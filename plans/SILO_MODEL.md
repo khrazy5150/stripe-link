@@ -17,6 +17,23 @@ So "four webhooks — two per mode, each with a live and a test environment" mea
 not what a reader of `stripe_webhook.py` would assume. This document uses **silo** for the deployment axis
 and **Stripe mode** for test/live, and avoids the bare words entirely. Do the same.
 
+## The root cause: the silo is not a modeled concept
+
+Author, 2026-09-23, and it is the sentence this whole document exists to record:
+
+> *The code is still using legacy terminology because it ignores the silo itself. It asks `mode=live|test`
+> — the Stripe axis — and that is the gap that was never fixed when the silo concept was introduced. The
+> code adopted the legacy logic and we have been patching it.*
+
+stripe-cart had ONE server with two Stripe modes, so "which deployment" and "which Stripe mode" were the
+same question. stripe-link has several deployments, and the decoupling split those axes **in the data**
+(`stripe_mode` became a record attribute) — but it never made the **silo** a modeled thing. There is no
+silo identity on a record, no silo on an event, and `ENVIRONMENT` appears nowhere in the webhook handler.
+
+The silo boundary today is implicit: *whatever tables this Lambda's environment variables happen to point
+at.* That works, and it is unverifiable — nothing can ask "does this belong here?", because nothing says
+where anything came from. Every bug in this area has been a patch around that absence.
+
 ## The model
 
 **A silo is a complete, independent SaaS.** Not a staging copy, not a scratch environment — the whole
@@ -86,9 +103,49 @@ establishes that an event belongs to this silo. It was patched with a `livemode`
 which worked only by accident of the old conflation, and P3 of `plans/STRIPE_MODE_DECOUPLING.md` removed
 that guard when the conflation went away. The symptom was treated; the hole was not.
 
-## The proposal
+## The proposal — CORRECTED 2026-09-23
 
-**If an event names a connected account and that account is not a tenant of this silo, do not process it.**
+An earlier draft of this section proposed: *"if an event names a connected account and that account is not
+a tenant of this silo, do not process it."* **That does not work, and the reason is the modeling gap
+above.**
+
+**A tenant can be a tenant of several silos at once.** The same connected account is registered in dev AND
+prod — `acct_1TA08M21lLbLd4Y5` is in both `jb-stripe-keys-v2-dev` and `-prod` (verified 2026-09-23). Both
+silos legitimately answer "yes, mine." Membership is **necessary but not sufficient**; it cannot
+discriminate, because the account is not what distinguishes silos.
+
+This is the same wall the 2026-09-20 investigation hit: *"With no discriminator, both once processed
+everything and produced duplicate orders."* The fix at the time — route-by-livemode with a single
+registered endpoint — stopped the duplicates by **starving dev of traffic entirely**, which is why
+`jb-orders-dev` has never held a row and `jb-ledger-prod` holds test money.
+
+### What the discriminator has to be
+
+The event must carry **which silo created the thing it is about**, because nothing else can distinguish
+two silos that both know the account. We control that for anything we originate:
+
+- **Stamp the silo at session creation.** `build_checkout_payload` already writes
+  `metadata[tenant_id]`; it adds `metadata[silo]`. Subscriptions already copy session metadata onto
+  `subscription_data[metadata]`, so renewals inherit it.
+- **The webhook processes an event whose stamped silo is its own, and ignores the rest** — acknowledging
+  to Stripe so it stops retrying, logging loudly, persisting nothing.
+- Membership stays as a second check, per ACCOUNT not per (account, Stripe-mode), for the reason in the
+  section below.
+
+### The residual case, which needs a decision
+
+**An event we did not originate carries no stamp.** A tenant creating a test invoice in Stripe's own
+dashboard — exactly what happened on 2026-09-23 — produces `invoice.paid` with no `metadata[silo]`,
+because no silo created it. Options, none obviously right:
+
+1. **The production silo claims unstamped events.** Simple; wrong the moment a staging tenant does it.
+2. **Every silo ignores unstamped events.** Safe, and silently drops legitimate Stripe-dashboard activity
+   — which is how yesterday's subscription renewals arrived.
+3. **Route by which silo the tenant "belongs to"**, requiring a home-silo on the tenant record — the
+   modeling this document says is missing, done properly.
+
+(3) is the honest answer and the largest. Decide before S1 ships, because the guard's behaviour for
+unstamped events IS the design.
 
 - Acknowledge to Stripe (2xx) so it stops retrying — the event is not ours and never will be.
 - Log loudly, with the account id and the silo. A silo receiving another's traffic is a misconfiguration

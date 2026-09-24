@@ -224,11 +224,21 @@ It activates the moment a second silo gets one — which is the direction the pl
 guard that worked by accident of the old conflation. Decoupling P3 removed that guard when the conflation
 went away. The symptom was treated; the hole was not.
 
-**The guard is NOT "non-production refuses live money."** That was proposed and is wrong (author,
-2026-09-23): a silo is a complete independent SaaS differentiated only by its audience, so sandbox must
-process live transactions or it verifies nothing before release, and staging's tenants are real. The
-property is **membership** — if an event names a connected account that is not a tenant of this silo,
-acknowledge it to Stripe, log loudly, and persist nothing.
+**Two proposals were made and BOTH were wrong; the corrections are the useful part.**
+
+1. *"Non-production refuses live money"* — wrong. A silo is a complete independent SaaS differentiated
+   only by its audience, so sandbox must process live transactions or it verifies nothing before release,
+   and staging's tenants are real.
+2. *"Process an event only if the account is a tenant of this silo"* — **also wrong, and for the reason
+   that is the whole point**: the SAME connected account is registered in dev AND prod
+   (`acct_1TA08M21lLbLd4Y5`, verified). Both silos answer "yes, mine." Membership is necessary and not
+   sufficient, because the account is not what distinguishes silos.
+
+**The discriminator has to be stamped on the event** — `metadata[silo]` at session creation, which is
+precisely what the 2026-09-20 entry below proposed. **Unresolved and blocking:** what a silo does with an
+event it did NOT originate (a tenant's test invoice created in Stripe's own dashboard carries no stamp —
+that is how the 2026-09-23 renewals arrived). Three options are recorded in `plans/SILO_MODEL.md`; the
+honest one needs a home-silo on the tenant record.
 
 **Resolved while planning:** a tenant CAN exist with no `stripe_keys` (non-transactional pages, lead
 capture, a link hub) — but such a tenant produces no Stripe events, because a transaction needs a
@@ -291,6 +301,12 @@ reader of one passes a mode — not to fix a fourth instance. Full audit and the
 `plans/STRIPE_MODE_DECOUPLING.md` **P7**.
 
 ### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
+
+> **2026-09-23: this and the entry above are ONE problem, and `plans/SILO_MODEL.md` now holds the design.**
+> Root cause named by the author: *the silo is not a modeled concept.* The decoupling split Stripe mode
+> from environment in the data but never made the SILO a first-class thing — no silo on a record, no silo
+> on an event, `ENVIRONMENT` absent from the webhook. "Stamp origin on the session", proposed here three
+> days earlier, is exactly the missing model. Everything since has been patching around its absence.
 
 **Confirmed again in A/B QA, 2026-09-22 — and it now blocks a feature, not just reporting.** A test-mode
 purchase made from a DEV-published page (its baked CTA points at `dev.juniorbay.com/checkout`, so dev
