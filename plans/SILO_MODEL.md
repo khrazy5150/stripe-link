@@ -318,17 +318,25 @@ resolver has to answer, and it shows the resolver cannot be webhook-only: **an e
 data enters a silo.** A direct API call from a published page is the other, and it routes by whatever
 backend that page was published against.
 
-### Stripe does NOT propagate session metadata to the PaymentIntent
+### Stripe does NOT propagate session metadata to the PaymentIntent — CLOSED as S1b
 
 Confirmed on our own data rather than quoted: the two session-driven PaymentIntents came back with **no
 `silo`**, while their sessions carry it. The preliminary document warned of exactly this —
 *"metadata set on one payment object doesn't automatically propagate to related objects"* — and it is now
 observed here.
 
-**Harmless today.** Refunds and disputes resolve by "do I hold the order?" (`find_by_payment_intent`), not
-by PaymentIntent metadata. **Worth closing anyway:** `payment_intent_data[metadata][silo]` on the session,
-one line, would make charge and dispute events self-describing instead of dependent on a lookup — useful
-precisely when the order is in the OTHER silo, as the split order above shows it can be. Not built.
+Harmless today: refunds and disputes resolve by "do I hold the order?" (`find_by_payment_intent`), not by
+PaymentIntent metadata. Closed anyway, because that lookup works only until the order is in the OTHER silo
+— which the split order above proves is not hypothetical.
+
+**S1b (2026-09-23):** `payment_intent_data[metadata][silo]` on payment-mode sessions. It belongs to S1 —
+"stamp what we create" — and was missed because the omission is invisible in the payload we send and only
+appears in the object Stripe builds from it. Recorded as its own phase rather than folded into S2, so a
+fix from one phase is never indistinguishable from another phase's changes.
+
+**What S1b does NOT reach:** a subscription RENEWAL's PaymentIntent. Stripe creates that from the
+subscription months later, so no session parameter touches it. Renewals stay resolvable through
+`subscription_data[metadata]`, which S1 already sets.
 
 ## Phases
 
@@ -340,12 +348,13 @@ Ordered so that each phase is verifiable on its own and nothing is deployed that
   purpose** — both directions of guess are wrong (calling production "sandbox" makes a silo foreign to
   itself; calling sandbox "production" pollutes real data), so an unknown value is unknown and callers
   omit rather than invent. Adding `staging` is an entry in two places, never a new endpoint.
+- **S1b — the PaymentIntent a session creates. BUILT 2026-09-23.** `payment_intent_data[metadata][silo]`,
+  payment mode only. A completion of S1, not part of S2: see Evidence for why it was missed and why it
+  matters once an order can live in another silo.
 - **S1 — stamp what we create. BUILT 2026-09-23.** `metadata[silo]` on every Checkout Session (so the
   cart path gets it too, sharing `build_checkout_payload`), on `subscription_data[metadata]` so renewals
   inherit it, and on the one-click upsell's PaymentIntent — the one Stripe object we create directly
-  rather than through a session. **Gap, deliberately left:** a session's own PaymentIntent is NOT stamped,
-  because Stripe does not propagate session metadata to it (observed 2026-09-23, see Evidence).
-  **Write-only**: a test asserts that nothing in `src/` reads
+  rather than through a session. **Write-only**: a test asserts that nothing in `src/` reads
   `metadata[silo]` yet, so shipping the stamp ahead of the resolver is provably safe. That test is
   deleted, not edited, when S3 begins.
 - **S2 — a Customer for every buyer.** Point checkout at `find_or_create_customer(email)` so every session

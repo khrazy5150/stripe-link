@@ -819,6 +819,20 @@ def build_checkout_payload(
         # subscription has to hold it -- the same reason tip_recurring is copied here.
         if payload.get("mode") == "subscription":
             payload.setdefault("subscription_data[metadata][silo]", silo)
+        else:
+            # And the session's own PaymentIntent, because **Stripe does not propagate session metadata
+            # to it** -- observed on real objects 2026-09-23, not taken from the docs: three transactions
+            # produced sessions carrying `silo` whose PaymentIntents carried nothing.
+            #
+            # It matters for the events that name a CHARGE rather than a session -- a refund, a dispute.
+            # Those resolve today by asking whether this silo holds the order, which works until the order
+            # is in the OTHER silo. That is not hypothetical: one purchase is already split, its session
+            # order in production and its downsell in sandbox (plans/SILO_MODEL.md, Evidence).
+            #
+            # `payment_intent_data` is payment-mode only; subscription mode routes through
+            # subscription_data above, and a RENEWAL's PaymentIntent is created by Stripe from the
+            # subscription, so nothing here reaches it.
+            payload.setdefault("payment_intent_data[metadata][silo]", silo)
 
     # One-click post-purchase upsells charge OFF-SESSION against the buyer's saved card, so when this offer has
     # a post-purchase opportunity the checkout must create a customer and save the payment method for reuse

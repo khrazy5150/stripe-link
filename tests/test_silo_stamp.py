@@ -87,6 +87,28 @@ class StampTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "subscription")
         self.assertEqual(payload["subscription_data[metadata][silo]"], SANDBOX)
 
+    def test_a_one_off_purchase_stamps_its_own_payment_intent(self):
+        # S1b. Stripe does NOT propagate session metadata to the session's PaymentIntent — observed on
+        # real objects 2026-09-23, where sessions carried `silo` and their PaymentIntents carried nothing.
+        # It matters for events naming a CHARGE rather than a session: a refund, a dispute.
+        with patch.dict(os.environ, {"SILO": "production"}, clear=False):
+            payload = _payload()
+
+        self.assertEqual(payload["payment_intent_data[metadata][silo]"], PRODUCTION)
+
+    def test_a_subscription_does_not_get_payment_intent_data(self):
+        # `payment_intent_data` is payment-mode only; Stripe rejects the combination.
+        recurring = {"kind": "service", "service_id": "s1", "currency": "usd", "unit_amount": 1000,
+                     "label": "X", "recurring": {"interval": "month"}}
+        with patch.dict(os.environ, {"SILO": "production"}, clear=False):
+            payload = _payload(resolved={"items": [recurring], "currency": "usd"})
+
+        self.assertNotIn("payment_intent_data[metadata][silo]", payload)
+
+    def test_an_unknown_silo_stamps_no_payment_intent_either(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertNotIn("payment_intent_data[metadata][silo]", _payload())
+
     def test_a_one_off_purchase_does_not_invent_a_subscription(self):
         with patch.dict(os.environ, {"SILO": "production"}, clear=False):
             payload = _payload()
