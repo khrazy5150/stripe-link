@@ -232,8 +232,20 @@ running.
 Scanning for `stripe_mode` reported every ledger row as unstamped and the ledger was briefly blamed. It
 was correct all along. Audit both spellings; prefer `mode` for anything new.
 
-**Still open:** the guard tests are per-repository, so a NEW shared table gets no protection. Full audit,
-the checklist for adding a table, and the reasoning are in `plans/STRIPE_MODE_DECOUPLING.md` **P7**.
+**The root cause, in the author's words (and it is the right one):** *the old architecture was ported to
+the new one instead of being rewritten for it.* Under the old model `environment == mode`, so isolation
+was FREE — a structural property nobody had to uphold. The decoupling removed that invariant; code
+written before it kept compiling, kept passing, and silently stopped being correct. Both leaking
+repositories predate 2026-08-02, and the retrofit has now taken THREE passes (2026-08-02, 2026-09-20,
+2026-09-23), each by inspection, each finding more.
+
+**Still open — ⭐ and this is the real item:** the fix has been instance-by-instance every time, including
+today. `refund_requests_repository` writes to the SAME notifications table just fixed, takes no mode, and
+handles money — missed within an hour of diagnosing the pattern. Two more are latent: `refunds_repository`
+(table empty today) and `reviews_repository` (a test purchase could publish a review on a live
+storefront). The work is to ENUMERATE the class — which tables both modes write to, and a check that every
+reader of one passes a mode — not to fix a fourth instance. Full audit and the reasoning in
+`plans/STRIPE_MODE_DECOUPLING.md` **P7**.
 
 ### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
 

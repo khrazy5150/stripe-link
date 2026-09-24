@@ -293,13 +293,38 @@ re-onboard blocker) and **prod callback → TEST app** (test-onboard on prod). P
 
 ## P7 — the read paths that were missed (2026-09-23)
 
-This plan's own Risks section said it:
+### The root cause is not "a read path was missed"
+
+That was the first framing written here, and it is too kind. The author's, which is correct
+(2026-09-23): **the old architecture was ported to the new one instead of being rewritten for it.**
+
+Under the old model, `environment == mode`: prod WAS live, dev WAS test. Isolation was free — a
+structural property of having separate stacks and separate tables, impossible to get wrong because
+nobody had to do anything. The decoupling **removed that invariant** and replaced it with one every
+reader must uphold by hand. Code written before the change kept compiling, kept passing tests, and
+silently stopped being correct.
+
+The history says so plainly. The decoupling landed **2026-08-02**; every repository that leaked was
+written before it:
+
+| repository | written | mode support added |
+|---|---|---|
+| `notifications_repository` | 2026-05-29 | **2026-09-23** (7 weeks late) |
+| `review_invites_repository` | 2026-07-23 | **2026-09-23** (7 weeks late) |
+| `orders_repository` | 2026-07-03 | 2026-08-02, revisited 2026-09-20 |
+| `ledger_repository` | 2026-07-07 | 2026-08-02, revisited 2026-09-20 |
+
+And the retrofit took **three passes** — `0cfef7c` + `869d12a` (2026-08-02), then `af18e0c`
+("mode isolation: test money must never be read as real money", 2026-09-20), then this one. Each pass
+found more, because each was **by inspection**: someone thought of a table, fixed that table, and
+stopped. Nobody enumerated the class.
+
+This plan's own Risks section had already named the shape of it:
 
 > **Breadth of P2:** many handlers touch tenant entities; risk is missing a read path that then leaks
 > cross-mode data. Mitigate with a shared mode-filter helper + tests per entity.
 
-There was no shared helper and no per-entity tests, and two read paths were missed. Both were found the
-same afternoon, from a single report: *"a dev subscription is showing up as a real transaction in prod."*
+Neither the helper nor the per-entity tests were built, so inspection was the only method available.
 
 ### What the decoupling actually obliges
 
@@ -372,9 +397,29 @@ three, and what `LedgerRepository`/`ModeScopedNotificationsRepository` already r
 `notifications_repository()` or `review_invites_repository()`, derived from the source. Both were proven to
 bite by removing a `mode=` and watching them fail by name.
 
-**They are per-repository.** A new shared table gets no protection from them. Generalising the check —
-"every repository whose table is written in both modes must be constructed with a mode" — needs a way to
-know which tables those are, and is not built.
+**They are per-repository, which is the same mistake one level up.** A guard that names
+`notifications_repository` and `review_invites_repository` is inspection with a test around it. It
+protects the two instances already found and nothing else.
+
+**Proof, from the same afternoon:** `refund_requests_repository` writes to the SAME notifications table
+that was just fixed, takes no mode, and handles money. Fixing notifications and not noticing its
+neighbour is precisely the failure being described — committed by the person writing this section, an
+hour after diagnosing it.
+
+### Latent, not yet leaking (2026-09-23)
+
+Twenty-four repository factories still take no `mode`. Most are legitimately mode-agnostic — app config,
+user profiles, OAuth states, slot locks, legal pages, product categories. **Three are not, and are
+latent only because the tables are empty or the feature is unused:**
+
+| repository | table | why it matters |
+|---|---|---|
+| `refund_requests_repository` | notifications | money, and shares the table just fixed for notifications |
+| `refunds_repository` | refunds | money; `jb-refunds-prod` is empty **today** |
+| `reviews_repository` | reviews | a test purchase could publish a review on a live storefront |
+
+These are predictions, not observations — no leak has occurred. They are recorded so the next pass is an
+enumeration rather than a fourth round of inspection.
 
 ## Relationship to other plans
 
