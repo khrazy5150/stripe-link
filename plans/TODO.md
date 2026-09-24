@@ -18,6 +18,14 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 > predict. Dimensions stay **optional to create a product** — a tenant who walks to the post office stays
 > first-class — gated by `label_readiness`, never by validation. The wizard asks for item dimensions
 > (measurable at creation); the edit form holds box sizing (learned from real orders).
+>
+> **Envelopes are part of the same work.** The catalog has a `Padded mailer (9x6x1)` and it is close to
+> unusable: `fits_inside` is strict and axis-aligned, so an 8x5x2 pouch fails on `2 > 1` and the packer
+> climbs to a carton. And `_shippo_parcel` declares no packaging TYPE, so soft packs are priced as rigid
+> boxes and carrier flat-rate envelope templates are never quoted. Needs `kind` (box/soft_pack) on a
+> catalog entry, an optional carrier template, and a compressible flag on the item. The cost runs both
+> ways — a rigid item under-sized into a mailer is refused at the counter, a pouch over-sized into a
+> carton overcharges every order.
 - **What:** the module supports four providers in its schema and its `<select>` -- shippo, easypost,
   shipstation, easyship. Design: **`plans/SHIPPING_PROVIDERS.md`** (written 2026-09-20).
 - **Status re-verified against the code 2026-09-23.** Much of what this entry originally listed as missing

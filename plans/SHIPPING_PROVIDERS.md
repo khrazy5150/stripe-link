@@ -579,11 +579,61 @@ optional. Exactly inverted.
   which box their most common order fits, because they have had no orders. Asking at creation invites a
   guess that then hardens into the data the packer trusts.
 
+### Not everything ships in a box (2026-09-24)
+
+A Beta-Alanine pouch goes in a bubble mailer, not a carton. The catalog already has
+`Padded mailer (9x6x1)`, so it looks handled. It is not — the entry exists and **neither of the two
+things that make a mailer work does**.
+
+#### The packer treats everything as rigid
+
+`fits_inside` is a strict axis-aligned check: each sorted item side must be `<=` the matching sorted box
+side. Correct for cartons, wrong for pouches.
+
+An 8x5x2 pouch against the 9x6x1 mailer: sorted, `2 > 1`, so it **fails**. The packer rejects the mailer,
+climbs to a carton, and quotes a bigger, heavier parcel — for something that physically slides into the
+envelope because both are compressible. **The starter mailer is therefore close to unusable today**:
+almost nothing with real thickness clears a one-inch wall.
+
+#### Carriers price soft packs differently, and we cannot say which it is
+
+`_shippo_parcel` sends `length`/`width`/`height`/`weight` and the units. **Nothing declares the packaging
+type.** Two consequences:
+
+- **Dimensional weight.** This plan already notes that "a larger, lighter-dim box can win" — but soft
+  packs are commonly billed on ACTUAL weight rather than dim weight. Sending a mailer as a generic parcel
+  can have it priced as though it were a rigid box of the same outside measurements.
+- **Carrier flat-rate packaging.** Shippo accepts a parcel `template` (USPS flat-rate envelopes and the
+  like), which is frequently the cheapest option for exactly this shape. We never send one, so those rates
+  are never quoted and the tenant never sees them.
+
+#### What to model
+
+- **`kind` on a catalog entry — `box` or `soft_pack`.** A soft pack checks its two largest dimensions
+  strictly and treats thickness as CAPACITY rather than a wall: compressible in one axis only. That is the
+  physical truth, and it keeps the check honest rather than loosening `fits_inside` everywhere — a rigid
+  jar must still be refused by a flat envelope.
+- **An optional carrier `template` on a soft pack**, passed through the provider adapter so flat-rate
+  envelope pricing becomes reachable at all.
+- **A matching property on the ITEM — compressible or not.** A pouch squashes; a jar does not. Two 8x5x2
+  items pack completely differently depending on which they are, and only the tenant knows. It belongs
+  beside the item weight, on the same block, in the same wizard step.
+
+**The cost of getting it wrong runs BOTH ways**, which is why it is worth modelling rather than
+approximating: under-sizing a rigid item into a mailer gets it refused at the counter, after the label is
+bought; over-sizing a pouch into a carton overcharges every order that contains one.
+
 ### What has to change
 
 - **Schema:** an item weight distinct from the packed weight. `item_dimensions` gains a weight; the
   existing `weight_lb` keeps meaning *packed, box included* and is used only on the declared-box path.
+  The item also gains **compressible** (default false — a rigid jar is the safe assumption), and a
+  catalog entry gains **`kind`** (`box` / `soft_pack`) plus an optional carrier `template`.
 - **`packable_items`:** stop passing the packed weight as the item weight — that is the double-count.
+- **`fits_inside`:** takes the packaging kind and the item's compressibility. A soft pack checks its two
+  largest dimensions strictly and treats thickness as capacity; everything else keeps today's strict
+  behaviour.
+- **The provider adapter:** `_shippo_parcel` passes a `template` when the chosen packaging has one.
 - **`pack()`:** partition rather than short-circuit. It returns early on a declared package for a single
   unit, so an order mixing a ships-alone item with packable ones cannot be expressed at all. It should
   produce a parcel for each ships-alone item plus one packed parcel for the rest.
