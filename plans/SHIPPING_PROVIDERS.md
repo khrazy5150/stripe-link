@@ -498,6 +498,109 @@ variant and must not be assumed free.
 The legacy plan has a full section. The rule worth carrying over verbatim: **never issue a Stripe refund
 automatically just because a return label was created.**
 
+## The item/box inversion — DESIGN AGREED 2026-09-24
+
+Settles "The product stores the BOX, not the ITEM" above. The diagnosis there was right and the data now
+shows it has already cost us the whole multi-item path.
+
+### The evidence
+
+| | prod | dev |
+|---|---|---|
+| shippable products | 4 | 11 |
+| with a declared BOX | 4 | 11 |
+| **with ITEM dimensions** | **0** | **1** |
+| with a weight | 4 | 11 |
+
+`pack()`'s multi-item branch requires `all(item_dims)`. It never gets them, so it falls back to one parcel
+per item — **every bundle quotes separate parcels today.** The box catalog, the volume fit, the smallest-box
+selection: all built, all unreachable, because the input they need is the field marked *optional* while
+the field marked prominent is the one that cannot compose.
+
+### A second bug, found the same day: the packaging is billed once per item
+
+There is ONE weight field, `fulfillment.weight_lb`, and `_weight()` documents it as *"the thing as
+shipped, box included"*. But the shared-box branch does:
+
+```python
+total_weight = sum(_weight(unit) for unit in units)   # each already includes its OWN box
+weight = total_weight + box["empty_weight"]           # plus the shared box
+```
+
+Three tubs at 1 lb packed (0.85 product + 0.15 box) in a shared medium box quote
+`3.0 + 0.35 = 3.35 lb`; the truth is `2.55 + 0.35 = 2.9 lb`. **~15% over on three items**, growing with
+item count, always toward over-quoting the buyer. The item needs a weight of its OWN, distinct from what
+it weighs packed.
+
+### The model (author, 2026-09-24)
+
+> *Item dimensions and weight are first priority — this information doesn't change. Based on this,
+> determine the box size.*
+
+1. **Item dimensions + weight are the facts.** Intrinsic to the product, measurable the moment it is in
+   front of you, and they compose: any combination of items can be packed.
+2. **The box is derived.** The packer sums item volumes, applies void fill, and picks the **smallest box
+   in the tenant's catalog** that clears the volume and physically fits every item — which is already what
+   `pack()` does, starved of input.
+3. **A declared box is an EXCEPTION, not the primary path.** It survives only for what the packer cannot
+   derive from dimensions: something fragile needing void fill far beyond its size, a rolled poster, an
+   item shipping in manufacturer packaging.
+
+**Why a saved box is not a substitute for measurement.** A saved box answers one question — *what if
+someone buys exactly this?* Measured items answer all of them: main alone, main + bump, main + bump +
+upsell, the combination a coupon creates next month. The measuring is a one-time cost per product; the
+saved box has to be re-reasoned every time an offer changes.
+
+### Dimensions stay OPTIONAL to create a product
+
+**Do not gate the save.** A tenant who walks their parcels to the post office is a first-class tenant, and
+the shipping module must never become compulsory by the back door. Item dimensions are *optional on the
+product* and *necessary for provider shipping* — which is a readiness question, not a validation one.
+
+`label_readiness()` already draws exactly this line, and says why:
+
+> *"Is this document well-formed" and "is this setup complete enough to do X" are different questions, and
+> answering the second by refusing to SAVE is how a tenant ends up unable to test a key until they have
+> typed two addresses they do not have yet.*
+
+It grows a product-level companion — *"3 products have no dimensions; orders containing them ship one
+parcel per item"* — surfaced where a tenant is buying a label, never where they are saving a product.
+
+### Two surfaces, split by WHEN the knowledge exists
+
+The current form asks the discovered question at the creation moment and makes the measurable one
+optional. Exactly inverted.
+
+- **Wizard — item dimensions + weight, optional. No box sizing.** These are measurable at creation: the
+  product is in front of you, with a tape measure and a scale. Asking here is also what makes provider
+  shipping usable later *without a migration* — a tenant who fills them in during setup has already done
+  the work when they eventually want labels and returns.
+- **Edit form — box sizing lives here.** The ideal box is **learned**. A tenant cannot know at creation
+  which box their most common order fits, because they have had no orders. Asking at creation invites a
+  guess that then hardens into the data the packer trusts.
+
+### What has to change
+
+- **Schema:** an item weight distinct from the packed weight. `item_dimensions` gains a weight; the
+  existing `weight_lb` keeps meaning *packed, box included* and is used only on the declared-box path.
+- **`packable_items`:** stop passing the packed weight as the item weight — that is the double-count.
+- **`pack()`:** partition rather than short-circuit. It returns early on a declared package for a single
+  unit, so an order mixing a ships-alone item with packable ones cannot be expressed at all. It should
+  produce a parcel for each ships-alone item plus one packed parcel for the rest.
+- **Wizard + edit form** per the split above.
+- **Readiness:** the product-level companion.
+
+### Migration
+
+15 shippable products have a box and no item dimensions. **Nothing breaks** — single-item orders keep
+using the declared box exactly as now — but bundles stay unpacked until someone measures. That is the
+honest cost, and it is why the wizard asks at creation from here on.
+
+### Resolves, from "Decisions needed" below
+
+**7 — who owns the box catalog.** Per-tenant, with `starter_boxes()` as a seed. Already built; this
+section makes it the primary path rather than a fallback.
+
 ## Risks worth naming before building
 
 - **Buying a label spends real money**, immediately and irreversibly, at the carrier. `test_mode` is in the
@@ -531,7 +634,8 @@ automatically just because a return label was created.**
 6. **`free_shipping_threshold` vs baked-in shipping — they double-count.** If shipping is already in the
    price, the threshold is either meaningless or discounts something the buyer has already paid for. One
    rule needed: threshold applies only when shipping is charged separately (B), or it is retired.
-7. **Who owns the box catalog?** Per-tenant (most tenants use 3-5 box sizes) or a platform default list
-   the tenant trims? A tenant with no catalog gets one-parcel-per-item, which over-estimates.
+7. ~~**Who owns the box catalog?**~~ **RESOLVED 2026-09-24** — per-tenant, seeded from
+   `starter_boxes()`. See "The item/box inversion" above, which makes the catalog the primary path
+   rather than a fallback.
 8. **Does the buyer ever see a shipping line?** Under A + Calculate Price, shipping is invisible and the
    page can legitimately say "free shipping". Confirm that is the intent, because it constrains B later.
