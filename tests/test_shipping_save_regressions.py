@@ -93,9 +93,23 @@ class ReadinessComesFromTheServerTests(unittest.TestCase):
         self.assertEqual(self.HANDLER.count("label_readiness("), 3)  # GET, PUT, and the connection test
 
     def test_the_screen_reads_it_from_each_response(self):
+        """Counting the calls asserted only that there were four of them, and the comment naming which
+        four was wrong: `load` was not among them, so a SAVED config that was missing its ship-from
+        address loaded reading "Ready to buy labels" until the tenant happened to press Save. Name the
+        call sites instead of counting them."""
+        for path, body in (("load", "applyReadiness(body)"),
+                           ("save", "applyReadiness(body)"),
+                           ("testConnection", "applyReadiness(body)")):
+            source = self.SCREEN.split(f"function {path}", 1)
+            self.assertEqual(len(source), 2, f"no {path}() on the screen")
+            self.assertIn(body, source[1].split("\nasync function", 1)[0].split("\nfunction", 1)[0])
         # Including the FAILED connection test, whose 502 body still describes what is missing.
-        self.assertEqual(self.SCREEN.count("applyReadiness("), 4)  # definition + load + save + test paths
         self.assertIn("applyReadiness(err.body)", self.SCREEN)
+
+    def test_an_unanswered_screen_does_not_claim_to_be_ready(self):
+        """An empty readiness list means READY; an absent one means UNKNOWN -- the state of a tenant whose
+        GET 404'd because they have saved nothing at all. Those must not both render the green banner."""
+        self.assertIn('v-else-if="readinessKnown"', self.SCREEN)
 
     def test_a_response_without_readiness_leaves_the_last_answer_alone(self):
         block = self.SCREEN.split("function applyReadiness", 1)[1][:200]

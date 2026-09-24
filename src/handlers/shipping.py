@@ -1,11 +1,22 @@
+import os
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
+from stripe_link.common import (
+    error_response,
+    json_response,
+    parse_json_body,
+    resolve_stripe_mode,
+    tenant_id_from_event,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
-from stripe_link.domain.shipping import label_readiness
+from stripe_link.domain.shipping import label_readiness, product_readiness
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
-from stripe_link.repositories.documents import RepositoryError, shipping_config_repository
+from stripe_link.repositories.documents import (
+    RepositoryError,
+    products_repository,
+    shipping_config_repository,
+)
 
 
 REDACTED_SECRET = "********"
@@ -16,7 +27,7 @@ SECRET_MODE = "shipping"
 SECRET_FIELD = "provider.api_key_ref"
 
 
-def handler(event, context, repository=None, secret_cipher=None):
+def handler(event, context, repository=None, secret_cipher=None, products_repo=None):
     repository = repository or shipping_config_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     method = (event or {}).get("httpMethod", "").upper()
@@ -28,7 +39,7 @@ def handler(event, context, repository=None, secret_cipher=None):
     if method == "POST" and path.rstrip("/").endswith("/test"):
         return test_shipping_connection(event, repository, secret_cipher)
     if method in {"POST", "PUT"}:
-        return save_shipping_config(event, repository, secret_cipher)
+        return save_shipping_config(event, repository, secret_cipher, products_repo)
     if method == "GET":
         tenant_id = tenant_id_from_event(event)
         if not tenant_id:
@@ -39,11 +50,32 @@ def handler(event, context, repository=None, secret_cipher=None):
         return json_response({
             "shipping_config": redact_shipping_config(config),
             "readiness": label_readiness(config),
+            # Separate from `readiness` on purpose: that one is about THIS document and blocks labels,
+            # while this is about the catalogue and costs money without blocking anything.
+            "product_readiness": catalogue_readiness(
+                tenant_id, products_repo, resolve_stripe_mode(event)),
         })
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def save_shipping_config(event, repository, secret_cipher):
+def catalogue_readiness(tenant_id: str, products_repo=None, mode: str = "test") -> list[str]:
+    """What the PRODUCTS still need before an order can be packed into one box.
+
+    Best-effort and never raises: this is advice on a settings screen, and a products table that will not
+    read is not a reason to fail the shipping config the tenant came here to save. An empty list on
+    failure under-reports, which is the right direction for a hint -- the packer itself still falls back
+    to one parcel per item, so nothing is silently mis-shipped by the advice going missing.
+    """
+    try:
+        repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
+        if repo is None:
+            return []
+        return product_readiness(repo.list_for_tenant(tenant_id))
+    except Exception:  # noqa: BLE001 - a hint must never cost the tenant their save
+        return []
+
+
+def save_shipping_config(event, repository, secret_cipher, products_repo=None):
     try:
         document = parse_json_body(event)
         tenant_id = str(document.get("tenant_id") or "").strip()
@@ -56,6 +88,8 @@ def save_shipping_config(event, repository, secret_cipher):
         return json_response({
             "shipping_config": redact_shipping_config(saved),
             "readiness": label_readiness(saved),
+            "product_readiness": catalogue_readiness(
+                tenant_id, products_repo, resolve_stripe_mode(event)),
         }, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_shipping_config")

@@ -3204,6 +3204,12 @@ Resources:
       Handler: handlers.shipping.handler
       Description: Tenant shipping configuration API.
       Policies:
+        # The Shipping screen tells a tenant which PRODUCTS still need measuring — orders
+        # containing an unmeasured product ship one parcel per item, which costs more
+        # (plans/SHIPPING_PROVIDERS.md). Read-only, and best-effort: a products table that will
+        # not read must never cost the tenant the shipping config they came here to save.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ShippingConfigTable
         - Version: "2012-10-17"

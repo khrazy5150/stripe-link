@@ -12,9 +12,17 @@ It is worth saying out loud rather than leaving silent: measured 2026-09-24, 0 o
 sandbox shippable products carried item dimensions, so the packer's multi-item branch had never run and
 every bundle quoted one parcel per item. Nothing announced that.
 """
+import json
+import os
+import pathlib
 import unittest
+from unittest import mock
 
+from tests.fakes import FakeSimpleRepository
+from handlers.shipping import handler as shipping_handler
 from stripe_link.domain.shipping import product_readiness
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 FULL = {"length_in": 8, "width_in": 5, "height_in": 2, "weight_lb": 0.9}
 SIZED = {"length_in": 8, "width_in": 5, "height_in": 2}
@@ -77,6 +85,88 @@ class ReadinessTests(unittest.TestCase):
 
         self.assertIn("local_abc", product_readiness([nameless])[0])
 
+
+class HandlerSurfacesReadinessTests(unittest.TestCase):
+    """The advice is only worth computing if it reaches a screen, and the Shipping screen is its home.
+
+    It rides on the shipping response rather than getting its own endpoint because it answers the question
+    that screen already asks -- "what still stops this from working?" -- and because a second round trip
+    for a hint is a round trip nobody makes.
+    """
+
+    def _config(self):
+        return json.loads((ROOT / "schemas" / "examples" / "shipping-config-demo.json").read_text())
+
+    def test_the_get_carries_what_the_catalogue_still_needs(self):
+        repository = FakeSimpleRepository("tenant_id")
+        config = self._config()
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(config)}, None,
+                         repository=repository, products_repo=FakeProducts([_product("Creatine")]))
+
+        fetched = shipping_handler({"httpMethod": "GET",
+                                    "queryStringParameters": {"tenant_id": config["tenant_id"]}}, None,
+                                   repository=repository,
+                                   products_repo=FakeProducts([_product("Creatine")]))
+
+        [line] = json.loads(fetched["body"])["product_readiness"]
+        self.assertIn("Creatine", line)
+
+    def test_the_save_answers_too_so_the_screen_updates_without_a_reload(self):
+        repository = FakeSimpleRepository("tenant_id")
+
+        saved = shipping_handler({"httpMethod": "PUT", "body": json.dumps(self._config())}, None,
+                                 repository=repository,
+                                 products_repo=FakeProducts([_product("Creatine")]))
+
+        self.assertEqual(saved["statusCode"], 201)
+        self.assertIn("Creatine", json.loads(saved["body"])["product_readiness"][0])
+
+    def test_it_stays_separate_from_label_readiness(self):
+        # Merging them would file "add a weight" under "before you can buy labels", which is untrue: an
+        # unmeasured catalogue costs postage, it does not stop a label.
+        repository = FakeSimpleRepository("tenant_id")
+
+        saved = shipping_handler({"httpMethod": "PUT", "body": json.dumps(self._config())}, None,
+                                 repository=repository,
+                                 products_repo=FakeProducts([_product("Creatine")]))
+
+        body = json.loads(saved["body"])
+        self.assertTrue(body["product_readiness"])
+        # The catalogue never appears in the list headed "before you can buy labels", whatever else does.
+        self.assertNotIn("Creatine", " ".join(body["readiness"]))
+        self.assertFalse(set(body["product_readiness"]) & set(body["readiness"]))
+
+    def test_a_products_table_that_will_not_read_never_costs_the_tenant_their_save(self):
+        """The whole point of the hint is that it is optional. A hint must not be able to fail a save."""
+        repository = FakeSimpleRepository("tenant_id")
+
+        saved = shipping_handler({"httpMethod": "PUT", "body": json.dumps(self._config())}, None,
+                                 repository=repository, products_repo=ExplodingProducts())
+
+        self.assertEqual(saved["statusCode"], 201)
+        self.assertEqual(json.loads(saved["body"])["product_readiness"], [])
+
+    def test_with_no_products_table_configured_it_simply_says_nothing(self):
+        repository = FakeSimpleRepository("tenant_id")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PRODUCTS_TABLE", None)
+            saved = shipping_handler({"httpMethod": "PUT", "body": json.dumps(self._config())}, None,
+                                     repository=repository)
+
+        self.assertEqual(json.loads(saved["body"])["product_readiness"], [])
+
+
+class FakeProducts:
+    def __init__(self, products):
+        self.products = products
+
+    def list_for_tenant(self, tenant_id):  # noqa: ARG002 - the fake answers for whoever asks
+        return self.products
+
+
+class ExplodingProducts:
+    def list_for_tenant(self, tenant_id):  # noqa: ARG002
+        raise RuntimeError("ResourceNotFoundException")
 
 if __name__ == "__main__":
     unittest.main()

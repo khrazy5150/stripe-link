@@ -96,7 +96,7 @@
           <strong>Before you can buy labels:</strong>
           <ul><li v-for="item in readiness" :key="item">{{ item }}</li></ul>
         </div>
-        <p v-else class="keys-status-banner success">Ready to buy labels.</p>
+        <p v-else-if="readinessKnown" class="keys-status-banner success">Ready to buy labels.</p>
         <p v-if="connectionResult" class="keys-status-banner" :class="connectionResult.status === 'connected' ? 'success' : 'error'">
           {{ connectionResult.message }}
           <span v-if="connectionResult.carriers?.length">
@@ -113,6 +113,13 @@
           with no boxes listed, every item ships in its own parcel, which usually costs more.</p>
       </header>
       <div class="dashboard-card-body">
+        <!-- Boxes only help once the ITEMS have sizes of their own: the packer cannot choose a shared box
+             for things whose dimensions it does not know. Advisory, never a blocker -- item dimensions are
+             optional to create a product and the shipping module must not become compulsory sideways. -->
+        <div v-if="productReadiness.length" class="keys-status-banner warning">
+          <strong>Boxes can only be shared once items are measured:</strong>
+          <ul><li v-for="item in productReadiness" :key="item">{{ item }}</li></ul>
+        </div>
         <p v-if="!form.boxes.length" class="field-hint">
           No boxes yet.
           <button class="link-action" type="button" @click="useStarterBoxes">Start with common sizes</button>
@@ -441,9 +448,21 @@ function validationErrors() {
 // turned green the moment boxes were added on screen -- before any save -- so a save that failed still
 // read "Ready to buy labels". One implementation, in domain/shipping.py, carried on every response.
 const readiness = ref([]);
+// Kept apart from `readiness` for the same reason the server sends them separately: that list blocks a
+// label, this one only costs postage. Merging them would put "add a weight" under "before you can buy
+// labels", which is untrue and would send tenants looking for a tape measure they do not need.
+const productReadiness = ref([]);
+
+// Whether the server has told us yet. An empty `readiness` means ready; an ABSENT one means unknown --
+// the state of a tenant whose GET 404'd because they have saved nothing. Those must not look alike.
+const readinessKnown = ref(false);
 
 function applyReadiness(body) {
-  if (Array.isArray(body?.readiness)) readiness.value = body.readiness;
+  if (Array.isArray(body?.readiness)) {
+    readiness.value = body.readiness;
+    readinessKnown.value = true;
+  }
+  if (Array.isArray(body?.product_readiness)) productReadiness.value = body.product_readiness;
 }
 
 async function load() {
@@ -453,6 +472,9 @@ async function load() {
   try {
     const body = await apiRequest("/shipping");
     applyConfig(body.shipping_config || {});
+    // The GET has always carried readiness; only save applied it. So a saved config that was missing its
+    // ship-from address loaded reading "Ready to buy labels" until the tenant happened to press Save.
+    applyReadiness(body);
   } catch (err) {
     if (/not found/i.test(err.message)) {
       applyConfig({});
