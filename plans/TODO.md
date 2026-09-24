@@ -267,6 +267,20 @@ went away. The symptom was treated; the hole was not.
    (`acct_1TA08M21lLbLd4Y5`, verified). Both silos answer "yes, mine." Membership is necessary and not
    sufficient, because the account is not what distinguishes silos.
 
+**PROVEN, 2026-09-23 — one purchase is already split across two silos.** S0+S1 shipped to both silos, and
+three organic transactions immediately produced the clearest statement of the problem:
+
+```
+jb-orders-prod   order_cs_test_a1gXWA…            $24.20   the checkout session
+jb-orders-dev    order_cs_test_a1gXWA…_upsell_1   $18.34   its downsell
+```
+
+Same order id, different silos. The session's order went to production because only production receives
+Stripe webhooks; the downsell went to sandbox because the sandbox-published page called sandbox's
+`/upsell/charge` **directly**. **Neither silo can render that order completely.** It also shows the S3
+resolver cannot be webhook-only — a direct API call from a published page is the other way data enters a
+silo, routed by whatever backend the page was baked against.
+
 **DESIGN DECIDED 2026-09-23 — see `plans/SILO_MODEL.md`, phases S0–S6.** One shared Stripe platform
 account (deliberately: a tenant's Stripe relationship must not fracture when they switch silos), the
 Stripe **Customer as the silo anchor** (buyer-scoped, deduped by email), and `metadata[silo]` stamped on

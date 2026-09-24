@@ -274,6 +274,62 @@ Customer per buyer.
 create-or-reuse deduped by email. Pointing checkout at it keeps a repeat guest buyer as ONE Customer
 rather than one per purchase, which is what makes this cost tolerable.
 
+## Evidence — three organic transactions, 2026-09-23
+
+Recorded after S0+S1 were deployed to both silos. The author declined to backfill the older records, so
+the pre-stamp objects remain as a **control group** on the same Stripe account: unstamped rows sitting
+beside stamped ones, which is stronger evidence than a backfilled set where nothing distinguishes what was
+organic.
+
+### The stamp works
+
+| object | `metadata.silo` |
+|---|---|
+| new subscription session | `sandbox` |
+| new subscription `sub_1UJ5D8…` | `sandbox` |
+| one-time session | `sandbox` |
+| downsell PaymentIntent `pi_3UJ5AH…` | `sandbox` |
+| the two pre-S1 subscriptions | **absent** — control group intact, nothing retroactive |
+
+The new subscription carrying the stamp is the one that matters: its renewal inherits it through
+`subscription_details.metadata`, which `invoice_subscription_metadata` already reads. The old
+subscriptions renew unstamped on the same day, which is the comparison.
+
+### ONE PURCHASE, SPLIT ACROSS TWO SILOS
+
+The clearest statement of the problem this document exists for. A single customer's single purchase:
+
+```
+jb-orders-prod   order_cs_test_a1gXWA…               $24.20   the checkout session
+jb-orders-dev    order_cs_test_a1gXWA…_upsell_1      $18.34   its downsell
+```
+
+**Same order id. Different silos.** The session's order landed in **production** because only production
+receives Stripe webhooks. The downsell landed in **sandbox** because the sandbox-published page called
+sandbox's `/upsell/charge` **directly** — an API call, not a webhook, routed by the page's own baked
+backend URL.
+
+So the two halves of one order are in different databases, and **neither silo can render that order
+completely**. Production shows a $24.20 purchase with no downsell; sandbox shows an $18.34 downsell
+attached to an order it does not have.
+
+This was invisible before the stamp because nothing distinguished the two. It is the concrete case S3's
+resolver has to answer, and it shows the resolver cannot be webhook-only: **an event is not the only way
+data enters a silo.** A direct API call from a published page is the other, and it routes by whatever
+backend that page was published against.
+
+### Stripe does NOT propagate session metadata to the PaymentIntent
+
+Confirmed on our own data rather than quoted: the two session-driven PaymentIntents came back with **no
+`silo`**, while their sessions carry it. The preliminary document warned of exactly this —
+*"metadata set on one payment object doesn't automatically propagate to related objects"* — and it is now
+observed here.
+
+**Harmless today.** Refunds and disputes resolve by "do I hold the order?" (`find_by_payment_intent`), not
+by PaymentIntent metadata. **Worth closing anyway:** `payment_intent_data[metadata][silo]` on the session,
+one line, would make charge and dispute events self-describing instead of dependent on a lookup — useful
+precisely when the order is in the OTHER silo, as the split order above shows it can be. Not built.
+
 ## Phases
 
 Ordered so that each phase is verifiable on its own and nothing is deployed that depends on a later one.
@@ -287,7 +343,9 @@ Ordered so that each phase is verifiable on its own and nothing is deployed that
 - **S1 — stamp what we create. BUILT 2026-09-23.** `metadata[silo]` on every Checkout Session (so the
   cart path gets it too, sharing `build_checkout_payload`), on `subscription_data[metadata]` so renewals
   inherit it, and on the one-click upsell's PaymentIntent — the one Stripe object we create directly
-  rather than through a session. **Write-only**: a test asserts that nothing in `src/` reads
+  rather than through a session. **Gap, deliberately left:** a session's own PaymentIntent is NOT stamped,
+  because Stripe does not propagate session metadata to it (observed 2026-09-23, see Evidence).
+  **Write-only**: a test asserts that nothing in `src/` reads
   `metadata[silo]` yet, so shipping the stamp ahead of the resolver is provably safe. That test is
   deleted, not edited, when S3 begins.
 - **S2 — a Customer for every buyer.** Point checkout at `find_or_create_customer(email)` so every session
