@@ -108,3 +108,39 @@ class EveryCallSiteIsScopedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewInviteSweepTests(unittest.TestCase):
+    """The invite sweep SENDS EMAIL to a real customer, so its mode isolation is the strictest case.
+
+    Found the same day as the notification leak and worse in consequence: four invites in
+    `jb-reviews-prod`, every one minted from a `cs_test_` checkout session, three still active — so a
+    live person was being asked how they were enjoying a product they never bought. One had already
+    been delivered.
+    """
+
+    SOURCE = (ROOT / "src" / "handlers" / "review_invites.py").read_text(encoding="utf-8")
+    WEBHOOK = (ROOT / "src" / "handlers" / "stripe_webhook.py").read_text(encoding="utf-8")
+    PUBLIC = (ROOT / "src" / "handlers" / "reviews_public.py").read_text(encoding="utf-8")
+
+    def test_the_sweep_reads_live_invites_only(self):
+        # Mirrors the abandoned-cart sweep, which settled this question first: never email a real person
+        # about test-mode activity.
+        self.assertIn('review_invites_repository(mode="live")', self.SOURCE)
+
+    def test_an_invite_is_minted_in_the_mode_of_the_purchase(self):
+        self.assertIn("review_invites_repository(mode=mode)", self.WEBHOOK)
+
+    def test_the_public_review_form_resolves_invites_in_the_requests_mode(self):
+        self.assertIn("review_invites_repository(mode=mode)", self.PUBLIC)
+
+    def test_no_caller_builds_an_unscoped_invites_repository(self):
+        offenders = []
+        for path in sorted((ROOT / "src" / "handlers").glob("*.py")):
+            for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if "review_invites_repository(" not in line:
+                    continue
+                if not re.search(r"review_invites_repository\([^)]*mode\s*=", line):
+                    offenders.append(f"{path.name}:{line_no} builds review_invites_repository() with no "
+                                     "mode — a test purchase can then email a real customer")
+        self.assertEqual(offenders, [], "\n".join(offenders))

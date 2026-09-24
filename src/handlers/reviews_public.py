@@ -51,7 +51,7 @@ def handler(event, context, *, reviews_repo=None, products_repo=None, sites_repo
     if sites_repo is None and os.environ.get("SITES_TABLE"):
         sites_repo = sites_repository(mode=mode)
     if invites_repo is None and os.environ.get("REVIEWS_TABLE"):
-        invites_repo = review_invites_repository()
+        invites_repo = review_invites_repository(mode=mode)
     if method == "GET":
         return render_form(event, products_repo, sites_repo)
     if method == "POST":

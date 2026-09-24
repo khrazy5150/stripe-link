@@ -622,7 +622,7 @@ def persist_checkout_session_completed(
     notifications_repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
-    invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
+    invites_repo = invites_repo or (review_invites_repository(mode=mode) if os.environ.get("REVIEWS_TABLE") else None)
     carts_repo = carts_repo or (carts_repository(mode=mode) if os.environ.get("CARTS_TABLE") else None)
     if tip_tokens_repo is None and os.environ.get("CARTS_TABLE"):
         tip_tokens_repo = tip_tokens_repository(mode=mode)

@@ -1168,13 +1168,21 @@ def purchase_throttles_repository(table: Any | None = None) -> DynamoDocumentRep
     )
 
 
-def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
-    # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
+def review_invites_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    """Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix +
+    scan_type).
+
+    Mode-partitioned like carts, and for the same reason: the sweep that reads these SENDS EMAIL to real
+    customers. Without it a test-mode purchase minted an invite indistinguishable from a real one, and the
+    sweep asked a live person how they were enjoying a product they never bought (found 2026-09-23 — four
+    such invites in `jb-reviews-prod`, every one from a `cs_test_` session, three still active).
+    """
     return DynamoDocumentRepository(
         os.environ.get("REVIEWS_TABLE", ""),
         document_type="review_invite",
         id_field="invite_id",
         table=table,
+        mode=mode,
     )
 
 

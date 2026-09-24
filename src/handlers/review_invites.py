@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=None, now_fn=None,
             profiles_repo=None):
-    invites_repo = invites_repo or review_invites_repository()
+    # LIVE ONLY, exactly like the abandoned-cart sweep: this sends email to a real customer, and a
+    # test-mode purchase must never cause a real person to be asked about a product they never bought.
+    invites_repo = invites_repo or review_invites_repository(mode="live")
     if sites_repo is None and os.environ.get("SITES_TABLE"):
         sites_repo = sites_repository()
     mailer_send = mailer_send or send_email
