@@ -623,6 +623,38 @@ type.** Two consequences:
 approximating: under-sizing a rigid item into a mailer gets it refused at the counter, after the label is
 bought; over-sizing a pouch into a carton overcharges every order that contains one.
 
+### BUILT 2026-09-24 — the packer half
+
+Pure functions first, deliberately: no UI, no schema migration, no tenant data needed, so the arithmetic
+could be made correct and tested before anything asks a tenant for a new number.
+
+- **`fits_inside(item, box, *, box_kind, compressible)`** — a soft pack holding a compressible item
+  checks its two LARGEST dimensions strictly and treats thickness as capacity, bounded by
+  `SOFT_PACK_THICKNESS_TOLERANCE` (3x). A rigid item is still refused by an envelope; a pouch is still
+  refused by a carton of the same nominal size. The constraint got more precise, not looser.
+- **A soft pack's declared thickness is what it will MEASURE when stuffed**, not the flat figure — and
+  only when EVERY item squashes, because one jar in the envelope stops it bulging for anything.
+  Under-declaring thickness is how a carrier re-bills dimensional weight after the label is bought.
+- **`_item_weight` split from `_weight`** — bare weight for the shared-box sum, packed weight for the
+  declared path. Closes the ~15% over-quote. A product with no bare weight falls back to the packed one,
+  which over-estimates; that is the safe direction and it is what every pre-existing product hits.
+- **`pack()` partitions** on `ships_alone` instead of returning early, so a ships-alone item and packable
+  ones can coexist in one order. Backwards compatible: a declared package with no flag behaves exactly as
+  before.
+- **`packable_items`** passes `item_weight`, `compressible` and `ships_alone` through.
+
+Measured on the case that started this — a Beta-Alanine pouch, 8x5x2, 0.9 lb bare:
+
+| | box chosen | parcel | weight |
+|---|---|---|---|
+| before (rigid rules) | medium box | 12 x 10 x 6 | 1.25 lb |
+| after (compressible) | bubble mailer | 9 x 6 x 1.85 | 0.95 lb |
+
+**Still to build:** the schema fields these read (`item_dimensions.weight_lb`, `compressible`,
+`ships_alone`, catalog `kind` + carrier `template`), the provider adapter passing `template`, both UI
+surfaces, and the product-level readiness line. Until then the new paths are reachable only by callers
+that set the flags themselves — nothing in the product catalogue does yet.
+
 ### What has to change
 
 - **Schema:** an item weight distinct from the packed weight. `item_dimensions` gains a weight; the

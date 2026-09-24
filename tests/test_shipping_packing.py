@@ -13,7 +13,12 @@ parcel is this" would disagree, and the one that priced the order would not be t
 """
 import unittest
 
-from stripe_link.domain.shipping_packing import DEFAULT_VOID_FILL, fits_inside, pack
+from stripe_link.domain.shipping_packing import (
+    DEFAULT_VOID_FILL,
+    SOFT_PACK,
+    fits_inside,
+    pack,
+)
 
 BOXES = [
     {"name": "mailer", "length": 9, "width": 6, "height": 3, "empty_weight": 0.1},
@@ -175,3 +180,128 @@ class KnownLimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+POUCH = {"product_id": "beta_alanine", "quantity": 1, "item_weight": 0.9,
+         "length": 8, "width": 5, "height": 2, "compressible": True}
+MAILER = {"name": "bubble mailer", "kind": "soft_pack", "length": 9, "width": 6, "height": 1,
+          "empty_weight": 0.05}
+
+
+class SoftPackTests(unittest.TestCase):
+    """A Beta-Alanine pouch goes in a bubble mailer, not a carton.
+
+    The catalog has had a padded mailer since it was written, which made envelopes LOOK handled. They were
+    not: `fits_inside` is strict and axis-aligned, so an 8x5x2 pouch failed a 9x6x1 mailer on `2 > 1` and
+    the packer climbed to a carton — overcharging every order containing one.
+    """
+
+    def test_a_compressible_item_may_exceed_a_soft_pack_thickness(self):
+        self.assertTrue(fits_inside((8, 5, 2), (9, 6, 1), box_kind=SOFT_PACK, compressible=True))
+
+    def test_the_same_item_is_refused_by_a_rigid_box_of_those_dimensions(self):
+        # The exception is about the PACKAGING, not about being lenient in general.
+        self.assertFalse(fits_inside((8, 5, 2), (9, 6, 1)))
+
+    def test_a_rigid_item_is_still_refused_by_a_soft_pack(self):
+        # A jar does not squash. Letting it through fails at the counter, after the label is paid for.
+        self.assertFalse(fits_inside((4, 4, 5), (9, 6, 1), box_kind=SOFT_PACK, compressible=True))
+
+    def test_the_two_largest_dimensions_are_still_strict(self):
+        # A pouch cannot be longer than the envelope however soft it is.
+        self.assertFalse(fits_inside((11, 5, 0.5), (9, 6, 1), box_kind=SOFT_PACK, compressible=True))
+
+    def test_the_thickness_allowance_is_bounded(self):
+        # 3x a 1-inch mailer is 3 inches. A 4-inch item does not go in it however soft it is.
+        self.assertTrue(fits_inside((8, 5, 3), (9, 6, 1), box_kind=SOFT_PACK, compressible=True))
+        self.assertFalse(fits_inside((8, 5, 4), (9, 6, 1), box_kind=SOFT_PACK, compressible=True))
+
+    def test_a_pouch_now_actually_packs_into_the_mailer(self):
+        parcel = pack([POUCH], [MAILER, *BOXES])[0]
+
+        self.assertEqual(parcel["strategy"], "packed")
+        self.assertEqual(parcel["box"], "bubble mailer")
+
+    def test_without_the_flag_it_climbs_to_a_carton(self):
+        # The behaviour before this change, pinned so the cost of getting it wrong stays visible.
+        rigid = {**POUCH, "compressible": False}
+
+        self.assertNotEqual(pack([rigid], [MAILER, *BOXES])[0]["box"], "bubble mailer")
+
+
+class SharedBoxWeightTests(unittest.TestCase):
+    """The packaging was billed once per item.
+
+    One weight field meant "the thing as shipped, box included", and the shared-box branch summed it per
+    item and then added the shared box on top.
+    """
+
+    TUB = {"product_id": "tub", "quantity": 1, "weight": 1.0, "item_weight": 0.85,
+           "length": 4, "width": 4, "height": 4}
+
+    def test_bare_weights_are_summed_not_packed_ones(self):
+        parcel = pack([self.TUB, {**self.TUB, "product_id": "tub2"},
+                       {**self.TUB, "product_id": "tub3"}], BOXES)[0]
+
+        # 3 x 0.85 bare + 0.3 for the box that actually ships = 2.85, not 3 x 1.0 + 0.3 = 3.3.
+        self.assertEqual(parcel["weight"], 2.85)
+
+    def test_a_product_with_no_bare_weight_over_estimates_rather_than_guessing(self):
+        # Every product stored before `item_weight` existed hits this. Over-estimating is the safe
+        # direction: a carrier re-bills or refuses an under-weight parcel after the label is bought.
+        no_bare = {k: v for k, v in self.TUB.items() if k != "item_weight"}
+        parcel = pack([no_bare, {**no_bare, "product_id": "b"}], BOXES)[0]
+
+        self.assertEqual(parcel["weight"], 2.3)   # 2 x 1.0 packed + 0.3
+
+    def test_the_declared_path_still_uses_the_packed_weight(self):
+        # A thing shipping in its own box IS the packed weight; nothing is added to it.
+        parcel = pack([{**self.TUB, "ships_alone": True,
+                        "package": {"length": 6, "width": 6, "height": 6, "weight": 1.0}}], BOXES)[0]
+
+        self.assertEqual(parcel["weight"], 1.0)
+
+
+class ShipsAloneTests(unittest.TestCase):
+    """A declared box is an exception, so it must not swallow the rest of the order."""
+
+    ALONE = {"product_id": "poster", "quantity": 1, "weight": 2.0, "ships_alone": True,
+             "package": {"name": "tube", "length": 26, "width": 4, "height": 4, "weight": 2.0}}
+
+    def test_a_ships_alone_item_gets_its_own_parcel_and_the_rest_still_pack(self):
+        parcels = pack([self.ALONE, JAR, {**JAR, "product_id": "jar2"}], BOXES)
+
+        self.assertEqual(len(parcels), 2)
+        by_strategy = {p["strategy"]: p for p in parcels}
+        self.assertEqual(by_strategy["declared"]["packed_from"], ["poster"])
+        self.assertEqual(sorted(by_strategy["packed"]["packed_from"]), ["gummies", "jar2"])
+
+    def test_it_is_the_whole_order_when_nothing_else_is_there(self):
+        parcels = pack([self.ALONE], BOXES)
+
+        self.assertEqual(len(parcels), 1)
+        self.assertEqual(parcels[0]["strategy"], "declared")
+
+    def test_a_declared_package_WITHOUT_the_flag_does_not_split_the_order(self):
+        # Backwards compatible: before this change a declared package only applied to a lone item, and
+        # a multi-item order ignored it. That stays true unless the tenant opts in.
+        not_alone = {k: v for k, v in self.ALONE.items() if k != "ships_alone"}
+        parcels = pack([not_alone, JAR], BOXES)
+
+        self.assertNotIn("declared", {p["strategy"] for p in parcels})
+
+    def test_the_declared_thickness_is_what_it_will_MEASURE_when_stuffed(self):
+        """Not the flat figure on the envelope. Under-declaring thickness is how a carrier re-bills
+        dimensional weight after the label is bought."""
+        parcel = pack([POUCH], [MAILER])[0]
+
+        # 8x5x2 = 80 cu in, x1.25 void fill = 100, over a 9x6 footprint = 1.85in, not the nominal 1in.
+        self.assertEqual(parcel["box"], "bubble mailer")
+        self.assertGreater(parcel["height"], 1.0)
+        self.assertLessEqual(parcel["height"], 3.0)   # and never beyond the allowance
+
+    def test_a_rigid_item_in_the_order_stops_the_pack_bulging(self):
+        # One jar in the envelope and it cannot be squashed for anything.
+        parcels = pack([POUCH, {**JAR, "item_weight": 1.0}], [MAILER, *BOXES])
+
+        self.assertNotEqual(parcels[0]["box"], "bubble mailer")

@@ -244,12 +244,22 @@ def packable_items(lines: list[dict[str, Any]], products_by_id: dict[str, dict[s
         fulfillment = product.get("fulfillment") or {}
         if fulfillment.get("requires_shipping") is False:
             continue
+        own = fulfillment.get("item_dimensions") or {}
         item: dict[str, Any] = {
             "product_id": str(line.get("product_id") or ""),
             "quantity": max(1, int(line.get("quantity") or 1)),
+            # PACKED weight -- the thing in its own box, which is what `weight_lb` has always meant.
             "weight": fulfillment.get("weight_lb"),
+            # BARE weight, for when several items share one box. Absent on every product stored before
+            # this field existed, and the packer over-estimates rather than guessing (safe direction).
+            "item_weight": own.get("weight_lb"),
+            # A pouch squashes into a padded mailer; a jar does not. Two items of identical dimensions
+            # pack differently depending on which they are, and only the tenant knows.
+            "compressible": bool(fulfillment.get("compressible")),
+            # A declared box is an EXCEPTION, not the default route -- see plans/SHIPPING_PROVIDERS.md,
+            # "The item/box inversion". It applies only when the tenant says this thing ships on its own.
+            "ships_alone": bool(fulfillment.get("ships_alone")),
         }
-        own = fulfillment.get("item_dimensions") or {}
         for source, target in (("length_in", "length"), ("width_in", "width"), ("height_in", "height")):
             if own.get(source):
                 item[target] = own[source]
