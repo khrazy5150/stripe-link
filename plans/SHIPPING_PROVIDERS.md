@@ -731,9 +731,30 @@ A tenant's own mailer now behaves like one:
 | marked as a mailer | My bubble mailers | 9 x 6 x 1.85 | **0.95 lb** |
 | left as a box | My cartons | 12 x 10 x 6 | 1.25 lb |
 
-**Still to build:** wiring `product_readiness` into a surface. The Shipping screen is the natural home,
-and `ShippingFunction` has no grant on `ProductsTable` today — a template change plus a handler read, not
-only a component.
+### BUILT 2026-09-24 — product readiness reaches the Shipping screen
+
+It rides on every `/shipping` response beside `label_readiness`, and stays a **separate list**: that one
+blocks a label, this one only costs postage. Merged, the screen would file *"add a weight"* under *"before
+you can buy labels"* — untrue, and it would send a tenant looking for a tape measure they do not need. It
+renders in the **Boxes** card, which is where the promise it qualifies is made (*"several items in one
+order share the smallest box they all fit in"* — only once the items have sizes of their own).
+
+`ShippingFunction` gained a **read-only** grant on `ProductsTable`; `test_table_grants` caught its absence
+before a deploy could. The lookup is **best-effort and never raises**: a products table that will not read
+is not a reason to fail the shipping config the tenant came here to save. It under-reports on failure,
+which is the right direction for a hint — the packer still falls back to one parcel per item, so nothing
+ships wrongly when the advice goes missing.
+
+**A second bug fell out of it.** The GET had always carried `readiness`, but only `save` applied it, so a
+saved config *missing its ship-from address* loaded reading **"Ready to buy labels"** until the tenant
+happened to press Save. The test that should have caught it counted `applyReadiness(` calls and asserted
+"definition + load + save + test paths" — the comment named `load`, the code never called it. It now names
+the call sites instead of counting them. And the green banner is gated on `readinessKnown`: an *empty*
+readiness list means ready, an *absent* one means unknown — the state of a tenant whose GET 404'd because
+they have saved nothing — and those two must not render alike.
+
+**Still to build:** nothing on the inversion. The remaining shipping work is the provider surface (rates,
+labels, tracking) tracked above.
 
 ### What has to change
 

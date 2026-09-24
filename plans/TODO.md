@@ -2,16 +2,49 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
+## Stripe API version drift — HIGH
+
+**The account is on `2026-05-27.preview`, and the code is written against remembered field names.** Three
+fields had moved, and every reader of them was silently hollow rather than broken — the record was written,
+just empty:
+
+| read as | actually at | cost |
+|---|---|---|
+| `invoice.subscription` | `invoice.parent.subscription_details.subscription` | renewals unlinked; booking credits never topped up |
+| `invoice.subscription_details.metadata` | `invoice.parent.subscription_details.metadata` | the silo stamp never seen on a renewal |
+| `line.price.{id,product}` | `line.pricing.price_details.{price,product}` | no product id, so no way to name a receipt line |
+
+All three are fixed (2026-09-24) and pinned against a payload transcribed from `jb-webhook-events-prod`.
+**What remains is the systemic part**, and it is why this is HIGH rather than done:
+
+1. **No test could have caught any of it**, because every fixture was written from older docs. The fixtures
+   are the vulnerability, not the handlers. Audit the remaining Stripe-shaped fixtures against stored
+   payloads — `jb-webhook-events-*` holds real ones for free.
+2. **Nothing pins the API version.** `stripe_client.py` sends `STRIPE_API_VERSION` and several call sites
+   hardcode `2024-06-20`, while webhook payloads arrive as `2026-05-27.preview` — the account default. So
+   requests we make and events we receive can disagree about the shape of the same object, and a dashboard
+   change to the account default silently reshapes every payload. Decide whether to pin the webhook version
+   explicitly and upgrade deliberately.
+3. **A `.preview` version is not a stable contract.** Being on one by default means fields can move again
+   before GA.
+4. **Other handlers have not been audited** for the same pattern. `checkout.session.*` readers are fine
+   (sessions still carry `subscription`), but nothing has checked the rest.
+
 ## Shipping
 
 ### Wire the shipping providers (Shippo first)
 
-> **⭐ 2026-09-24 — the item/box inversion is DESIGNED, not built.** See `plans/SHIPPING_PROVIDERS.md`,
-> "The item/box inversion". The product stores a BOX where it should store the ITEM, and the consequence is
-> now measured: **0 of 4 prod and 1 of 11 dev shippable products have item dimensions**, so `pack()`'s
-> multi-item branch never runs and *every bundle quotes one parcel per item today*. A second bug found with
-> it: one weight field means "packed, box included", and the shared-box path sums it per item then adds the
-> shared box — **~15% over on three items**, growing with count.
+> **✅ 2026-09-24 — the item/box inversion is BUILT** (schema, packer, both product surfaces, the box
+> catalog editor, and product readiness on the Shipping screen). Deployed dev + prod 2026-09-24. See
+> `plans/SHIPPING_PROVIDERS.md`, "The item/box inversion". The product stored a BOX where it should store
+> the ITEM; the consequence was measured at **0 of 4 prod and 1 of 11 dev shippable products carrying item
+> dimensions**, so `pack()`'s multi-item branch had never run and *every bundle quoted one parcel per item*.
+> Nothing announced that, which is why `product_readiness` now does. A second bug found with it: one weight
+> field meant "packed, box included", and the shared-box path summed it per item then added the shared box
+> — **~15% over on three items**, growing with count.
+>
+> Old products are untouched and keep their declared box (pinned by test); tenants adopt item dimensions by
+> measuring, at their own pace. The provider surface below — rates, labels, tracking — is unchanged by it.
 >
 > Agreed model: item dimensions + weight are the facts and they compose; the box is derived by the packer
 > from the tenant's catalog; a declared box survives only as an exception for what dimensions cannot

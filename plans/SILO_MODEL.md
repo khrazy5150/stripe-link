@@ -382,6 +382,32 @@ are written and before S3 reads anything — not a separate act.
 Without a wipe, S3 needs a rule for records that predate the stamp. The same rule as everywhere else in
 this codebase: **unstamped means test/sandbox**, never production.
 
+## S1b nearly didn't reach renewals — the API-version trap (2026-09-24)
+
+The stamp was verified on real prod sessions (`metadata.silo = sandbox`) and on the subscription itself:
+
+```
+sub_1UJ5D821lLbLd4Y5GyNhoDN7   status active, daily
+metadata: { silo: 'sandbox', product_name: '120 minute massage', offer_id: ... }
+```
+
+So the write side worked. The **read** side did not. This account is on API `2026-05-27.preview`, which
+moved `invoice.subscription_details` under `invoice.parent` — and `invoice_subscription_metadata` looked
+only at the old top-level key, so it returned `{}` for every renewal and the stamp was never seen.
+`order_record_from_invoice` compounded it by reading that metadata for attribution and then dropping the
+rest, so even a stamp that *was* found could not have reached the order.
+
+Both fixed, and the lesson generalises past the silo work: **a stamp is only as good as the reader**. S3
+resolves a silo per event, and the same API version has moved `line.price` to `line.pricing.price_details`
+and hidden the subscription id under `parent` too. Any resolver written against remembered field names will
+be silently hollow rather than loudly broken — it will resolve *nothing* and fall through to whatever the
+default is. For S3 that default decides whether money is processed, so:
+
+- **Verify every field S3 reads against a stored `jb-webhook-events-*` payload**, not against docs or
+  memory. The payloads are already there; that is how this was found.
+- **S3's disagreement logging must distinguish "no stamp" from "could not read the stamp".** Under the
+  current design both look identical, and only one of them is a real unstamped legacy record.
+
 ## Relationship to other plans
 
 - `plans/STRIPE_MODE_DECOUPLING.md` owns the **Stripe** axis and its P7 owns the isolation debt on it.
