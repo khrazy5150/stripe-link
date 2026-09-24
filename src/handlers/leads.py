@@ -68,6 +68,7 @@ def handler(
             products_repo=products_repo or products_repository(mode=mode),
             notifications_repo=notifications_repo,
             now=now_fn(),
+            mode=mode,
         )
     # Tenant-side lead access requires the `lead_capture` plan capability. The public POST ingest above stays open
     # (buyers never see a plan gate); an unentitled tenant simply can't view/manage leads.
@@ -98,7 +99,7 @@ def _request_context(event) -> dict:
     }
 
 
-def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_repo, now):
+def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_repo, now, mode="test"):
     try:
         payload = parse_json_body(event)
     except ValueError as exc:
@@ -161,14 +162,14 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_lead")
 
-    _emit_lead_notification(notifications_repo, lead, tenant_id, now)
+    _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode)
     return json_response({"lead_id": lead_id, "status": "captured"}, status_code=201)
 
 
-def _emit_lead_notification(notifications_repo, lead, tenant_id, now):
+def _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode="test"):
     import os
 
-    repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
+    repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     if not repo:
         return
     try:

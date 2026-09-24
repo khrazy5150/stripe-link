@@ -1,7 +1,7 @@
 import time
 from typing import Callable
 
-from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_notification, validate_refund_request
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -11,7 +11,9 @@ from stripe_link.repositories.documents import (
 
 
 def handler(event, context, notifications_repo=None, refund_requests_repo=None, now_fn: Callable[[], int] = lambda: int(time.time())):
-    notifications_repo = notifications_repo or notifications_repository()
+    # Mode-scoped so a tenant reading their bell in LIVE never sees test-mode activity — one prod
+    # endpoint serves both modes, so the isolation is the reader's to enforce.
+    notifications_repo = notifications_repo or notifications_repository(mode=resolve_stripe_mode(event))
     refund_requests_repo = refund_requests_repo or refund_requests_repository()
     method = (event or {}).get("httpMethod", "").upper()
     resource = (event or {}).get("resource") or ""

@@ -619,7 +619,7 @@ def persist_checkout_session_completed(
     orders_table = orders_table or dynamodb_table(os.environ.get("ORDERS_TABLE", ""))
     customers_repo = customers_repo or (customers_repository(mode=mode) if os.environ.get("CUSTOMERS_TABLE") else None)
     invoices_repo = invoices_repo or (invoices_repository(mode=mode) if os.environ.get("INVOICES_TABLE") else None)
-    notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
+    notifications_repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
     invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
@@ -1731,7 +1731,7 @@ def persist_subscription_renewal(
     now = int(now_fn())
     orders_table = orders_table or dynamodb_table(os.environ.get("ORDERS_TABLE", ""))
     orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
-    notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
+    notifications_repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
 

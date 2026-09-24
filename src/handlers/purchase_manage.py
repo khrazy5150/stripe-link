@@ -330,7 +330,7 @@ def _act(action, body, *, tokens_repo, orders_repo, refunds_repo, notifications_
     if action == "cancel":
         return _cancel(order, tenant_id, mode, business,
                        stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener)
-    return _request_refund(order, tenant_id, business, str(body.get("reason") or ""),
+    return _request_refund(order, tenant_id, business, str(body.get("reason") or ""), mode=mode,
                            refunds_repo=refunds_repo, notifications_repo=notifications_repo, now_fn=now_fn)
 
 
@@ -361,7 +361,7 @@ def _cancel(order, tenant_id, mode, business, *, stripe_repo, secret_cipher, ope
     return _html(render_cancelled(business))
 
 
-def _request_refund(order, tenant_id, business, reason, *, refunds_repo, notifications_repo, now_fn):
+def _request_refund(order, tenant_id, business, reason, *, mode="test", refunds_repo, notifications_repo, now_fn):
     """A REQUEST. The money is the seller's to return, so this lands in the queue their Refunds screen
     already knows how to answer, and notifies them it arrived."""
     now = int(now_fn())
@@ -377,7 +377,7 @@ def _request_refund(order, tenant_id, business, reason, *, refunds_repo, notific
         from handlers.notifications import _emit_refund_notification
 
         _emit_refund_notification(
-            notifications_repo or notifications_repository(), saved, now)
+            notifications_repo or notifications_repository(mode=mode), saved, now)
     except Exception:  # noqa: BLE001 - the request is saved; a missing bell must not undo it
         pass
     return _html(render_refund_requested(business))

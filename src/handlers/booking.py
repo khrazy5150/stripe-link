@@ -303,7 +303,10 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
         confirmed.pop("hold_expires_at", None)
         confirmed["reminders"] = plan_reminders(confirmed, now=now)
         appointments_repo.put(confirmed)
-        _emit_booked_notification(notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None), confirmed, tenant_id, now)
+        _emit_booked_notification(
+            notifications_repo or (notifications_repository(mode=resolve_stripe_mode(event))
+                                   if os.environ.get("NOTIFICATIONS_TABLE") else None),
+            confirmed, tenant_id, now)
         _delegate(appointments_repo, confirmed, action="upsert", change="booked", delegation=delegation, tenant_repo=tenant_repo)
         payable = book_then_pay and requires_payment(appointment)
         return json_response({

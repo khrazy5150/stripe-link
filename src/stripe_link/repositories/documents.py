@@ -1016,12 +1016,59 @@ def user_profiles_repository(table: Any | None = None) -> DynamoDocumentReposito
     )
 
 
-def notifications_repository(table: Any | None = None) -> DynamoDocumentRepository:
-    return DynamoDocumentRepository(
+class ModeScopedNotificationsRepository(DynamoDocumentRepository):
+    """Notifications, isolated by Stripe mode the way orders and ledger entries already are.
+
+    ONE prod endpoint serves both Stripe modes by design (plans/STRIPE_MODE_DECOUPLING.md P3), so a
+    tenant's TEST activity writes to the PROD tables. Orders carry `stripe_mode` and LedgerRepository
+    filters on `mode`; notifications carried neither, so a test-mode subscription renewal put "New sale"
+    in the production bell with nothing to distinguish it from money (found 2026-09-23, nine such rows in
+    `jb-notifications-prod` against zero live orders).
+
+    Two deliberate choices:
+
+    - **Stamped on WRITE, here.** Five call sites build notification documents and a sixth will be added
+      by whoever ships the next emitter; asking each to remember is how this happened.
+    - **Filtered in memory, NOT key-partitioned.** Passing `mode` to `DynamoDocumentRepository` would put
+      it in the sort key, and every notification written before today would become unreachable in both
+      modes. Filtering on the attribute instead lets an unstamped row still be read — as TEST, which is
+      what those nine actually are.
+    """
+
+    def __init__(self, *args: Any, mode: str | None = None, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.notification_mode = normalize_stripe_mode(mode) if mode is not None else None
+
+    def put(self, document: dict[str, Any]) -> dict[str, Any]:
+        if self.notification_mode is not None and not str(document.get("mode") or "").strip():
+            document = {**document, "mode": self.notification_mode}
+        return super().put(document)
+
+    def _in_mode(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self.notification_mode is None:
+            return items
+        # No mode at all predates the stamp: treat it as test rather than let it into a live tenant's
+        # view. Under-reporting activity is recoverable; showing test money as real is not.
+        return [item for item in items if str(item.get("mode") or "test") == self.notification_mode]
+
+    def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+        return self._in_mode(super().list_for_tenant(tenant_id))
+
+    def list_page_for_tenant(self, tenant_id: str, *, limit: int | None = None, cursor: str = ""):
+        """Paged read, filtered too. Nothing pages notifications today, but an unfiltered inherited
+        method is a leak waiting for the first screen that does. A page may come back shorter than
+        `limit` because the filter runs after the read; the cursor is still the server's."""
+        items, next_cursor = super().list_page_for_tenant(tenant_id, limit=limit, cursor=cursor)
+        return self._in_mode(items), next_cursor
+
+
+def notifications_repository(table: Any | None = None, *, mode: str | None = None) -> ModeScopedNotificationsRepository:
+    return ModeScopedNotificationsRepository(
         os.environ.get("NOTIFICATIONS_TABLE", ""),
         document_type="notification",
         id_field="notification_id",
         table=table,
+        mode=mode,
     )
 
 
