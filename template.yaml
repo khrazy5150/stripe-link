@@ -213,6 +213,19 @@ Conditions:
   # header would leak onto indexable custom-domain pages.
   IsNonProd: !Not [!Equals [!Ref Environment, "prod"]]
 
+# A SILO is a complete, independent SaaS — its own tables, tenants and money — differing from the others
+# only in who uses it (plans/SILO_MODEL.md). It is NOT the same axis as `Environment` (the deployment name
+# AWS knows) and NOT the same as Stripe's test/live mode. `dev` is a deployment; `sandbox` is a silo.
+#
+# Adding `staging` later is an entry here plus its own deployment — never a new webhook endpoint, because
+# the Stripe axis stays data rather than routing.
+Mappings:
+  SiloForEnvironment:
+    dev:
+      Silo: sandbox
+    prod:
+      Silo: production
+
 Globals:
   Function:
     Runtime: python3.12
@@ -250,6 +263,9 @@ Globals:
         COUPONS_TABLE: !Ref CouponsTable
         COUPON_GRANTS_TABLE: !Ref CouponGrantsTable
         COUPON_REDEMPTIONS_TABLE: !Ref CouponRedemptionsTable
+        # Which independent copy of Junior Bay this is. Stamped onto everything we create at Stripe so
+        # an event can say where it came from (plans/SILO_MODEL.md S0/S1).
+        SILO: !FindInMap [SiloForEnvironment, !Ref Environment, Silo]
         PAGES_TABLE: !Ref PagesTable
         SITES_TABLE: !Ref SitesTable
         # Registrable domain for tenant free-tier Sites (Zone B, always noindex). Read from config, never

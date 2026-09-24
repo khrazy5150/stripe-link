@@ -2,6 +2,7 @@ import time
 from urllib.request import urlopen
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.silo import current_silo
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.pricing import PricingError, load_offer_products, resolve_offer
@@ -240,6 +241,11 @@ def process_upsell(
         "description": "One-click upsell",
         "metadata[tenant_id]": tenant_id,
         "metadata[upsell]": "true",
+        # Which silo charged this (plans/SILO_MODEL.md S1). A one-click upsell is a PaymentIntent we
+        # create directly rather than a session, so it needs the stamp of its own -- its later refund and
+        # dispute events are resolvable from the order it writes, but the charge itself should still say
+        # where it came from. Omitted rather than guessed when unknown, as everywhere else.
+        **({"metadata[silo]": current_silo()} if current_silo() else {}),
         "metadata[original_session_id]": session_id,
         "metadata[offer_id]": offer_id,
         "metadata[product_type]": fee_context["product_type"],

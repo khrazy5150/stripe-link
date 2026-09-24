@@ -278,12 +278,18 @@ rather than one per purchase, which is what makes this cost tolerable.
 
 Ordered so that each phase is verifiable on its own and nothing is deployed that depends on a later one.
 
-- **S0 — name the silo.** A `SILO` value in config (`sandbox` / `production`), distinct from `ENVIRONMENT`
-  and from `stripe_mode`. One constant, one template parameter. Nothing behaves differently yet. This is
-  the modeling step whose absence caused everything else.
-- **S1 — stamp what we create.** `metadata[silo]` on every Checkout Session, and on
-  `subscription_data[metadata]` so renewals inherit it. Write-only: nothing reads it yet, so it cannot
-  break anything, and it starts accumulating evidence immediately.
+- **S0 — name the silo. BUILT 2026-09-23.** `stripe_link/silo.py` (`SANDBOX`/`PRODUCTION`/`KNOWN_SILOS`,
+  `normalize_silo`, `current_silo`) plus a `SiloForEnvironment` mapping in the template feeding a `SILO`
+  environment variable. `dev` is a DEPLOYMENT; `sandbox` is a silo. **`normalize_silo` has no default on
+  purpose** — both directions of guess are wrong (calling production "sandbox" makes a silo foreign to
+  itself; calling sandbox "production" pollutes real data), so an unknown value is unknown and callers
+  omit rather than invent. Adding `staging` is an entry in two places, never a new endpoint.
+- **S1 — stamp what we create. BUILT 2026-09-23.** `metadata[silo]` on every Checkout Session (so the
+  cart path gets it too, sharing `build_checkout_payload`), on `subscription_data[metadata]` so renewals
+  inherit it, and on the one-click upsell's PaymentIntent — the one Stripe object we create directly
+  rather than through a session. **Write-only**: a test asserts that nothing in `src/` reads
+  `metadata[silo]` yet, so shipping the stamp ahead of the resolver is provably safe. That test is
+  deleted, not edited, when S3 begins.
 - **S2 — a Customer for every buyer.** Point checkout at `find_or_create_customer(email)` so every session
   names a Customer. Record `(tenant_id, silo, stripe_customer_id)` in a mapping table as it happens.
   Still nothing routes on it.
