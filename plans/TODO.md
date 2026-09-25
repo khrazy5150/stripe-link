@@ -1426,7 +1426,7 @@ low-traffic tenant account may well be served different HTML, which is exactly t
 exists to retire.
 
 
-### ⭐ HIGH — the dashboard has no linter, and it cost nine days of broken product editing (2026-09-10)
+### ✅ FIXED 2026-09-25 — the dashboard had no linter, and it cost nine days of broken product editing (2026-09-10)
 
 `Products.vue` called `productStore.fetchFull(row)` while declaring `const store = useProductsStore()`.
 Editing any product failed with `ReferenceError: productStore is not defined`. Shipped 2026-09-01
@@ -1446,6 +1446,25 @@ helper, or an unused import.
 broken identifier fails the build rather than the browser. That is a dependency and config decision rather
 than a code change, which is why it is recorded here instead of done: it needs a call on whether the build
 should fail on lint errors (it should) and how noisy the first run will be on an existing codebase.
+
+**Done, 2026-09-25.** Both questions answered by measuring rather than guessing.
+
+*How noisy:* the first run found **88 problems — and zero `no-undef`**. The codebase is already clean on
+the one rule that mattered, which is what made the next decision easy. The noise is 41 `no-unused-vars`
+and 46 `vue/no-mutating-props` in code that has shipped for months.
+
+*Should the build fail:* yes, on ERRORS. `no-undef` and three real Vue mistakes are errors and gate
+`npm run build`; the 87 pre-existing findings are WARNINGS. As errors they would have failed the build on
+day one, which means someone turns the linter off — and then it catches nothing at all. As warnings they
+are visible and countable, while the rule that breaks the product still blocks.
+
+*Proven, not assumed:* reintroducing the exact 2026-09-01 bug — `productStore.fetchFull` against
+`const store` — makes `npm run build` exit 1 with `'productStore' is not defined`. Removing it, exit 0.
+
+`tests/test_dashboard_lint.py` runs eslint from the Python suite, so the guarantee holds without anyone
+remembering to run it, and pins the warning count at 88 so it cannot quietly grow.
+`tests/test_dashboard_store_references.py` — the stand-in this entry described — is now redundant but
+harmless; it can go whenever someone touches it.
 
 
 ### ✅ "Recurring" pricing saves cleanly and then charges ONCE — FIXED dev 2026-09-15
