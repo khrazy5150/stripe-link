@@ -67,14 +67,31 @@ class TableStructureTests(unittest.TestCase):
         """The ledger view predates this screen's fulfilment role; losing it would be a regression dressed
         as a redesign. It moved from a centred modal into the side drawer, where the row stays visible --
         so the anchor is the drawer, and the assertion is that the CONTENT is still reachable."""
-        self.assertIn("Details", self.SOURCE)
+        # The Action column is the author's: one Label button. Details are reached by clicking the ROW,
+        # which is why openDetail exists and why it ignores clicks on the controls inside a row.
         self.assertIn("OrderDetailDrawer", self.SOURCE)
+        self.assertIn("openDetail", self.SOURCE)
         drawer = (ROOT / "dashboard/src/components/orders/OrderDetailDrawer.vue").read_text(encoding="utf-8")
         for fragment in ("Raw JSON", "order.fees", "amount_refunded", "order.order_id"):
             self.assertIn(fragment, drawer, f"the drawer dropped {fragment} from the old details modal")
 
-    def test_the_destination_is_shown_because_fulfilment_needs_it(self):
+    def test_the_destination_rides_UNDER_the_customer(self):
+        """The author's design: name, with city/state/zip beneath it in tiny type, so the "where" travels
+        with the "who" instead of costing a column."""
         self.assertIn("destinationSummary", self.SOURCE)
+        customer_cell = self.SOURCE.split('<td class="orders-col-customer">', 1)[1].split("</td>", 1)[0]
+        self.assertIn("orders-primary", customer_cell)
+        self.assertIn("orders-place", customer_cell)
+
+    def test_the_columns_are_the_ones_the_author_asked_for(self):
+        header = self.SOURCE.split("<thead>", 1)[1].split("</thead>", 1)[0]
+        for column in ("Customer", "Status", "Paid", "Carrier", "Order", "Fulfilled", "Rate", "Action"):
+            self.assertIn(column, header, f"the {column} column is missing from the header")
+
+    def test_select_all_is_in_the_header_for_bulk_label_printing(self):
+        header = self.SOURCE.split("<thead>", 1)[1].split("</thead>", 1)[0]
+        self.assertIn('type="checkbox"', header)
+        self.assertIn("toggleAll", header)
 
     def test_a_non_shippable_order_still_opens_and_says_why(self):
         """"Not a shippable product" beats an empty shipment panel -- and the reason comes from the gate

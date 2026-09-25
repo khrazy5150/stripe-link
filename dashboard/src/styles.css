@@ -7730,3 +7730,37 @@ button:disabled {
 @media (max-width: 640px) {
   .drawer { width: 100%; }
 }
+
+
+/* ---- Orders: the author's column set ------------------------------------------------------------ */
+/* Customer carries the destination beneath it in tiny type, so the "where" travels with the "who"
+   instead of costing a column of its own. */
+
+.orders-col-customer { min-width: 18rem; }
+.orders-col-carrier { min-width: 16rem; }
+
+.orders-place {
+  margin-top: 0.2rem;
+  font-size: 1.15rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+a.orders-place { text-decoration: underline; }
+
+/* A disabled Label button must read as unavailable rather than broken; the reason is in its title and
+   spelled out in the Status cell beside it. */
+.orders-label-button {
+  padding: 0.6rem 1.8rem;
+  font-size: 1.3rem;
+}
+
+.orders-label-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.orders-table .orders-col-actions a.secondary-action {
+  display: inline-block;
+  text-decoration: none;
+}

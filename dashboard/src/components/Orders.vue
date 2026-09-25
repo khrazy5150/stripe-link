@@ -57,7 +57,7 @@
         <span v-else class="orders-secondary">Getting rates…</span>
         <button type="button" class="primary-action" :disabled="!buyableIds.length || buying"
                 @click="confirmBuy = true">
-          {{ buying ? `Buying ${buyProgress.done}/${buyProgress.total}…` : `Buy ${buyableIds.length} label${buyableIds.length === 1 ? "" : "s"}` }}
+          {{ buying ? `Printing ${buyProgress.done}/${buyProgress.total}…` : `Print ${buyableIds.length} label${buyableIds.length === 1 ? "" : "s"}` }}
         </button>
       </div>
 
@@ -78,122 +78,113 @@
         <table class="orders-table">
           <thead>
             <tr>
-              <th v-if="showFulfilment" scope="col" class="orders-col-select">
+              <th scope="col" class="orders-col-select">
                 <input type="checkbox" :checked="allEligibleSelected" :disabled="!eligibleIds.length"
-                       :aria-label="allEligibleSelected ? 'Clear selection' : 'Select all shippable orders'"
+                       :aria-label="allEligibleSelected ? 'Clear selection' : 'Select every shippable order'"
                        @change="toggleAll" />
               </th>
-              <th scope="col" class="orders-col-order">
-                <button type="button" class="orders-sort" @click="sortBy('created_at')">
-                  Order <span class="orders-sort-caret">{{ caret("created_at") }}</span>
-                </button>
-              </th>
-              <th scope="col">
+              <th scope="col" class="orders-col-customer">
                 <button type="button" class="orders-sort" @click="sortBy('customer')">
                   Customer <span class="orders-sort-caret">{{ caret("customer") }}</span>
                 </button>
               </th>
-              <th scope="col">Items</th>
-              <th v-if="showFulfilment" scope="col">Fulfilment</th>
-              <th v-if="showFulfilment" scope="col" class="orders-col-rate">Rate</th>
+              <th scope="col">Status</th>
               <th scope="col" class="orders-col-money">
                 <button type="button" class="orders-sort" @click="sortBy('amount_total')">
-                  Total <span class="orders-sort-caret">{{ caret("amount_total") }}</span>
+                  Paid <span class="orders-sort-caret">{{ caret("amount_total") }}</span>
                 </button>
               </th>
-              <th scope="col">Status</th>
-              <th scope="col"><span class="visually-hidden">Actions</span></th>
+              <th scope="col">Carrier</th>
+              <th scope="col">
+                <button type="button" class="orders-sort" @click="sortBy('created_at')">
+                  Order <span class="orders-sort-caret">{{ caret("created_at") }}</span>
+                </button>
+              </th>
+              <th scope="col">Fulfilled</th>
+              <th scope="col" class="orders-col-money">Rate</th>
+              <th scope="col" class="orders-col-actions">Action</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="order in visibleOrders" :key="order.order_id"
                 class="orders-row" :class="{ 'orders-row-selected': selected_.has(order.order_id) }"
                 tabindex="0" @click="openDetail(order, $event)" @keyup.enter="selected = order">
-              <td v-if="showFulfilment" class="orders-col-select">
+              <td class="orders-col-select">
+                <!-- Only a shippable, unshipped order can join a bulk print. The reason a box is
+                     unavailable is in its tooltip and, at length, in the Status cell. -->
                 <input type="checkbox" :checked="selected_.has(order.order_id)"
                        :disabled="!order.fulfilment?.eligible"
                        :title="order.fulfilment?.eligible ? '' : (order.fulfilment?.reasons || []).join(' ')"
-                       :aria-label="`Select order ${order.order_id}`"
+                       :aria-label="`Select order for ${order.customer?.name || order.order_id}`"
                        @change="toggleOne(order)" />
               </td>
-              <td class="orders-col-order">
-                <div class="orders-primary">{{ order.product?.name || itemsSummary(order) }}</div>
-                <button type="button" class="orders-id font-mono" :title="`${order.order_id} — click to copy`"
-                        @click="copyId(order.order_id)">{{ elideId(order.order_id) }}</button>
-                <div class="orders-secondary">{{ formatDate(order.created_at) }}</div>
-              </td>
-              <td>
+
+              <td class="orders-col-customer">
                 <div class="orders-primary">{{ order.customer?.name || order.customer?.email || "—" }}</div>
-                <div v-if="destinationSummary(order)" class="orders-secondary">{{ destinationSummary(order) }}</div>
+                <div v-if="destinationSummary(order)" class="orders-place">{{ destinationSummary(order) }}</div>
               </td>
-              <td>{{ itemsSummary(order) }}</td>
-              <td v-if="showFulfilment" class="orders-col-fulfilment">
-                <template v-if="order.fulfilment?.status === 'shipped'">
-                  <span class="product-status active">Shipped</span>
-                  <div v-if="order.fulfilment.shipment?.tracking_number" class="orders-secondary">
-                    <a v-if="order.fulfilment.shipment.tracking_url" :href="order.fulfilment.shipment.tracking_url"
-                       target="_blank" rel="noopener">{{ order.fulfilment.shipment.tracking_number }}</a>
-                    <span v-else>{{ order.fulfilment.shipment.tracking_number }}</span>
-                  </div>
-                </template>
-                <template v-else-if="order.fulfilment?.status === 'ready'">
-                  <span class="product-status active">Ready to ship</span>
-                </template>
-                <template v-else>
-                  <div class="orders-secondary">{{ (order.fulfilment?.reasons || []).join(" ") || "—" }}</div>
-                  <!-- The ONLY gate with a call to action: the tenant can fix a missing measurement. -->
-                  <button v-for="item in order.fulfilment?.needs_measurement || []" :key="item.product_id"
-                          type="button" class="link-action" @click="measureProduct(item)">
-                    + Add package info for {{ item.name }}
-                  </button>
-                </template>
+
+              <td>
+                <span class="product-status" :class="order.delivery?.badge">{{ order.delivery?.label }}</span>
+                <div v-if="order.delivery?.note" class="orders-place">{{ order.delivery.note }}</div>
+                <button v-for="item in order.fulfilment?.needs_measurement || []" :key="item.product_id"
+                        type="button" class="link-action" @click="measureProduct(item)">
+                  + Add package info
+                </button>
               </td>
+
               <td class="orders-col-money">
-                <div class="orders-primary">{{ formatMoney(order.amount_total, order.currency) }}</div>
-                <div v-if="Number(order.amount_refunded) > 0" class="orders-secondary">
+                <div>{{ formatMoney(order.amount_total, order.currency) }}</div>
+                <div v-if="Number(order.amount_refunded) > 0" class="orders-place">
                   −{{ formatMoney(order.amount_refunded, order.currency) }} refunded
                 </div>
               </td>
-              <td>
-                <span class="product-status" :class="statusBadgeClass(orderStatus(order))">
-                  {{ statusLabel(orderStatus(order)) }}
-                </span>
+
+              <td class="orders-col-carrier">
+                <template v-if="carrierOf(order)">
+                  <div>{{ carrierOf(order) }}</div>
+                  <a v-if="order.fulfilment?.shipment?.tracking_url" class="orders-place"
+                     :href="order.fulfilment.shipment.tracking_url" target="_blank" rel="noopener" @click.stop>
+                    {{ order.fulfilment.shipment.tracking_number }}
+                  </a>
+                </template>
+                <!-- Not yet shipped: the rate dropdown is how a carrier gets chosen. -->
+                <select v-else-if="rates[order.order_id]?.selected" class="orders-rate-select"
+                        :value="chosenRateId(order)" :aria-label="`Carrier for ${order.order_id}`"
+                        @click.stop @change="chooseRate(order, $event.target.value)">
+                  <option v-for="rate in rates[order.order_id].rates" :key="rate.rate_id" :value="rate.rate_id">
+                    {{ rate.carrier }} {{ rate.service }}{{ rate.estimated_days ? ` · ${rate.estimated_days}d` : "" }}
+                  </option>
+                </select>
+                <span v-else-if="rates[order.order_id]?.loading" class="orders-place">Getting rates…</span>
+                <span v-else-if="rates[order.order_id]?.error" class="orders-rate-error">{{ rates[order.order_id].error }}</span>
+                <button v-else-if="order.fulfilment?.eligible" type="button" class="link-action"
+                        @click.stop="quote(order)">Get rates</button>
+                <span v-else class="orders-place">—</span>
               </td>
-              <td v-if="showFulfilment" class="orders-col-rate">
-                <template v-if="rates[order.order_id]?.loading">
-                  <span class="orders-secondary">Getting rates…</span>
+
+              <td>{{ formatDate(order.created_at) }}</td>
+              <td>{{ fulfilledOn(order) || "—" }}</td>
+
+              <td class="orders-col-money">
+                <template v-if="order.fulfilment?.shipment?.cost?.amount">
+                  {{ formatMoney(order.fulfilment.shipment.cost.amount, order.fulfilment.shipment.cost.currency) }}
                 </template>
-                <template v-else-if="rates[order.order_id]?.error">
-                  <span class="orders-rate-error">{{ rates[order.order_id].error }}</span>
+                <template v-else-if="rateFor(order.order_id)">
+                  {{ formatMoney(rateFor(order.order_id).amount, rateFor(order.order_id).currency) }}
                 </template>
-                <template v-else-if="rates[order.order_id]?.selected">
-                  <select class="orders-rate-select" :value="chosenRateId(order)"
-                          :aria-label="`Shipping rate for order ${order.order_id}`"
-                          @change="chooseRate(order, $event.target.value)">
-                    <option v-for="rate in rates[order.order_id].rates" :key="rate.rate_id" :value="rate.rate_id">
-                      {{ rate.carrier }} {{ rate.service }} — {{ money(rate.amount, rate.currency) }}{{ rate.estimated_days ? ` · ${rate.estimated_days}d` : "" }}
-                    </option>
-                  </select>
-                  <div class="orders-secondary">
-                    <template v-if="overrides[order.order_id]">you chose this</template>
-                    <template v-else>{{ rates[order.order_id].selection_reason }}</template>
-                  </div>
-                  <div v-if="rates[order.order_id].withheld && !overrides[order.order_id]"
-                       class="orders-rate-error">Above your limit — choose a rate to continue.</div>
-                </template>
-                <template v-else-if="order.fulfilment?.status === 'ready'">
-                  <!-- Rated on demand, never for the whole page: each lookup is a provider round trip. -->
-                  <button type="button" class="link-action" @click="quote(order)">Get rates</button>
-                </template>
-                <span v-else class="orders-secondary">—</span>
+                <span v-else class="orders-place">—</span>
               </td>
+
               <td class="orders-col-actions">
-                <button v-if="showFulfilment && order.fulfilment?.status === 'ready'" type="button"
-                        class="secondary-action" @click.stop="shipping = order">Mark shipped</button>
                 <a v-if="order.fulfilment?.shipment?.label_url" class="secondary-action"
-                   :href="order.fulfilment.shipment.label_url" target="_blank" rel="noopener"
-                   @click.stop>Download</a>
-                <button type="button" class="secondary-action" @click.stop="selected = order">Details</button>
+                   :href="order.fulfilment.shipment.label_url" target="_blank" rel="noopener" @click.stop>
+                  Label
+                </a>
+                <button v-else type="button" class="primary-action orders-label-button"
+                        :disabled="!canLabel(order) || buying"
+                        :title="labelTitle(order)"
+                        @click.stop="labelOne(order)">Label</button>
               </td>
             </tr>
           </tbody>
@@ -335,11 +326,11 @@ function caret(key) {
   return sort.direction === "asc" ? "▲" : "▼";
 }
 
-// The fulfilment columns exist only for a tenant this feature is relevant to. A tenant selling downloads
-// should never learn that a shipping module exists by finding empty columns in their sales list.
-const showFulfilment = computed(() =>
-  shippingConfigured.value || orders.value.some((o) => o.fulfilment?.status === "shipped"
-    || o.fulfilment?.status === "ready" || (o.fulfilment?.needs_measurement || []).length));
+// Every column is unconditional now: the author's design is a fulfilment table, and a digital-only tenant
+// reads "Not Shippable" down the Status column, which is a true and useful answer rather than an empty
+// one. `shippingConfigured` still gates the BANNER and the batch actions, which are genuinely irrelevant
+// to a tenant with no provider.
+const showFulfilment = computed(() => true);
 
 const selected_ = ref(new Set());
 
@@ -572,6 +563,43 @@ async function submitHandover() {
 function openDetail(order, event) {
   if (event?.target?.closest("button, a, input, select, label")) return;
   selected.value = order;
+}
+
+// --- the row's cells ---------------------------------------------------------------------------------
+
+function carrierOf(order) {
+  const shipment = order?.fulfilment?.shipment;
+  if (!shipment) return "";
+  // The service already names the carrier ("USPS Ground Advantage"), so showing both repeats it.
+  return shipment.service || shipment.carrier || "";
+}
+
+function fulfilledOn(order) {
+  const shipment = order?.fulfilment?.shipment;
+  const stamp = shipment?.shipped_at || shipment?.purchased_at;
+  return stamp ? formatDate(stamp) : "";
+}
+
+// Ready AND rated: a label cannot be bought without a rate to buy, and a rate withheld by the tenant's
+// own ceiling has to be chosen by hand first.
+function canLabel(order) {
+  return Boolean(order?.fulfilment?.eligible && rateFor(order.order_id));
+}
+
+function labelTitle(order) {
+  if (!order?.fulfilment?.eligible) return (order?.fulfilment?.reasons || []).join(" ");
+  if (!rates.value[order.order_id]) return "Get rates first";
+  if (rates.value[order.order_id]?.withheld) return "This rate is above your limit — choose one";
+  return "";
+}
+
+async function labelOne(order) {
+  if (!rates.value[order.order_id]) {
+    await quote(order);
+    return; // the tenant sees the rate before it is bought, never after
+  }
+  selected_.value = new Set([order.order_id]);
+  await buySelected();
 }
 
 const copied = ref("");

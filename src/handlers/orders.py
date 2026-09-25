@@ -18,7 +18,7 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.carriers import carrier_options, service_has_tracking, tracking_url
-from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
+from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_state, product_index
 from stripe_link.domain.handover import handover_groups, orders_csv
 from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.domain.shipping import ShipmentError, build_manual_shipment, label_readiness
@@ -88,6 +88,9 @@ def list_orders(event, repository, mode, *, products_repo=None, shipments_repo=N
             index=context["index"],
             shipment=context["shipments"].get(str(order.get("order_id") or "")),
         )
+        # The Status column is the DELIVERY story, derived once here so the table, the drawer and the CSV
+        # cannot each tell a different one.
+        order["delivery"] = delivery_status(order)
     return json_response({
         "orders": orders,
         "count": len(orders),
@@ -230,6 +233,7 @@ def export_orders(event, repository, mode, *, products_repo=None, shipments_repo
             index=context["index"],
             shipment=context["shipments"].get(str(order.get("order_id") or "")),
         )
+        order["delivery"] = delivery_status(order)
     stamp = time.strftime("%Y-%m-%d", time.gmtime())
     return {
         "statusCode": 200,

@@ -86,12 +86,13 @@ ORDER_CSV_COLUMNS = (
     ("items", "Items"),
     ("amount_total", "Total"),
     ("currency", "Currency"),
-    ("status", "Status"),
+    ("payment_status", "Payment"),
     ("ship_to_city", "City"),
     ("ship_to_state", "State"),
     ("ship_to_postal", "Postal code"),
     ("ship_to_country", "Country"),
-    ("fulfilment", "Fulfilment"),
+    ("status", "Delivery status"),
+    ("fulfilled_at", "Fulfilled"),
     ("carrier", "Carrier"),
     ("service", "Service"),
     ("tracking_number", "Tracking"),
@@ -120,17 +121,26 @@ def order_csv_row(order: dict[str, Any]) -> dict[str, str]:
         "items": items,
         "amount_total": _money(order.get("amount_total")),
         "currency": str(order.get("currency") or "usd").upper(),
-        "status": str(order.get("payment_status") or order.get("status") or ""),
+        "payment_status": str(order.get("payment_status") or order.get("status") or ""),
         "ship_to_city": str(address.get("city") or ""),
         "ship_to_state": str(address.get("state") or ""),
         "ship_to_postal": str(address.get("postal_code") or ""),
         "ship_to_country": str(address.get("country") or ""),
-        "fulfilment": str(fulfilment.get("status") or ""),
+        "status": str((order.get("delivery") or {}).get("label") or ""),
+        "fulfilled_at": _date(shipment.get("shipped_at") or shipment.get("purchased_at")),
         "carrier": str(shipment.get("carrier") or ""),
         "service": str(shipment.get("service") or ""),
         "tracking_number": str(shipment.get("tracking_number") or ""),
         "shipping_cost": _money((shipment.get("cost") or {}).get("amount")),
     }
+
+
+def _date(stamp: Any) -> str:
+    try:
+        value = int(stamp or 0)
+    except (TypeError, ValueError):
+        return ""
+    return datetime.fromtimestamp(value, tz=timezone.utc).strftime("%Y-%m-%d") if value else ""
 
 
 def _money(cents: Any) -> str:

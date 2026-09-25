@@ -202,3 +202,78 @@ def _and_more(names: list[str], shown: int = 2) -> str:
     if len(names) <= shown:
         return " and ".join(names) if len(names) == 2 else ", ".join(names)
     return f"{', '.join(names[:shown])} and {len(names) - shown} more"
+
+
+# --- delivery status -------------------------------------------------------------------------------
+# What the Orders table's Status column says. This is the DELIVERY story, not the payment one: a refunded
+# order can still be in transit, and a paid one can be undeliverable.
+
+NOT_SHIPPABLE_LABEL = "Not Shippable"
+
+# key -> (label, badge class). Ordered roughly as a parcel progresses.
+DELIVERY_STATUSES = {
+    NOT_SHIPPABLE: (NOT_SHIPPABLE_LABEL, "inactive"),
+    NEEDS_INFO: ("Needs info", "warning"),
+    READY: ("Ready to ship", "active"),
+    "label_purchased": ("Label purchased", "active"),
+    "in_transit": ("In transit", "active"),
+    "delivered": ("Delivered", "active"),
+    "returned": ("Returned", "warning"),
+    "failed": ("Label failed", "archived"),
+}
+
+# What a carrier's tracking vocabulary means to us. Providers differ in casing and in the exact words, so
+# the mapping is explicit rather than a lowercase-and-hope.
+_TRACKING = {
+    "DELIVERED": "delivered",
+    "TRANSIT": "in_transit",
+    "IN_TRANSIT": "in_transit",
+    "PRE_TRANSIT": "label_purchased",
+    "RETURNED": "returned",
+    "RETURN_TO_SENDER": "returned",
+    "FAILURE": "failed",
+}
+
+
+def delivery_status(order: dict[str, Any], state: dict[str, Any] | None = None) -> dict[str, str]:
+    """The Status cell: `{key, label, badge, note}`.
+
+    **"Not Shippable" is a terminal fact about the ORDER, not a step it is stuck on** -- a download, a
+    service, an order with no address, an address too incomplete to label, or a country we cannot label
+    to. It is deliberately NOT the same as "Needs info", which is a physical order whose product has not
+    been measured yet: that one becomes shippable the moment the tenant types some dimensions, and telling
+    them it is unshippable would send them looking for the wrong fix.
+
+    Tracking, when a provider has told us any, outranks our own view: once a carrier says delivered, what
+    our gates think about measurements stopped mattering.
+    """
+    state = state if state is not None else (order.get("fulfilment") or {})
+    shipment = state.get("shipment") or {}
+
+    tracked = _TRACKING.get(str(shipment.get("tracking_status") or "").strip().upper())
+    if tracked:
+        return _status(tracked, "")
+
+    if str(shipment.get("status") or "") == "failed":
+        return _status("failed", str(shipment.get("error") or ""))
+    if str(shipment.get("status") or "") == "shipped":
+        # Marked shipped by hand. We have no carrier scan, so "in transit" is the honest ceiling.
+        return _status("in_transit", "")
+    if str(shipment.get("status") or "") == "purchased":
+        return _status("label_purchased", "")
+
+    key = str(state.get("status") or NOT_SHIPPABLE)
+    note = "; ".join(state.get("reasons") or [])
+    if key not in DELIVERY_STATUSES:
+        key = NOT_SHIPPABLE
+    return _status(key, note)
+
+
+def _status(key: str, note: str) -> dict[str, str]:
+    label, badge = DELIVERY_STATUSES.get(key, (NOT_SHIPPABLE_LABEL, "inactive"))
+    return {"key": key, "label": label, "badge": badge, "note": note}
+
+
+def can_buy_label(state: dict[str, Any] | None) -> bool:
+    """Whether the Label button does anything. Only a READY order can have one bought."""
+    return bool((state or {}).get("eligible"))
