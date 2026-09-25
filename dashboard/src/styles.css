@@ -7695,6 +7695,10 @@ button:disabled {
 .drawer-grid dd {
   margin: 0.4rem 0 0;
   font-size: 1.4rem;
+  /* A grid cell defaults to min-width:auto and so refuses to shrink below its content -- which is how a
+     72-character order id pushed straight through the neighbouring column. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .drawer-lines {
@@ -7772,3 +7776,32 @@ a.orders-place { text-decoration: underline; }
   border-radius: var(--radius-md);
   background: #f5f9ff;
 }
+
+/* ---- Orders: the order reference ---------------------------------------------------------------- */
+/* A Stripe session id is 66 characters and the order id built from it is 72-81. Unbroken, it ran
+   straight through the neighbouring column. The short ref leads; the full id wraps. */
+
+.drawer-order-ref {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.drawer-order-full {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  /* The id has no spaces, so only an explicit anywhere-break will wrap it. */
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.drawer-order-full:hover { color: var(--brand); }

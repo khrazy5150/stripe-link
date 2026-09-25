@@ -68,3 +68,26 @@ export function sortOrders(orders, key, direction) {
   const sorted = [...(orders || [])].sort(compare);
   return direction === "asc" ? sorted : sorted.reverse();
 }
+
+
+/**
+ * A short reference a person can actually say out loud — "order b13b4Un3".
+ *
+ * Derived, never stored: it is a SUBSTRING of the real id, taken from Stripe's own random part, so
+ * pasting it into the search box still finds the order. A hash would be shorter and prettier and would
+ * lose exactly that.
+ *
+ * The full id stays the record. This is the label on it.
+ */
+export function shortOrderRef(orderId) {
+  const id = String(orderId || "");
+  if (!id) return "";
+  // order_cs_test_<random>  /  order_cs_live_<random>  /  order_in_<random>
+  const match = id.match(/^order_(?:cs_(?:test|live)_|in_|pi_)?([A-Za-z0-9]+)/);
+  const core = match ? match[1] : id.replace(/^order_/, "");
+  const head = core.slice(0, 8) || id.slice(0, 8);
+  // A post-purchase order shares its parent's session id, so without the suffix an upsell and the
+  // purchase it followed would show the SAME reference.
+  const upsell = id.match(/_upsell_(\d+)$/);
+  return upsell ? `${head}-U${upsell[1]}` : head;
+}

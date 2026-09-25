@@ -42,7 +42,12 @@
           </dd></div>
           <div v-if="shipment"><dt>Tracking status</dt><dd>{{ trackStatus }}</dd></div>
           <div><dt>Order</dt><dd>
-            <span class="font-mono">{{ order.order_id }}</span>
+            <!-- The short reference leads because it is the one a person can read out. The full id is a
+                 72-to-81 character Stripe session id; it stays available, wrapped, and copyable. -->
+            <div class="drawer-order-ref font-mono">{{ shortOrderRef(order.order_id) }}</div>
+            <button type="button" class="drawer-order-full font-mono"
+                    :title="`${order.order_id} — click to copy`"
+                    @click="$emit('copy', order.order_id)">{{ order.order_id }}</button>
             <div class="orders-secondary">{{ formatDate(order.created_at) }}</div>
           </dd></div>
           <div v-if="shipment?.shipped_at || shipment?.purchased_at">
@@ -145,7 +150,7 @@
 import { computed } from "vue";
 import { formatMoney } from "../../stores/products";
 import { formatEpochDate, statusLabel } from "../../utils/format";
-import { orderStatus, statusBadgeClass } from "./orderDisplay";
+import { orderStatus, shortOrderRef, statusBadgeClass } from "./orderDisplay";
 
 const props = defineProps({ order: { type: Object, required: true } });
 defineEmits(["close", "copy"]);

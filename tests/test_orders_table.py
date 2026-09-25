@@ -164,6 +164,62 @@ class DisplayHelperTests(unittest.TestCase):
         self.assertEqual(self.out["status_default"], "paid")
 
 
+class OrderReferenceTests(unittest.TestCase):
+    """A Stripe session id is 66 characters; the order id built from it is 72, or 81 with an upsell
+    suffix. Unbroken, it ran straight through the neighbouring column of the detail drawer.
+
+    The stored id cannot change -- `order_{session_id}` is the idempotency key the webhook dedupes on,
+    and shipment_id_for() derives the carrier's idempotency key from it -- so what changes is the display.
+    """
+
+    IDS = {
+        "plain": "order_cs_test_b13b4Un3fLskfKQnlC26ksYEkPw7PjUaxalKrgY7qzcZsg6cf6JbOjrzRJ",
+        "upsell1": "order_cs_test_b13b4Un3fLskfKQnlC26ksYEkPw7PjUaxalKrgY7qzcZsg6cf6JbOjrzRJ_upsell_1",
+        "upsell2": "order_cs_test_b13b4Un3fLskfKQnlC26ksYEkPw7PjUaxalKrgY7qzcZsg6cf6JbOjrzRJ_upsell_2",
+        "renewal": "order_in_1UJRhD21lLbLd4Y5fht1Zu5J",
+        "live": "order_cs_live_a1gXWA49OA8dEg6135TGyEUI6CwEjs9n",
+        "weird": "order_something_else",
+        "empty": "",
+    }
+
+    def setUp(self):
+        self.out = run_js({key: ["shortOrderRef", [value]] for key, value in self.IDS.items()})
+        if self.out is None:
+            self.skipTest("node is not available")
+
+    def test_it_is_short_enough_to_say_out_loud(self):
+        self.assertEqual(self.out["plain"], "b13b4Un3")
+        self.assertLessEqual(len(self.out["plain"]), 8)
+
+    def test_it_is_a_SUBSTRING_of_the_real_id_so_search_still_finds_it(self):
+        """A hash would be shorter and prettier and would lose exactly this."""
+        self.assertIn(self.out["plain"], self.IDS["plain"])
+
+    def test_an_upsell_does_not_share_its_parents_reference(self):
+        # A post-purchase order carries its parent's session id, so without the suffix the purchase and
+        # both its upsells would show the same reference.
+        refs = {self.out["plain"], self.out["upsell1"], self.out["upsell2"]}
+        self.assertEqual(len(refs), 3)
+        self.assertTrue(self.out["upsell2"].endswith("-U2"))
+
+    def test_a_renewal_and_a_live_order_both_shorten(self):
+        self.assertEqual(self.out["renewal"], "1UJRhD21")
+        self.assertEqual(self.out["live"], "a1gXWA49")
+
+    def test_an_id_shaped_unlike_any_of_those_still_returns_something(self):
+        self.assertTrue(self.out["weird"])
+        self.assertEqual(self.out["empty"], "")
+
+    def test_the_full_id_is_still_reachable_and_cannot_overflow_its_cell(self):
+        drawer = (ROOT / "dashboard/src/components/orders/OrderDetailDrawer.vue").read_text(encoding="utf-8")
+        self.assertIn("order.order_id", drawer, "the full id must remain available to copy")
+        css = (ROOT / "dashboard/src/styles.css").read_text(encoding="utf-8")
+        block = css.split(".drawer-order-full {", 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-wrap: anywhere", block)
+        grid = css.split(".drawer-grid dd {", 1)[1].split("}", 1)[0]
+        self.assertIn("min-width: 0", grid, "a grid cell without min-width:0 refuses to shrink")
+
+
 class SortingTests(unittest.TestCase):
     ORDERS = [
         {"order_id": "a", "created_at": "100", "amount_total": 500, "customer": {"name": "Zoe"}},
