@@ -261,7 +261,10 @@ class ProcessUpsellTests(unittest.TestCase):
         self.assertEqual(order["product"]["product_id"], "prod_creatine_gummies")
         self.assertEqual(order["metadata"]["upsell_sequence"], "2")
         # Idempotency is keyed on the real offer_id + the sequence (distinct slots don't collide).
-        self.assertEqual(opener.requests[-1].headers.get("Idempotency-key"), "upsell:tenant_demo:cs_test_123:offer_funnel:2")
+        # Found by what it IS, not by being last: the handler now also reads the original session (for
+        # the shipping address), so "the last request" is no longer the charge.
+        charge = next(r for r in opener.requests if str(r.full_url).endswith("/payment_intents"))
+        self.assertEqual(charge.headers.get("Idempotency-key"), "upsell:tenant_demo:cs_test_123:offer_funnel:2")
 
     def test_charges_a_downsell_price(self):
         # The in-place downsell swap charges the SAME product at its downsell price; process_upsell must accept
@@ -365,6 +368,88 @@ class ProcessUpsellTests(unittest.TestCase):
             opener=FakeStripeOpener({}),
         )
         self.assertEqual(response["statusCode"], 400)
+
+
+class UpsellShipsSomewhereTests(ProcessUpsellTests):
+    """An upsell of a PHYSICAL product has to know where the parcel goes.
+
+    Found 2026-09-25 from three real upsells of Beta Alanine: every one was recorded with no
+    shipping_address, so every shipping gate downstream read them as digital sales and the Orders screen
+    said "Not a shippable product" about a tub of powder someone had paid for.
+
+    The cause is structural rather than a slip. An upsell is charged OFF-SESSION against the card the buyer
+    already used, so there is no second Checkout Session to collect an address -- and the builder simply had
+    no shipping_address key at all.
+    """
+
+    SESSION = {
+        "id": "cs_test_123",
+        "shipping_details": {"name": "Ada Buyer",
+                             "address": {"line1": "1493 Osage St", "line2": "Apt 542-A", "city": "Denver",
+                                         "state": "CO", "postal_code": "80204", "country": "US"}},
+        "customer_details": {"name": "Ada Buyer", "email": "ada@example.com", "phone": "+13035551212"},
+    }
+
+    def _opener(self, session=None):
+        responses = {
+            ("GET", "/v1/customers/cus_123"): {
+                "id": "cus_123",
+                "invoice_settings": {"default_payment_method": {"id": "pm_123"}},
+            },
+            ("POST", "/v1/payment_intents"): {"id": "pi_456", "status": "succeeded"},
+        }
+        if session is not None:
+            responses[("GET", "/v1/checkout/sessions/cs_test_123")] = session
+        return FakeStripeOpener(responses)
+
+    def test_the_upsell_ships_where_the_original_purchase_shipped(self):
+        self.handle(self.base_event(), self._opener(self.SESSION))
+
+        order = self.orders_repo.get("tenant_demo", "order_cs_test_123_upsell_1")
+        self.assertEqual(order["shipping_address"]["city"], "Denver")
+        self.assertEqual(order["shipping_address"]["postal_code"], "80204")
+        self.assertEqual(order["shipping_address"]["street2"], "Apt 542-A")
+
+    def test_the_address_comes_from_STRIPE_not_from_the_request_body(self):
+        """get_upsell_session already hands the browser this address, so accepting it back would be one
+        line -- and would let anyone with the funnel page redirect someone else's parcel."""
+        event = self.base_event(shipping_address={"city": "Nowhere", "street1": "1 Evil St",
+                                                  "state": "XX", "postal_code": "00000",
+                                                  "country": "US", "name": "Attacker"})
+
+        self.handle(event, self._opener(self.SESSION))
+
+        order = self.orders_repo.get("tenant_demo", "order_cs_test_123_upsell_1")
+        self.assertEqual(order["shipping_address"]["city"], "Denver")
+
+    def test_it_is_looked_up_BEFORE_the_charge(self):
+        """Doing a network call between "the money moved" and "the order is written" widens the window in
+        which a tenant has been paid and nothing records it."""
+        opener = self._opener(self.SESSION)
+        self.handle(self.base_event(), opener)
+
+        paths = [str(r.full_url) for r in opener.requests]
+        session_at = next(i for i, p in enumerate(paths) if "checkout/sessions" in p)
+        charge_at = next(i for i, p in enumerate(paths) if p.endswith("/payment_intents"))
+        self.assertLess(session_at, charge_at)
+
+    def test_a_session_that_collected_NO_address_records_none(self):
+        """A digital upsell is not a failure -- it simply has nowhere to ship, and a half-filled address
+        would buy a label that cannot be delivered."""
+        self.handle(self.base_event(), self._opener({"id": "cs_test_123", "customer_details": {}}))
+
+        order = self.orders_repo.get("tenant_demo", "order_cs_test_123_upsell_1")
+        self.assertNotIn("shipping_address", order)
+
+    def test_a_FAILED_lookup_never_costs_the_tenant_the_order(self):
+        """The money has already moved by the time the order is written. An unreachable Stripe must cost
+        an address, never the record of a sale."""
+        response = self.handle(self.base_event(), self._opener(session=None))
+
+        self.assertEqual(response["statusCode"], 201)
+        order = self.orders_repo.get("tenant_demo", "order_cs_test_123_upsell_1")
+        self.assertIsNotNone(order)
+        self.assertNotIn("shipping_address", order)
 
 
 if __name__ == "__main__":

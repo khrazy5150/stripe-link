@@ -2,6 +2,30 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
+## Upsell orders and their parents land in DIFFERENT TABLES — HIGH
+
+Found 2026-09-25 while fixing the missing upsell shipping address, and it is the more serious half.
+
+A parent checkout order is written by the **webhook**; its upsell is written by **whichever backend the
+funnel page called**. On a test-mode sale those are not the same place:
+
+| | where it landed |
+|---|---|
+| `order_cs_test_a17LZK…` (checkout, Denver CO) | `jb-orders-prod` |
+| `order_cs_test_a17LZK…_upsell_1` (the upsell of it) | `jb-orders-dev` |
+
+All three test upsells measured that day were orphans in dev whose parents were all in prod. The
+consequences are not cosmetic: **neither Orders screen shows a complete sale**, the sandbox one showing
+upsells with no purchase and the production one purchases with no upsells; per-order revenue and fee totals
+are wrong in both; and anything that reasons from the parent (refunds, fulfilment, the returns gate) cannot
+see it. It is also why the shipping-address fix reads Stripe rather than the parent order row -- the row is
+not reliably in the same table.
+
+Root cause is the known mode/environment conflation in `plans/STRIPE_MODE_DECOUPLING.md` (the prod webhook
+handles test events by design since P3; test funnel pages are served from the dev bucket and call the dev
+API). **Fix it there, not with a patch here** -- the two writers have to agree which table a sale belongs
+in, and that is exactly the decision that plan exists to make.
+
 ## Stripe API version drift — HIGH
 
 **The account is on `2026-05-27.preview`, and the code is written against remembered field names.** Three

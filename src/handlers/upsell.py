@@ -6,6 +6,7 @@ from stripe_link.silo import current_silo
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.pricing import PricingError, load_offer_products, resolve_offer
+from stripe_link.domain.shipping import destination_address_from_session
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     customers_repository,
@@ -121,6 +122,34 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
             "shipping_address": shipping_details.get("address"),
         }
     })
+
+
+def upsell_destination(session_id, *, api_key, stripe_account, opener):
+    """Where an upsell ships: the address the ORIGINAL Checkout Session collected.
+
+    Read from STRIPE rather than from two closer-looking sources, both of which are wrong:
+
+    - **Not from the request body.** `get_upsell_session` already hands the browser this address, so it
+      would be one line to accept it back -- and it would let anyone with the funnel page redirect someone
+      else's parcel. A shipping destination is not a thing to take on a client's word.
+    - **Not from the parent order row.** It looks equivalent and is not: the parent order is written by the
+      WEBHOOK while this upsell is written by whichever backend the funnel page called, and on a test-mode
+      sale those are different tables (the prod webhook handles test events; the sandbox API writes to dev).
+      Measured 2026-09-25: three upsells in jb-orders-dev whose parents were all in jb-orders-prod. Stripe
+      is the one place both environments agree.
+
+    Best-effort. The money has already moved by the time this runs, so a failed lookup must cost the
+    tenant an address on the order, never the order itself.
+    """
+    try:
+        session = stripe_request(
+            "GET", f"/checkout/sessions/{session_id}",
+            api_key=api_key, stripe_account=stripe_account, opener=opener)
+    except StripeApiError:
+        return {}
+    except Exception:  # noqa: BLE001 - see docstring: never fail an order that is already paid for
+        return {}
+    return destination_address_from_session(session)
 
 
 def process_upsell(
@@ -255,6 +284,12 @@ def process_upsell(
     if stripe_account and subtotal > 0 and platform_fee > 0:
         pi_params["application_fee_amount"] = str(platform_fee)
 
+    # Looked up BEFORE the charge, deliberately. It is best-effort either way, but doing a network call
+    # between "the money moved" and "the order is written" widens the window in which a tenant has been
+    # paid and nothing records it.
+    shipping_address = upsell_destination(
+        session_id, api_key=api_key, stripe_account=stripe_account, opener=opener)
+
     try:
         payment_intent = stripe_request(
             "POST",
@@ -306,6 +341,11 @@ def process_upsell(
             "post_checkout_entry": "upsell",
         },
         "metadata": {"upsell_sequence": str(sequence)},
+        # Where the parcel goes. An upsell is charged off-session against the card the buyer already used,
+        # so no second Checkout Session collects an address -- and without this the order looked like a
+        # digital sale to every shipping gate downstream (found 2026-09-25 from three real upsells of a
+        # PHYSICAL product, all recorded with no destination).
+        **({"shipping_address": shipping_address} if shipping_address else {}),
         "created_at": str(now),
         "updated_at": now,
     }
