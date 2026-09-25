@@ -130,20 +130,5 @@ class StampTests(unittest.TestCase):
 
         self.assertIn('"metadata[silo]": current_silo()', source)
 
-    def test_nothing_reads_the_stamp_yet(self):
-        """S1 is write-only ON PURPOSE. When the resolver (S3) lands this test is deleted, not edited —
-        it exists to make shipping the stamp ahead of the reader provably safe."""
-        import pathlib
-        import re
-
-        root = pathlib.Path(__file__).resolve().parents[1] / "src"
-        readers = []
-        for path in root.rglob("*.py"):
-            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if re.search(r'(get|metadata)\s*\(?\s*["\']silo["\']', line):
-                    readers.append(f"{path.relative_to(root)}:{n}")
-        self.assertEqual(readers, [], "something reads metadata[silo] — S3 has begun, retire this test")
-
-
 if __name__ == "__main__":
     unittest.main()

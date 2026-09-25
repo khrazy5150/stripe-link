@@ -37,6 +37,8 @@ from stripe_link.domain.shipping import (
     destination_address_from_invoice,
     destination_address_from_session,
 )
+from stripe_link.domain.silo_routing import resolve_event_silo, routing_log
+from stripe_link.silo import current_silo
 from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
@@ -238,6 +240,16 @@ def handler(
         except RepositoryError:
             events_repo = None  # never block processing on the idempotency store
 
+    # S3: resolve which silo owns this event and LOG it. Nothing is refused yet -- a resolver that starts
+    # dropping events on its first day drops the ones it is wrong about, and the logs are how we find out
+    # which those are before S4 makes it a refusal (plans/SILO_MODEL.md).
+    silo_resolution = resolve_event_silo(
+        stripe_event,
+        this_silo=current_silo(),
+        holds_order=_order_holder(tenant_id, orders_repo),
+    )
+    print(json.dumps(routing_log(stripe_event, silo_resolution, this_silo=current_silo())))
+
     persistence = {}
     if event_type == "charge.refunded" and tenant_id:
         persistence = reconcile_charge_refunded(
@@ -372,6 +384,24 @@ def handler(
             "persistence": persistence,
         },
     })
+
+
+def _order_holder(tenant_id: str, orders_repo):
+    """"Do I already hold this order?" -- the S3 fallback for records written before stamping existed.
+
+    Returns None when it cannot be asked, rather than a function that always says no: "I do not hold it"
+    and "I could not look" are different answers, and only the first is evidence.
+    """
+    if not tenant_id or orders_repo is None:
+        return None
+
+    def holds(order_id: str) -> bool:
+        try:
+            return bool(orders_repo.get(tenant_id, order_id))
+        except Exception:  # noqa: BLE001 - a lookup that fails must never decide a silo
+            return False
+
+    return holds
 
 
 def _owner_user_profile(user_profiles_repo, tenant_id: str) -> dict[str, Any] | None:

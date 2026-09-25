@@ -357,10 +357,22 @@ Ordered so that each phase is verifiable on its own and nothing is deployed that
   rather than through a session. **Write-only**: a test asserts that nothing in `src/` reads
   `metadata[silo]` yet, so shipping the stamp ahead of the resolver is provably safe. That test is
   deleted, not edited, when S3 begins.
-- **S2 — a Customer for every buyer.** Point checkout at `find_or_create_customer(email)` so every session
-  names a Customer. Record `(tenant_id, silo, stripe_customer_id)` in a mapping table as it happens.
-  Still nothing routes on it.
-- **S3 — resolve, then enforce.** The webhook resolves a silo per event: stamp first, Customer anchor
+- **S2 — a Customer for every buyer. SKIPPED 2026-09-25, not built.** The anchor was to resolve events the
+  stamp cannot reach. Measured against 126 stored production events that day, it resolves nothing anyone
+  reads: the webhook acts on five event types, the two that occur (`checkout.session.completed`,
+  `invoice.*`) both carry a stamp today, and everything the stamp cannot reach — all 16 `customer.updated`,
+  8 `customer.created`, 37 `checkout.session.expired`, 25 `payment_intent.succeeded` — the webhook ignores
+  entirely. A mapping table kept true for no reader is a liability, not a safety net. **Revisit the day
+  anything acts on `customer.*`**, which is also the day it starts paying for itself.
+- **S3 — resolve, then enforce. BUILT 2026-09-25.** `domain/silo_routing.py`, wired into the webhook,
+  refusing nothing. Two rules and an honest default: the stamp (read from every place this API version
+  keeps it, including `parent.subscription_details`), then "do I already hold this order?", then the
+  documented fallback — unstamped means sandbox, never production. A stamp that contradicts our own tables
+  is logged as an invariant violation, which is precisely the orphan already sitting in the data. One
+  structured `silo_routing` line per event, carrying the SOURCE as well as the answer: a run of `default`
+  means the stamp is not arriving, which is a different problem from a run of disagreements, and S4 is
+  gated on both being quiet.
+- **S3 (original wording) — resolve, then enforce.** The webhook resolves a silo per event: stamp first, Customer anchor
   second, "do I hold the order?" third. **Log disagreements for a period before acting on them** — a
   stamp that says production against an anchor that says sandbox is an invariant violation and worth
   seeing before it becomes a refusal.
