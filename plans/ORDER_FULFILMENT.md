@@ -1,6 +1,6 @@
 # Order fulfilment — the Orders screen, and buying labels from it
 
-**Status: DESIGN, nothing built. 2026-09-24.**
+**Status: BUILT 2026-09-24 — F1–F4 and R1–R3 all shipped to dev. See "What shipped" at the end.**
 
 This is the detailed design for `plans/SHIPPING_PROVIDERS.md` **P2** ("rates and label purchase from an
 order"), which existed only as a six-line sketch. It also covers the Orders screen itself, which is not
@@ -480,3 +480,58 @@ Voiding, refunds and adjustment reconciliation stay where §PA put them — afte
   the provider's tracking API to drive delivery notifications (§P3), even though we did not sell the label.
   It would unify the two paths for the buyer. It also costs a provider call per parcel and may require an
   account we cannot assume — decide when §P3 is built, not now.
+
+
+---
+
+## What shipped, 2026-09-24
+
+All seven phases, deployed to dev. Not yet in production.
+
+| phase | what landed |
+|---|---|
+| **F1** | The table. `orderDisplay.js` holds the pure display helpers so the table and the details modal cannot describe an order two different ways. |
+| **F2** | The three gates computed server-side and carried on every order; selection that takes only eligible rows; **the whole manual path** — Mark as shipped, the carrier table, the buyer's email, the optional tracking number. New `ShipmentsTable`: the schema existed, nothing had ever persisted one. |
+| **F3** | The rate policy on `rate_options`, `POST /shipping/rates`, one rate per row with its justification, the override dropdown. |
+| **F4** | `POST /shipping/labels` — idempotent, claim-before-spend, client-driven bulk with per-row progress, the spend confirmation and the adjustment disclosure. `buy_label` added to the provider contract and to `MockProvider`. |
+| **R1** | The refund gate. `return_pending` / `return_in_transit` / `return_received`, snapshotted terms, `keep_it_below`, and `POST /refunds/{id}/received`. |
+| **R2** | Return labels: reverse addresses, separate shipment id, the three-day window, forfeit enforced at issue. |
+| **R3** | What a carrier scan means — `advance_to_in_transit`. The webhook that delivers the scan belongs to §P3 and is not built. |
+
+### What the build changed about the design
+
+- **The resolver was as central as predicted.** `product_index` / `resolve_order_lines` turned out to be
+  needed by the gates, the rate quote, the packer AND the refund policy read. An unresolvable line is kept
+  rather than dropped, or the parcel silently shrinks.
+- **`notify_buyer` is shared, its failure handling is not.** One builder and one mailer for both paths, but
+  the label path swallows a send failure (the label is already paid for) and the manual path reports it
+  (the tenant pressed the button in order to notify). That split is the whole reason it took a comment.
+- **The grants test earned its keep three times** and was itself too weak: it detected tables by env-var
+  NAME, and `handlers/refunds.py` reaches products only through `products_repository()`. The missing grant
+  would have failed *silently*, skipping the return gate on every refund. It now follows repository
+  factories too, but only for single-entry-point modules — in a module serving several functions, a
+  factory call says nothing about which one reaches it. It then immediately caught that refund requests
+  live in the **Notifications** table, so a grant on "RefundRequestsTable" was a `!Ref` to a resource that
+  does not exist — something `sam validate` accepts and CloudFormation would not.
+- **`provider` is an object, not a string.** `Shipment.schema.json` always said so; the adapter returned a
+  flat string. Corrected in both directions, and `manual` joined the provider enum — an honest answer to
+  who provided the label: the tenant, at the post office.
+
+### Still not built, deliberately
+
+- **The tracking webhook** that would drive `advance_to_in_transit` automatically (§P3).
+- **A sweep that closes lapsed returns.** The forfeit is enforced where the label is issued, because a
+  lapsed window costs the buyer free postage — it does not by itself decide their refund, which stays the
+  tenant's call.
+- **Multi-parcel orders**, refused explicitly at rate time rather than quoting one box and shipping three.
+- **International labels.** A non-US order is refused in the row, before money is spent.
+- **Consolidating several orders into one parcel**, and **charging the buyer for shipping** (§PE).
+
+### Verify before production
+
+- **The per-payment-method refund window.** Unchanged from R1's warning and still the biggest open risk:
+  BNPL windows are shorter than a card's, and some methods may have to refund on approval regardless of
+  the return.
+- **Whether return labels are pay-on-scan** for each carrier in use. The three-day window is safe if they
+  are and punitive if they are not.
+- **The seeded USPS service names**, particularly which carry no tracking.

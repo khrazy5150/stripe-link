@@ -11,6 +11,10 @@ export function refundStatusLabel(status) {
     new: "New",
     manual_review: "Manual review",
     approved: "Approved",
+    // The leg between approval and the money going back (plans/ORDER_FULFILMENT.md R1).
+    return_pending: "Waiting for return",
+    return_in_transit: "Return in transit",
+    return_received: "Return received",
     rejected: "Rejected",
     refunded: "Refunded",
     closed: "Closed",
@@ -22,6 +26,9 @@ export function refundStatusClass(status) {
     new: "inactive",
     manual_review: "warning",
     approved: "active",
+    return_pending: "warning",
+    return_in_transit: "warning",
+    return_received: "active",
     rejected: "archived",
     refunded: "active",
     closed: "inactive",
@@ -49,7 +56,8 @@ export const useRefundsStore = defineStore("refunds", {
     filteredRequests(state) {
       if (state.filterStatus === "all") return state.requests;
       if (state.filterStatus === "open") {
-        return state.requests.filter((r) => ["new", "manual_review", "approved"].includes(r.status));
+        return state.requests.filter((r) => ["new", "manual_review", "approved",
+          "return_pending", "return_in_transit", "return_received"].includes(r.status));
       }
       return state.requests.filter((r) => r.status === state.filterStatus);
     },
@@ -96,6 +104,7 @@ export const useRefundsStore = defineStore("refunds", {
           approve: "Request approved.",
           reject: "Request rejected.",
           execute: "Refund issued.",
+          received: "Return received — you can issue the refund now.",
         }[action] || "Updated.";
         return result;
       } catch (error) {
@@ -105,6 +114,10 @@ export const useRefundsStore = defineStore("refunds", {
       } finally {
         this.saving = "";
       }
+    },
+
+    markReturnReceived(request, body) {
+      return this.act(request, "received", body || {});
     },
 
     approve(request) {

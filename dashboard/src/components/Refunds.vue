@@ -51,13 +51,25 @@
               <div v-if="request.reason"><dt>Reason</dt><dd>{{ request.reason }}</dd></div>
               <div v-if="request.refund?.stripe_refund_id"><dt>Stripe refund</dt><dd class="font-mono">{{ request.refund.stripe_refund_id }}</dd></div>
             </dl>
+            <!-- The refund waits for the goods. `approved` means the claim is valid, not that the money
+                 is going back (plans/ORDER_FULFILMENT.md R1). -->
+            <p v-if="awaitingReturn(request)" class="keys-status-banner warning">
+              {{ request.policy_snapshot?.reason || "Waiting for the goods to come back." }}
+              <span v-if="request.return_label_expires_at">
+                Buyer has until {{ formatDate(request.return_label_expires_at) }} to post it.
+              </span>
+            </p>
             <div class="product-card-actions">
               <button
                 v-if="canApprove(request)" type="button" class="primary-action"
                 :disabled="busy(request)" @click="store.approve(request)"
               >Approve</button>
               <button
-                v-if="request.status === 'approved'" type="button" class="primary-action"
+                v-if="awaitingReturn(request)" type="button" class="primary-action"
+                :disabled="busy(request)" @click="store.markReturnReceived(request)"
+              >Mark return received</button>
+              <button
+                v-if="['approved', 'return_received'].includes(request.status)" type="button" class="primary-action"
                 :disabled="busy(request)" @click="pendingExecute = request"
               >{{ busy(request) ? "Issuing…" : "Issue refund" }}</button>
               <button
@@ -115,6 +127,7 @@ import {
   refundRequestedAmount,
   formatMoneyCents,
 } from "../stores/refunds";
+import { formatEpochDate } from "../utils/format";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import PromptDialog from "./shared/PromptDialog.vue";
 
@@ -142,6 +155,14 @@ async function doReject(reason) {
   } catch {
     /* store surfaces the error banner */
   }
+}
+
+// A scan can say a parcel is moving; only the tenant can say the right item came back in usable
+// condition, which is why this is a button and not an automatic transition.
+const formatDate = formatEpochDate;
+
+function awaitingReturn(request) {
+  return ["return_pending", "return_in_transit"].includes(request?.status);
 }
 
 async function executeRefund() {

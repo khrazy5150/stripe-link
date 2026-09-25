@@ -32,12 +32,16 @@ All three are fixed (2026-09-24) and pinned against a payload transcribed from `
 
 ## Shipping
 
-### Orders screen + label buying — DESIGNED 2026-09-24, not built
+### Orders screen + label buying — BUILT 2026-09-24 (dev), not in prod
 
 `plans/ORDER_FULFILMENT.md`. The Orders screen renders cards and carries none of the facts needed to ship
 anything; it becomes a conventional fulfilment table with per-order readiness gates, a saved rate policy,
 and bulk label purchase. Four phases (F1 table → F2 gates + **the whole manual path** → F3 rates → F4
-buying, then R1 refund gate → R2 return labels → R3 return tracking), each shippable on its own. F2
+buying, then R1 refund gate → R2 return labels → R3 return tracking) — **all seven shipped to dev**.
+Three things to verify before prod, listed under "Verify before production" in the plan: the per-payment-
+method refund window (BNPL is shorter than a card's and may have to refund on approval regardless), whether
+return labels are pay-on-scan per carrier (the three-day window is safe if they are), and the seeded USPS
+service names — especially which carry no tracking. F2
 deliberately gives a tenant who never connects a provider a complete fulfilment flow — Mark as shipped, carrier, tracking number, and the buyer's email — because the tracking
 number is optional (USPS First-Class Mail has none) and the email must never promise a link that will not
 arrive. R1 adds the author's rule that a product requiring physical return releases no Stripe refund until
