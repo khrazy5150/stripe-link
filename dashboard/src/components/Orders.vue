@@ -39,26 +39,65 @@
         {{ loaded ? "No orders found." : "Loading orders..." }}
       </div>
 
-      <div v-else class="coupon-card-grid">
-        <article v-for="order in orders" :key="order.order_id" class="coupon-card">
-          <header>
-            <div>
-              <h3>{{ order.product?.name || "Checkout" }}</h3>
-              <p class="font-mono">{{ order.order_id }}</p>
-            </div>
-            <span class="product-status" :class="paymentBadgeClass(orderStatus(order))">{{ statusLabel(orderStatus(order)) }}</span>
-          </header>
-          <strong class="coupon-discount">{{ formatMoney(order.amount_total, order.currency) }}</strong>
-          <dl class="coupon-detail-list">
-            <div><dt>Customer</dt><dd>{{ order.customer?.name || order.customer?.email || "—" }}</dd></div>
-            <div v-if="Number(order.amount_refunded) > 0"><dt>Refunded</dt><dd>{{ formatMoney(order.amount_refunded, order.currency) }}</dd></div>
-            <div><dt>Date</dt><dd>{{ formatDate(order.created_at) }}</dd></div>
-          </dl>
-          <div class="product-card-actions">
-            <button type="button" class="secondary-action" @click="selected = order">Details</button>
-          </div>
-        </article>
+      <!-- A fulfilment table, not a card grid: twelve orders to post must be visible and comparable at
+           once. Horizontal scroll lives on the wrapper so the PAGE never scrolls sideways. -->
+      <div v-else class="orders-table-wrap">
+        <table class="orders-table">
+          <thead>
+            <tr>
+              <th scope="col" class="orders-col-order">
+                <button type="button" class="orders-sort" @click="sortBy('created_at')">
+                  Order <span class="orders-sort-caret">{{ caret("created_at") }}</span>
+                </button>
+              </th>
+              <th scope="col">
+                <button type="button" class="orders-sort" @click="sortBy('customer')">
+                  Customer <span class="orders-sort-caret">{{ caret("customer") }}</span>
+                </button>
+              </th>
+              <th scope="col">Items</th>
+              <th scope="col" class="orders-col-money">
+                <button type="button" class="orders-sort" @click="sortBy('amount_total')">
+                  Total <span class="orders-sort-caret">{{ caret("amount_total") }}</span>
+                </button>
+              </th>
+              <th scope="col">Status</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in visibleOrders" :key="order.order_id">
+              <td class="orders-col-order">
+                <div class="orders-primary">{{ order.product?.name || itemsSummary(order) }}</div>
+                <button type="button" class="orders-id font-mono" :title="`${order.order_id} — click to copy`"
+                        @click="copyId(order.order_id)">{{ elideId(order.order_id) }}</button>
+                <div class="orders-secondary">{{ formatDate(order.created_at) }}</div>
+              </td>
+              <td>
+                <div class="orders-primary">{{ order.customer?.name || order.customer?.email || "—" }}</div>
+                <div v-if="destinationSummary(order)" class="orders-secondary">{{ destinationSummary(order) }}</div>
+              </td>
+              <td>{{ itemsSummary(order) }}</td>
+              <td class="orders-col-money">
+                <div class="orders-primary">{{ formatMoney(order.amount_total, order.currency) }}</div>
+                <div v-if="Number(order.amount_refunded) > 0" class="orders-secondary">
+                  −{{ formatMoney(order.amount_refunded, order.currency) }} refunded
+                </div>
+              </td>
+              <td>
+                <span class="product-status" :class="statusBadgeClass(orderStatus(order))">
+                  {{ statusLabel(orderStatus(order)) }}
+                </span>
+              </td>
+              <td class="orders-col-actions">
+                <button type="button" class="secondary-action" @click="selected = order">Details</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+
+      <p v-if="copied" class="orders-copied" role="status">Copied {{ elideId(copied) }}</p>
     </section>
 
     <div v-if="selected" class="modal-backdrop" @click.self="selected = null">
@@ -100,10 +139,18 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { apiRequest } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { formatEpochDate, statusLabel } from "../utils/format";
+import {
+  destinationSummary,
+  elideId,
+  itemsSummary,
+  orderStatus,
+  sortOrders,
+  statusBadgeClass,
+} from "./orders/orderDisplay";
 
 const orders = ref([]);
 const loaded = ref(false);
@@ -115,19 +162,42 @@ const filters = reactive({ customer: "", status: "" });
 
 const formatDate = formatEpochDate;
 
-function orderStatus(order) {
-  return order?.payment_status || order?.status || "paid";
+// The SERVER already sorts newest-first, and re-sorting in the browser only reorders what was fetched --
+// which is the honest scope of a column sort on a list that is not paginated yet. When paging arrives this
+// has to move to the query, and the caret must stop implying it sorted everything.
+const sort = reactive({ key: "created_at", direction: "desc" });
+
+const visibleOrders = computed(() => sortOrders(orders.value, sort.key, sort.direction));
+
+function sortBy(key) {
+  if (sort.key === key) {
+    sort.direction = sort.direction === "asc" ? "desc" : "asc";
+    return;
+  }
+  sort.key = key;
+  // Money and dates read newest/largest first; a name reads A-Z. Matching the expectation of each column
+  // saves a second click on the one people actually want.
+  sort.direction = key === "customer" ? "asc" : "desc";
 }
 
-function paymentBadgeClass(status) {
-  return {
-    paid: "active",
-    completed: "active",
-    partially_refunded: "warning",
-    refunded: "inactive",
-    disputed: "archived",
-    cancelled: "archived",
-  }[status] || "inactive";
+function caret(key) {
+  if (sort.key !== key) return "";
+  return sort.direction === "asc" ? "▲" : "▼";
+}
+
+const copied = ref("");
+let copyTimer = null;
+
+async function copyId(orderId) {
+  try {
+    await navigator.clipboard.writeText(String(orderId || ""));
+    copied.value = orderId;
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => { copied.value = ""; }, 2000);
+  } catch {
+    // Clipboard is permission-gated and blocked outright in some embeddings. The id is in the title
+    // attribute either way, so a failure costs the reader nothing worth reporting.
+  }
 }
 
 async function load() {
