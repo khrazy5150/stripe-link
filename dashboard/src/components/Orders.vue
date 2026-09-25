@@ -27,7 +27,7 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="filters.customer" type="search" placeholder="Customer name or email..." @input="onFilterInput" @keyup.enter="load" />
+          <input v-model.trim="filters.customer" type="search" placeholder="Customer, email, or order reference..." @input="onFilterInput" @keyup.enter="load" />
         </label>
         <label>
           Status
@@ -167,7 +167,15 @@
                 <span v-else class="orders-place">—</span>
               </td>
 
-              <td>{{ formatDate(order.created_at) }}</td>
+              <td>
+                <div>{{ formatDate(order.created_at) }}</div>
+                <!-- The reference beneath the date, the way the destination sits beneath the customer.
+                     Searchable, and short enough not to need a column of its own. -->
+                <button type="button" class="orders-id font-mono" title="Click to copy the order reference"
+                        @click.stop="copyId(order.short_ref || order.order_id)">
+                  {{ order.short_ref || shortOrderRef(order.order_id) }}
+                </button>
+              </td>
               <td>{{ fulfilledOn(order) || "—" }}</td>
 
               <td class="orders-col-money">

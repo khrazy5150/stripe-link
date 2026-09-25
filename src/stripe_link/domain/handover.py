@@ -79,7 +79,8 @@ def handover_groups(shipments: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 ORDER_CSV_COLUMNS = (
-    ("order_id", "Order"),
+    ("short_ref", "Order"),
+    ("order_id", "Full order id"),
     ("created_at", "Order date"),
     ("customer_name", "Customer"),
     ("customer_email", "Email"),
@@ -113,6 +114,7 @@ def order_csv_row(order: dict[str, Any]) -> dict[str, str]:
     ) or str((order.get("product") or {}).get("name") or "")
     created = int(order.get("created_at") or 0)
     return {
+        "short_ref": str(order.get("short_ref") or ""),
         "order_id": str(order.get("order_id") or ""),
         "created_at": datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
                       if created else "",

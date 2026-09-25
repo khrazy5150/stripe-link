@@ -7805,3 +7805,14 @@ a.orders-place { text-decoration: underline; }
 }
 
 .drawer-order-full:hover { color: var(--brand); }
+
+/* The reference is now the only id shown, so it behaves like a value: click to copy. */
+.drawer-order-ref {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.drawer-order-ref:hover { color: var(--brand); }

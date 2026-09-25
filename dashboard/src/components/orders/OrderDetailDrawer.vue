@@ -42,12 +42,14 @@
           </dd></div>
           <div v-if="shipment"><dt>Tracking status</dt><dd>{{ trackStatus }}</dd></div>
           <div><dt>Order</dt><dd>
-            <!-- The short reference leads because it is the one a person can read out. The full id is a
-                 72-to-81 character Stripe session id; it stays available, wrapped, and copyable. -->
-            <div class="drawer-order-ref font-mono">{{ shortOrderRef(order.order_id) }}</div>
-            <button type="button" class="drawer-order-full font-mono"
-                    :title="`${order.order_id} — click to copy`"
-                    @click="$emit('copy', order.order_id)">{{ order.order_id }}</button>
+            <!-- The reference, and only the reference. The 72-character Stripe id is internal: it is not
+                 actionable for a tenant, and it is what ran through the column beside this one. It is
+                 still what gets copied, because that is the value anything else would ask for. -->
+            <button type="button" class="drawer-order-ref font-mono"
+                    title="Click to copy the order reference"
+                    @click="$emit('copy', order.short_ref || order.order_id)">
+              {{ order.short_ref || shortOrderRef(order.order_id) }}
+            </button>
             <div class="orders-secondary">{{ formatDate(order.created_at) }}</div>
           </dd></div>
           <div v-if="shipment?.shipped_at || shipment?.purchased_at">

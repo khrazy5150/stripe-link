@@ -73,6 +73,10 @@ export function sortOrders(orders, key, direction) {
 /**
  * A short reference a person can actually say out loud — "order b13b4Un3".
  *
+ * The SERVER computes the real one (domain/order_reference.py), across the tenant's whole set, so it can
+ * guarantee uniqueness — which this cannot, seeing one order at a time. This stays as the fallback for an
+ * order that reached a component without passing through the list endpoint.
+ *
  * Derived, never stored: it is a SUBSTRING of the real id, taken from Stripe's own random part, so
  * pasting it into the search box still finds the order. A hash would be shorter and prettier and would
  * lose exactly that.

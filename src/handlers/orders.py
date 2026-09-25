@@ -25,6 +25,7 @@ from stripe_link.domain.address_validation import (
 from stripe_link.domain.carriers import carrier_options, service_has_tracking, tracking_url
 from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_state, product_index
 from stripe_link.domain.handover import handover_groups, orders_csv
+from stripe_link.domain.order_reference import matches_reference, short_refs
 from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -92,7 +93,9 @@ def list_orders(event, repository, mode, *, products_repo=None, shipments_repo=N
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     params = query_params(event)
-    orders = filter_orders(repository.list_for_tenant(tenant_id), params)
+    everything = repository.list_for_tenant(tenant_id)
+    _stamp_references(everything)
+    orders = filter_orders(everything, params)
     orders.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
 
     context = fulfilment_context(tenant_id, mode, products_repo, shipments_repo, shipping_config_repo)
@@ -214,8 +217,13 @@ def mark_shipped(event, repository, order_id, mode, *, shipments_repo=None, user
 
 
 def filter_orders(orders, params):
+    """Filter by status, and by a search box that matches a person OR an order reference.
+
+    The reference has to be searchable or removing the full id from the screen would leave a tenant
+    holding a number they cannot look up.
+    """
     status = str(params.get("status") or "").strip()
-    customer = str(params.get("customer") or "").strip().lower()
+    needle = str(params.get("customer") or "").strip().lower()
     filtered = []
     for order in orders:
         order_customer = order.get("customer") or {}
@@ -223,7 +231,7 @@ def filter_orders(orders, params):
         order_status = order.get("payment_status") or order.get("status")
         if status and order_status != status:
             continue
-        if customer and customer not in haystack:
+        if needle and needle not in haystack and not matches_reference(order, needle):
             continue
         filtered.append(order)
     return filtered
@@ -241,7 +249,9 @@ def export_orders(event, repository, mode, *, products_repo=None, shipments_repo
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     params = query_params(event)
-    orders = filter_orders(repository.list_for_tenant(tenant_id), params)
+    everything = repository.list_for_tenant(tenant_id)
+    _stamp_references(everything)
+    orders = filter_orders(everything, params)
     orders.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
     context = fulfilment_context(tenant_id, mode, products_repo, shipments_repo, shipping_config_repo)
     for order in orders:
@@ -264,6 +274,20 @@ def export_orders(event, repository, mode, *, products_repo=None, shipments_repo
         },
         "body": orders_csv(orders),
     }
+
+
+def _stamp_references(orders) -> None:
+    """Give every order its short reference, computed across the WHOLE set.
+
+    Across the whole set rather than per order, because uniqueness is a property of the set: two orders
+    that would share a prefix both get a longer one. Done before filtering, so a search result shows the
+    same reference the full list did.
+    """
+    mapping = short_refs([str(o.get("order_id") or "") for o in orders])
+    for order in orders:
+        reference = mapping.get(str(order.get("order_id") or ""))
+        if reference:
+            order["short_ref"] = reference
 
 
 def _is_validate_path(event) -> bool:

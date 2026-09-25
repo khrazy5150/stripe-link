@@ -58,7 +58,14 @@ class CsvTests(unittest.TestCase):
 
     def test_the_header_is_human_readable(self):
         first_line = orders_csv([]).splitlines()[0]
-        self.assertTrue(first_line.startswith("Order,Order date,Customer"))
+        self.assertTrue(first_line.startswith("Order,Full order id,Order date,Customer"), first_line)
+
+    def test_the_export_leads_with_the_SHORT_reference(self):
+        """An exported row has to match what the screen showed, and the screen shows the short one. The
+        full id follows it, because a spreadsheet is exactly where someone goes looking for it."""
+        row = order_csv_row({**self.ORDER, "short_ref": "b13b4Un3"})
+        self.assertEqual(row["short_ref"], "b13b4Un3")
+        self.assertEqual(row["order_id"], "order_1")
 
     def test_fulfilment_columns_are_included_because_that_is_why_people_export(self):
         row = order_csv_row(self.ORDER)
@@ -182,7 +189,7 @@ class OrdersResponseTests(unittest.TestCase):
         self.assertEqual(result["statusCode"], 200)
         self.assertIn("text/csv", result["headers"]["Content-Type"])
         self.assertIn("attachment", result["headers"]["Content-Disposition"])
-        self.assertIn("Order,Order date,Customer", result["body"])
+        self.assertIn("Order,Full order id,Order date,Customer", result["body"])
 
     def test_the_export_carries_the_same_fulfilment_join_the_screen_shows(self):
         result = self._list({"format": "csv"})
