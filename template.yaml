@@ -505,13 +505,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /app-config/{config_key}
             Method: PUT
-        AppConfigOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /app-config/{config_key}
-            Method: OPTIONS
-
   OfferResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -547,13 +540,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /prices/calculate
             Method: POST
-        PriceCalculateOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /prices/calculate
-            Method: OPTIONS
-
   BillingConnectCardFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -575,13 +561,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /billing/connect-card
             Method: GET
-        BillingConnectCardOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /billing/connect-card
-            Method: OPTIONS
-
   # Platform->tenant SaaS subscription: list plans, subscribe (Stripe Checkout subscription mode) and manage
   # (Stripe Billing Portal) on the PLATFORM account. See plans/SAAS_BILLING_PAYWALL.md.
   PlatformSubscriptionFunction:
@@ -625,49 +604,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /platform-billing/portal
             Method: POST
-        PlatformBillingPlansOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /platform-billing/plans
-            Method: OPTIONS
-        PlatformBillingSubscribeOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /platform-billing/subscribe
-            Method: OPTIONS
-        PlatformBillingPortalOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /platform-billing/portal
-            Method: OPTIONS
         PlatformBillingCancel:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /platform-billing/cancel
             Method: POST
-        PlatformBillingCancelOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /platform-billing/cancel
-            Method: OPTIONS
         PlatformBillingResume:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /platform-billing/resume
             Method: POST
-        PlatformBillingResumeOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /platform-billing/resume
-            Method: OPTIONS
-
   ProductsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -702,37 +650,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /products
             Method: POST
-        ProductsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /products
-            Method: OPTIONS
         ProductsGet:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /products/{product_id}
             Method: GET
-        ProductOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /products/{product_id}
-            Method: OPTIONS
         ProductStatusUpdate:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /products/{product_id}/status
             Method: PATCH
-        ProductStatusOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /products/{product_id}/status
-            Method: OPTIONS
-
   LeadsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -765,12 +694,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /leads
             Method: GET
-        LeadsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /leads
-            Method: OPTIONS
         LeadGet:
           Type: Api
           Properties:
@@ -783,13 +706,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /leads/{lead_id}
             Method: PATCH
-        LeadOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /leads/{lead_id}
-            Method: OPTIONS
-
   CartFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -819,12 +735,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart
             Method: GET
-        CartOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /cart
-            Method: OPTIONS
         CartItemPatch:
           Type: Api
           Properties:
@@ -837,25 +747,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart/items/{line_id}
             Method: DELETE
-        CartItemOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /cart/items/{line_id}
-            Method: OPTIONS
         CartUnsubscribe:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /cart/unsubscribe
             Method: GET
-        CartUnsubscribeOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /cart/unsubscribe
-            Method: OPTIONS
-
   ReviewsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -882,12 +779,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /reviews
             Method: GET
-        ReviewsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /reviews
-            Method: OPTIONS
         ReviewGet:
           Type: Api
           Properties:
@@ -900,25 +791,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /reviews/{review_id}
             Method: DELETE
-        ReviewOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /reviews/{review_id}
-            Method: OPTIONS
         ReviewModerate:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /reviews/{review_id}/status
             Method: PATCH
-        ReviewModerateOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /reviews/{review_id}/status
-            Method: OPTIONS
-
   CollectionsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -945,12 +823,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /collections
             Method: GET
-        CollectionsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /collections
-            Method: OPTIONS
         CollectionGet:
           Type: Api
           Properties:
@@ -963,13 +835,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /collections/{collection_id}
             Method: DELETE
-        CollectionOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /collections/{collection_id}
-            Method: OPTIONS
-
   ReviewsPublicFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -997,13 +862,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /review
             Method: POST
-        ReviewFormOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /review
-            Method: OPTIONS
-
   ProductSyncFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1034,13 +892,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /products/{product_id}/sync
             Method: POST
-        ProductSyncOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /products/{product_id}/sync
-            Method: OPTIONS
-
   DownloadsUploadFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1062,13 +913,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /downloads/upload-url
             Method: POST
-        DownloadsUploadUrlOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /downloads/upload-url
-            Method: OPTIONS
-
   # Public -- a Page Ribbon's lead magnet. Reads the PAGE to decide what the visitor must provide, so the
   # gate cannot be skipped by omitting a field from the request.
   LeadDownloadFunction:
@@ -1108,13 +952,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /downloads/lead
             Method: POST
-        LeadDownloadOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /downloads/lead
-            Method: OPTIONS
-
   DownloadServeFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1140,13 +977,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /download
             Method: GET
-        DownloadServeOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /download
-            Method: OPTIONS
-
   RefundsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1186,13 +1016,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /refunds/{refund_request_id}/{action}
             Method: POST
-        RefundActionOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /refunds/{refund_request_id}/{action}
-            Method: OPTIONS
-
   FontImportFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1242,13 +1065,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /fonts/import
             Method: DELETE
-        FontImportOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /fonts/import
-            Method: OPTIONS
-
   UploadFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1266,24 +1082,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /upload/multiple
             Method: POST
-        UploadCreateOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /upload/multiple
-            Method: OPTIONS
         UploadStatus:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /upload/status/{image_id}
             Method: GET
-        UploadStatusOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /upload/status/{image_id}
-            Method: OPTIONS
         # Bake a crop into a derivative. Proxied because the resize function's ALLOWED_ORIGINS does not
         # include the dashboard, and widening CORS on a public endpoint to save a proxy is the wrong trade.
         UploadCrop:
@@ -1292,13 +1096,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /upload/crop
             Method: POST
-        UploadCropOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /upload/crop
-            Method: OPTIONS
-
   OffersFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1515,12 +1312,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /coupons
             Method: POST
-        CouponsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /coupons
-            Method: OPTIONS
         CouponsGet:
           Type: Api
           Properties:
@@ -1533,12 +1324,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /coupons/{coupon_id}
             Method: PUT
-        CouponsItemOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /coupons/{coupon_id}
-            Method: OPTIONS
         # Targeted coupons: one personal code per recipient, exported as CSV for the tenant's own email
         # software (plans/COUPONS_COMPLETION.md C5).
         CouponGrantsIssue:
@@ -1560,13 +1345,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /coupons/{coupon_id}/grants
             Method: PUT
-        CouponGrantsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /coupons/{coupon_id}/grants
-            Method: OPTIONS
-
   # Public, unauthenticated: it is called by an anonymous visitor from a published page. Always answers
   # 204 with no body, so it cannot report whether a page exists or whether a view was counted.
   # The store's avatar. Narrow on purpose: a general tenant-profile write endpoint would expose billing
@@ -1760,13 +1538,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /product-categories
             Method: GET
-        SearchCategoriesOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /product-categories
-            Method: OPTIONS
-
   PostCheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1797,13 +1568,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /pages/{page_id}/post-checkout/next
             Method: GET
-        PostCheckoutNextOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /pages/{page_id}/post-checkout/next
-            Method: OPTIONS
-
   CartCheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1852,13 +1616,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart/checkout
             Method: POST
-        CartCheckoutOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /cart/checkout
-            Method: OPTIONS
-
   CheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1911,13 +1668,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /checkout
             Method: POST
-        CheckoutOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /checkout
-            Method: OPTIONS
-
   # A supporter cancelling their own recurring tip, without an account (plans/PAY_WHAT_YOU_WANT.md 5g).
   # Public and unauthenticated: the opaque token in the link IS the credential, and the action behind it is
   # fail-safe -- the worst a leaked link does is stop a donation the supporter can start again.
@@ -1978,13 +1728,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /purchase/manage
             Method: POST
-        PurchaseManageOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /purchase/manage
-            Method: OPTIONS
-
   TipJarProvisionFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2017,13 +1760,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /tip-jar
             Method: POST
-        TipJarProvisionOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /tip-jar
-            Method: OPTIONS
-
   TipManageFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2055,13 +1791,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /tips/manage
             Method: GET
-        TipManageOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /tips/manage
-            Method: OPTIONS
-
   PaymentMethodsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2095,13 +1824,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /payment-methods
             Method: PUT
-        PaymentMethodsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /payment-methods
-            Method: OPTIONS
-
   UpsellFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2148,19 +1870,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /upsell/charge
             Method: POST
-        UpsellSessionOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /upsell/session
-            Method: OPTIONS
-        UpsellChargeOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /upsell/charge
-            Method: OPTIONS
-
   PagePublishFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2599,13 +2308,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /webhook/platform-billing
             Method: POST
-        PlatformBillingWebhookOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /webhook/platform-billing
-            Method: OPTIONS
-
   ConfigFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2667,37 +2369,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /custom-domains
             Method: POST
-        CustomDomainsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /custom-domains
-            Method: OPTIONS
         CustomDomainsCheck:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /custom-domains/{domain}/check
             Method: POST
-        CustomDomainsCheckOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /custom-domains/{domain}/check
-            Method: OPTIONS
         CustomDomainsDelete:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /custom-domains/{domain}
             Method: DELETE
-        CustomDomainsItemOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /custom-domains/{domain}
-            Method: OPTIONS
-
   CustomDomainsResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2724,13 +2407,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /custom-domains/resolve
             Method: GET
-        CustomDomainsResolveOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /custom-domains/resolve
-            Method: OPTIONS
-
   RoutesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2754,25 +2430,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /routes
             Method: POST
-        RoutesOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /routes
-            Method: OPTIONS
         RoutesDelete:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /routes/{short_code}
             Method: DELETE
-        RoutesItemOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /routes/{short_code}
-            Method: OPTIONS
-
   RoutesResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2795,13 +2458,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /routes/resolve
             Method: GET
-        RoutesResolveOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /routes/resolve
-            Method: OPTIONS
-
   TestPageServeFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2899,12 +2555,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments
             Method: POST
-        ExperimentsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /experiments
-            Method: OPTIONS
         ExperimentsGet:
           Type: Api
           Properties:
@@ -2923,12 +2573,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}
             Method: DELETE
-        ExperimentsItemOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /experiments/{experiment_id}
-            Method: OPTIONS
         ExperimentsStart:
           Type: Api
           Properties:
@@ -2947,13 +2591,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}/complete
             Method: POST
-        ExperimentsActionOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /experiments/{experiment_id}/{action}
-            Method: OPTIONS
-
   SupportContactFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2979,13 +2616,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /support/contact
             Method: POST
-        SupportContactOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /support/contact
-            Method: OPTIONS
-
   LegalFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3008,25 +2638,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /legal
             Method: GET
-        LegalListOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /legal
-            Method: OPTIONS
         LegalPage:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /legal/{page_id}
             Method: GET
-        LegalPageOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /legal/{page_id}
-            Method: OPTIONS
-
   ExperimentsViewFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3045,13 +2662,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}/view
             Method: POST
-        CountViewOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /experiments/{experiment_id}/view
-            Method: OPTIONS
-
   ExperimentsResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3074,13 +2684,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}/resolve
             Method: GET
-        ExperimentsResolveOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /experiments/{experiment_id}/resolve
-            Method: OPTIONS
-
   PreferencesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3195,13 +2798,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /notifications/mark-read
             Method: POST
-        MarkNotificationsReadOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /notifications/mark-read
-            Method: OPTIONS
-
   ShippingFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3551,13 +3147,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /admin/delete-test-data
             Method: POST
-        DeleteTestDataOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /admin/delete-test-data
-            Method: OPTIONS
-
   LedgerFunction:
     Type: AWS::Serverless::Function
     Properties:

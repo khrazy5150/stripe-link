@@ -26,7 +26,7 @@ handles test events by design since P3; test funnel pages are served from the de
 API). **Fix it there, not with a patch here** -- the two writers have to agree which table a sale belongs
 in, and that is exactly the decision that plan exists to make.
 
-## The CloudFormation template is at its resource ceiling — HIGH
+## ✅ FIXED 2026-09-25 — the CloudFormation template was at its resource ceiling
 
 Hit on 2026-09-25: a deploy failed with *"Number of resources, 501, is greater than maximum allowed, 500"*.
 
@@ -39,6 +39,20 @@ remain in the template**, and each one is a resource bought for nothing. Removin
 Until then the ceiling is real and close: each new endpoint costs roughly two resources, so there is
 headroom for a couple of routes, not a phase. The structural fix if it recurs is splitting the API into a
 nested stack, which is a bigger change than deleting dead OPTIONS.
+
+**Done, 2026-09-25.** All 62 removed; **264 Api events down to 202**, and the stack deploys again with
+real headroom.
+
+Verified rather than assumed, because the failure mode is a broken dashboard rather than a failed deploy:
+ten paths were sampled and their preflights recorded BEFORE the removal, then checked again after
+deploying — 200 with `Access-Control-Allow-Origin: *` and the full header list, both times, with zero
+explicit OPTIONS methods anywhere in the template.
+
+`tests/test_cors_preflight.py` now asserts the global `Cors:` block exists, allows every header the
+dashboard actually sends, and that no route declares its own OPTIONS again — adding one back is how the
+next deploy fails. The handlers keep their `if method == "OPTIONS"` branch: SAM's generated preflight is a
+MOCK integration that never reaches a Lambda, so the branch is unused, but it costs nothing and is the
+difference between a 500 and an empty 200 if a route is ever invoked that way.
 
 ## Stripe API version drift — HIGH
 
