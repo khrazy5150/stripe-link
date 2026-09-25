@@ -63,6 +63,20 @@ class ShippingProvider:
         """Turn a rate into a bought label. Returns the normalised purchase."""
         raise NotImplementedError
 
+    def carrier_accounts(self) -> list[dict[str, Any]]:
+        """The tenant's carrier accounts, with the ids a pickup or a manifest has to name."""
+        raise NotImplementedError
+
+    def schedule_pickup(self, *, carrier_account: str, location: dict, transactions: list[str],
+                        start_time: str, end_time: str) -> dict[str, Any]:
+        """Ask the carrier to collect. Returns {confirmation, window, status}."""
+        raise NotImplementedError
+
+    def create_manifest(self, *, carrier_account: str, ship_date: str, address_from: str,
+                        transactions: list[str]) -> dict[str, Any]:
+        """The end-of-day handover document (USPS calls it a SCAN form)."""
+        raise NotImplementedError
+
 
 class ShippoProvider(ShippingProvider):
     """Shippo over its REST API. Test mode is carried by the KEY -- a test token returns test rates and
@@ -173,7 +187,88 @@ def _shippo_buy(self, *, rate_id: str, label_format: str = "PDF",
     }
 
 
+def _shippo_carrier_accounts(self) -> list[dict[str, Any]]:
+    body = self._request("/carrier_accounts", params={"results": 50})
+    return [
+        {"account_id": str(entry.get("object_id") or ""),
+         "carrier": str(entry.get("carrier") or ""),
+         "active": bool(entry.get("active"))}
+        for entry in (body.get("results") or [])
+        if entry.get("object_id")
+    ]
+
+
+def _shippo_pickup(self, *, carrier_account: str, location: dict, transactions: list[str],
+                   start_time: str, end_time: str) -> dict[str, Any]:
+    """Book a carrier collection.
+
+    `is_account_address` False plus an explicit address is the honest shape: the parcels are wherever the
+    tenant actually packs them, which is not necessarily the address on the carrier account.
+    """
+    body = self._request("/pickups", payload={
+        "carrier_account": str(carrier_account or ""),
+        "location": {
+            "building_location_type": str(location.get("building_location_type") or "Front Door"),
+            "address": _shippo_address(location.get("address") or {}),
+        },
+        "transactions": [str(t) for t in transactions or []],
+        "requested_start_time": str(start_time or ""),
+        "requested_end_time": str(end_time or ""),
+    })
+    status = str(body.get("status") or "").upper()
+    if status not in {"CONFIRMED", "SUCCESS"}:
+        messages = body.get("messages") or []
+        detail = "; ".join(str(m.get("text") or m) for m in messages)[:300]
+        raise ProviderError(detail or f"The carrier did not confirm the pickup (status {status or '?'}).")
+    return {
+        "provider": "shippo",
+        "pickup_id": str(body.get("object_id") or ""),
+        "confirmation_code": str(body.get("confirmation_code") or ""),
+        "status": status,
+        "window_start": str(body.get("confirmed_start_time") or start_time),
+        "window_end": str(body.get("confirmed_end_time") or end_time),
+    }
+
+
+def _shippo_manifest(self, *, carrier_account: str, ship_date: str, address_from: str,
+                     transactions: list[str]) -> dict[str, Any]:
+    """The end-of-day handover document.
+
+    Shippo takes an address OBJECT ID here, not an inline address, which is why the caller has to have
+    created one. The document covers ONE carrier, ONE ship date and ONE origin -- that constraint is the
+    carrier's, not ours, and it is why the screen has to group before it offers this.
+    """
+    body = self._request("/manifests", payload={
+        "carrier_account": str(carrier_account or ""),
+        "shipment_date": str(ship_date or ""),
+        "address_from": str(address_from or ""),
+        "transactions": [str(t) for t in transactions or []],
+    })
+    status = str(body.get("status") or "").upper()
+    if status in {"ERROR", "INVALID"}:
+        messages = body.get("messages") or []
+        detail = "; ".join(str(m.get("text") or m) for m in messages)[:300]
+        raise ProviderError(detail or "The carrier rejected the manifest.")
+    return {
+        "provider": "shippo",
+        "manifest_id": str(body.get("object_id") or ""),
+        "status": status or "QUEUED",
+        "document_url": str(body.get("documents") or [""])[0] if isinstance(body.get("documents"), list)
+                        else str(body.get("document_url") or ""),
+    }
+
+
+def _shippo_create_address(self, address: dict[str, Any]) -> str:
+    """A stored address object, because /manifests takes an id rather than an inline address."""
+    body = self._request("/addresses", payload=_shippo_address(address))
+    return str(body.get("object_id") or "")
+
+
 ShippoProvider.buy_label = _shippo_buy
+ShippoProvider.carrier_accounts = _shippo_carrier_accounts
+ShippoProvider.schedule_pickup = _shippo_pickup
+ShippoProvider.create_manifest = _shippo_manifest
+ShippoProvider.create_address = _shippo_create_address
 
 
 def _shippo_address(address: dict[str, Any]) -> dict[str, Any]:
@@ -263,6 +358,23 @@ class MockProvider(ShippingProvider):
             })
         return out
 
+
+    def carrier_accounts(self) -> list[dict[str, Any]]:
+        return [{"account_id": f"mock_acct_{carrier}", "carrier": carrier, "active": True}
+                for carrier in ("usps", "ups", "fedex")]
+
+    def schedule_pickup(self, *, carrier_account: str, location: dict, transactions: list[str],
+                        start_time: str, end_time: str) -> dict[str, Any]:
+        return {"provider": "mock", "pickup_id": "mock_pickup_1", "confirmation_code": "MOCKCONF",
+                "status": "CONFIRMED", "window_start": start_time, "window_end": end_time}
+
+    def create_manifest(self, *, carrier_account: str, ship_date: str, address_from: str,
+                        transactions: list[str]) -> dict[str, Any]:
+        return {"provider": "mock", "manifest_id": "mock_manifest_1", "status": "SUCCESS",
+                "document_url": "https://example.invalid/mock-manifest.pdf"}
+
+    def create_address(self, address: dict[str, Any]) -> str:
+        return "mock_address_1"
 
     def buy_label(self, *, rate_id: str, label_format: str = "PDF",
                   idempotency_key: str = "") -> dict[str, Any]:

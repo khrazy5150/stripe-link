@@ -209,6 +209,15 @@
     "expires_at": {
       "type": "integer",
       "description": "A RETURN label the buyer must use by this time or forfeit free return postage. Return labels are commonly pay-on-scan, so an unused one usually costs nothing -- which is what makes a short window safe rather than punitive."
+    },
+    "manifest_id": {
+      "type": "string"
+    },
+    "pickup_id": {
+      "type": "string"
+    },
+    "pickup_confirmation": {
+      "type": "string"
     }
   },
   "$defs": {

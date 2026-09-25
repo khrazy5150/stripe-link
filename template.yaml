@@ -3283,6 +3283,30 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/labels
             Method: POST
+        ShippingPickups:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/pickups
+            Method: POST
+        ShippingPickupsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/pickups
+            Method: OPTIONS
+        ShippingManifests:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/manifests
+            Method: POST
+        ShippingManifestsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/manifests
+            Method: OPTIONS
         ShippingReturnLabels:
           Type: Api
           Properties:

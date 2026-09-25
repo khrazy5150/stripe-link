@@ -6,6 +6,13 @@
         <p>Sales recorded from completed checkouts and one-click upsells</p>
       </div>
       <div class="button-row">
+        <button class="secondary-action" type="button" :disabled="exporting || !orders.length" @click="exportCsv">
+          {{ exporting ? "Exporting…" : "Export CSV" }}
+        </button>
+        <button v-if="handoverGroups.length" class="secondary-action" type="button"
+                :disabled="handing" @click="handoverKind = 'pickups'">Schedule pickup</button>
+        <button v-if="handoverGroups.length" class="primary-action" type="button"
+                :disabled="handing" @click="handoverKind = 'manifests'">Create manifest</button>
         <button class="secondary-action" type="button" :disabled="loading" @click="load">
           {{ loading ? "Loading..." : "Reload" }}
         </button>
@@ -100,7 +107,8 @@
           </thead>
           <tbody>
             <tr v-for="order in visibleOrders" :key="order.order_id"
-                :class="{ 'orders-row-selected': selected_.has(order.order_id) }">
+                class="orders-row" :class="{ 'orders-row-selected': selected_.has(order.order_id) }"
+                tabindex="0" @click="openDetail(order, $event)" @keyup.enter="selected = order">
               <td v-if="showFulfilment" class="orders-col-select">
                 <input type="checkbox" :checked="selected_.has(order.order_id)"
                        :disabled="!order.fulfilment?.eligible"
@@ -181,8 +189,11 @@
               </td>
               <td class="orders-col-actions">
                 <button v-if="showFulfilment && order.fulfilment?.status === 'ready'" type="button"
-                        class="secondary-action" @click="shipping = order">Mark shipped</button>
-                <button type="button" class="secondary-action" @click="selected = order">Details</button>
+                        class="secondary-action" @click.stop="shipping = order">Mark shipped</button>
+                <a v-if="order.fulfilment?.shipment?.label_url" class="secondary-action"
+                   :href="order.fulfilment.shipment.label_url" target="_blank" rel="noopener"
+                   @click.stop>Download</a>
+                <button type="button" class="secondary-action" @click.stop="selected = order">Details</button>
               </td>
             </tr>
           </tbody>
@@ -227,41 +238,48 @@
     <MarkShippedModal v-if="shipping" :order="shipping" :carriers="carriers" :saving="shippingSaving"
                       :error="shippingError" @close="shipping = null" @shipped="submitShipped" />
 
-    <div v-if="selected" class="modal-backdrop" @click.self="selected = null">
-      <section class="modal-card product-details-modal" role="dialog" aria-modal="true" aria-labelledby="orderDetailsTitle">
+    <div v-if="handoverKind" class="modal-backdrop" @click.self="handoverKind = ''">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="handoverTitle">
         <header class="modal-card-header">
-          <h2 id="orderDetailsTitle">Order Details</h2>
-          <button type="button" class="modal-close" aria-label="Close order details" @click="selected = null">×</button>
+          <h2 id="handoverTitle">{{ handoverKind === "pickups" ? "Schedule a pickup" : "Create a manifest" }}</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="handoverKind = ''">×</button>
         </header>
         <div class="product-details-body">
-          <dl class="product-details-grid">
-            <div><dt>Order ID</dt><dd class="font-mono">{{ selected.order_id }}</dd></div>
-            <div><dt>Status</dt><dd>{{ statusLabel(orderStatus(selected)) }}</dd></div>
-            <div><dt>Amount</dt><dd>{{ formatMoney(selected.amount_total, selected.currency) }}</dd></div>
-            <div v-if="Number(selected.amount_refunded) > 0"><dt>Refunded</dt><dd>{{ formatMoney(selected.amount_refunded, selected.currency) }}</dd></div>
-            <div v-if="Number(selected.amount_refunded) > 0"><dt>Refundable</dt><dd>{{ formatMoney(selected.refundable_amount, selected.currency) }}</dd></div>
-            <div><dt>Date</dt><dd>{{ formatDate(selected.created_at) }}</dd></div>
-            <div><dt>Customer</dt><dd>{{ selected.customer?.name || "—" }}</dd></div>
-            <div><dt>Email</dt><dd>{{ selected.customer?.email || "—" }}</dd></div>
-            <div><dt>Product</dt><dd>{{ selected.product?.name || "—" }}</dd></div>
-            <div><dt>Type</dt><dd>{{ statusLabel(selected.line_item_type || "checkout") }}</dd></div>
-          </dl>
-          <template v-if="selected.fees">
-            <h3 class="details-subheading">Fees</h3>
-            <dl class="product-details-grid">
-              <div><dt>Gross</dt><dd>{{ formatMoney(selected.fees.tenant_keyed_amount, selected.currency) }}</dd></div>
-              <div><dt>Stripe Fee</dt><dd>{{ formatMoney(selected.fees.stripe_fee, selected.currency) }}</dd></div>
-              <div><dt>Platform Fee</dt><dd>{{ formatMoney(selected.fees.platform_fee, selected.currency) }}</dd></div>
-              <div><dt>Net Payout</dt><dd>{{ formatMoney(selected.fees.net_payout, selected.currency) }}</dd></div>
-            </dl>
-          </template>
-          <details class="product-json-details">
-            <summary>Raw JSON</summary>
-            <pre>{{ JSON.stringify(selected, null, 2) }}</pre>
-          </details>
+          <p class="field-hint">
+            A carrier collects — and scans — one carrier's parcels from one address on one day, so choose
+            which batch this is for.
+          </p>
+          <label>
+            Batch
+            <select v-model="handoverBatch">
+              <option v-for="group in handoverGroups" :key="`${group.carrier}-${group.ship_date}`"
+                      :value="`${group.carrier}|${group.ship_date}`">
+                {{ group.carrier.toUpperCase() }} — {{ group.ship_date }} — {{ group.transactions.length }}
+                label{{ group.transactions.length === 1 ? "" : "s" }} ({{ money(group.total) }})
+              </option>
+            </select>
+          </label>
+          <div v-if="handoverKind === 'pickups'" class="offer-two-column">
+            <label>Ready at <input v-model="pickup.start_time" type="datetime-local" /></label>
+            <label>Closes at <input v-model="pickup.end_time" type="datetime-local" /></label>
+          </div>
+          <p v-if="handoverKind === 'pickups'" class="field-hint">
+            Carriers need a window, and most have a same-day cutoff. Labels you marked shipped yourself
+            are not included — the carrier has no label of ours to scan for those.
+          </p>
+          <p v-if="handoverError" class="keys-status-banner error">{{ handoverError }}</p>
+          <div class="button-row">
+            <button type="button" class="primary-action" :disabled="handing || !handoverBatch" @click="submitHandover">
+              {{ handing ? "Sending…" : (handoverKind === "pickups" ? "Schedule pickup" : "Create manifest") }}
+            </button>
+            <button type="button" class="secondary-action" :disabled="handing" @click="handoverKind = ''">Cancel</button>
+          </div>
         </div>
       </section>
     </div>
+
+    <OrderDetailDrawer v-if="selected" :order="selected" @close="selected = null" @copy="copyId" />
+
   </section>
 </template>
 
@@ -271,6 +289,7 @@ import { apiRequest } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { formatEpochDate, statusLabel } from "../utils/format";
 import MarkShippedModal from "./orders/MarkShippedModal.vue";
+import OrderDetailDrawer from "./orders/OrderDetailDrawer.vue";
 import {
   destinationSummary,
   elideId,
@@ -493,6 +512,68 @@ async function submitShipped(form) {
   }
 }
 
+// --- export, pickups and manifests ------------------------------------------------------------------
+const handoverGroups = ref([]);
+const handoverKind = ref("");
+const handoverBatch = ref("");
+const handoverError = ref("");
+const handing = ref(false);
+const exporting = ref(false);
+const pickup = reactive({ start_time: "", end_time: "" });
+
+async function exportCsv() {
+  exporting.value = true;
+  try {
+    const csv = await apiRequest("/orders", {
+      params: { status: filters.status, customer: filters.customer, format: "csv" },
+      raw: true,
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = err.message || "Export failed.";
+  } finally {
+    exporting.value = false;
+  }
+}
+
+async function submitHandover() {
+  const [carrier, shipDate] = String(handoverBatch.value || "").split("|");
+  if (!carrier || !shipDate) return;
+  handing.value = true;
+  handoverError.value = "";
+  try {
+    const body = { carrier, ship_date: shipDate };
+    if (handoverKind.value === "pickups") {
+      // A carrier needs a real window; sending a blank one gets refused at their end, not ours.
+      body.start_time = new Date(pickup.start_time).toISOString();
+      body.end_time = new Date(pickup.end_time).toISOString();
+    }
+    const result = await apiRequest(`/shipping/${handoverKind.value}`, { method: "POST", body });
+    message.value = handoverKind.value === "pickups"
+      ? `Pickup confirmed (${result.pickup?.confirmation_code || "booked"}) for ${result.shipments} parcel(s).`
+      : `Manifest created for ${result.shipments} parcel(s).`;
+    handoverKind.value = "";
+    await load();
+  } catch (err) {
+    handoverError.value = err.message || "The carrier refused that batch.";
+  } finally {
+    handing.value = false;
+  }
+}
+
+// A row is clickable, but the controls inside it are not the row. Without this, Mark shipped would also
+// open the drawer behind its own modal.
+function openDetail(order, event) {
+  if (event?.target?.closest("button, a, input, select, label")) return;
+  selected.value = order;
+}
+
 const copied = ref("");
 let copyTimer = null;
 
@@ -517,6 +598,11 @@ async function load() {
     carriers.value = Array.isArray(body.carriers) ? body.carriers : [];
     shippingReadiness.value = Array.isArray(body.shipping_readiness) ? body.shipping_readiness : [];
     shippingConfigured.value = Boolean(body.shipping_configured);
+    handoverGroups.value = Array.isArray(body.handover_groups) ? body.handover_groups : [];
+    if (handoverGroups.value.length && !handoverBatch.value) {
+      const first = handoverGroups.value[0];
+      handoverBatch.value = `${first.carrier}|${first.ship_date}`;
+    }
     // A reload must not leave an order selected that is no longer selectable -- it has just shipped.
     const stillEligible = new Set(orders.value.filter((o) => o.fulfilment?.eligible).map((o) => o.order_id));
     selected_.value = new Set([...selected_.value].filter((id) => stillEligible.has(id)));

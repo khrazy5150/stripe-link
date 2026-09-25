@@ -19,6 +19,7 @@ from stripe_link.common import (
 )
 from stripe_link.domain.carriers import carrier_options, service_has_tracking, tracking_url
 from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
+from stripe_link.domain.handover import handover_groups, orders_csv
 from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.domain.shipping import ShipmentError, build_manual_shipment, label_readiness
 from stripe_link.repositories.documents import (
@@ -53,6 +54,9 @@ def handler(event, context, repository=None, products_repo=None, shipments_repo=
 
     if order_id:
         return get_order(event, repository, order_id)
+    if str(query_params(event).get("format") or "").lower() == "csv":
+        return export_orders(event, repository, mode, products_repo=products_repo,
+                             shipments_repo=shipments_repo, shipping_config_repo=shipping_config_repo)
     return list_orders(event, repository, mode,
                        products_repo=products_repo, shipments_repo=shipments_repo,
                        shipping_config_repo=shipping_config_repo)
@@ -91,6 +95,12 @@ def list_orders(event, repository, mode, *, products_repo=None, shipments_repo=N
         "shipping_readiness": context["readiness"],
         "shipping_configured": context["configured"],
         "carriers": carrier_options(),
+        # What a carrier would actually accept as one handover: ONE carrier, ONE ship date. Grouped on the
+        # server so the toolbar cannot offer a batch the carrier will reject.
+        "handover_groups": [
+            {k: v for k, v in group.items() if k != "shipments"}
+            for group in handover_groups(list(context["shipments"].values()))
+        ],
     })
 
 
@@ -196,3 +206,39 @@ def filter_orders(orders, params):
             continue
         filtered.append(order)
     return filtered
+
+
+def export_orders(event, repository, mode, *, products_repo=None, shipments_repo=None,
+                  shipping_config_repo=None):
+    """The same list the screen shows, as CSV.
+
+    Built from the same joined data rather than from what the browser happens to be holding, so an export
+    says the same thing as the screen -- including the fulfilment columns, which is most of why a tenant
+    exports at all.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    params = query_params(event)
+    orders = filter_orders(repository.list_for_tenant(tenant_id), params)
+    orders.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
+    context = fulfilment_context(tenant_id, mode, products_repo, shipments_repo, shipping_config_repo)
+    for order in orders:
+        order["fulfilment"] = order_fulfilment_state(
+            order,
+            products_by_id=context["products_by_id"],
+            index=context["index"],
+            shipment=context["shipments"].get(str(order.get("order_id") or "")),
+        )
+    stamp = time.strftime("%Y-%m-%d", time.gmtime())
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": f'attachment; filename="orders-{stamp}.csv"',
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode",
+            "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,PATCH,DELETE",
+        },
+        "body": orders_csv(orders),
+    }

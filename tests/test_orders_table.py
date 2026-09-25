@@ -64,13 +64,28 @@ class TableStructureTests(unittest.TestCase):
         self.assertIn("overflow-x: auto", block)
 
     def test_details_survived_the_rewrite(self):
-        # The modal is the ledger view and predates this screen's fulfilment role; losing it would be a
-        # regression dressed as a redesign.
+        """The ledger view predates this screen's fulfilment role; losing it would be a regression dressed
+        as a redesign. It moved from a centred modal into the side drawer, where the row stays visible --
+        so the anchor is the drawer, and the assertion is that the CONTENT is still reachable."""
         self.assertIn("Details", self.SOURCE)
-        self.assertIn("orderDetailsTitle", self.SOURCE)
+        self.assertIn("OrderDetailDrawer", self.SOURCE)
+        drawer = (ROOT / "dashboard/src/components/orders/OrderDetailDrawer.vue").read_text(encoding="utf-8")
+        for fragment in ("Raw JSON", "order.fees", "amount_refunded", "order.order_id"):
+            self.assertIn(fragment, drawer, f"the drawer dropped {fragment} from the old details modal")
 
     def test_the_destination_is_shown_because_fulfilment_needs_it(self):
         self.assertIn("destinationSummary", self.SOURCE)
+
+    def test_a_non_shippable_order_still_opens_and_says_why(self):
+        """"Not a shippable product" beats an empty shipment panel -- and the reason comes from the gate
+        the row already computed, so the panel and the row cannot disagree."""
+        drawer = (ROOT / "dashboard/src/components/orders/OrderDetailDrawer.vue").read_text(encoding="utf-8")
+        self.assertIn("Not a shippable product", drawer)
+        self.assertIn("fulfilment?.reasons", drawer)
+
+    def test_clicking_a_row_opens_it_without_hijacking_the_buttons_inside(self):
+        self.assertIn("openDetail", self.SOURCE)
+        self.assertIn('closest("button, a, input, select, label")', self.SOURCE)
 
 
 class DisplayHelperTests(unittest.TestCase):

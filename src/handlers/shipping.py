@@ -10,6 +10,7 @@ from stripe_link.common import (
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
 from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
+from stripe_link.domain.handover import handover_groups
 from stripe_link.domain.rate_policy import select_rate
 from stripe_link.domain.returns import RETURN_STATES, return_deadline, return_label_expired
 from stripe_link.domain.shipping import (
@@ -65,6 +66,9 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
     path = str((event or {}).get("path") or (event or {}).get("resource") or "")
     if method == "POST" and path.rstrip("/").endswith("/test"):
         return test_shipping_connection(event, repository, secret_cipher)
+    if _action(event) in {"pickups", "manifests"} and method == "POST":
+        return handover(event, repository, secret_cipher, _action(event),
+                        shipments_repo=shipments_repo, now_fn=now_fn)
     if _action(event) == "return-labels" and method == "POST":
         return buy_return_label(event, repository, secret_cipher, orders_repo=orders_repo,
                                 shipments_repo=shipments_repo, refund_requests_repo=refund_requests_repo,
@@ -553,3 +557,103 @@ def buy_return_label(event, repository, secret_cipher, *, orders_repo=None, ship
 
     return json_response({"shipment": saved, "refund_request": refund_request,
                           "expires_at": saved["expires_at"]}, status_code=201)
+
+
+def handover(event, repository, secret_cipher, kind, *, shipments_repo=None,
+             now_fn=lambda: int(time.time())):
+    """Schedule a pickup, or create a manifest, for ONE carrier's labels from ONE day.
+
+    That constraint is the carrier's: a manifest lists the labels a driver will scan, and a driver scans
+    one carrier's parcels from one address on one day. Sending a mixed batch fails at the carrier, so the
+    batch is validated here before a request is made rather than after it is refused.
+
+    Only labels WE bought can be handed over. A parcel the tenant marked shipped themselves has no
+    provider transaction, so there is nothing for the carrier to scan -- it is excluded by `manifestable`,
+    not rejected with an error, because the tenant did nothing wrong.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    body = parse_json_body(event)
+    carrier = str(body.get("carrier") or "").strip().lower()
+    day = str(body.get("ship_date") or "").strip()
+    if not carrier or not day:
+        return error_response("A carrier and a ship date are required.", code="missing_batch")
+
+    config = repository.get(tenant_id)
+    if not config:
+        return error_response("Shipping config not found.", status_code=404, code="not_found")
+    blockers = label_readiness(config)
+    if blockers:
+        return error_response(" ".join(blockers), code="not_ready")
+
+    shipments = shipments_repo or shipments_repository(mode=resolve_stripe_mode(event))
+    groups = handover_groups(shipments.list_for_tenant(tenant_id) or [])
+    group = next((g for g in groups if g["carrier"] == carrier and g["ship_date"] == day), None)
+    if not group:
+        return error_response(
+            f"No {carrier.upper()} labels bought on {day} are waiting to be handed over.",
+            code="nothing_to_hand_over")
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    ship_from = config.get("ship_from_address") or {}
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        ) if secret_ref else ""
+        provider = provider_for(name, api_key)
+        account = _carrier_account_for(provider, carrier)
+        if not account:
+            return error_response(
+                f"Your {name} account has no active {carrier.upper()} carrier account to hand these to.",
+                code="no_carrier_account")
+        if kind == "pickups":
+            result = provider.schedule_pickup(
+                carrier_account=account,
+                location={"address": ship_from,
+                          "building_location_type": str(body.get("building_location_type") or "Front Door")},
+                transactions=group["transactions"],
+                start_time=str(body.get("start_time") or ""),
+                end_time=str(body.get("end_time") or ""))
+        else:
+            result = provider.create_manifest(
+                carrier_account=account,
+                ship_date=day,
+                address_from=provider.create_address(ship_from),
+                transactions=group["transactions"])
+    except ProviderError as exc:
+        return error_response(str(exc), status_code=502, code="provider_error")
+
+    now = int(now_fn())
+    stamped = []
+    for shipment in group["shipments"]:
+        updated = dict(shipment)
+        if kind == "manifests":
+            # Recorded so the same labels are never manifested twice -- a carrier refuses the second, and
+            # the tenant would have no way to tell which document their parcels are actually on.
+            updated["manifest_id"] = str(result.get("manifest_id") or "")
+        else:
+            updated["pickup_id"] = str(result.get("pickup_id") or "")
+            updated["pickup_confirmation"] = str(result.get("confirmation_code") or "")
+        updated["updated_at"] = now
+        try:
+            stamped.append(shipments.put(updated))
+        except RepositoryError:
+            stamped.append(updated)
+
+    return json_response({kind[:-1]: result, "shipments": len(stamped),
+                          "carrier": carrier, "ship_date": day}, status_code=201)
+
+
+def _carrier_account_for(provider, carrier: str) -> str:
+    """The provider's account id for this carrier, which a pickup and a manifest both have to name."""
+    try:
+        accounts = provider.carrier_accounts() or []
+    except ProviderError:
+        return ""
+    for account in accounts:
+        if str(account.get("carrier") or "").lower() == carrier and account.get("active"):
+            return str(account.get("account_id") or "")
+    return ""
