@@ -3867,9 +3867,11 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-orders-api-${Environment}"
       CodeUri: src/
       Handler: handlers.orders.handler
-      Description: Order history plus fulfilment state, and the manual mark-as-shipped path.
+      Description: Order history plus fulfilment state, the manual mark-as-shipped path, and address checks.
       Policies:
-        - DynamoDBReadPolicy:
+        # WRITE, not read: an address deliverability verdict is stored on the order it is about, so the
+        # Status column can be answered from the table rather than by a provider call per row per render.
+        - DynamoDBCrudPolicy:
             TableName: !Ref OrdersTable
         # The fulfilment gates are computed server-side so the table and the buy endpoint cannot disagree
         # about whether an order is eligible (plans/ORDER_FULFILMENT.md). Products and shipping config are
@@ -3890,6 +3892,18 @@ Resources:
                 - ses:SendEmail
                 - ses:SendRawEmail
               Resource: "*"
+        # Decrypting the tenant's shipping-provider key to ask the carrier about an address.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:EncryptionContext:service: stripe-link
       Events:
         OrdersList:
           Type: Api
@@ -3903,6 +3917,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /orders/{order_id}
             Method: GET
+        OrdersValidateAddresses:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders/validate-addresses
+            Method: POST
+        OrdersValidateAddressesOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders/validate-addresses
+            Method: OPTIONS
         OrdersMarkShipped:
           Type: Api
           Properties:

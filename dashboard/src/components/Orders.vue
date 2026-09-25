@@ -6,6 +6,10 @@
         <p>Sales recorded from completed checkouts and one-click upsells</p>
       </div>
       <div class="button-row">
+        <button v-if="shippingConfigured && uncheckedCount" class="secondary-action" type="button"
+                :disabled="checkingAddresses" @click="checkAddresses()">
+          {{ checkingAddresses ? "Checking…" : `Check ${uncheckedCount} address${uncheckedCount === 1 ? "" : "es"}` }}
+        </button>
         <button class="secondary-action" type="button" :disabled="exporting || !orders.length" @click="exportCsv">
           {{ exporting ? "Exporting…" : "Export CSV" }}
         </button>
@@ -601,6 +605,29 @@ async function labelOne(order) {
   selected_.value = new Set([order.order_id]);
   await buySelected();
 }
+
+// --- address deliverability --------------------------------------------------------------------------
+// Asked ONCE per address, in one bounded batch, never per render: a verdict does not change between two
+// loads of the same list, and a call per row would make the page crawl.
+const checkingAddresses = ref(false);
+
+async function checkAddresses({ silent = false } = {}) {
+  if (checkingAddresses.value || !shippingConfigured.value) return;
+  checkingAddresses.value = true;
+  try {
+    const body = await apiRequest("/orders/validate-addresses", { method: "POST", body: {} });
+    if (body?.checked) await load();
+  } catch (err) {
+    // A failed check leaves every order exactly as it was -- unchecked, not undeliverable. Only say so
+    // when the tenant asked; doing it on load and shouting about an outage helps nobody.
+    if (!silent) error.value = err.message || "Could not check addresses.";
+  } finally {
+    checkingAddresses.value = false;
+  }
+}
+
+const uncheckedCount = computed(() =>
+  orders.value.filter((o) => o.shipping_address && !o.address_validation).length);
 
 const copied = ref("");
 let copyTimer = null;

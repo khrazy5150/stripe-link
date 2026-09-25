@@ -527,6 +527,30 @@ All seven phases, deployed to dev. Not yet in production.
 - **International labels.** A non-US order is refused in the row, before money is spent.
 - **Consolidating several orders into one parcel**, and **charging the buyer for shipping** (§PE).
 
+### Address deliverability — BUILT 2026-09-25
+
+The author's "Not Shippable" covers an address that is not **deliverable**, not merely incomplete.
+Completeness is structural and free; deliverability is a question only a carrier can answer.
+
+**The verdict is stored on the order, not recomputed.** Validating on render would be one provider call
+per row per load — slow, rate-limited, and pointless, since an address does not change between two
+renders of the same list. It is checked once in a bounded batch (`POST /orders/validate-addresses`,
+20 at a time), written onto the order with a fingerprint of the address it describes, and re-asked only
+when that fingerprint changes.
+
+Three distinctions the code keeps and a simpler version would lose:
+
+- **UNKNOWN is not UNDELIVERABLE.** A provider that will not answer, or is down, records "we could not
+  check" — which never blocks. Otherwise one outage turns a tenant's entire list unshippable.
+- **A stale verdict is not shown.** Correct the address and the old answer stops applying immediately,
+  because telling someone their corrected address is undeliverable is worse than saying nothing.
+- **A known-undeliverable order is not re-checked on a loop.** The tenant has to fix it; asking the
+  carrier the same question again costs money and changes nothing.
+
+Shippo's normalised address is deliberately **offered, never applied silently** — changing where a parcel
+goes without being asked is worse than failing to deliver it. Surfacing that correction in the UI is not
+built.
+
 ### Verify before production
 
 - **The per-payment-method refund window.** Unchanged from R1's warning and still the biggest open risk:

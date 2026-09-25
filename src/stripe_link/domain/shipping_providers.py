@@ -67,6 +67,14 @@ class ShippingProvider:
         """The tenant's carrier accounts, with the ids a pickup or a manifest has to name."""
         raise NotImplementedError
 
+    def validate_address(self, address: dict) -> dict[str, Any]:
+        """Is this a real, deliverable address? Returns {valid, messages, normalized}.
+
+        `valid` is True, False, or **None for "the provider would not say"** -- which is not the same as
+        False, and must never be shown to a tenant as an undeliverable address.
+        """
+        raise NotImplementedError
+
     def schedule_pickup(self, *, carrier_account: str, location: dict, transactions: list[str],
                         start_time: str, end_time: str) -> dict[str, Any]:
         """Ask the carrier to collect. Returns {confirmation, window, status}."""
@@ -258,6 +266,34 @@ def _shippo_manifest(self, *, carrier_account: str, ship_date: str, address_from
     }
 
 
+def _shippo_validate(self, address: dict[str, Any]) -> dict[str, Any]:
+    """Shippo validates on address CREATE, with `validate: true`, and answers in validation_results.
+
+    A carrier refuses an undeliverable address at the counter, or -- worse -- accepts it, fails to
+    deliver, and returns the parcel weeks later at the tenant's expense. Finding out before the label is
+    bought is the entire point.
+    """
+    body = self._request("/addresses", payload={**_shippo_address(address), "validate": True})
+    results = body.get("validation_results") if isinstance(body.get("validation_results"), dict) else {}
+    messages = [str(m.get("text") or m) for m in (results.get("messages") or [])]
+    is_valid = results.get("is_valid")
+    return {
+        "valid": bool(is_valid) if is_valid is not None else None,
+        "messages": [m for m in messages if m][:5],
+        # Shippo echoes a corrected address. Offered to the tenant, never applied silently: changing where
+        # a parcel goes without being asked is worse than failing to deliver it.
+        "normalized": {
+            "street1": str(body.get("street1") or ""),
+            "street2": str(body.get("street2") or ""),
+            "city": str(body.get("city") or ""),
+            "state": str(body.get("state") or ""),
+            "postal_code": str(body.get("zip") or ""),
+            "country": str(body.get("country") or ""),
+        },
+        "address_id": str(body.get("object_id") or ""),
+    }
+
+
 def _shippo_create_address(self, address: dict[str, Any]) -> str:
     """A stored address object, because /manifests takes an id rather than an inline address."""
     body = self._request("/addresses", payload=_shippo_address(address))
@@ -269,6 +305,7 @@ ShippoProvider.carrier_accounts = _shippo_carrier_accounts
 ShippoProvider.schedule_pickup = _shippo_pickup
 ShippoProvider.create_manifest = _shippo_manifest
 ShippoProvider.create_address = _shippo_create_address
+ShippoProvider.validate_address = _shippo_validate
 
 
 def _shippo_address(address: dict[str, Any]) -> dict[str, Any]:
@@ -362,6 +399,14 @@ class MockProvider(ShippingProvider):
     def carrier_accounts(self) -> list[dict[str, Any]]:
         return [{"account_id": f"mock_acct_{carrier}", "carrier": carrier, "active": True}
                 for carrier in ("usps", "ups", "fedex")]
+
+    def validate_address(self, address: dict) -> dict[str, Any]:
+        """Deliverable unless the street says otherwise, so the undeliverable branch can be walked."""
+        street = str((address or {}).get("street1") or "").lower()
+        if "invalid" in street or "undeliverable" in street:
+            return {"valid": False, "messages": ["Mock provider: this street is marked undeliverable."],
+                    "normalized": {}, "address_id": "mock_addr_bad"}
+        return {"valid": True, "messages": [], "normalized": {}, "address_id": "mock_addr_1"}
 
     def schedule_pickup(self, *, carrier_account: str, location: dict, transactions: list[str],
                         start_time: str, end_time: str) -> dict[str, Any]:

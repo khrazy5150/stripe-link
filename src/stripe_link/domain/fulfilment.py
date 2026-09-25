@@ -16,6 +16,8 @@ Everything here is pure. The handler joins the documents; this decides what they
 """
 from typing import Any
 
+from stripe_link.domain.address_validation import blocking_reason
+
 # Where a label can be bought today. Checkout already allows CA (handlers/checkout.py), so a Canadian order
 # can arrive that we cannot label without a customs declaration -- it must be refused HERE, in the row,
 # rather than at the moment money is spent.
@@ -97,6 +99,11 @@ def order_gate(order: dict[str, Any], *, shipment: dict[str, Any] | None = None,
             reasons.append(
                 f"Ships to {country}. International labels are not supported yet — "
                 "mark it shipped manually once you have posted it.")
+        # Structurally complete is not the same as deliverable, and only a carrier can answer the
+        # second. The verdict is stored on the order rather than recomputed, so this stays free.
+        undeliverable = blocking_reason(order)
+        if undeliverable:
+            reasons.append(undeliverable)
     status = str(order.get("payment_status") or order.get("status") or "").strip().lower()
     if status in {"refunded", "cancelled", "canceled"}:
         reasons.append(f"Order is {status}.")

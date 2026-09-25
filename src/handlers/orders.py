@@ -17,10 +17,13 @@ from stripe_link.common import (
     resolve_stripe_mode,
     tenant_id_from_event,
 )
+from stripe_link.domain.address_validation import needs_check, record_validation
 from stripe_link.domain.carriers import carrier_options, service_has_tracking, tracking_url
 from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_state, product_index
 from stripe_link.domain.handover import handover_groups, orders_csv
 from stripe_link.domain.shipment_notice import notify_buyer
+from stripe_link.domain.shipping_providers import ProviderError, provider_for
+from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.domain.shipping import ShipmentError, build_manual_shipment, label_readiness
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -32,9 +35,14 @@ from stripe_link.repositories.documents import (
 )
 
 
+# The same encryption context the shipping handler uses, so one key decrypts under both.
+SECRET_MODE = "shipping"
+SECRET_FIELD = "provider.api_key_ref"
+
+
 def handler(event, context, repository=None, products_repo=None, shipments_repo=None,
             shipping_config_repo=None, user_profiles_repo=None, mailer_send=None,
-            now_fn: Callable[[], int] = lambda: int(time.time())):
+            secret_cipher=None, now_fn: Callable[[], int] = lambda: int(time.time())):
     mode = resolve_stripe_mode(event)
     repository = repository or orders_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
@@ -42,6 +50,9 @@ def handler(event, context, repository=None, products_repo=None, shipments_repo=
         return json_response({})
 
     order_id = path_params(event).get("order_id")
+    if method == "POST" and _is_validate_path(event):
+        return validate_addresses(event, repository, mode, shipping_config_repo=shipping_config_repo,
+                                  secret_cipher=secret_cipher, now_fn=now_fn)
     if method == "POST":
         if not order_id:
             return error_response("An order id is required.", code="missing_order")
@@ -246,3 +257,72 @@ def export_orders(event, repository, mode, *, products_repo=None, shipments_repo
         },
         "body": orders_csv(orders),
     }
+
+
+def _is_validate_path(event) -> bool:
+    path = str((event or {}).get("resource") or (event or {}).get("path") or "")
+    return path.rstrip("/").endswith("/validate-addresses")
+
+
+# One request, a bounded batch. Each address is a provider call, so this is the number the screen can ask
+# for without turning a page load into a minute of waiting.
+VALIDATION_BATCH = 20
+
+
+def validate_addresses(event, repository, mode, *, shipping_config_repo=None, secret_cipher=None,
+                       now_fn=lambda: int(time.time())):
+    """Ask the carrier whether these addresses are deliverable, and write the answers down.
+
+    Batched and bounded on purpose. Validating on every render would be one network call per row per
+    load; validating one row per request would be twenty requests for a page of twenty. This is one
+    request that checks the orders which have no current verdict, and stops.
+
+    An order already known undeliverable is NOT re-checked -- the tenant has to fix the address, and
+    asking the carrier the same question again costs money and changes nothing.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+
+    config = (shipping_config_repo or shipping_config_repository()).get(tenant_id) or {}
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    if not name:
+        return error_response("Set up a shipping provider before checking addresses.",
+                              code="no_provider")
+
+    orders = [o for o in repository.list_for_tenant(tenant_id) if needs_check(o)][:VALIDATION_BATCH]
+    if not orders:
+        return json_response({"checked": 0, "orders": []})
+
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    try:
+        cipher = secret_cipher if secret_cipher is not None else KmsSecretCipher()
+        api_key = cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        ) if secret_ref else ""
+        provider = provider_for(name, api_key)
+    except ProviderError as exc:
+        return error_response(str(exc), status_code=502, code="provider_error")
+
+    now = int(now_fn())
+    checked = []
+    for order in orders:
+        address = order.get("shipping_address") or {}
+        try:
+            result = provider.validate_address(address)
+        except ProviderError as exc:
+            # UNKNOWN, never undeliverable: a provider outage must not turn a tenant's whole list
+            # unshippable.
+            result = {"valid": None, "messages": [str(exc)[:200]]}
+        except Exception:  # noqa: BLE001 - one bad address must not stop the batch
+            result = {"valid": None, "messages": []}
+        order["address_validation"] = record_validation(address, result, now=now)
+        try:
+            repository.put(order)
+        except RepositoryError:
+            pass
+        checked.append({"order_id": order.get("order_id"),
+                        "address_validation": order["address_validation"]})
+
+    return json_response({"checked": len(checked), "orders": checked})
