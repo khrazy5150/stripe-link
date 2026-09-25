@@ -7764,3 +7764,11 @@ a.orders-place { text-decoration: underline; }
   display: inline-block;
   text-decoration: none;
 }
+
+.drawer-suggestion {
+  margin-top: 1rem;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+  background: #f5f9ff;
+}

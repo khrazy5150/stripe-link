@@ -113,3 +113,38 @@ def blocking_reason(order: dict[str, Any]) -> str:
     detail = "; ".join(state["messages"][:2])
     return (f"The carrier will not deliver to this address. {detail}".strip()
             if detail else "The carrier will not deliver to this address.")
+
+
+def suggested_correction(order: dict[str, Any]) -> dict[str, Any]:
+    """What the carrier would write on the label instead, when it differs from what the buyer typed.
+
+    Returns `{}` when there is nothing worth showing. "Worth showing" excludes pure capitalisation --
+    USPS returns everything title-cased, and "1493 Osage St" versus "1493 OSAGE ST" is not a correction,
+    it is a house style. A ZIP+4, a folded apartment line or a corrected street IS worth showing, because
+    each one changes what a carrier can do with the parcel.
+
+    It is **offered, never applied**. Changing where a parcel goes without being asked is worse than
+    failing to deliver it -- the buyer typed an address and is entitled to have it be the one used.
+    """
+    state = validation_state(order)
+    if state["stale"] or state["status"] == UNCHECKED:
+        return {}
+    stored = order.get("address_validation") or {}
+    normalized = stored.get("normalized") or {}
+    address = order.get("shipping_address") or {}
+    if not normalized.get("street1"):
+        return {}
+
+    changed = {}
+    for field in ADDRESS_FIELDS:
+        was = " ".join(str(address.get(field) or "").split())
+        now = " ".join(str(normalized.get(field) or "").split())
+        if not now:
+            continue
+        if was.lower() == now.lower():
+            continue  # capitalisation only: a house style, not a correction
+        changed[field] = {"was": was, "suggested": now}
+    if not changed:
+        return {}
+    return {"changed": changed, "normalized": normalized,
+            "messages": [str(m) for m in (stored.get("messages") or [])]}

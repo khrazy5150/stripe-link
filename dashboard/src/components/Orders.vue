@@ -616,6 +616,9 @@ async function checkAddresses({ silent = false } = {}) {
   checkingAddresses.value = true;
   try {
     const body = await apiRequest("/orders/validate-addresses", { method: "POST", body: {} });
+    // Say what happened. The button removes itself once nothing is unchecked, so without this the whole
+    // interaction is "I clicked something and it vanished".
+    message.value = describeCheck(body);
     if (body?.checked) await load();
   } catch (err) {
     // A failed check leaves every order exactly as it was -- unchecked, not undeliverable. Only say so
@@ -624,6 +627,22 @@ async function checkAddresses({ silent = false } = {}) {
   } finally {
     checkingAddresses.value = false;
   }
+}
+
+function describeCheck(body) {
+  const checked = Number(body?.checked || 0);
+  if (!checked) return "No addresses needed checking.";
+  const tally = body?.summary || {};
+  const parts = [];
+  if (tally.deliverable) parts.push(`${tally.deliverable} deliverable`);
+  if (tally.undeliverable) parts.push(`${tally.undeliverable} undeliverable`);
+  // "Could not check" is not "will not deliver" and must not read like it.
+  if (tally.unknown) parts.push(`${tally.unknown} the carrier could not confirm`);
+  const suggestions = Number(body?.suggestions || 0);
+  const tail = suggestions
+    ? ` The carrier suggests a more precise address for ${suggestions} — open the order to see it.`
+    : "";
+  return `Checked ${checked} address${checked === 1 ? "" : "es"}: ${parts.join(", ")}.${tail}`;
 }
 
 const uncheckedCount = computed(() =>

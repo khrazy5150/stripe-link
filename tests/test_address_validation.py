@@ -22,6 +22,7 @@ from stripe_link.domain.address_validation import (
     blocking_reason,
     needs_check,
     record_validation,
+    suggested_correction,
     validation_state,
 )
 from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_state
@@ -122,6 +123,51 @@ class GateTests(unittest.TestCase):
         self.assertNotEqual(order_fulfilment_state(order)["status"], "not_shippable")
 
 
+class SuggestionTests(unittest.TestCase):
+    """The carrier's own version of the address. OFFERED, never applied."""
+
+    VERDICT = {"status": DELIVERABLE, "fingerprint": address_fingerprint(ADDRESS), "checked_at": 100,
+               "messages": ["More information, such as an apartment number, may give a more specific address."],
+               "normalized": {"street1": "1493 Osage St Apt 542-A", "street2": "", "city": "Denver",
+                              "state": "CO", "postal_code": "80204-2417", "country": "US"}}
+
+    def test_it_names_only_what_actually_differs(self):
+        # The real Shippo answer for a real order (dev, 2026-09-25): a ZIP+4 and a folded apartment line.
+        changed = suggested_correction(_order(verdict=self.VERDICT))["changed"]
+        self.assertEqual(sorted(changed), ["postal_code", "street1"])
+        self.assertEqual(changed["postal_code"]["suggested"], "80204-2417")
+
+    def test_CAPITALISATION_alone_is_not_a_correction(self):
+        """USPS title-cases everything. "1493 Osage St" vs "1493 OSAGE ST" is a house style, and offering
+        it as a fix trains the tenant to ignore the ones that matter."""
+        order = _order(address={**ADDRESS, "street1": "1493 OSAGE ST", "city": "DENVER"},
+                       verdict={**self.VERDICT,
+                                "fingerprint": address_fingerprint({**ADDRESS, "street1": "1493 OSAGE ST",
+                                                                    "city": "DENVER"}),
+                                "normalized": {"street1": "1493 Osage St", "city": "Denver", "state": "CO",
+                                               "postal_code": "80204", "country": "US"}})
+        self.assertEqual(suggested_correction(order), {})
+
+    def test_a_provider_that_returned_no_address_offers_nothing(self):
+        order = _order(verdict={**self.VERDICT, "normalized": {}})
+        self.assertEqual(suggested_correction(order), {})
+
+    def test_a_STALE_verdict_offers_nothing(self):
+        order = _order(address={**ADDRESS, "street1": "99 New Road"}, verdict=self.VERDICT)
+        self.assertEqual(suggested_correction(order), {})
+
+    def test_an_unchecked_order_offers_nothing(self):
+        self.assertEqual(suggested_correction(_order()), {})
+
+    def test_the_stored_address_is_NEVER_rewritten(self):
+        """The buyer typed an address and is entitled to have it be the one used. A ZIP+4 is worth
+        having, not worth taking without being asked."""
+        order = _order(verdict=self.VERDICT)
+        suggested_correction(order)
+        self.assertEqual(order["shipping_address"]["street1"], "1493 Osage St")
+        self.assertEqual(order["shipping_address"]["postal_code"], "80204")
+
+
 class Repo:
     def __init__(self, rows=None, key="order_id"):
         self.rows = list(rows or [])
@@ -181,6 +227,15 @@ class EndpointTests(unittest.TestCase):
                 for n in range(VALIDATION_BATCH + 5)]
         result, _ = _check(many)
         self.assertEqual(json.loads(result["body"])["checked"], VALIDATION_BATCH)
+
+    def test_it_reports_what_it_DID_so_the_button_does_not_just_vanish(self):
+        """The tenant clicked something, it disappeared, and nothing visibly changed. The response has to
+        carry enough to say what happened."""
+        result, _ = _check([_order(), _order(address={**ADDRESS, "street1": "1 Invalid Way"}, order_id="o2")])
+        body = json.loads(result["body"])
+        self.assertEqual(body["checked"], 2)
+        self.assertEqual(body["summary"], {DELIVERABLE: 1, UNDELIVERABLE: 1})
+        self.assertIn("suggestions", body)
 
     def test_no_provider_is_refused_rather_than_silently_doing_nothing(self):
         result, _ = _check([_order()], config={"tenant_id": "t1", "provider": {}})
