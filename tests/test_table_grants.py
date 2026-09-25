@@ -20,13 +20,13 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HANDLERS = ROOT / "src" / "handlers"
 
-# Entry points whose module mentions a table env var that the entry point itself never reaches.
-# function name -> (handler module, table env var, why)
+# Entry points whose module mentions a table env var -- or calls the repository factory for one -- that the
+# entry point ITSELF never reaches. Several handlers hold more than one entry point in one module, so this
+# is keyed by the pair.
+# (function name, table env var) -> (handler module, why)
 PURE_ENTRY_POINTS = {
-    "OfferResolveFunction": (
-        "offers", "SERVICES_TABLE",
-        "resolve_handler takes offer/products/services from the request body and reads no table",
-    ),
+    ("OfferResolveFunction", "SERVICES_TABLE"): (
+        "offers", "resolve_handler takes offer/products/services from the request body and reads no table"),
 }
 
 
@@ -92,27 +92,72 @@ class TableGrantTests(unittest.TestCase):
 
     def test_every_handler_that_names_a_table_is_granted_it(self):
         missing = []
+        repo_factories = self._repository_factories()
         for path in sorted(HANDLERS.glob("*.py")):
             source = path.read_text(encoding="utf-8")
             for env, table in sorted(self.env_to_table.items()):
-                if not re.search(rf"\b{env}\b", source):
+                # A handler reaches a table two ways: by naming the env var, or by calling the repository
+                # factory that names it. Only the first was checked, and handlers/refunds.py slipped
+                # through by calling products_repository() -- where a missing grant would have been
+                # SILENT, because the read is wrapped in a swallow and the refund would simply have
+                # skipped its return gate.
+                names_env = bool(re.search(rf"\b{env}\b", source))
+                # The factory check applies only where the module has ONE entry point. In a module with
+                # several, `products_repository()` appearing somewhere says nothing about which function
+                # reaches it -- that ambiguity is what PURE_ENTRY_POINTS exists for, and inferring from it
+                # would mean exempting half the codebase by hand. With a single entry point there is no
+                # ambiguity: whatever the module reaches, that function reaches.
+                sole_entry_point = len(self.functions_by_module.get(path.stem, [])) == 1
+                calls_factory = sole_entry_point and any(
+                    re.search(rf"\b{factory}\s*\(", source) for factory in repo_factories.get(env, ()))
+                if not (names_env or calls_factory):
                     continue
                 for function in self.functions_by_module.get(path.stem, []):
-                    if PURE_ENTRY_POINTS.get(function, (None, None))[:2] == (path.stem, env):
+                    exemption = PURE_ENTRY_POINTS.get((function, env))
+                    if exemption and exemption[0] == path.stem:
                         continue
                     if not re.search(rf"TableName: !Ref {table}\b", self.blocks[function]):
                         missing.append(f"{function} (handlers.{path.stem}) reads {env} but is not granted {table}")
         self.assertEqual([], missing, "\n".join(missing))
 
+    @staticmethod
+    def _repository_factories() -> dict[str, tuple[str, ...]]:
+        """env var -> the repository factories that read it, parsed from the repositories module."""
+        source = (ROOT / "src" / "stripe_link" / "repositories" / "documents.py").read_text(encoding="utf-8")
+        factories: dict[str, list[str]] = {}
+        for name, body in re.findall(r"\ndef (\w*repository)\(((?:.|\n)*?)\n\n", source):
+            for env in re.findall(r'os\.environ\.get\("(\w+_TABLE)"', body):
+                factories.setdefault(env, []).append(name)
+        return {env: tuple(names) for env, names in factories.items()}
+
+    def test_the_factory_map_actually_parsed(self):
+        """A silently empty map would turn the check above back into the one that missed refunds.py."""
+        factories = self._repository_factories()
+        self.assertIn("PRODUCTS_TABLE", factories)
+        self.assertIn("products_repository", factories["PRODUCTS_TABLE"])
+
+    def test_a_handler_reaching_a_table_only_through_a_factory_is_still_checked(self):
+        """The hole this closes: handlers/refunds.py reads every product's refund_policy by calling
+        products_repository(), never naming PRODUCTS_TABLE, so the env-var check could not see it -- and
+        the grant would have failed SILENTLY, because that read is best-effort and a failure would simply
+        have skipped the return gate on every refund."""
+        source = (HANDLERS / "refunds.py").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"\bPRODUCTS_TABLE\b", "refunds.py now names it; pick another example")
+        self.assertRegex(source, r"\bproducts_repository\s*\(")
+        self.assertEqual(len(self.functions_by_module.get("refunds", [])), 1)
+        self.assertRegex(self.blocks["RefundsFunction"], r"TableName: !Ref ProductsTable\b")
+
     def test_no_exemption_outlives_its_reason(self):
-        for function, (module, env, why) in PURE_ENTRY_POINTS.items():
-            with self.subTest(function=function):
+        factories = self._repository_factories()
+        for (function, env), (module, why) in PURE_ENTRY_POINTS.items():
+            with self.subTest(function=function, env=env):
                 self.assertIn(function, self.blocks, f"{function} is gone; drop the exemption ({why})")
                 source = (HANDLERS / f"{module}.py").read_text(encoding="utf-8")
-                self.assertRegex(
-                    source, rf"\b{env}\b",
-                    f"handlers.{module} no longer names {env}; the {function} exemption is dead weight",
-                )
+                reached = bool(re.search(rf"\b{env}\b", source)) or any(
+                    re.search(rf"\b{factory}\s*\(", source) for factory in factories.get(env, ()))
+                self.assertTrue(
+                    reached,
+                    f"handlers.{module} no longer reaches {env}; the {function} exemption is dead weight")
 
 
 if __name__ == "__main__":

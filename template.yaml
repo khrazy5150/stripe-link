@@ -1161,6 +1161,11 @@ Resources:
             TableName: !Ref OrdersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RefundsTable
+        # Approving a refund reads each product's refund_policy to decide whether the goods must come
+        # back before the money does (plans/ORDER_FULFILMENT.md R1). Without this grant the read fails
+        # SILENTLY -- it is a best-effort lookup -- and every refund would skip its return gate.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
         - Statement:

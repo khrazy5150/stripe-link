@@ -164,6 +164,11 @@
         },
         "full_policy": {
           "type": "string"
+        },
+        "keep_it_below": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Below this order value (cents), a refund that would normally require a physical return is granted without one. Return postage above the item's worth loses money, and a buyer held waiting files a chargeback that costs more than the refund."
         }
       }
     },
