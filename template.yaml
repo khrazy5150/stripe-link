@@ -3222,6 +3222,13 @@ Resources:
         # Buying one claims a shipment row BEFORE the money is spent, then records what was bought.
         - DynamoDBCrudPolicy:
             TableName: !Ref ShipmentsTable
+        # A RETURN label is bought against a refund request that is already waiting for goods, and writes
+        # its expiry back onto that request (plans/ORDER_FULFILMENT.md R2). Refund requests live in the
+        # NOTIFICATIONS table -- refund_requests_repository() reads NOTIFICATIONS_TABLE -- so there is no
+        # RefundRequestsTable to grant, and naming one would have been a Ref to a resource that does not
+        # exist. The grants test caught it.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
         # The buyer's "on its way" email goes out from the TENANT's business name and support address.
         - DynamoDBReadPolicy:
             TableName: !Ref UserProfilesTable
@@ -3276,6 +3283,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/labels
             Method: POST
+        ShippingReturnLabels:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/return-labels
+            Method: POST
+        ShippingReturnLabelsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/return-labels
+            Method: OPTIONS
         ShippingLabelsOptions:
           Type: Api
           Properties:

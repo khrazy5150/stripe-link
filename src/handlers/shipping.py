@@ -11,6 +11,7 @@ from stripe_link.common import (
 from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
 from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
 from stripe_link.domain.rate_policy import select_rate
+from stripe_link.domain.returns import RETURN_STATES, return_deadline, return_label_expired
 from stripe_link.domain.shipping import (
     ShipmentError,
     build_shipment,
@@ -19,6 +20,7 @@ from stripe_link.domain.shipping import (
     mark_purchased,
     packable_items,
     product_readiness,
+    return_address,
     shipment_id_for,
     tenant_boxes,
 )
@@ -30,6 +32,7 @@ from stripe_link.repositories.documents import (
     RepositoryError,
     orders_repository,
     products_repository,
+    refund_requests_repository,
     shipments_repository,
     shipping_config_repository,
 )
@@ -50,7 +53,8 @@ def _action(event) -> str:
 
 
 def handler(event, context, repository=None, secret_cipher=None, products_repo=None, orders_repo=None,
-            shipments_repo=None, user_profiles_repo=None, mailer_send=None):
+            shipments_repo=None, user_profiles_repo=None, mailer_send=None,
+            refund_requests_repo=None, now_fn=lambda: int(time.time())):
     repository = repository or shipping_config_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     method = (event or {}).get("httpMethod", "").upper()
@@ -61,10 +65,14 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
     path = str((event or {}).get("path") or (event or {}).get("resource") or "")
     if method == "POST" and path.rstrip("/").endswith("/test"):
         return test_shipping_connection(event, repository, secret_cipher)
+    if _action(event) == "return-labels" and method == "POST":
+        return buy_return_label(event, repository, secret_cipher, orders_repo=orders_repo,
+                                shipments_repo=shipments_repo, refund_requests_repo=refund_requests_repo,
+                                now_fn=now_fn)
     if _action(event) == "labels" and method == "POST":
         return buy_label(event, repository, secret_cipher, products_repo=products_repo,
                          orders_repo=orders_repo, shipments_repo=shipments_repo,
-                         user_profiles_repo=user_profiles_repo, mailer_send=mailer_send)
+                         user_profiles_repo=user_profiles_repo, mailer_send=mailer_send, now_fn=now_fn)
     if _action(event) == "rates" and method == "POST":
         return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
                            orders_repo=orders_repo)
@@ -421,3 +429,127 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
             pass
 
     return json_response({"shipment": saved, "notification": notified}, status_code=201)
+
+
+def buy_return_label(event, repository, secret_cipher, *, orders_repo=None, shipments_repo=None,
+                     refund_requests_repo=None, now_fn=lambda: int(time.time())):
+    """A label for the parcel coming BACK. The reverse of buy_label on the same primitive.
+
+    Two things differ, and both are about money:
+
+    1. **It is bought against a refund request that is already waiting for goods.** Issuing a return label
+       for a refund nobody approved gives away postage for a parcel the tenant never asked for.
+    2. **It expires.** The buyer has a short window to actually post it (the tenant's
+       `return_window_days`, default 3). A label left open indefinitely holds the tenant's money hostage
+       while the refund window -- which is finite, and shorter still for BNPL -- runs down.
+
+    Return labels are commonly PAY-ON-SCAN, so an unused one usually costs nothing. That is what makes a
+    short expiry safe rather than punitive, and it must be verified per carrier before it is relied on.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    body = parse_json_body(event)
+    request_id = str(body.get("refund_request_id") or "").strip()
+    rate_id = str(body.get("rate_id") or "").strip()
+    parcel = body.get("parcel") if isinstance(body.get("parcel"), dict) else None
+    if not request_id or not rate_id or not parcel:
+        return error_response("A refund request, a rate and a parcel are required.",
+                              code="missing_return_label")
+
+    requests_repo = refund_requests_repo or refund_requests_repository()
+    refund_request = requests_repo.get(tenant_id, request_id)
+    if not refund_request:
+        return error_response("Refund request not found.", status_code=404, code="not_found")
+    if str(refund_request.get("status") or "") not in RETURN_STATES:
+        return error_response("This refund request is not waiting on a return.", code="not_returning")
+    # The forfeit. A second free label after the window lapsed is the tenant paying twice for a buyer who
+    # did not post it the first time.
+    if return_label_expired(refund_request, now=int(now_fn())):
+        return error_response(
+            "The return window for this refund has passed, so free return postage no longer applies.",
+            code="return_window_passed")
+
+    config = repository.get(tenant_id)
+    if not config:
+        return error_response("Shipping config not found.", status_code=404, code="not_found")
+    blockers = label_readiness(config)
+    if blockers:
+        return error_response(" ".join(blockers), code="not_ready")
+
+    mode = resolve_stripe_mode(event)
+    orders = orders_repo or orders_repository(mode=mode)
+    order = orders.get(tenant_id, str(refund_request.get("order_id") or ""))
+    if not order:
+        return error_response("Order for this refund request was not found.", status_code=404,
+                              code="order_not_found")
+
+    shipments = shipments_repo or shipments_repository(mode=mode)
+    shipment_id = shipment_id_for(str(order.get("order_id") or ""), "return")
+    existing = shipments.get(tenant_id, shipment_id)
+    if existing and existing.get("status") in {"purchased", "shipped"}:
+        return json_response({"shipment": existing, "already_bought": True})
+
+    now = int(now_fn())
+    # Reversed: the parcel travels from the BUYER back to the tenant's return address.
+    from_address = order.get("shipping_address") or {}
+    to_address = return_address(config)
+    try:
+        claim = build_shipment(
+            order={**order, "shipping_address": to_address},
+            from_address=from_address, parcel=parcel, kind="return", now=now)
+    except ShipmentError as exc:
+        return error_response(str(exc), code="invalid_shipment")
+    claim["refund_request_id"] = request_id
+    claim["expires_at"] = return_deadline(refund_request, now=now)
+    try:
+        shipments.put(claim)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="shipment_not_saved")
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        ) if secret_ref else ""
+        purchase = provider_for(name, api_key).buy_label(
+            rate_id=rate_id,
+            label_format=str((config.get("label_options") or {}).get("format") or "pdf"),
+            idempotency_key=shipment_id)
+    except ProviderError as exc:
+        failed = mark_failed(claim, str(exc), now=now)
+        try:
+            shipments.put(failed)
+        except RepositoryError:
+            pass
+        return error_response(str(exc), status_code=502, code="provider_error")
+
+    purchase_record = {
+        **{k: v for k, v in purchase.items() if k != "provider" and not k.startswith("provider_")},
+        "provider": {"name": str(purchase.get("provider") or name), "rate_id": rate_id,
+                     "transaction_id": str(purchase.get("provider_transaction_id") or ""),
+                     "idempotency_key": shipment_id},
+    }
+    amount = body.get("amount")
+    if amount is not None:
+        purchase_record["cost"] = {"amount": int(amount), "currency": str(body.get("currency") or "usd")}
+    purchased = mark_purchased(claim, purchase=purchase_record, now=now)
+    purchased["refund_request_id"] = request_id
+    purchased["expires_at"] = claim["expires_at"]
+    try:
+        saved = shipments.put(purchased)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="shipment_not_saved")
+
+    # The request remembers its label, so the screen can show the buyer's tracking without a second lookup.
+    refund_request["return_shipment_id"] = shipment_id
+    refund_request["return_label_expires_at"] = saved["expires_at"]
+    try:
+        requests_repo.put(refund_request)
+    except RepositoryError:
+        pass
+
+    return json_response({"shipment": saved, "refund_request": refund_request,
+                          "expires_at": saved["expires_at"]}, status_code=201)

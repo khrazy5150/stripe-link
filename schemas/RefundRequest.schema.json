@@ -187,6 +187,9 @@
     },
     "return_note": {
       "type": "string"
+    },
+    "return_label_expires_at": {
+      "type": "integer"
     }
   }
 }

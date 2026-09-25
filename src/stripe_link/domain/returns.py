@@ -137,3 +137,30 @@ def return_deadline(request: dict[str, Any], *, now: int) -> int:
     days = int(snapshot.get("return_window_days") or DEFAULT_RETURN_WINDOW_DAYS)
     started = int(request.get("return_started_at") or request.get("updated_at") or now)
     return started + days * 86400
+
+
+def return_label_expired(request: dict[str, Any], *, now: int) -> bool:
+    """Has the buyer's window to post it back lapsed?
+
+    The author's rule: the buyer has about three days to act or forfeits the free return postage. Enforced
+    where the label is ISSUED rather than by a sweep that closes the request, because the two are
+    different consequences: a lapsed window costs the buyer free postage, it does not by itself decide
+    their refund. Whether to close the request as well is the tenant's call.
+    """
+    expires_at = int((request or {}).get("return_label_expires_at") or 0)
+    return bool(expires_at) and int(now) > expires_at
+
+
+def advance_to_in_transit(request: dict[str, Any], *, now: int) -> dict[str, Any]:
+    """A carrier scan says the parcel is moving. It does NOT say it arrived, or that the right item is in
+    it -- which is why `return_received` stays the tenant's decision (R1).
+
+    The scan itself will come from the provider's tracking webhook, which belongs to §P3; this is the
+    transition it drives, kept here so both callers agree on what a scan means.
+    """
+    updated = dict(request or {})
+    if str(updated.get("status") or "") == RETURN_PENDING:
+        updated["status"] = RETURN_IN_TRANSIT
+        updated["return_in_transit_at"] = int(now)
+        updated["updated_at"] = int(now)
+    return updated
