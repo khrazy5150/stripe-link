@@ -113,6 +113,35 @@
         "free_shipping_threshold": {
           "type": "integer",
           "minimum": 0
+        },
+        "prefer": {
+          "type": "string",
+          "enum": [
+            "cheapest",
+            "fastest",
+            "best_value"
+          ]
+        },
+        "max_transit_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "preferred_carrier": {
+          "type": "string"
+        },
+        "preferred_carrier_tolerance": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_auto_amount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
         }
       }
     },

@@ -3211,6 +3211,9 @@ Resources:
         # not read must never cost the tenant the shipping config they came here to save.
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
+        # Rating a label needs the ORDER it ships: its destination and its lines.
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ShippingConfigTable
         - Version: "2012-10-17"
@@ -3243,6 +3246,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/test
             Method: POST
+        ShippingRates:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/rates
+            Method: POST
+        ShippingRatesOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/rates
+            Method: OPTIONS
 
   CustomersFunction:
     Type: AWS::Serverless::Function

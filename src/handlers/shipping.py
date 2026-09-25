@@ -9,11 +9,20 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
-from stripe_link.domain.shipping import label_readiness, product_readiness
+from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
+from stripe_link.domain.rate_policy import select_rate
+from stripe_link.domain.shipping import (
+    label_readiness,
+    packable_items,
+    product_readiness,
+    tenant_boxes,
+)
+from stripe_link.domain.shipping_packing import pack
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.repositories.documents import (
     RepositoryError,
+    orders_repository,
     products_repository,
     shipping_config_repository,
 )
@@ -27,7 +36,13 @@ SECRET_MODE = "shipping"
 SECRET_FIELD = "provider.api_key_ref"
 
 
-def handler(event, context, repository=None, secret_cipher=None, products_repo=None):
+def _action(event) -> str:
+    """The trailing path segment: /shipping, /shipping/test, /shipping/rates."""
+    path = str((event or {}).get("resource") or (event or {}).get("path") or "")
+    return path.rstrip("/").rsplit("/", 1)[-1].lower()
+
+
+def handler(event, context, repository=None, secret_cipher=None, products_repo=None, orders_repo=None):
     repository = repository or shipping_config_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     method = (event or {}).get("httpMethod", "").upper()
@@ -38,6 +53,9 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
     path = str((event or {}).get("path") or (event or {}).get("resource") or "")
     if method == "POST" and path.rstrip("/").endswith("/test"):
         return test_shipping_connection(event, repository, secret_cipher)
+    if _action(event) == "rates" and method == "POST":
+        return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
+                           orders_repo=orders_repo)
     if method in {"POST", "PUT"}:
         return save_shipping_config(event, repository, secret_cipher, products_repo)
     if method == "GET":
@@ -196,3 +214,85 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
         "connection": {"status": status, "message": message, "carriers": carriers},
         "readiness": label_readiness(saved),
     }, status_code=200 if status == "connected" else 502)
+
+
+def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_repo=None):
+    """Rates for ONE order, packed by the same `pack()` every other caller uses.
+
+    Rated on demand -- when a row is selected or expanded -- and never for a whole page at once. Every
+    lookup is a provider shipment creation: a network call per order, rate-limited and slow, and rating
+    forty rows nobody has acted on is waste that makes the screen feel broken.
+
+    The returned rates are DISPLAY. The purchase re-rates, because a cached rate id can expire and a price
+    shown ten minutes ago is not a price.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    order_id = str(parse_json_body(event).get("order_id") or "").strip()
+    if not order_id:
+        return error_response("An order id is required.", code="missing_order")
+
+    config = repository.get(tenant_id)
+    if not config:
+        return error_response("Shipping config not found.", status_code=404, code="not_found")
+    blockers = label_readiness(config)
+    if blockers:
+        return error_response(" ".join(blockers), code="not_ready")
+
+    mode = resolve_stripe_mode(event)
+    orders = orders_repo or orders_repository(mode=mode)
+    order = orders.get(tenant_id, order_id)
+    if not order:
+        return error_response("Order not found.", status_code=404, code="order_not_found")
+
+    products = (products_repo or products_repository(mode=mode)).list_for_tenant(tenant_id) or []
+    state = order_fulfilment_state(
+        order,
+        products_by_id={str(p.get("product_id") or ""): p for p in products if p.get("product_id")},
+        index=product_index(products),
+    )
+    # The same gate the row showed. Rating an ineligible order would let the screen and this endpoint
+    # disagree about eligibility, which is the disagreement the server-side gates exist to prevent.
+    if not state["eligible"]:
+        return error_response(" ".join(state["reasons"]) or "This order cannot be shipped.",
+                              code="not_eligible")
+
+    parcels = pack(packable_items(state["lines"], {str(p.get("product_id") or ""): p for p in products}),
+                   tenant_boxes(config))
+    if not parcels:
+        return error_response("Nothing in this order needs a parcel.", code="nothing_to_pack")
+    if len(parcels) > 1:
+        # Multi-parcel orders are out of scope for this slice and must say so rather than quietly quoting
+        # postage for one box and shipping three (plans/ORDER_FULFILMENT.md, "Deliberately not").
+        return error_response(
+            f"This order needs {len(parcels)} parcels, and buying multi-parcel labels is not supported "
+            "yet — mark it shipped manually once you have posted it.",
+            code="multi_parcel")
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        ) if secret_ref else ""
+        rates = provider_for(name, api_key).rates(
+            from_address=config.get("ship_from_address") or {},
+            to_address=order.get("shipping_address") or {},
+            parcel=parcels[0],
+        )
+    except ProviderError as exc:
+        return error_response(str(exc), status_code=502, code="provider_error")
+
+    # The policy lives on `rate_options` -- the object that was already about rates and that nothing had
+    # ever written to -- rather than in a second, overlapping object beside it.
+    selection = select_rate(rates, config.get("rate_options"))
+    return json_response({
+        "order_id": order_id,
+        "parcel": parcels[0],
+        "rates": selection["candidates"],
+        "selected": selection["rate"],
+        "selection_reason": selection["reason"],
+        "withheld": selection["withheld"],
+    })

@@ -7580,3 +7580,20 @@ button:disabled {
   text-transform: none;
   letter-spacing: 0;
 }
+
+/* ---- Orders: rates (F3) ------------------------------------------------------------------------ */
+
+.orders-col-rate { min-width: 24rem; }
+
+.orders-rate-select {
+  width: 100%;
+  max-width: 26rem;
+  font-size: 1.3rem;
+}
+
+.orders-rate-error {
+  display: block;
+  margin-top: 0.3rem;
+  color: #b91c1c;
+  font-size: 1.25rem;
+}

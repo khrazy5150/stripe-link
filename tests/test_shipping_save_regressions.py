@@ -90,7 +90,14 @@ class ReadinessComesFromTheServerTests(unittest.TestCase):
         self.assertIn("const readiness = ref([])", self.SCREEN)
 
     def test_every_response_carries_it(self):
-        self.assertEqual(self.HANDLER.count("label_readiness("), 3)  # GET, PUT, and the connection test
+        """Named, not counted -- the count broke the moment /shipping/rates started checking the same
+        readiness before quoting, which is exactly what it should do."""
+        for function in ("handler", "save_shipping_config", "test_shipping_connection", "quote_rates"):
+            body = self.HANDLER.split(f"def {function}(", 1)
+            self.assertEqual(len(body), 2, f"no {function}() in the shipping handler")
+            window = body[1].split("\ndef ", 1)[0]
+            self.assertIn("label_readiness(", window,
+                          f"{function}() must answer with what still blocks a label")
 
     def test_the_screen_reads_it_from_each_response(self):
         """Counting the calls asserted only that there were four of them, and the comment naming which

@@ -108,6 +108,45 @@
 
     <section class="dashboard-card">
       <header class="dashboard-card-header">
+        <h2>Rate preference</h2>
+        <p>Which rate we pick for you when you buy labels. You can always change it on an individual
+          order before buying.</p>
+      </header>
+      <div class="dashboard-card-body">
+        <div class="offer-two-column">
+          <label>
+            Prefer
+            <select v-model="form.rate_options.prefer">
+              <option value="cheapest">Cheapest</option>
+              <option value="fastest">Fastest</option>
+              <option value="best_value">Best value</option>
+            </select>
+          </label>
+          <label>
+            Must arrive within <span class="field-optional">optional</span>
+            <input v-model.trim="form.rate_options.max_transit_days" type="number" min="1" placeholder="Any" />
+            <small class="field-hint">Days. Set this if you promise a delivery speed — otherwise a slow
+              service can be the cheapest one.</small>
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label>
+            Preferred carrier <span class="field-optional">optional</span>
+            <input v-model.trim="form.rate_options.preferred_carrier" type="text" placeholder="e.g. USPS" />
+            <small class="field-hint">Used when it costs about the same as the cheapest.</small>
+          </label>
+          <label>
+            Never pick a rate above <span class="field-optional">optional</span>
+            <input v-model.trim="form.rate_options.max_auto_amount" type="text" placeholder="e.g. 25.00" />
+            <small class="field-hint">We still show the rate — you just choose it yourself. A safety net,
+              because buying labels in bulk spends money on every selected order at once.</small>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
+      <header class="dashboard-card-header">
         <h2>Boxes</h2>
         <p>The boxes you pack into. Several items in one order share the smallest box they all fit in;
           with no boxes listed, every item ships in its own parcel, which usually costs more.</p>
@@ -286,7 +325,8 @@ function defaultForm() {
     provider: { name: "", base_url: "", api_key: "" },
     ship_from_address: emptyAddress(),
     return_address: emptyAddress(),
-    rate_options: { default_service_level: "", allowed_carriers: "", markup_amount: "", free_shipping_threshold: "" },
+    rate_options: { default_service_level: "", allowed_carriers: "", markup_amount: "", free_shipping_threshold: "",
+                    prefer: "cheapest", max_transit_days: "", preferred_carrier: "", max_auto_amount: "" },
     label_options: { format: "pdf", size: "4x6" },
     boxes: [],
   };
@@ -399,6 +439,11 @@ function applyConfig(config) {
     allowed_carriers: Array.isArray(rate.allowed_carriers) ? rate.allowed_carriers.join(", ") : "",
     markup_amount: rate.markup_amount ?? "",
     free_shipping_threshold: rate.free_shipping_threshold ?? "",
+    prefer: rate.prefer || "cheapest",
+    max_transit_days: rate.max_transit_days ?? "",
+    preferred_carrier: rate.preferred_carrier || "",
+    // Stored in cents, shown in dollars -- the tenant types "25.00", not "2500".
+    max_auto_amount: rate.max_auto_amount ? (Number(rate.max_auto_amount) / 100).toFixed(2) : "",
   };
   form.label_options = { format: config.label_options?.format || "pdf", size: config.label_options?.size || "4x6" };
   void base;
@@ -536,6 +581,17 @@ function buildPayload() {
   if (carriers.length) rate.allowed_carriers = carriers;
   if (form.rate_options.markup_amount !== "" && form.rate_options.markup_amount != null) rate.markup_amount = Number(form.rate_options.markup_amount);
   if (form.rate_options.free_shipping_threshold !== "" && form.rate_options.free_shipping_threshold != null) rate.free_shipping_threshold = Number(form.rate_options.free_shipping_threshold);
+
+  // The rate PREFERENCE. "cheapest" is the default the server falls back to anyway, so storing it would
+  // only pin a choice the tenant never made.
+  if (form.rate_options.prefer && form.rate_options.prefer !== "cheapest") rate.prefer = form.rate_options.prefer;
+  const days = Number(form.rate_options.max_transit_days);
+  if (days > 0) rate.max_transit_days = Math.floor(days);
+  if (form.rate_options.preferred_carrier.trim()) rate.preferred_carrier = form.rate_options.preferred_carrier.trim();
+  // Typed in dollars, stored in CENTS like every other amount in this codebase.
+  const ceiling = Number(String(form.rate_options.max_auto_amount).replace(/[$,]/g, ""));
+  if (ceiling > 0) rate.max_auto_amount = Math.round(ceiling * 100);
+
   if (Object.keys(rate).length) doc.rate_options = rate;
   else delete doc.rate_options;
 

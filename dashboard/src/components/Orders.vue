@@ -74,6 +74,7 @@
               </th>
               <th scope="col">Items</th>
               <th v-if="showFulfilment" scope="col">Fulfilment</th>
+              <th v-if="showFulfilment" scope="col" class="orders-col-rate">Rate</th>
               <th scope="col" class="orders-col-money">
                 <button type="button" class="orders-sort" @click="sortBy('amount_total')">
                   Total <span class="orders-sort-caret">{{ caret("amount_total") }}</span>
@@ -135,6 +136,34 @@
                 <span class="product-status" :class="statusBadgeClass(orderStatus(order))">
                   {{ statusLabel(orderStatus(order)) }}
                 </span>
+              </td>
+              <td v-if="showFulfilment" class="orders-col-rate">
+                <template v-if="rates[order.order_id]?.loading">
+                  <span class="orders-secondary">Getting rates…</span>
+                </template>
+                <template v-else-if="rates[order.order_id]?.error">
+                  <span class="orders-rate-error">{{ rates[order.order_id].error }}</span>
+                </template>
+                <template v-else-if="rates[order.order_id]?.selected">
+                  <select class="orders-rate-select" :value="chosenRateId(order)"
+                          :aria-label="`Shipping rate for order ${order.order_id}`"
+                          @change="chooseRate(order, $event.target.value)">
+                    <option v-for="rate in rates[order.order_id].rates" :key="rate.rate_id" :value="rate.rate_id">
+                      {{ rate.carrier }} {{ rate.service }} — {{ money(rate.amount, rate.currency) }}{{ rate.estimated_days ? ` · ${rate.estimated_days}d` : "" }}
+                    </option>
+                  </select>
+                  <div class="orders-secondary">
+                    <template v-if="overrides[order.order_id]">you chose this</template>
+                    <template v-else>{{ rates[order.order_id].selection_reason }}</template>
+                  </div>
+                  <div v-if="rates[order.order_id].withheld && !overrides[order.order_id]"
+                       class="orders-rate-error">Above your limit — choose a rate to continue.</div>
+                </template>
+                <template v-else-if="order.fulfilment?.status === 'ready'">
+                  <!-- Rated on demand, never for the whole page: each lookup is a provider round trip. -->
+                  <button type="button" class="link-action" @click="quote(order)">Get rates</button>
+                </template>
+                <span v-else class="orders-secondary">—</span>
               </td>
               <td class="orders-col-actions">
                 <button v-if="showFulfilment && order.fulfilment?.status === 'ready'" type="button"
@@ -260,14 +289,31 @@ const allEligibleSelected = computed(() =>
 function toggleOne(order) {
   const next = new Set(selected_.value);
   if (next.has(order.order_id)) next.delete(order.order_id);
-  else if (order.fulfilment?.eligible) next.add(order.order_id);
+  else if (order.fulfilment?.eligible) {
+    next.add(order.order_id);
+    if (!rates.value[order.order_id]) quote(order);
+  }
   selected_.value = next;
 }
 
 // Select-all takes only the ELIGIBLE rows. Selecting forty and being told afterwards that four of them
 // could not ship is the behaviour this avoids.
 function toggleAll() {
-  selected_.value = allEligibleSelected.value ? new Set() : new Set(eligibleIds.value);
+  if (allEligibleSelected.value) {
+    selected_.value = new Set();
+    return;
+  }
+  selected_.value = new Set(eligibleIds.value);
+  // Sequential on purpose: a provider round trip per order, and forty at once is how a rate limit is hit.
+  quoteMissing(eligibleIds.value);
+}
+
+async function quoteMissing(ids) {
+  for (const id of ids) {
+    if (rates.value[id]) continue;
+    const order = orders.value.find((o) => o.order_id === id);
+    if (order) await quote(order);
+  }
 }
 
 // The shell's navigation, which carries a payload so the destination does not have to guess why it was
@@ -276,6 +322,41 @@ const navigateTo = inject("navigateTo", null);
 
 function measureProduct(item) {
   if (navigateTo) navigateTo("products", { edit: item.product_id });
+}
+
+// Rates are fetched when a row is SELECTED or asks for them -- never for a whole page. Every lookup is a
+// provider shipment creation: a network call per order, rate-limited and slow, and rating forty rows
+// nobody has acted on makes the screen feel broken.
+const rates = ref({});
+const overrides = ref({});
+
+const money = (cents, currency) => formatMoney(cents, currency || "usd");
+
+function chosenRateId(order) {
+  const entry = rates.value[order.order_id];
+  return overrides.value[order.order_id] || entry?.selected?.rate_id || "";
+}
+
+function chooseRate(order, rateId) {
+  // An override is remembered so a later bulk action does not quietly revert the tenant's choice.
+  overrides.value = { ...overrides.value, [order.order_id]: rateId };
+}
+
+async function quote(order) {
+  const id = order.order_id;
+  rates.value = { ...rates.value, [id]: { loading: true } };
+  try {
+    const body = await apiRequest("/shipping/rates", { method: "POST", body: { order_id: id } });
+    rates.value = { ...rates.value, [id]: {
+      rates: body.rates || [],
+      selected: body.selected || null,
+      selection_reason: body.selection_reason || "",
+      withheld: Boolean(body.withheld),
+      parcel: body.parcel || null,
+    } };
+  } catch (err) {
+    rates.value = { ...rates.value, [id]: { error: err.message || "No rates." } };
+  }
 }
 
 const shipping = ref(null);
