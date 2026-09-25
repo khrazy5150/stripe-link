@@ -3214,6 +3214,19 @@ Resources:
         # Rating a label needs the ORDER it ships: its destination and its lines.
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
+        # Buying one claims a shipment row BEFORE the money is spent, then records what was bought.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ShipmentsTable
+        # The buyer's "on its way" email goes out from the TENANT's business name and support address.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
         - DynamoDBCrudPolicy:
             TableName: !Ref ShippingConfigTable
         - Version: "2012-10-17"
@@ -3252,6 +3265,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/rates
             Method: POST
+        ShippingLabels:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/labels
+            Method: POST
+        ShippingLabelsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/labels
+            Method: OPTIONS
         ShippingRatesOptions:
           Type: Api
           Properties:

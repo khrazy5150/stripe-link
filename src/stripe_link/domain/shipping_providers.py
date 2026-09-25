@@ -58,6 +58,11 @@ class ShippingProvider:
     def rates(self, *, from_address: dict, to_address: dict, parcel: dict) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    def buy_label(self, *, rate_id: str, label_format: str = "PDF",
+                  idempotency_key: str = "") -> dict[str, Any]:
+        """Turn a rate into a bought label. Returns the normalised purchase."""
+        raise NotImplementedError
+
 
 class ShippoProvider(ShippingProvider):
     """Shippo over its REST API. Test mode is carried by the KEY -- a test token returns test rates and
@@ -73,17 +78,21 @@ class ShippoProvider(ShippingProvider):
         self.base_url = (base_url or self.BASE_URL).rstrip("/")
         self._opener = opener or urlopen
 
-    def _request(self, path: str, *, payload: dict | None = None, params: dict | None = None) -> Any:
+    def _request(self, path: str, *, payload: dict | None = None, params: dict | None = None,
+                 idempotency_key: str = "") -> Any:
         url = f"{self.base_url}{path}"
         if params:
             url = f"{url}?{urlencode(params)}"
+        headers = {
+            "Authorization": f"ShippoToken {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        if idempotency_key:
+            headers["Shippo-Idempotency-Key"] = idempotency_key
         request = Request(
             url,
             data=json.dumps(payload).encode("utf-8") if payload is not None else None,
-            headers={
-                "Authorization": f"ShippoToken {self._api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST" if payload is not None else "GET",
         )
         try:
@@ -130,6 +139,41 @@ class ShippoProvider(ShippingProvider):
             detail = "; ".join(str(m.get("text") or "") for m in messages if m.get("text"))[:300]
             raise ProviderError(detail or "Shippo returned no rates for that parcel and address.")
         return [_shippo_rate(rate) for rate in rates]
+
+
+def _shippo_buy(self, *, rate_id: str, label_format: str = "PDF",
+                idempotency_key: str = "") -> dict[str, Any]:
+    """Buy the label for a rate.
+
+    Shippo calls this a *transaction*. The `async: False` matters: the default queues the purchase and
+    returns a transaction with no label on it, which reads as a silent failure.
+
+    The idempotency key is the shipment id, which is derived from the order (shipment_id_for), so a
+    double-clicked Buy and a retried request ask for the SAME label rather than buying two. A label is
+    money that cannot be un-spent by refreshing the page.
+    """
+    payload = {"rate": str(rate_id or ""), "label_file_type": str(label_format or "PDF").upper(),
+               "async": False}
+    body = self._request("/transactions", payload=payload,
+                         idempotency_key=str(idempotency_key or ""))
+    status = str(body.get("status") or "").upper()
+    if status != "SUCCESS":
+        messages = body.get("messages") or []
+        detail = "; ".join(str(m.get("text") or "") for m in messages if m.get("text"))[:300]
+        raise ProviderError(detail or f"Shippo could not buy that label (status {status or 'unknown'}).")
+    return {
+        "provider": "shippo",
+        "provider_transaction_id": str(body.get("object_id") or ""),
+        "label_url": str(body.get("label_url") or ""),
+        "tracking_number": str(body.get("tracking_number") or ""),
+        # The provider hands us the tracking URL, which is why domain/carriers.py is needed only on the
+        # MANUAL path.
+        "tracking_url": str(body.get("tracking_url_provider") or ""),
+        "label_format": str(body.get("label_file_type") or label_format or "PDF"),
+    }
+
+
+ShippoProvider.buy_label = _shippo_buy
 
 
 def _shippo_address(address: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +262,21 @@ class MockProvider(ShippingProvider):
                 "estimated_days": 5 - index, "attributes": ["CHEAPEST"] if carrier == "usps" else [],
             })
         return out
+
+
+    def buy_label(self, *, rate_id: str, label_format: str = "PDF",
+                  idempotency_key: str = "") -> dict[str, Any]:
+        """Buys nothing. It exists so the entire flow -- select, rate, buy, notify -- can be walked end to
+        end with no provider account, which is how F4 is proved before a tenant spends real postage."""
+        token = str(rate_id or "mock_rate").rsplit("_", 1)[-1]
+        return {
+            "provider": "mock",
+            "provider_transaction_id": f"mock_txn_{token}",
+            "label_url": "https://example.invalid/mock-label.pdf",
+            "tracking_number": f"MOCK{abs(hash(rate_id)) % 10**10:010d}",
+            "tracking_url": "https://example.invalid/track",
+            "label_format": str(label_format or "PDF").upper(),
+        }
 
 
 _PROVIDERS = {"shippo": ShippoProvider, "mock": MockProvider}

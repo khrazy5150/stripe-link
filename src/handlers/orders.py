@@ -19,9 +19,8 @@ from stripe_link.common import (
 )
 from stripe_link.domain.carriers import carrier_options, service_has_tracking, tracking_url
 from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
-from stripe_link.domain.receipts import shipment_tracking_content
+from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.domain.shipping import ShipmentError, build_manual_shipment, label_readiness
-from stripe_link.mailer import send_email, tenant_email_identity
 from stripe_link.repositories.documents import (
     RepositoryError,
     orders_repository,
@@ -181,47 +180,6 @@ def mark_shipped(event, repository, order_id, mode, *, shipments_repo=None, user
         return error_response(str(exc), code="shipment_not_saved")
 
     return json_response({"shipment": saved, "notification": notified}, status_code=201)
-
-
-def notify_buyer(order, shipment, tenant_id, *, has_tracking=None, user_profiles_repo=None, mailer_send=None):
-    """Tell the buyer. Reports the OUTCOME rather than swallowing it.
-
-    plans/SHIPPING_PROVIDERS.md §P3 says a tracking email must never break what triggered it, which is
-    right when a label is already bought and paid for. On the MANUAL path nothing irreversible has
-    happened and the tenant pressed the button IN ORDER TO notify the buyer -- swallowing a failure there
-    means the tenant believes their customer was told and the customer hears nothing. So the parcel is
-    still recorded as shipped, and the failure is handed back so the screen can offer Resend.
-    """
-    email = str((order.get("customer") or {}).get("email") or "").strip()
-    if not email:
-        return {"sent": False, "reason": "no_customer_email"}
-    try:
-        identity = tenant_email_identity(tenant_id, user_profiles_repo)
-        lines = order.get("line_items") or []
-        items = str((lines[0] or {}).get("name") or "") if len(lines) == 1 else ""
-        if not items:
-            items = str((order.get("product") or {}).get("name") or "")
-        content = shipment_tracking_content(
-            business_name=identity.get("business_name", ""),
-            order_id=str(order.get("order_id") or ""),
-            items=items,
-            carrier_label=str(shipment.get("carrier") or ""),
-            service_label=str(shipment.get("service") or ""),
-            tracking_number=str(shipment.get("tracking_number") or ""),
-            tracking_url=str(shipment.get("tracking_url") or ""),
-            has_tracking=has_tracking,
-            support_email=identity.get("reply_to", ""),
-        )
-        (mailer_send or send_email)(
-            to_address=email,
-            subject=content["subject"],
-            html_body=content["html"],
-            text_body=content["text"],
-            tenant_id=tenant_id,
-        )
-        return {"sent": True, "to": email}
-    except Exception as exc:  # noqa: BLE001 - reported, never raised: the parcel DID ship
-        return {"sent": False, "error": str(exc)}
 
 
 def filter_orders(orders, params):

@@ -44,7 +44,21 @@
 
       <div v-if="selectedIds.length" class="orders-bulk-bar">
         <span>{{ selectedIds.length }} selected</span>
-        <span class="orders-secondary">Buying labels arrives next — for now, mark them shipped one at a time.</span>
+        <span v-if="buyableIds.length" class="orders-bulk-total">
+          {{ buyableIds.length }} ready — {{ money(selectedTotal) }}
+        </span>
+        <span v-else class="orders-secondary">Getting rates…</span>
+        <button type="button" class="primary-action" :disabled="!buyableIds.length || buying"
+                @click="confirmBuy = true">
+          {{ buying ? `Buying ${buyProgress.done}/${buyProgress.total}…` : `Buy ${buyableIds.length} label${buyableIds.length === 1 ? "" : "s"}` }}
+        </button>
+      </div>
+
+      <div v-if="buyResults.length" class="keys-status-banner" :class="buyFailures.length ? 'warning' : 'success'">
+        <strong>{{ buyResults.length - buyFailures.length }} bought, {{ buyFailures.length }} failed.</strong>
+        <ul v-if="buyFailures.length">
+          <li v-for="row in buyFailures" :key="row.order_id">{{ elideId(row.order_id) }} — {{ row.error }}</li>
+        </ul>
       </div>
 
       <div v-if="!orders.length" class="product-empty-state">
@@ -177,6 +191,38 @@
 
       <p v-if="copied" class="orders-copied" role="status">Copied {{ elideId(copied) }}</p>
     </section>
+
+    <!-- One click here spends real money on every selected order, so the total and the carrier-adjustment
+         warning are shown at the point of spending rather than in a help page. -->
+    <div v-if="confirmBuy" class="modal-backdrop" @click.self="confirmBuy = false">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="buyLabelsTitle">
+        <header class="modal-card-header">
+          <h2 id="buyLabelsTitle">Buy {{ buyableIds.length }} label{{ buyableIds.length === 1 ? "" : "s" }}</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="confirmBuy = false">×</button>
+        </header>
+        <div class="product-details-body">
+          <p><strong>{{ money(selectedTotal) }}</strong> will be charged to your carrier account now.</p>
+          <p class="field-hint">
+            This is what the carrier quoted for the parcels below. A carrier that re-weighs or re-measures
+            a parcel bills the difference back to you later — so a wrong box size shows up as a surcharge
+            weeks after the order shipped.
+          </p>
+          <ul class="orders-buy-list">
+            <li v-for="row in buyableRows" :key="row.order.order_id">
+              {{ row.order.customer?.name || elideId(row.order.order_id) }} —
+              {{ row.rate.carrier }} {{ row.rate.service }}
+              <strong>{{ money(row.rate.amount, row.rate.currency) }}</strong>
+            </li>
+          </ul>
+          <div class="button-row">
+            <button type="button" class="primary-action" :disabled="buying" @click="buySelected">
+              {{ buying ? "Buying…" : `Buy ${buyableIds.length} label${buyableIds.length === 1 ? "" : "s"}` }}
+            </button>
+            <button type="button" class="secondary-action" :disabled="buying" @click="confirmBuy = false">Cancel</button>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <MarkShippedModal v-if="shipping" :order="shipping" :carriers="carriers" :saving="shippingSaving"
                       :error="shippingError" @close="shipping = null" @shipped="submitShipped" />
@@ -357,6 +403,66 @@ async function quote(order) {
   } catch (err) {
     rates.value = { ...rates.value, [id]: { error: err.message || "No rates." } };
   }
+}
+
+// --- buying ---------------------------------------------------------------------------------------
+const confirmBuy = ref(false);
+const buying = ref(false);
+const buyProgress = reactive({ done: 0, total: 0 });
+const buyResults = ref([]);
+
+function rateFor(orderId) {
+  const entry = rates.value[orderId];
+  if (!entry?.rates?.length) return null;
+  const chosen = overrides.value[orderId];
+  if (chosen) return entry.rates.find((r) => r.rate_id === chosen) || null;
+  // A withheld rate is deliberately NOT bought without the tenant choosing it: it is over their ceiling.
+  return entry.withheld ? null : entry.selected;
+}
+
+const buyableRows = computed(() => selectedIds.value
+  .map((id) => ({ order: orders.value.find((o) => o.order_id === id), rate: rateFor(id) }))
+  .filter((row) => row.order && row.rate));
+
+const buyableIds = computed(() => buyableRows.value.map((row) => row.order.order_id));
+
+const selectedTotal = computed(() =>
+  buyableRows.value.reduce((total, row) => total + Number(row.rate.amount || 0), 0));
+
+const buyFailures = computed(() => buyResults.value.filter((row) => row.error));
+
+// Bulk is the CLIENT driving a one-order endpoint: twenty purchases cannot fit in one request, and a
+// timeout mid-batch would leave the tenant not knowing which labels were bought. Sequential, past
+// failures, with a per-row outcome.
+async function buySelected() {
+  confirmBuy.value = false;
+  buying.value = true;
+  buyResults.value = [];
+  const rows = buyableRows.value;
+  buyProgress.done = 0;
+  buyProgress.total = rows.length;
+  for (const row of rows) {
+    const id = row.order.order_id;
+    try {
+      await apiRequest("/shipping/labels", {
+        method: "POST",
+        body: {
+          order_id: id,
+          rate_id: row.rate.rate_id,
+          parcel: rates.value[id]?.parcel,
+          amount: row.rate.amount,
+          currency: row.rate.currency,
+        },
+      });
+      buyResults.value = [...buyResults.value, { order_id: id }];
+    } catch (err) {
+      buyResults.value = [...buyResults.value, { order_id: id, error: err.message || "Failed." }];
+    }
+    buyProgress.done += 1;
+  }
+  buying.value = false;
+  selected_.value = new Set();
+  await load();
 }
 
 const shipping = ref(null);

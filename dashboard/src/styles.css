@@ -7597,3 +7597,20 @@ button:disabled {
   color: #b91c1c;
   font-size: 1.25rem;
 }
+
+/* ---- Orders: buying (F4) ----------------------------------------------------------------------- */
+
+.orders-bulk-total {
+  font-variant-numeric: tabular-nums;
+}
+
+.orders-bulk-bar .primary-action {
+  margin-left: auto;
+}
+
+.orders-buy-list {
+  margin: 1.2rem 0;
+  padding-left: 1.8rem;
+  font-size: 1.35rem;
+  line-height: 1.8;
+}

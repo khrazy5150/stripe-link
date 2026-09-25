@@ -12,18 +12,25 @@ from stripe_link.domain.documents import DocumentValidationError, validate_shipp
 from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
 from stripe_link.domain.rate_policy import select_rate
 from stripe_link.domain.shipping import (
+    ShipmentError,
+    build_shipment,
     label_readiness,
+    mark_failed,
+    mark_purchased,
     packable_items,
     product_readiness,
+    shipment_id_for,
     tenant_boxes,
 )
 from stripe_link.domain.shipping_packing import pack
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
+from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.repositories.documents import (
     RepositoryError,
     orders_repository,
     products_repository,
+    shipments_repository,
     shipping_config_repository,
 )
 
@@ -42,7 +49,8 @@ def _action(event) -> str:
     return path.rstrip("/").rsplit("/", 1)[-1].lower()
 
 
-def handler(event, context, repository=None, secret_cipher=None, products_repo=None, orders_repo=None):
+def handler(event, context, repository=None, secret_cipher=None, products_repo=None, orders_repo=None,
+            shipments_repo=None, user_profiles_repo=None, mailer_send=None):
     repository = repository or shipping_config_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     method = (event or {}).get("httpMethod", "").upper()
@@ -53,6 +61,10 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
     path = str((event or {}).get("path") or (event or {}).get("resource") or "")
     if method == "POST" and path.rstrip("/").endswith("/test"):
         return test_shipping_connection(event, repository, secret_cipher)
+    if _action(event) == "labels" and method == "POST":
+        return buy_label(event, repository, secret_cipher, products_repo=products_repo,
+                         orders_repo=orders_repo, shipments_repo=shipments_repo,
+                         user_profiles_repo=user_profiles_repo, mailer_send=mailer_send)
     if _action(event) == "rates" and method == "POST":
         return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
                            orders_repo=orders_repo)
@@ -296,3 +308,116 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
         "selection_reason": selection["reason"],
         "withheld": selection["withheld"],
     })
+
+
+def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_repo=None,
+              shipments_repo=None, user_profiles_repo=None, mailer_send=None,
+              now_fn=lambda: int(time.time())):
+    """Buy ONE label. Idempotent on the order, because a label is money that cannot be un-spent.
+
+    Bulk is the CLIENT driving this endpoint with limited concurrency: twenty purchases cannot happen
+    inside one API Gateway request, and a timeout mid-batch would leave the tenant not knowing which
+    labels were bought -- the worst possible failure for an action that spends money.
+
+    The shipment row is claimed BEFORE the provider is called (`build_shipment` starts at `purchasing`),
+    so a crash between the two leaves a row saying "we were buying this" rather than a silently bought
+    label nobody recorded.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    body = parse_json_body(event)
+    order_id = str(body.get("order_id") or "").strip()
+    rate_id = str(body.get("rate_id") or "").strip()
+    if not order_id or not rate_id:
+        return error_response("An order id and a rate id are required.", code="missing_rate")
+
+    config = repository.get(tenant_id)
+    if not config:
+        return error_response("Shipping config not found.", status_code=404, code="not_found")
+    blockers = label_readiness(config)
+    if blockers:
+        return error_response(" ".join(blockers), code="not_ready")
+
+    mode = resolve_stripe_mode(event)
+    orders = orders_repo or orders_repository(mode=mode)
+    order = orders.get(tenant_id, order_id)
+    if not order:
+        return error_response("Order not found.", status_code=404, code="order_not_found")
+
+    shipments = shipments_repo or shipments_repository(mode=mode)
+    shipment_id = shipment_id_for(order_id)
+    existing = shipments.get(tenant_id, shipment_id)
+    if existing and existing.get("status") in {"purchased", "shipped"}:
+        # The second click, or the retry. Hand back the label that was already bought rather than buying
+        # a second one at the carrier.
+        return json_response({"shipment": existing, "already_bought": True})
+
+    parcel = body.get("parcel") if isinstance(body.get("parcel"), dict) else None
+    if not parcel:
+        return error_response("Re-quote this order before buying.", code="missing_parcel")
+
+    now = int(now_fn())
+    try:
+        claim = build_shipment(order=order, from_address=config.get("ship_from_address") or {},
+                               parcel=parcel, now=now)
+    except ShipmentError as exc:
+        return error_response(str(exc), code="invalid_shipment")
+    try:
+        shipments.put(claim)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="shipment_not_saved")
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    label_format = str((config.get("label_options") or {}).get("format") or "pdf")
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        ) if secret_ref else ""
+        purchase = provider_for(name, api_key).buy_label(
+            rate_id=rate_id, label_format=label_format,
+            # Derived from the order, so a retry asks the CARRIER for the same label too.
+            idempotency_key=shipment_id)
+    except ProviderError as exc:
+        failed = mark_failed(claim, str(exc), now=now)
+        try:
+            shipments.put(failed)
+        except RepositoryError:
+            pass
+        return error_response(str(exc), status_code=502, code="provider_error")
+
+    amount = body.get("amount")
+    # Reshape the adapter's flat answer into the shape Shipment.schema.json declares: `provider` is an
+    # OBJECT carrying the ids needed to reconcile a label that was bought but not saved.
+    purchase_record = {
+        **{k: v for k, v in purchase.items() if k != "provider" and not k.startswith("provider_")},
+        "provider": {
+            "name": str(purchase.get("provider") or name),
+            "rate_id": rate_id,
+            "transaction_id": str(purchase.get("provider_transaction_id") or ""),
+            "idempotency_key": shipment_id,
+        },
+    }
+    if amount is not None:
+        purchase_record["cost"] = {"amount": int(amount), "currency": str(body.get("currency") or "usd")}
+    purchased = mark_purchased(claim, purchase=purchase_record, now=now)
+    try:
+        saved = shipments.put(purchased)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="shipment_not_saved")
+
+    # The buyer is told the same way the manual path tells them -- one builder, one mailer. Best-effort
+    # HERE, unlike the manual path: the label is already bought and paid for, so a bounced address must
+    # not turn a successful purchase into an error the tenant thinks they should retry.
+    notified = notify_buyer(order, saved, tenant_id, has_tracking=True,
+                            user_profiles_repo=user_profiles_repo, mailer_send=mailer_send)
+    if notified.get("sent"):
+        saved["notified_at"] = now
+        try:
+            shipments.put(saved)
+        except RepositoryError:
+            pass
+
+    return json_response({"shipment": saved, "notification": notified}, status_code=201)

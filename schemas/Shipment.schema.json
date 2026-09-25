@@ -81,7 +81,8 @@
             "easypost",
             "shipstation",
             "easyship",
-            "mock"
+            "mock",
+            "manual"
           ]
         },
         "rate_id": {

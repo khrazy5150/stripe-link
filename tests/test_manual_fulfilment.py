@@ -131,7 +131,9 @@ class ManualShipmentTests(unittest.TestCase):
     def test_a_parcel_with_no_tracking_number_is_a_complete_record(self):
         shipment = build_manual_shipment(order=ORDER, carrier="usps", service="first_class_mail", now=100)
         self.assertEqual(shipment["status"], "shipped")
-        self.assertEqual(shipment["provider"], "manual")
+        # An object, as Shipment.schema.json declares -- "manual" is an honest answer to who provided
+        # the label: the tenant, at the post office.
+        self.assertEqual(shipment["provider"], {"name": "manual"})
         self.assertEqual(shipment["tracking_number"], "")
 
     def test_the_id_is_derived_so_marking_shipped_twice_cannot_make_two_records(self):

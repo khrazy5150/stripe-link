@@ -409,7 +409,9 @@ def build_manual_shipment(
         "kind": kind,
         "status": "shipped",
         "stripe_mode": str(order.get("stripe_mode") or order.get("mode") or "test"),
-        "provider": MANUAL_PROVIDER,
+        # An OBJECT, like every other shipment's, because the schema says so -- "manual" is an honest
+        # answer to "who provided this label": the tenant, at the post office.
+        "provider": {"name": MANUAL_PROVIDER},
         "carrier": str(carrier or "").strip(),
         "service": str(service or "").strip(),
         "tracking_number": str(tracking_number or "").strip(),
