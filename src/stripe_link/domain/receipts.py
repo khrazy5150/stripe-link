@@ -175,3 +175,106 @@ def tip_renewal_content(
         '</div>'
     )
     return {"subject": subject, "html": html, "text": "\n".join(text_lines)}
+
+
+def _shipped_via(carrier: str, service: str) -> str:
+    """"USPS Ground Advantage", not "USPS via Ground Advantage" and not "USPS USPS Ground Advantage".
+
+    Carrier service labels routinely embed the carrier's own name, so naively joining the two repeats it.
+    """
+    carrier = str(carrier or "").strip()
+    service = str(service or "").strip()
+    if not service:
+        return carrier
+    if not carrier:
+        return service
+    if service.lower().startswith(carrier.lower()):
+        return service
+    return f"{carrier} {service}"
+
+
+def shipment_tracking_content(
+    *,
+    business_name: str = "",
+    order_id: str = "",
+    items: str = "",
+    carrier_label: str = "",
+    service_label: str = "",
+    tracking_number: str = "",
+    tracking_url: str = "",
+    has_tracking: bool | None = None,
+    support_email: str = "",
+) -> dict[str, str]:
+    """"Your order is on its way" — for a label we bought AND for a parcel the tenant posted themselves.
+
+    One builder for both paths, because the buyer does not care how the postage was obtained and two
+    builders would drift.
+
+    The hard case is the parcel with NO tracking number. USPS First-Class Mail carries none, so this must
+    degrade honestly rather than sending "track your parcel" with nothing to track — which produces exactly
+    the support message the email exists to prevent. Three shapes:
+
+      number + url  -> the link, and the number as text for anyone who cannot use it
+      no number, service known to have none -> say so plainly, so nobody waits for a link
+      no number, unknown -> say it is on its way and stop. We do not KNOW there is no tracking, and
+                            telling a buyer "there is none" when the tenant simply had not typed it yet
+                            would be a second kind of lie.
+    """
+    business = str(business_name or "").strip()
+    number = str(tracking_number or "").strip()
+    url = str(tracking_url or "").strip()
+    carrier = str(carrier_label or "").strip()
+    service = str(service_label or "").strip()
+    what = str(items or "").strip()
+
+    subject = f"Your order from {business} is on its way" if business else "Your order is on its way"
+
+    shipped_line = f"{what} is on its way." if what else "Your order is on its way."
+    via = _shipped_via(carrier, service)
+    if via:
+        shipped_line += f" Sent via {via}."
+
+    text_lines = [shipped_line, ""]
+    rows = []
+    if order_id:
+        rows.append(("Order", str(order_id)))
+    if via:
+        rows.append(("Shipped via", via))
+    if number:
+        rows.append(("Tracking number", number))
+        text_lines.append(f"Tracking number: {number}")
+        if url:
+            text_lines.append(f"Track it: {url}")
+    elif has_tracking is False:
+        # Said once, plainly, and never dressed up as a link.
+        no_tracking = (f"{service or 'This service'} does not include tracking, so there is no number to "
+                       "follow — it is on its way by post.")
+        text_lines.append(no_tracking)
+
+    if support_email:
+        text_lines += ["", f"Questions? Reply to this email or write to {support_email}."]
+
+    body = [paragraph(escape(shipped_line))]
+    if rows:
+        body.append(rows_table([(escape(label), escape(value)) for label, value in rows]))
+    if number and url:
+        body.append(button("Track your parcel", url))
+    elif not number and has_tracking is False:
+        body.append(paragraph(escape(
+            f"{service or 'This service'} does not include tracking, so there is no number to follow — "
+            "it is on its way by post.")))
+    if support_email:
+        body.append(paragraph(
+            f'Questions? Reply to this email or write to '
+            f'<a href="mailto:{escape(support_email)}" style="color:{ACCENT};">{escape(support_email)}</a>.'))
+
+    return {
+        "subject": subject,
+        "html": render_email(
+            title=subject,
+            preheader=(f"Tracking {number}" if number else shipped_line),
+            business_name=business,
+            body="".join(body),
+        ),
+        "text": "\n".join(text_lines),
+    }

@@ -71,7 +71,9 @@ def destination_address_from_session(session: dict[str, Any]) -> dict[str, Any]:
 # --- shipments -------------------------------------------------------------------------------------
 
 SHIPMENT_KINDS = ("outbound", "return")
-SHIPMENT_STATUSES = ("draft", "purchasing", "purchased", "failed", "voided")
+# "shipped" is the MANUAL terminus: the tenant declares the parcel handed over, and no label was ever
+# bought here. Calling that "purchased" would be a lie in the one record that says what really happened.
+SHIPMENT_STATUSES = ("draft", "purchasing", "purchased", "shipped", "failed", "voided")
 
 
 class ShipmentError(ValueError):
@@ -366,3 +368,59 @@ def label_readiness(config: dict[str, Any] | None) -> list[str]:
     if not tenant_boxes(config):
         missing.append("Add at least one box, or set Package Dimensions on each product you ship.")
     return missing
+
+
+MANUAL_PROVIDER = "manual"
+
+
+def build_manual_shipment(
+    *,
+    order: dict[str, Any],
+    carrier: str = "",
+    service: str = "",
+    tracking_number: str = "",
+    tracking_url: str = "",
+    shipped_at: int = 0,
+    kind: str = "outbound",
+    sequence: int = 1,
+    now: int = 0,
+) -> dict[str, Any]:
+    """A parcel the tenant posted themselves.
+
+    Deliberately NOT `build_shipment` with the provider bits left blank. That one demands a parcel and a
+    validated ship-from address because it is about to spend money at a carrier and a wrong address is a
+    wasted label. This one records something that has ALREADY happened, and demanding measurements for a
+    box already in the post would block the tenant from telling their customer the truth.
+
+    A tracking number is OPTIONAL. USPS First-Class Mail carries none, and a tenant who posted a padded
+    envelope at letter rate has nothing to type (see domain/carriers.py).
+    """
+    order = order or {}
+    order_id = str(order.get("order_id") or "").strip()
+    if not order_id:
+        raise ShipmentError("A shipment needs the order it ships.")
+    stamp = int(now or 0)
+    shipment = {
+        "schema_version": "2026-05-29",
+        "document_type": "shipment",
+        "tenant_id": str(order.get("tenant_id") or ""),
+        "shipment_id": shipment_id_for(order_id, kind, sequence),
+        "order_id": order_id,
+        "kind": kind,
+        "status": "shipped",
+        "stripe_mode": str(order.get("stripe_mode") or order.get("mode") or "test"),
+        "provider": MANUAL_PROVIDER,
+        "carrier": str(carrier or "").strip(),
+        "service": str(service or "").strip(),
+        "tracking_number": str(tracking_number or "").strip(),
+        "tracking_url": str(tracking_url or "").strip(),
+        "shipped_at": int(shipped_at or stamp),
+        "created_at": stamp,
+        "updated_at": stamp,
+    }
+    to_address = order.get("shipping_address")
+    if isinstance(to_address, dict) and to_address:
+        # A snapshot, for the same reason build_shipment snapshots: an address corrected next week must not
+        # rewrite where last week's parcel went.
+        shipment["to_address"] = dict(to_address)
+    return shipment

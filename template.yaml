@@ -259,6 +259,7 @@ Globals:
         PLATFORM_BILLING_RETURN_URL: !Sub "https://${DashboardCustomDomainName}"
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
+        SHIPMENTS_TABLE: !Ref ShipmentsTable
         OFFERS_TABLE: !Ref OffersTable
         COUPONS_TABLE: !Ref CouponsTable
         COUPON_GRANTS_TABLE: !Ref CouponGrantsTable
@@ -3778,10 +3779,29 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-orders-api-${Environment}"
       CodeUri: src/
       Handler: handlers.orders.handler
-      Description: Read-only order history API backed by webhook-recorded orders.
+      Description: Order history plus fulfilment state, and the manual mark-as-shipped path.
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
+        # The fulfilment gates are computed server-side so the table and the buy endpoint cannot disagree
+        # about whether an order is eligible (plans/ORDER_FULFILMENT.md). Products and shipping config are
+        # read-only inputs to that; shipments are written by the manual mark-as-shipped path.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ShipmentsTable
+        # The buyer's "on its way" email is sent from the TENANT's business name and support address.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
       Events:
         OrdersList:
           Type: Api
@@ -3795,6 +3815,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /orders/{order_id}
             Method: GET
+        OrdersMarkShipped:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders/{order_id}/ship
+            Method: POST
+        OrdersMarkShippedOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders/{order_id}/ship
+            Method: OPTIONS
 
   AppConfigTable:
     Type: AWS::DynamoDB::Table
@@ -4250,6 +4282,37 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-products-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ShipmentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-shipments-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true

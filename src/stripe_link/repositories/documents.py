@@ -356,6 +356,16 @@ def products_repository(table: Any | None = None, *, mode: str | None = None) ->
     )
 
 
+def shipments_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("SHIPMENTS_TABLE", ""),
+        document_type="shipment",
+        id_field="shipment_id",
+        table=table,
+        mode=mode,
+    )
+
+
 def offers_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("OFFERS_TABLE", ""),

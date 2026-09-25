@@ -35,6 +35,18 @@
       <div v-if="error" class="keys-status-banner error">{{ error }}</div>
       <div v-else class="keys-status-banner">{{ message }}</div>
 
+      <!-- The TENANT gate: it blocks every row, so it is said once here rather than forty times in the
+           table. Only shown to tenants who have started setting shipping up at all. -->
+      <div v-if="shippingConfigured && shippingReadiness.length" class="keys-status-banner warning">
+        <strong>Before you can buy labels:</strong>
+        <ul><li v-for="item in shippingReadiness" :key="item">{{ item }}</li></ul>
+      </div>
+
+      <div v-if="selectedIds.length" class="orders-bulk-bar">
+        <span>{{ selectedIds.length }} selected</span>
+        <span class="orders-secondary">Buying labels arrives next — for now, mark them shipped one at a time.</span>
+      </div>
+
       <div v-if="!orders.length" class="product-empty-state">
         {{ loaded ? "No orders found." : "Loading orders..." }}
       </div>
@@ -45,6 +57,11 @@
         <table class="orders-table">
           <thead>
             <tr>
+              <th v-if="showFulfilment" scope="col" class="orders-col-select">
+                <input type="checkbox" :checked="allEligibleSelected" :disabled="!eligibleIds.length"
+                       :aria-label="allEligibleSelected ? 'Clear selection' : 'Select all shippable orders'"
+                       @change="toggleAll" />
+              </th>
               <th scope="col" class="orders-col-order">
                 <button type="button" class="orders-sort" @click="sortBy('created_at')">
                   Order <span class="orders-sort-caret">{{ caret("created_at") }}</span>
@@ -56,6 +73,7 @@
                 </button>
               </th>
               <th scope="col">Items</th>
+              <th v-if="showFulfilment" scope="col">Fulfilment</th>
               <th scope="col" class="orders-col-money">
                 <button type="button" class="orders-sort" @click="sortBy('amount_total')">
                   Total <span class="orders-sort-caret">{{ caret("amount_total") }}</span>
@@ -66,7 +84,15 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="order in visibleOrders" :key="order.order_id">
+            <tr v-for="order in visibleOrders" :key="order.order_id"
+                :class="{ 'orders-row-selected': selected_.has(order.order_id) }">
+              <td v-if="showFulfilment" class="orders-col-select">
+                <input type="checkbox" :checked="selected_.has(order.order_id)"
+                       :disabled="!order.fulfilment?.eligible"
+                       :title="order.fulfilment?.eligible ? '' : (order.fulfilment?.reasons || []).join(' ')"
+                       :aria-label="`Select order ${order.order_id}`"
+                       @change="toggleOne(order)" />
+              </td>
               <td class="orders-col-order">
                 <div class="orders-primary">{{ order.product?.name || itemsSummary(order) }}</div>
                 <button type="button" class="orders-id font-mono" :title="`${order.order_id} — click to copy`"
@@ -78,6 +104,27 @@
                 <div v-if="destinationSummary(order)" class="orders-secondary">{{ destinationSummary(order) }}</div>
               </td>
               <td>{{ itemsSummary(order) }}</td>
+              <td v-if="showFulfilment" class="orders-col-fulfilment">
+                <template v-if="order.fulfilment?.status === 'shipped'">
+                  <span class="product-status active">Shipped</span>
+                  <div v-if="order.fulfilment.shipment?.tracking_number" class="orders-secondary">
+                    <a v-if="order.fulfilment.shipment.tracking_url" :href="order.fulfilment.shipment.tracking_url"
+                       target="_blank" rel="noopener">{{ order.fulfilment.shipment.tracking_number }}</a>
+                    <span v-else>{{ order.fulfilment.shipment.tracking_number }}</span>
+                  </div>
+                </template>
+                <template v-else-if="order.fulfilment?.status === 'ready'">
+                  <span class="product-status active">Ready to ship</span>
+                </template>
+                <template v-else>
+                  <div class="orders-secondary">{{ (order.fulfilment?.reasons || []).join(" ") || "—" }}</div>
+                  <!-- The ONLY gate with a call to action: the tenant can fix a missing measurement. -->
+                  <button v-for="item in order.fulfilment?.needs_measurement || []" :key="item.product_id"
+                          type="button" class="link-action" @click="measureProduct(item)">
+                    + Add package info for {{ item.name }}
+                  </button>
+                </template>
+              </td>
               <td class="orders-col-money">
                 <div class="orders-primary">{{ formatMoney(order.amount_total, order.currency) }}</div>
                 <div v-if="Number(order.amount_refunded) > 0" class="orders-secondary">
@@ -90,6 +137,8 @@
                 </span>
               </td>
               <td class="orders-col-actions">
+                <button v-if="showFulfilment && order.fulfilment?.status === 'ready'" type="button"
+                        class="secondary-action" @click="shipping = order">Mark shipped</button>
                 <button type="button" class="secondary-action" @click="selected = order">Details</button>
               </td>
             </tr>
@@ -99,6 +148,9 @@
 
       <p v-if="copied" class="orders-copied" role="status">Copied {{ elideId(copied) }}</p>
     </section>
+
+    <MarkShippedModal v-if="shipping" :order="shipping" :carriers="carriers" :saving="shippingSaving"
+                      :error="shippingError" @close="shipping = null" @shipped="submitShipped" />
 
     <div v-if="selected" class="modal-backdrop" @click.self="selected = null">
       <section class="modal-card product-details-modal" role="dialog" aria-modal="true" aria-labelledby="orderDetailsTitle">
@@ -139,10 +191,11 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from "vue";
+import { computed, inject, reactive, ref } from "vue";
 import { apiRequest } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { formatEpochDate, statusLabel } from "../utils/format";
+import MarkShippedModal from "./orders/MarkShippedModal.vue";
 import {
   destinationSummary,
   elideId,
@@ -153,6 +206,9 @@ import {
 } from "./orders/orderDisplay";
 
 const orders = ref([]);
+const carriers = ref([]);
+const shippingReadiness = ref([]);
+const shippingConfigured = ref(false);
 const loaded = ref(false);
 const loading = ref(false);
 const error = ref("");
@@ -185,6 +241,71 @@ function caret(key) {
   return sort.direction === "asc" ? "▲" : "▼";
 }
 
+// The fulfilment columns exist only for a tenant this feature is relevant to. A tenant selling downloads
+// should never learn that a shipping module exists by finding empty columns in their sales list.
+const showFulfilment = computed(() =>
+  shippingConfigured.value || orders.value.some((o) => o.fulfilment?.status === "shipped"
+    || o.fulfilment?.status === "ready" || (o.fulfilment?.needs_measurement || []).length));
+
+const selected_ = ref(new Set());
+
+const eligibleIds = computed(() =>
+  visibleOrders.value.filter((o) => o.fulfilment?.eligible).map((o) => o.order_id));
+
+const selectedIds = computed(() => [...selected_.value]);
+
+const allEligibleSelected = computed(() =>
+  eligibleIds.value.length > 0 && eligibleIds.value.every((id) => selected_.value.has(id)));
+
+function toggleOne(order) {
+  const next = new Set(selected_.value);
+  if (next.has(order.order_id)) next.delete(order.order_id);
+  else if (order.fulfilment?.eligible) next.add(order.order_id);
+  selected_.value = next;
+}
+
+// Select-all takes only the ELIGIBLE rows. Selecting forty and being told afterwards that four of them
+// could not ship is the behaviour this avoids.
+function toggleAll() {
+  selected_.value = allEligibleSelected.value ? new Set() : new Set(eligibleIds.value);
+}
+
+// The shell's navigation, which carries a payload so the destination does not have to guess why it was
+// opened. This app has no vue-router; App.vue provides this.
+const navigateTo = inject("navigateTo", null);
+
+function measureProduct(item) {
+  if (navigateTo) navigateTo("products", { edit: item.product_id });
+}
+
+const shipping = ref(null);
+const shippingSaving = ref(false);
+const shippingError = ref("");
+
+async function submitShipped(form) {
+  const order = shipping.value;
+  if (!order) return;
+  shippingSaving.value = true;
+  shippingError.value = "";
+  try {
+    const body = await apiRequest(`/orders/${encodeURIComponent(order.order_id)}/ship`, {
+      method: "POST",
+      body: form,
+    });
+    shipping.value = null;
+    // The parcel shipped even when the email did not, so say which happened rather than implying both.
+    const notified = body?.notification || {};
+    message.value = notified.sent
+      ? `Marked shipped. ${order.customer?.email || "The buyer"} was notified.`
+      : "Marked shipped — but the buyer could NOT be notified. Open the order to resend.";
+    await load();
+  } catch (err) {
+    shippingError.value = err.message || "Failed to mark shipped.";
+  } finally {
+    shippingSaving.value = false;
+  }
+}
+
 const copied = ref("");
 let copyTimer = null;
 
@@ -206,6 +327,12 @@ async function load() {
   try {
     const body = await apiRequest("/orders", { params: { status: filters.status, customer: filters.customer } });
     orders.value = Array.isArray(body.orders) ? body.orders : [];
+    carriers.value = Array.isArray(body.carriers) ? body.carriers : [];
+    shippingReadiness.value = Array.isArray(body.shipping_readiness) ? body.shipping_readiness : [];
+    shippingConfigured.value = Boolean(body.shipping_configured);
+    // A reload must not leave an order selected that is no longer selectable -- it has just shipped.
+    const stillEligible = new Set(orders.value.filter((o) => o.fulfilment?.eligible).map((o) => o.order_id));
+    selected_.value = new Set([...selected_.value].filter((id) => stillEligible.has(id)));
     loaded.value = true;
     message.value = orders.value.length ? `${orders.value.length} order${orders.value.length === 1 ? "" : "s"}.` : "";
   } catch (err) {

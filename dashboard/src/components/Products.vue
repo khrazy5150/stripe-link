@@ -538,7 +538,7 @@
 </template>
 
 <script setup>
-import { computed, h, inject, nextTick, ref, watch } from "vue";
+import { computed, h, inject, nextTick, onMounted, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
@@ -614,6 +614,16 @@ const PRODUCT_INTENTS = [
 ];
 // Provided by the shell (App.vue). Absent in a test harness or a stray mount, hence the fallback.
 const navigateTo = inject("navigateTo", null);
+// Arriving from "+ Add package info" on the Orders screen: open that product's editor rather than a list
+// to search through. Read once and cleared, so returning later does not reopen it.
+const takeViewIntent = inject("takeViewIntent", null);
+onMounted(async () => {
+  const intent = takeViewIntent?.();
+  if (!intent?.edit) return;
+  if (!store.loaded) await store.load();
+  const row = (store.products || []).find((product) => product.product_id === intent.edit);
+  if (row) await openEditModal(row);
+});
 // Services appear in this list (stores/products.js filteredProducts adapts them), so this screen fetches
 // them. Held on the products store rather than reached for inside the getter, which stays pure over state.
 const servicesStore = useServicesStore();
