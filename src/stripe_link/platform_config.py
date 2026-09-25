@@ -44,10 +44,28 @@ def asset_base_url() -> str:
     return str((envs.get(env) or {}).get("public_asset_base_url") or "").rstrip("/")
 
 
+# The favicon a browser actually fetches on first paint. 32x32 is ~3KB against the 200x200's 30KB, and it
+# is fetched on EVERY published page, competing with the LCP image for connections. The large one is kept
+# for apple-touch-icon, which genuinely wants a big square and is only fetched when someone adds the page
+# to a home screen.
+FAVICON_SMALL = "/icon/favicon-32.png"
+FAVICON_LARGE = "/icon/favicon.png"
+
+
 def default_favicon_url() -> str:
-    """The platform default favicon on the configured CDN; '' when unconfigured (so no literal is baked in)."""
+    """The platform default favicon (large) on the configured CDN; '' when unconfigured.
+
+    Still the 200x200: it is what apple-touch-icon wants, and it is the URL the OG/meta fallback has
+    always used. `default_favicon_small_url()` is what goes in the <link rel="icon">.
+    """
     base = asset_base_url()
-    return f"{base}/icon/favicon.png" if base else ""
+    return f"{base}{FAVICON_LARGE}" if base else ""
+
+
+def default_favicon_small_url() -> str:
+    """The 32x32 the browser puts in the tab. '' when the asset CDN is unconfigured, same as the large."""
+    base = asset_base_url()
+    return f"{base}{FAVICON_SMALL}" if base else ""
 
 
 def legal_overrides() -> dict[str, str]:

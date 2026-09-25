@@ -91,14 +91,18 @@ class PageRenderTests(unittest.TestCase):
     def test_render_page_outputs_semantic_sections_and_price_options(self):
         # The default favicon now comes from the configured asset CDN (app_config.public_asset_base_url), resolved by
         # the server-side reader — patch it to a known value to assert the tags carry it.
-        with patch("stripe_link.runtime.html.default_favicon_url", return_value="https://images.juniorbay.com/icon/favicon.png"):
+        with patch("stripe_link.runtime.html.default_favicon_url", return_value="https://images.juniorbay.com/icon/favicon.png"), \
+             patch("stripe_link.runtime.html.default_favicon_small_url", return_value="https://images.juniorbay.com/icon/favicon-32.png"):
             html = render_page(self.page, self.offer, self.products_by_id)
 
         self.assertIn(">Creatine Gummies</h1>", html)   # the hero headline is the page's sole <h1>
         self.assertEqual(html.count("<h1"), 1)          # exactly one H1 — semantic outline invariant
         self.assertIn("--sl-theme-accent:#16a34a", html)
-        self.assertIn("<link rel=\"icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
-        self.assertIn("<link rel=\"shortcut icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
+        # The browser fetches rel="icon" on first paint of every page, so it gets the 32x32 (~3KB) rather
+        # than the 200x200 (~30KB). apple-touch-icon keeps the large one: it wants a big square and is
+        # only fetched when someone adds the page to a home screen.
+        self.assertIn("<link rel=\"icon\" href=\"https://images.juniorbay.com/icon/favicon-32.png\" sizes=\"32x32\">", html)
+        self.assertIn("<link rel=\"shortcut icon\" href=\"https://images.juniorbay.com/icon/favicon-32.png\">", html)
         self.assertIn("<link rel=\"apple-touch-icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
         # Presets now carry typography, so a page renders its preset's body font ahead of the system
         # fallback. Before this, published pages loaded NO webfont at all and a tenant's chosen type
@@ -129,9 +133,12 @@ class PageRenderTests(unittest.TestCase):
 
         html = render_page(page, self.offer, self.products_by_id)
 
-        self.assertIn("<link rel=\"icon\" href=\"https://cdn.example.com/favicon.png\">", html)
+        # A tenant gave us ONE file at one size. Inventing a "-32" URL for it would 404, so all three
+        # tags carry theirs.
+        self.assertIn("<link rel=\"icon\" href=\"https://cdn.example.com/favicon.png\" sizes=\"32x32\">", html)
         self.assertIn("<link rel=\"shortcut icon\" href=\"https://cdn.example.com/favicon.png\">", html)
         self.assertIn("<link rel=\"apple-touch-icon\" href=\"https://cdn.example.com/favicon.png\">", html)
+        self.assertNotIn("favicon-32.png", html)
 
     def test_render_universal_bundle_template_sections(self):
         page = load_fixture("page-universal-bundle.json")

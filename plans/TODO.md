@@ -1099,7 +1099,7 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
-### ⭐⭐ HIGH — the default favicon is a 30KB 200x200 PNG on EVERY published page (found 2026-09-23)
+### ✅ FIXED 2026-09-25 — the default favicon was a 30KB 200x200 PNG on EVERY published page (found 2026-09-23)
 
 Found while checking the footer mark on the new email template; the author immediately spotted the larger
 consequence: **the same asset is the default favicon for every published page**, so this is page weight on
@@ -1136,6 +1136,21 @@ repo, and this repo only holds the URL. The CDN ignores resize parameters (`?w=4
 3. Email: point `SIGNATURE_LOGO_URL` at the 40x40 (2x of its 20x20 render).
 
 `tests/test_platform_signature.py` pins the current URL, so step 3 will fail loudly rather than drift.
+
+**Done, 2026-09-25.** All three steps:
+
+1. Published `icon/favicon-32.png` (**2,993 bytes**) and `icon/favicon-40.png` (3,928) to
+   `s3://images.juniorbay.net`, both with `Cache-Control: public, max-age=31536000, immutable`. Added as
+   NEW keys — the 200x200 is untouched, so nothing that already points at it broke. Verified over the CDN.
+2. `render_favicon_tags` emits the 32 for `icon`/`shortcut icon` and the 200 for `apple-touch-icon`, which
+   wants a big square and is only fetched when someone adds the page to a home screen. The split applies
+   to the PLATFORM DEFAULT only: a tenant gave us one file at one size, and deriving a "-32" URL from it
+   would 404. A deployment whose config predates the small asset falls back to the large one.
+3. `SIGNATURE_LOGO_URL` is the 40 — the 2x of its 20x20 render.
+
+**90% off the file every published page fetches on first paint**, and the apple-touch-icon left where it
+costs nothing. The 180x180 the entry suggested was not published: at 28,578 bytes it is 5% smaller than
+the 200x200 and would have been a second near-identical asset for no gain.
 
 ### ⭐ HIGH — add the font service to published pages — SHIPPED dev+prod 2026-09-08 (plan plans/FONT_SERVICE.md §12)
 

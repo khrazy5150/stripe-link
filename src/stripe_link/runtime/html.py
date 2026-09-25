@@ -9,7 +9,7 @@ import time
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
-from stripe_link.platform_config import default_favicon_url
+from stripe_link.platform_config import default_favicon_small_url, default_favicon_url
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.coupon_grants import grant_prefix
@@ -2077,7 +2077,8 @@ def _render_page_body(
     description = escape(document_description(page, offer, products_by_id))
     # Default favicon (when the tenant sets none) comes from the configured asset CDN (app_config.public_asset_base_url),
     # resolved via the failsafe cached reader — no hardcoded URL. "" outside a configured backend (tests).
-    favicon_tags = render_favicon_tags(page.get("seo") or {}, default_favicon_url())
+    favicon_tags = render_favicon_tags(
+        page.get("seo") or {}, default_favicon_url(), default_favicon_small_url())
     styles = render_template_styles(page)
     # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
     # composed list — it never decides visibility itself.
@@ -7302,15 +7303,28 @@ def render_analytics_adapters(analytics: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_favicon_tags(seo: dict[str, Any], default_url: str = "") -> str:
-    favicon_url = str(seo.get("favicon_url") or default_url).strip()
-    if not favicon_url:
+def render_favicon_tags(seo: dict[str, Any], default_url: str = "", small_default_url: str = "") -> str:
+    """The three favicon links.
+
+    A browser fetches `rel="icon"` on first paint of every page, so it gets the SMALL file -- 32x32 at
+    ~3KB rather than 200x200 at 30KB, which is roughly 15x oversized for something drawn at 32 pixels.
+    `apple-touch-icon` keeps the large one: it genuinely wants a big square, and it is only fetched when
+    someone adds the page to a home screen.
+
+    The split applies to the PLATFORM DEFAULT only. A tenant who uploaded their own favicon gave us one
+    file at one size, and inventing a smaller URL for it would 404.
+    """
+    tenant_url = str(seo.get("favicon_url") or "").strip()
+    large = tenant_url or str(default_url or "").strip()
+    small = tenant_url or str(small_default_url or "").strip() or large
+    if not large and not small:
         return ""  # no tenant favicon and no configured default — emit nothing rather than a broken empty href
-    favicon_url = escape(favicon_url)
+    small_href = escape(small or large)
+    large_href = escape(large or small)
     return "\n".join([
-        f"  <link rel=\"icon\" href=\"{favicon_url}\">",
-        f"  <link rel=\"shortcut icon\" href=\"{favicon_url}\">",
-        f"  <link rel=\"apple-touch-icon\" href=\"{favicon_url}\">",
+        f"  <link rel=\"icon\" href=\"{small_href}\" sizes=\"32x32\">",
+        f"  <link rel=\"shortcut icon\" href=\"{small_href}\">",
+        f"  <link rel=\"apple-touch-icon\" href=\"{large_href}\">",
     ])
 
 

@@ -172,7 +172,8 @@ class SignatureMarkTests(unittest.TestCase):
     def test_it_points_at_the_platform_icon(self):
         from stripe_link.domain.platform_signature import SIGNATURE_LOGO_URL, signature_html
 
-        self.assertEqual(SIGNATURE_LOGO_URL, "https://images.juniorbay.com/icon/favicon.png")
+        # The 2x of its 20x20 render, not the 200x200 original: 4KB against 30KB, fetched on every open.
+        self.assertEqual(SIGNATURE_LOGO_URL, "https://images.juniorbay.com/icon/favicon-40.png")
         self.assertIn(SIGNATURE_LOGO_URL, signature_html())
 
     def test_it_declares_its_size_so_a_blocked_image_reserves_no_odd_space(self):

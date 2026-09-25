@@ -20,7 +20,10 @@ SIGNATURE_TEXT = "Want to start your own online store?"
 SIGNATURE_CTA = "Try it for free"
 SIGNATURE_URL = "https://juniorbay.com/?utm_source=tenant_email&utm_medium=email&utm_campaign=signature"
 # Already public on the images CDN and used by the homepage, so it needs no new hosting.
-SIGNATURE_LOGO_URL = "https://images.juniorbay.com/icon/favicon.png"
+# Rendered at 20x20, so 40 is the 2x asset a retina client wants -- 4KB rather than the 200x200's 30KB.
+# An email client fetches this on open, often over a phone connection, and a mark drawn at 20 pixels has
+# no use for 200.
+SIGNATURE_LOGO_URL = "https://images.juniorbay.com/icon/favicon-40.png"
 
 
 def shows_platform_signature(tenant_profile: Any) -> bool:
