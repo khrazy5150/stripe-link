@@ -3289,49 +3289,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/pickups
             Method: POST
-        ShippingPickupsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /shipping/pickups
-            Method: OPTIONS
         ShippingManifests:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /shipping/manifests
             Method: POST
-        ShippingManifestsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /shipping/manifests
-            Method: OPTIONS
         ShippingReturnLabels:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /shipping/return-labels
             Method: POST
-        ShippingReturnLabelsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /shipping/return-labels
-            Method: OPTIONS
-        ShippingLabelsOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /shipping/labels
-            Method: OPTIONS
-        ShippingRatesOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /shipping/rates
-            Method: OPTIONS
-
   CustomersFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3923,25 +3892,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /orders/validate-addresses
             Method: POST
-        OrdersValidateAddressesOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /orders/validate-addresses
-            Method: OPTIONS
         OrdersMarkShipped:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /orders/{order_id}/ship
             Method: POST
-        OrdersMarkShippedOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /orders/{order_id}/ship
-            Method: OPTIONS
-
   AppConfigTable:
     Type: AWS::DynamoDB::Table
     Properties:

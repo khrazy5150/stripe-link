@@ -26,6 +26,20 @@ handles test events by design since P3; test funnel pages are served from the de
 API). **Fix it there, not with a patch here** -- the two writers have to agree which table a sale belongs
 in, and that is exactly the decision that plan exists to make.
 
+## The CloudFormation template is at its resource ceiling — HIGH
+
+Hit on 2026-09-25: a deploy failed with *"Number of resources, 501, is greater than maximum allowed, 500"*.
+
+The immediate cause was seven redundant `Method: OPTIONS` events. **They were never needed** — the API
+already carries a global `Cors:` block, so SAM generates the preflight method itself (verified against the
+live dev API: every new route answers OPTIONS 200 with `allow-origin: *`). **62 explicit OPTIONS events
+remain in the template**, and each one is a resource bought for nothing. Removing them is the cheapest
+~62 resources available and should be done before the next feature needs room.
+
+Until then the ceiling is real and close: each new endpoint costs roughly two resources, so there is
+headroom for a couple of routes, not a phase. The structural fix if it recurs is splitting the API into a
+nested stack, which is a bigger change than deleting dead OPTIONS.
+
 ## Stripe API version drift — HIGH
 
 **The account is on `2026-05-27.preview`, and the code is written against remembered field names.** Three
