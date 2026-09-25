@@ -33,7 +33,10 @@ from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
 from stripe_link.domain.receipts import receipt_content, tip_renewal_content
-from stripe_link.domain.shipping import destination_address_from_session
+from stripe_link.domain.shipping import (
+    destination_address_from_invoice,
+    destination_address_from_session,
+)
 from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
@@ -1953,6 +1956,7 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
     """
     metadata = invoice_subscription_metadata(invoice)
     subscription_id = invoice_subscription_id(invoice)
+    renewal_destination = destination_address_from_invoice(invoice)
     invoice_id = str(invoice.get("id") or "")
     amount = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
     email = str(invoice.get("customer_email") or "")
@@ -1984,6 +1988,10 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "contact_keys": _order_contact_keys({"customer": {"email": email, "phone": phone}}),
         "line_items": order_line_items_from_invoice(invoice, names, metadata),
         "attribution": attribution_from_metadata(metadata),
+        # Where this cycle's parcel goes. A renewal has no session of its own, so it comes off the
+        # invoice -- never from customer_address, which is BILLING and is frequently set when shipping is
+        # not (see destination_address_from_invoice).
+        **({"shipping_address": renewal_destination} if renewal_destination else {}),
         # The SUBSCRIPTION's metadata, carried onto the order exactly as a checkout order carries the
         # session's. Without it a renewal lands unstamped: S1b puts `silo` on subscription_data.metadata
         # precisely so the renewals a subscription generates can be attributed to the silo that SOLD it,

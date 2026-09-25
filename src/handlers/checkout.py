@@ -724,7 +724,11 @@ def build_checkout_payload(
         payload["metadata[booking_flow]"] = first.get("booking_flow") or "pay_then_book"
         payload["metadata[service_name]"] = first.get("product_name") or first.get("label") or "Service"
 
-    if collect_shipping and payload["mode"] == "payment":
+    # SUBSCRIPTION mode collects an address too. It was restricted to `payment`, which meant a recurring
+    # physical product -- a monthly tub of creatine -- never asked the buyer where to send it, so neither
+    # the first order nor any renewal had a destination and the whole thing was unshippable by design
+    # (found 2026-09-25: six subscription_cycle orders in prod, every one with no address).
+    if collect_shipping and payload["mode"] in {"payment", "subscription"}:
         payload["shipping_address_collection[allowed_countries][0]"] = "US"
         payload["shipping_address_collection[allowed_countries][1]"] = "CA"
     # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same

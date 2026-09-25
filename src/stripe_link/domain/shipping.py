@@ -68,6 +68,33 @@ def destination_address_from_session(session: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in destination.items() if value}
 
 
+def destination_address_from_invoice(invoice: dict[str, Any]) -> dict[str, Any]:
+    """The ship-to address on a subscription's cycle INVOICE, or {} when it carries none.
+
+    A renewal has no Checkout Session of its own, so the address has to come off the invoice. Stripe puts
+    it in two places depending on API version -- `shipping_details` and the older `customer_shipping` --
+    and both are shaped like a session's shipping_details, so the session parser does the work.
+
+    **`customer_address` is deliberately NOT a fallback.** It is the BILLING address. It is frequently
+    populated when the shipping one is not (measured on a real invoice, 2026-09-25: customer_address held
+    a St. George UT address while both shipping fields were null), which makes it exactly the kind of
+    plausible-looking wrong answer that silently posts a parcel to the wrong place. No address is a state
+    the caller can reason about; a confidently wrong one is not.
+    """
+    invoice = invoice or {}
+    for candidate in (invoice.get("shipping_details"), invoice.get("customer_shipping")):
+        if isinstance(candidate, dict) and candidate.get("address"):
+            return destination_address_from_session({
+                "shipping_details": candidate,
+                "customer_details": {
+                    "name": invoice.get("customer_name") or "",
+                    "email": invoice.get("customer_email") or "",
+                    "phone": invoice.get("customer_phone") or "",
+                },
+            })
+    return {}
+
+
 # --- shipments -------------------------------------------------------------------------------------
 
 SHIPMENT_KINDS = ("outbound", "return")
