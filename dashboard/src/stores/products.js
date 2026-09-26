@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { apiRequest, getStripeMode, getTenantId } from "../api/client";
-import { fetchFullDocument, filterRows, loadIndex, searchText } from "../composables/indexedList.js";
+import { fetchFullDocument, filterRows, loadIndex } from "../composables/indexedList.js";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
 import { imageDimsForUrls } from "../utils/imageDims";
 
@@ -22,9 +22,6 @@ export const PRODUCT_SEARCH_FIELDS = [
   "tags",
 ];
 
-function productSearchText(product) {
-  return searchText(product, PRODUCT_SEARCH_FIELDS);
-}
 
 function localId(prefix = "local") {
   const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -78,9 +75,6 @@ export function isValidGtin(raw) {
   return (10 - (sum % 10)) % 10 === check;
 }
 
-function cents(value) {
-  return Math.max(0, Math.round(Number(value || 0) * 100));
-}
 
 export function normalizeTag(value) {
   return String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");

@@ -15,9 +15,6 @@ function localId(prefix = "svc") {
   return `${prefix}_${suffix}`;
 }
 
-function cents(value) {
-  return Math.max(0, Math.round(Number(value || 0) * 100));
-}
 
 export function formatServicePrice(service) {
   const price = service?.price || {};

@@ -1927,9 +1927,6 @@ function draftSelectionIsCompatible() {
   return new Set(selectedDraftItems.map(productIntentFor)).size <= 1;
 }
 
-function productInitial(product) {
-  return String(product.name || "P").trim().slice(0, 1).toUpperCase();
-}
 
 function productPrices(product) {
   return (Array.isArray(product?.prices) ? product.prices : []).filter((price) => price && price.price_id);
@@ -2060,24 +2057,11 @@ function detectOfferType(products) {
   return "single_product";
 }
 
-function generateOfferLabel(products, type) {
-  if (!products.length) return "";
-  const baseName = String(products[0].name || "Product").split(" - ")[0].trim() || "Product";
-  return `${baseName} ${type === "bundle" ? "Bundle" : "Single Offer"}`;
-}
 
 // Internal offer name — brainless by default: just the primary item's product name, NO type suffix
 // (offer_type is derived now, so "… Single Offer / … Bundle" is gone). Sticky until the tenant edits it.
 // This is the tenant's dashboard label only; the customer-facing headline is offer.presentation.headline.
 // plans/OFFER_MODEL_REDESIGN.md §7.
-function offerLabelForItems() {
-  // Name off the primary LANDING item (a funnel-only bump/upsell product never names the offer).
-  const product = landingProducts.value[0];
-  const serviceName = serviceRows.value[0] ? serviceObjFor(serviceRows.value[0].service_id)?.name : "";
-  const name = product?.name || serviceName || "";
-  if (!name) return "";
-  return String(name).split(" - ")[0].trim() || "Item";
-}
 
 function contextLabel(value) {
   const labels = {

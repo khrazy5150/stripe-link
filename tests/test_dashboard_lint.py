@@ -16,10 +16,14 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "dashboard"
 
-# Measured 2026-09-25 on the first run: 41 no-unused-vars, 46 vue/no-mutating-props, 1 unused disable
-# directive. They are WARNINGS, so they do not block, but the count is pinned so it cannot quietly grow.
-# Lower it when they are fixed; raising it should be a deliberate act with a reason.
-WARNING_CEILING = 88
+# First run found 88. The 41 `no-unused-vars` were all genuinely dead and are gone -- ~100 lines across 13
+# files. What remains is ONE pattern: 46 `vue/no-mutating-props`, children writing to a prop object their
+# parent owns. That is a coherent design choice (form-field components editing a passed object), not 46
+# independent mistakes, and unpicking it means adopting `defineModel` across the product, offer and
+# landing editors -- a refactor with real regression risk on the most complex screens in the app.
+#
+# Pinned so it cannot grow. Lower it when the refactor happens; raising it should be deliberate.
+WARNING_CEILING = 46
 
 
 def _npx(*args, cwd=DASHBOARD):
@@ -85,6 +89,13 @@ class ItActuallyRunsTests(unittest.TestCase):
         errors = [f"{f['filePath'].rsplit('/', 1)[-1]}:{m['line']} {m.get('ruleId')}"
                   for f in self.report for m in f["messages"] if m.get("severity") == 2]
         self.assertEqual(errors, [], "\n".join(errors))
+
+    def test_no_unused_names_remain(self):
+        """All 41 were dead code and were removed. A new one is a rename half-done or an orphaned import,
+        and it should be noticed while it is one rather than forty."""
+        offenders = [f"{f['filePath'].rsplit('/', 1)[-1]}:{m['line']} {m['message']}"
+                     for f in self.report for m in f["messages"] if m.get("ruleId") == "no-unused-vars"]
+        self.assertEqual(offenders, [], "\n".join(offenders))
 
     def test_the_known_warnings_do_not_quietly_grow(self):
         count = len(self._by_rule(1))

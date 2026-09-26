@@ -424,7 +424,7 @@ import { fulfillerDisplayName, useFulfillersStore } from "../stores/fulfillers";
 import { formatMoney } from "../stores/products";
 import { useCalendarStore } from "../stores/calendar";
 import { applyTitleCaseInput } from "../utils/titleCase.js";
-import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
+import { priceFormFromDocument } from "../utils/priceForm";
 import PricingCard from "./shared/PricingCard.vue";
 import ServiceWizard from "./services/ServiceWizard.vue";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
@@ -488,7 +488,6 @@ const allowedForm = ref(defaultAllowedForm());
 const showAddFulfiller = ref(false);
 const newFulfiller = ref(defaultNewFulfiller());
 const addFulfillerError = ref("");
-const heroUploading = ref(false);
 const heroUploadError = ref("");
 
 const takeViewIntent = inject("takeViewIntent", null);

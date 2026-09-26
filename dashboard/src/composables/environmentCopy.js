@@ -37,7 +37,7 @@ export function offerForTarget(offer, env) {
   return o;
 }
 
-export function pageForTarget(page, existingTarget, env) {  // eslint-disable-line no-unused-vars
+export function pageForTarget(page, existingTarget, env) {   
   const now = nowSec();
   const status = existingTarget?.status || "draft";  // new -> draft; never downgrade a published target
   const p = cloneDoc(page);

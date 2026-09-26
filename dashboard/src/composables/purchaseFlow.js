@@ -175,22 +175,6 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
   };
   // Low–high across a tiered item's selectable prices. Returns "" when there is nothing to span (no tiers,
   // or none of their price_ids resolve), so the caller falls back to the single price.
-  const priceRange = (product, selectable) => {
-    const amounts = [];
-    let currency = "";
-    for (const tier of selectable || []) {
-      const price = (product?.prices || []).find((entry) => entry.price_id === tier?.price_id);
-      if (!price) continue;
-      amounts.push(Number(price.unit_amount || 0));
-      currency = currency || price.currency;
-    }
-    if (amounts.length < 2) return "";
-    const low = Math.min(...amounts);
-    const high = Math.max(...amounts);
-    return low === high
-      ? formatAmount(low, currency)
-      : `${formatAmount(low, currency)} – ${formatAmount(high, currency)}`;
-  };
 
   const card = (entry, intent) => {
     const product = resolveProduct(entry.id);

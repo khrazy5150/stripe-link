@@ -388,11 +388,6 @@ const wizardNextLabel = computed(() => {
   return "Next ->";
 });
 
-function openWizard(step = 1) {
-  wizardError.value = "";
-  wizardStep.value = step;
-  wizardOpen.value = true;
-}
 
 function closeWizard() {
   wizardOpen.value = false;

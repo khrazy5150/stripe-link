@@ -326,9 +326,17 @@ class WizardTests(unittest.TestCase):
         """
         self.assertIn("wizardDropsAStep = computed(() => wizardSkipsGoal.value && !wizardAsksUsername.value)",
                       self.BUILDER)
-        for calc in ("const displayTotal", "const displayStep"):
-            block = self.BUILDER.split(calc, 1)[1][:260]
-            self.assertIn("wizardDropsAStep", block, calc)
+        # The rail is `:steps="wizardStepLabels" :current="displayStep"`. The TOTAL is the label list's own
+        # length, built by pushing the steps of the path actually being walked, so it cannot disagree with
+        # itself. Only the CURRENT step needs the predicate.
+        block = self.BUILDER.split("const displayStep", 1)[1][:260]
+        self.assertIn("wizardDropsAStep", block)
+        labels = self.BUILDER.split("const wizardStepLabels", 1)[1][:400]
+        self.assertIn("wizardAsksUsername", labels)
+        self.assertIn("wizardSkipsGoal", labels)
+        # A separate total is what USED to be here; it was computed and never read, which the linter found
+        # in 2026-09-25. Re-adding one means two sources for one number.
+        self.assertNotIn("const displayTotal", self.BUILDER)
 
     def test_the_handle_is_written_to_the_SITE_not_the_page(self):
         # One handle per Site, however many hubs it ever has.

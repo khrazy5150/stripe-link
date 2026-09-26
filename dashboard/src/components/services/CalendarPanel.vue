@@ -71,12 +71,12 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 // Rendered inside the create wizard, which supplies its own step heading and chrome. A prop rather than the
 // wizard reaching in with :deep() -- that would break silently the next time this panel's markup moved, and
 // a shared component should say what it supports rather than have it discovered.
-const props = defineProps({ embedded: { type: Boolean, default: false } });
+defineProps({ embedded: { type: Boolean, default: false } });
 import { useCalendarStore } from "../../stores/calendar";
 import ConfirmDialog from "../shared/ConfirmDialog.vue";
 import PromptDialog from "../shared/PromptDialog.vue";

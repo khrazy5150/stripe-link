@@ -290,17 +290,14 @@
 import { computed, inject, reactive, ref } from "vue";
 import { apiRequest } from "../api/client";
 import { formatMoney } from "../stores/products";
-import { formatEpochDate, statusLabel } from "../utils/format";
+import { formatEpochDate } from "../utils/format";
 import MarkShippedModal from "./orders/MarkShippedModal.vue";
 import OrderDetailDrawer from "./orders/OrderDetailDrawer.vue";
 import {
   destinationSummary,
   elideId,
-  itemsSummary,
-  orderStatus,
   shortOrderRef,
   sortOrders,
-  statusBadgeClass,
 } from "./orders/orderDisplay";
 
 const orders = ref([]);
@@ -343,7 +340,6 @@ function caret(key) {
 // reads "Not Shippable" down the Status column, which is a true and useful answer rather than an empty
 // one. `shippingConfigured` still gates the BANNER and the batch actions, which are genuinely irrelevant
 // to a tenant with no provider.
-const showFulfilment = computed(() => true);
 
 const selected_ = ref(new Set());
 

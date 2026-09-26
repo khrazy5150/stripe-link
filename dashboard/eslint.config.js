@@ -46,6 +46,10 @@ export default [
         args: "none",
         varsIgnorePattern: "^_",
         caughtErrors: "none",
+        // `const { created_at, updated_at, ...stable } = doc` is how this codebase OMITS fields. The
+        // named halves are meant to be unused -- that is the point of the line -- so flagging them
+        // would be the linter objecting to correct code.
+        ignoreRestSiblings: true,
       }],
       // A child writing to its parent's prop: real Vue anti-pattern, 46 instances, and unpicking them is
       // a refactor rather than a lint fix.

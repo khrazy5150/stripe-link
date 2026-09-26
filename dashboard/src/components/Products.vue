@@ -538,7 +538,7 @@
 </template>
 
 <script setup>
-import { computed, h, inject, nextTick, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
@@ -777,7 +777,6 @@ function applyWizardIntent() {
 
 const showLeadPicker = ref(false);
 const formError = ref("");
-const imageFileInput = ref(null);
 const uploadStatus = ref("");
 const uploadStatusKind = ref("");
 const syncing = ref(false);

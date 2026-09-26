@@ -2412,7 +2412,7 @@ import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
+import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -2571,15 +2571,12 @@ function toggleBuilderForm() {
   else builderFormHidden.value = true;
 }
 const faviconFileInput = ref(null);
-const heroFileInput = ref(null);
 const avatarFileInput = ref(null);
 const blurbImageInputs = ref({});
 const faviconUploading = ref(false);
-const heroUploading = ref(false);
 const avatarUploading = ref(false);
 const blurbImageUploading = reactive({});
 const faviconUploadError = ref("");
-const heroUploadError = ref("");
 const avatarUploadError = ref("");
 const blurbImageErrors = reactive({});
 // Per-sub-item image uploads (testimonial avatars, client logos), keyed by element:list:index.
@@ -2676,7 +2673,6 @@ const selectedOfferIntent = computed(() => offerIntent(selectedOffer.value));
 const selectedOfferIsSocialPage = computed(() =>
   selectedOffer.value?.lead_capture_action === "social_redirect"
   || selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
-const selectedLeadAction = computed(() => selectedOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 // Which lead action this page's offer performs. The cta TYPE cannot say: one type ("email") backs three.
 // The CTA types that wear the shared panel (render_cta_panel): a phone number, a destination host, a
@@ -2940,8 +2936,6 @@ const builderGoalNote = computed(() => {
   return option ? option.note : "";
 });
 // Governed sections a tenant can toggle for this offer type + goal (Recommended = on by default).
-const recommendedSections = computed(() => recommendedSectionKeys(builderOfferType.value, builderGoal.value));
-const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value, builderGoal.value));
 // Structural sections are always present; these are the optional content sections the tenant can add/remove.
 const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_price_selector", "legal_footer", "checkout_cta"]);
 const optionalGovernedSections = computed(() => governedKeys().filter((key) => {
@@ -3629,7 +3623,6 @@ async function loadPages() {
     const body = await pagesPromise;
     pages.value = Array.isArray(body.pages) ? body.pages : [];
     pagesLoaded.value = true;
-    const activeCount = pages.value.filter((page) => page.status !== "archived").length;
     // No "N landing pages loaded." banner — the list itself is the feedback, and the blue box was pure
     // chrome above the builder. Action confirmations (saved/attached/published) still set `message`.
     catalogPromise.catch(() => {});
@@ -3871,7 +3864,6 @@ function nextWizardStep() {
   wizardStep.value += 1;
 }
 
-const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
 // The Site picker is a prepended step 1; the numbered build steps shift to 2..N+1 for display only
 // (internal wizardStep stays 1..N so the existing step logic is untouched).
 // A skipped step must not leave a hole in the count: without this a Social Page read "Step 2 of 5" and
@@ -3891,14 +3883,16 @@ const creatorUsernameSeed = computed(() =>
 // dropping it, so the count is unchanged. One predicate, read by all three of the rail's calculations,
 // because they have to agree and nothing else forces them to.
 const wizardDropsAStep = computed(() => wizardSkipsGoal.value && !wizardAsksUsername.value);
-const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardDropsAStep.value ? 1 : 0));
 // Labels for the shared step rail. Built rather than constant because this wizard has FOUR possible paths:
 // an offer page runs Site > Type > Goal > Configure > Review, a Social Page swaps Goal for Username (or
 // drops it where link-in-bio serving is not configured), and an offer-less page finishes at Details.
 //
-// The list must always be exactly displayTotal long. The first version was four labels sliced to length,
-// which silently showed a four-step rail on the five-step offer path -- a rail that lies about how much is
-// left is worse than the dots it replaced. wizardStepCountMatchesLabels() below is asserted by a test.
+// The length is correct BY CONSTRUCTION -- the labels are pushed for the path actually being walked, so
+// there is no separate total to keep in step. The first version was four labels sliced to length, which
+// silently showed a four-step rail on the five-step offer path; a rail that lies about how much is left is
+// worse than the dots it replaced. (A `displayTotal` computed and a `wizardStepCountMatchesLabels()` used
+// to guard that. Both are gone -- the first was dead code the linter found, the second had already been
+// deleted while this comment went on citing it.)
 const wizardStepLabels = computed(() => {
   if (form.pageKind !== "offer") return ["Site", "Type", "Details"];
   const labels = ["Site", "Type"];
@@ -5233,13 +5227,6 @@ function legalLinks() {
   return {};
 }
 
-function toggleHeroMedia(image) {
-  const items = new Set(heroMediaList.value);
-  if (items.has(image)) items.delete(image);
-  else items.add(image);
-  builder.hero_media_text = Array.from(items).join("\n");
-  if (!builder.seo_image) builder.seo_image = image;
-}
 
 // The media field speaks arrays; the builder keeps storing newline text, so buildBuilderPageDocument()
 // and the product-image autofill below are unchanged (hero_media.images is still a plain URL array).
@@ -5247,12 +5234,6 @@ function setHeroMedia(list) {
   builder.hero_media_text = (Array.isArray(list) ? list : []).join("\n");
 }
 
-function appendHeroMedia(image) {
-  const items = new Set(heroMediaList.value);
-  items.add(image);
-  builder.hero_media_text = Array.from(items).join("\n");
-  if (!builder.seo_image) builder.seo_image = image;
-}
 
 async function handleFaviconPicked(event) {
   const file = event.target.files?.[0];
@@ -5269,20 +5250,6 @@ async function handleFaviconPicked(event) {
   }
 }
 
-async function handleHeroMediaPicked(event) {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  if (!file) return;
-  heroUploadError.value = "";
-  heroUploading.value = true;
-  try {
-    appendHeroMedia(await uploadPageImage(file));
-  } catch (err) {
-    heroUploadError.value = err.message || "Hero image upload failed.";
-  } finally {
-    heroUploading.value = false;
-  }
-}
 
 async function handleAvatarPicked(event) {
   const file = event.target.files?.[0];
@@ -5531,7 +5498,6 @@ function removeSubItem(element, key, index) {
   element[key].splice(index, 1);
 }
 
-const elementDragIndex = ref(-1);
 
 function setElementImageInput(id, el) {
   if (el) blurbImageInputs.value[id] = el;
@@ -6072,12 +6038,6 @@ function countLabel(n, noun) {
 }
 
 // Sections with no editor still earn a row: a tenant needs to see WHERE they land, even with nothing to set.
-function rowNote(row) {
-  if (row.empty) return "Nothing is showing on the page yet — switch one on below.";
-  if (row.type === "offer_price_selector") return "Prices and options come from the offer.";
-  if (row.type === "related_products") return "Chosen automatically from your catalog.";
-  return "Nothing to configure — this section is generated.";
-}
 
 const rowDragFrom = ref(-1);
 

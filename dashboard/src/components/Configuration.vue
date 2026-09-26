@@ -347,11 +347,6 @@ const UPSELL_DEFAULTS = {
   downsell_headline: "Wait — Here's a Smaller Option",
   downsell_note: "This offer will not be shown again.",
 };
-const THANK_YOU_DEFAULTS = {
-  headline: "Thank You for Your Purchase!",
-  subtitle: "Your Order Has Been Confirmed!",
-  message: "Look for an email from us with further details on your order.",
-};
 function addThankYouCard() {
   form.page_defaults.thank_you.next_steps.push({ icon: "", title: "", desc: "" });
 }
