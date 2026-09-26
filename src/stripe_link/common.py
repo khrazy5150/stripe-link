@@ -126,14 +126,57 @@ def header_value(event: dict[str, Any], name: str) -> str:
 
 
 def tenant_id_from_event(event: dict[str, Any], body: dict[str, Any] | None = None) -> str:
+    """The tenant this request CLAIMS to be. Client-supplied, and nothing verifies it yet.
+
+    Every handler funnels through here, which is why the measurement below lives here rather than being
+    repeated 63 times. It changes nothing about what is returned -- see `_log_auth_gap`.
+    """
     body = body or {}
-    return (
+    claimed = (
         str(body.get("tenant_id") or "").strip()
         or str(query_params(event).get("tenant_id") or "").strip()
         or str(query_params(event).get("tenantID") or "").strip()
         or str(header_value(event, "X-Tenant-Id") or "").strip()
         or str(header_value(event, "X-Client-Id") or "").strip()
     )
+    _log_auth_gap(event, claimed)
+    return claimed
+
+
+def _log_auth_gap(event: dict[str, Any], claimed: str) -> None:
+    """Report what an authorizer WOULD have done, and enforce nothing.
+
+    plans/API_AUTHENTICATION.md phase 1. Enforcement is an API Gateway Cognito authorizer, which cannot be
+    shadowed -- it refuses before the Lambda runs -- so the gap is measured from inside instead: does this
+    request carry a token at all, and does the identity in it match the tenant it is asking for?
+
+    The claims used here are decoded WITHOUT a signature check and are a measurement, never a control.
+    Anyone can mint one; that is precisely what verifying exists to stop. Nothing in this function may
+    raise: a handler must not fail because a measurement did.
+    """
+    try:
+        from stripe_link.api_auth import PRIVATE, bearer_token, caller_tenant, classify, unverified_claims
+
+        if classify(event) != PRIVATE:
+            return
+        token = bearer_token(event)
+        claims = unverified_claims(event) if token else {}
+        caller = caller_tenant(claims)
+        method, resource = str(event.get("httpMethod") or ""), str(event.get("resource") or "")
+        if not token:
+            verdict = "no_token"
+        elif not caller:
+            verdict = "unreadable_token"
+        elif claimed and caller != claimed:
+            verdict = "tenant_mismatch"
+        else:
+            verdict = "would_allow"
+        print(json.dumps({"api_auth": {
+            "phase": "A1", "verdict": verdict, "method": method, "resource": resource,
+            "claimed_tenant": claimed, "token_tenant": caller, "enforced": False,
+        }}))
+    except Exception:  # noqa: BLE001 - a measurement must never be able to fail a request
+        pass
 
 
 def normalize_stripe_mode(value: Any) -> str:

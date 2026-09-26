@@ -710,7 +710,7 @@ what real traffic on these paths looks like.
 `X-Robots-Tag` over the whole artifact namespace plus the Worker stripping the inherited header and setting
 its own from `route.noindex`. It does nothing about commerce, and this item does nothing about indexing.
 
-### ⭐⭐ HIGH — the API never verifies who is calling; tenant_id is taken from the request (found 2026-09-15, confirmed 2026-09-23)
+### ⭐⭐ HIGH — the API never verifies who is calling — PHASE 1 BUILT 2026-09-25, nothing enforced yet (found 2026-09-15)
 
 Noticed while smoke-testing a newly deployed endpoint on prod, NOT introduced by it. This is repo-wide and
 pre-existing.
@@ -761,6 +761,13 @@ look like a fix and not be one. The boundary has to be drawn once, at the API.
 tip jar provision writes four documents and claims a GLOBALLY UNIQUE platform subdomain that is never
 recycled by design. Squatting those under another tenant's id is the kind of damage that cannot be fully
 undone by deleting rows.
+
+**Phase 1 built 2026-09-25** — `plans/API_AUTHENTICATION.md`. The boundary is written down as data in
+`stripe_link/api_auth.py`: 58 public routes of 202, classified per METHOD (`POST /leads` is a stranger
+filling in a form, `GET /leads` returns those strangers' addresses), failing CLOSED so an unclassified
+route is private. A shadow logger in `tenant_id_from_event` — the funnel every handler already passes
+through — reports what an authorizer would have done, and enforces nothing. Phase 2 attaches the Cognito
+authorizer once the logs are quiet.
 
 **The fix is not small**, which is why it is recorded rather than attempted: a Cognito authorizer on the
 RestApi, `tenant_id` derived from the verified claims instead of the request, and every handler that calls
