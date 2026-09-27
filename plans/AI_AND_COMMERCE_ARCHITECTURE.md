@@ -210,6 +210,15 @@ Confirmed by this:
   `put_use_case_for_model_access` is a separate reviewed submission. **Consequence for the adapter:
   there is no readable field that means "this model will answer."** `/ai/connect` must make a real
   generation, and a model's availability must be re-proven rather than cached from a status call.
+- **Invoking IS the enablement mechanism now**, which makes that rule load-bearing rather than merely
+  prudent. The console's Model access page has been retired, and says so: serverless models "are now
+  automatically enabled across all AWS commercial regions when first invoked", and for Marketplace-served
+  models "a user with AWS Marketplace permissions must invoke the model once to enable it account-wide
+  for all users." So `create_foundation_model_agreement` is the OLD path — which is exactly why it
+  granted nothing — and a verify-by-invoking connect flow is not just how we CHECK access, it is how
+  access gets turned on. One consequence worth designing for: the first call against a new model may be
+  slower or one-time-fallible in a way later calls are not, so connect must not treat a single failure
+  as permanent.
 - **The one entitled OpenAI model does not honour the contract.** `gpt-oss-120b` wrapped the object in
   an array and then emitted malformed JSON at char 2467 with `stopReason: end_turn`. Provider-agnosticism
   is therefore **unproven** until a frontier OpenAI model is enabled and measured.
