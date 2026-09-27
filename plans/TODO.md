@@ -1864,6 +1864,12 @@ is the closed-schema default doing its job with nobody reading the result.
     would have invited a tenant to give back money that never reached their balance. `amount_paid` stays the
     real charge. **There is no refund-confirmation email in the codebase at all**; that half rides with
     `docs/NOTIFICATION_EMITTERS.md`, not with this entry.
+  - (4) NOT in the original list, found while doing (3): the confirm dialog would have named the WRONG
+    NUMBER. It showed `amount.paid_amount` ($11.00) while the server sent the tip ($10.00), and the shipped
+    fee sentence read "you refund the full amount your customer paid" -- false for exactly this case. The
+    refund request now freezes `amount.refundable_amount` at creation, from the order already in hand, so
+    the dialog costs no extra read (which is what the entry below says the "this will cost you $X" figure
+    would cost). The tip case gets its own sentence; every other order keeps the old one.
   - Untested against real data: 0 of 22 prod orders carry `tip_keyed_amount`, because no tip has been sold
     through the live path yet. The first one is the real verification.
 - **Open: the refund policy WORDING** (plan §5f, raised 2026-09-13). There is nothing to return, so the policy has
