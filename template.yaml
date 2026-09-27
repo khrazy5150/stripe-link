@@ -1884,6 +1884,52 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /ai/connect
             Method: POST
+  AiGenerateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-ai-generate-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.ai_generate.handler
+      Description: A page brief becomes a Product, an Offer and a DRAFT page — the platform owns every id, the AI writes only floored copy (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.3, plans/AI_PAGE_BRIEF.md).
+      # A generation measured 13-20s. 60s leaves room for a repair round; API Gateway still caps the
+      # REQUEST at 30s, so this becomes a job the moment a critic pass or image work is added.
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          AI_PROVIDER_CONFIG_TABLE: !Ref AiProviderConfigTable
+          AI_USAGE_TABLE: !Ref AiUsageTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AiProviderConfigTable
+        # Read the allowance and SPEND against it -- the counter is written on every generation.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiUsageTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PagesTable
+        # Inference, on inference-profile ARNs as well as model ARNs: us-west-2 serves no In-Region
+        # inference for this generation, so every real call addresses a global./us. profile.
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:Converse
+            Resource:
+              - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+              - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+      Events:
+        AiGeneratePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ai/generate
+            Method: POST
   UpsellFunction:
     Type: AWS::Serverless::Function
     Properties:

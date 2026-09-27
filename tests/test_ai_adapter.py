@@ -257,6 +257,10 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(allowance_for(plan_key="basic", provider="bedrock"), 5)
         self.assertTrue(may_generate(0, allowance_for(plan_key="basic", provider="bedrock"))[0])
 
+    def test_an_unknown_plan_resolves_to_the_free_tier_not_to_nothing(self):
+        self.assertEqual(allowance_for(plan_key="", provider="bedrock"), 5)
+        self.assertEqual(allowance_for(plan_key="some-future-plan", provider="bedrock"), 5)
+
     def test_the_free_allowance_is_far_smaller_than_the_paid_one(self):
         free = allowance_for(plan_key="basic", provider="bedrock")
         paid = allowance_for(plan_key="premium", provider="bedrock")

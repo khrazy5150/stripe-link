@@ -111,11 +111,20 @@ class AiConfigTests(unittest.TestCase):
         self.assertEqual(usage["period"], "2026-09")
 
     def test_an_unreadable_tenant_profile_falls_to_the_free_tier(self):
-        # Fail CLOSED: a missing profile must not hand out platform-paid inference.
+        # The FREE TIER, which is what this test's name always claimed and what the code did not do:
+        # it resolved to zero, which renders as "AI is not included on your plan" -- a lie to a tenant
+        # whose profile read merely blipped. A tenant is never worse off than a free one.
         class Broken:
             def get(self, tenant_id):
                 raise RuntimeError("dynamo is having a day")
+        self.call("POST", {"provider": "bedrock", "model": "sonnet-4.6"})   # a provider IS configured
         usage = json.loads(self.call("GET", profiles=Broken())["body"])["usage"]
+        self.assertEqual(usage["allowance"], 5)
+
+    def test_no_provider_configured_is_its_own_zero(self):
+        # Distinct from an unknown PLAN: a tenant who has not turned AI on has no allowance because
+        # there is nothing to spend it through, not because their plan excludes them.
+        usage = json.loads(self.call("GET")["body"])["usage"]
         self.assertEqual(usage["allowance"], 0)
 
     def test_a_broken_counter_does_not_break_the_screen(self):

@@ -34,6 +34,12 @@ PLATFORM_PAID_ALLOWANCE = {
     # enough to see the feature work, which is the whole job of an acquisition feature.
     "basic": 5,
 }
+# The plan an unknown or unreadable plan key resolves to. NOT zero, which is what this used to do
+# while two comments and a test name all claimed it fell back to "the free tier". Zero renders as "AI
+# is not included on your plan", which is a lie to a tenant whose profile read merely blipped -- and
+# the exposure being defended against is five generations, about nine cents. The floor is the free
+# tier; a tenant is never worse off than a free one.
+FALLBACK_PLAN = "basic"
 # A tenant on their own key still gets a ceiling -- not to ration their spend, which is theirs, but
 # because a generation loop hammering their provider looks like our outage and costs them real money.
 BYOK_CEILING = 200
@@ -63,7 +69,8 @@ def allowance_for(*, plan_key: str = "", provider: str = "", exempt: bool = Fals
         return 0
     if provider != "bedrock":
         return BYOK_CEILING  # their key, their bill -- a safety ceiling, not a ration
-    return int(PLATFORM_PAID_ALLOWANCE.get(str(plan_key or "").strip().lower(), 0))
+    key = str(plan_key or "").strip().lower()
+    return int(PLATFORM_PAID_ALLOWANCE.get(key, PLATFORM_PAID_ALLOWANCE[FALLBACK_PLAN]))
 
 
 def remaining(used: int, allowance: int) -> int:
