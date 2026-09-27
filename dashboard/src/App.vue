@@ -151,6 +151,7 @@
           @switch-environment="switchEnvironment"
         />
         <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <AiProvider v-else-if="activeView === 'ai'" :key="`ai-${auth.session?.client_id || ''}`" />
         <Products v-else-if="activeView === 'products'" />
         <Coupons v-else-if="activeView === 'coupons'" />
         <Offers v-else-if="activeView === 'offers'" :key="`offers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
@@ -220,6 +221,7 @@ import Services from "./components/Services.vue";
 import Shipping from "./components/Shipping.vue";
 import Sites from "./components/Sites.vue";
 import StripeKeys from "./components/StripeKeys.vue";
+import AiProvider from "./components/AiProvider.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { assetUrl, getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";

@@ -5,7 +5,7 @@ export const menuSchema = {
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
     { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "collections", "services", "reviews", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "leads", "notifications", "invoices", "refunds", "shipping", "customers"] },
-    { key: "settings", label: "SETTINGS", items: ["billing", "stripeConnect", "registration", "configuration", "profile", "preferences"] },
+    { key: "settings", label: "SETTINGS", items: ["billing", "stripeConnect", "ai", "registration", "configuration", "profile", "preferences"] },
   ],
   items: {
     dashboard: {
@@ -21,6 +21,14 @@ export const menuSchema = {
       label: "Payments",
       icon: "creditCard",
       view: "stripeKeys",
+      enabled: true,
+      environments: ["test", "live"],
+    },
+    ai: {
+      key: "ai",
+      label: "AI",
+      icon: "sparkles",
+      view: "ai",
       enabled: true,
       environments: ["test", "live"],
     },
