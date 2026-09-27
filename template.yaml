@@ -1824,6 +1824,50 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /payment-methods
             Method: PUT
+  AiConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-ai-config-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.ai_config.handler
+      Description: Per-tenant AI provider configuration — saves the tenant's provider/model and PROVES it with a real generation, because no readable Bedrock field means "this model will answer" (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.1/§A.7).
+      Environment:
+        Variables:
+          AI_PROVIDER_CONFIG_TABLE: !Ref AiProviderConfigTable
+          AI_USAGE_TABLE: !Ref AiUsageTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiProviderConfigTable
+        # The generation counter: read to show the allowance, write to spend against it.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiUsageTable
+        # The plan decides the allowance, and billing_exempt lifts it.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        # Inference. Scoped to inference PROFILES as well as models: us-west-2 serves no In-Region
+        # inference for the current generation, so every real call addresses a `us.`/`global.` profile
+        # ARN and a model-only grant would deny every request we actually make.
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:Converse
+            Resource:
+              - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+              - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+      Events:
+        AiConfigGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ai/config
+            Method: GET
+        AiConnectPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ai/connect
+            Method: POST
   UpsellFunction:
     Type: AWS::Serverless::Function
     Properties:

@@ -263,6 +263,12 @@ class QuotaTests(unittest.TestCase):
         allowed, _ = may_generate(0, allowance_for(plan_key="basic", provider="anthropic"))
         self.assertTrue(allowed)
 
+    def test_a_tenant_with_no_provider_configured_gets_nothing(self):
+        # "Not bedrock" is not the same as "BYOK": reading the absence as BYOK granted every tenant who
+        # had never opened the screen a 200-generation ceiling.
+        self.assertEqual(allowance_for(plan_key="premium", provider=""), 0)
+        self.assertFalse(may_generate(0, allowance_for(plan_key="premium", provider=""))[0])
+
     def test_an_exempt_tenant_is_uncapped(self):
         self.assertEqual(allowance_for(plan_key="basic", provider="bedrock", exempt=True), UNLIMITED)
         self.assertTrue(may_generate(10_000, UNLIMITED)[0])

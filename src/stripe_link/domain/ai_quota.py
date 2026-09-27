@@ -51,7 +51,12 @@ def allowance_for(*, plan_key: str = "", provider: str = "", exempt: bool = Fals
     """How many generations this tenant may run this period. `UNLIMITED` (-1) means uncapped."""
     if exempt:
         return UNLIMITED
-    if str(provider or "").strip().lower() != "bedrock":
+    provider = str(provider or "").strip().lower()
+    if not provider:
+        # NOTHING configured is not the same as "not Bedrock". Reading the absence as BYOK handed every
+        # tenant who had never opened the screen a 200-generation ceiling.
+        return 0
+    if provider != "bedrock":
         return BYOK_CEILING  # their key, their bill -- a safety ceiling, not a ration
     return int(PLATFORM_PAID_ALLOWANCE.get(str(plan_key or "").strip().lower(), 0))
 
