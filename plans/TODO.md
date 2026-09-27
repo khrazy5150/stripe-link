@@ -1863,7 +1863,7 @@ is the closed-schema default doing its job with nobody reading the result.
 - **Open: is a tip an ORDER** — receipts/refunds/fees/ledger all assume one, and a tip has nothing to
   fulfil. Plus gratuity tax treatment.
 
-### ⭐⭐ HIGH — the DEPLOYED fee table was three weeks stale, on dev AND prod (found 2026-09-14)
+### ✅ CLOSED 2026-09-26 — the DEPLOYED fee table was three weeks stale, on dev AND prod (found 2026-09-14)
 
 The Payments screen showed a free tenant "Physical 10% / Digital 15%". Not a display bug: `/prices/calculate`
 on dev really answered 10% (probed live — $100 keyed, split fees, came back $107.06 with a $10.71 platform
@@ -1894,11 +1894,19 @@ config-only change could never be deployed. Fixed with `--no-fail-on-empty-chang
   path `deploy.sh` actually uploads.
 - ✅ Dev config re-uploaded and verified in the bucket (the running Lambdas pick it up within the 300s
   `BILLING_CONFIG_CACHE_TTL_SECONDS`).
-- ⛔ **PROD IS STILL STALE — needs a deploy.** Until then live tenants are charged 10%/15% instead of 5%/7%,
-  and premium subscribers 5/10/2 instead of 2/2/2/0 (proportionally the worst hit).
-- ⛔ **Decide what to do about fees already over-collected on prod** since 2026-08-27. The money went to the
-  platform as `application_fee_amount`, so it is ours to give back if that is the call. Needs a number first:
-  sum the platform fees on prod orders in that window and compare against the pivot rates.
+- ✅ **Prod is current, verified 2026-09-26.** The S3 object at `s3://jb-config-prod-…/global_billing_config.json`
+  is field-for-field identical to `DEFAULT_GLOBAL_BILLING_CONFIG` (the only textual difference is `2.9` vs
+  `Decimal("2.9")`, the same number after JSON). Deployed rates: free 5/6/7 physical/service/digital with
+  tip_jar 5, premium 2/2/2/0. One of the many prod deploys between 09-14 and today carried it — the entry
+  simply outlived the fix.
+- ✅ **Nothing was over-collected. The number is $0.00** (measured 2026-09-26, both sides):
+  - `jb-orders-prod` holds 22 orders, 21 of them on/after the pivot, and **every one is `stripe_mode: test`**.
+    A test-mode `application_fee_amount` moves no real money.
+  - Asked Stripe directly with the LIVE key — `GET /v1/application_fees?created[gte]=<pivot>` returns
+    **zero fees, $0.00 total**. No live tenant has transacted at all.
+  So there is nothing to give back and no policy call to make. Worth recording WHY rather than just "none":
+  the exposure was real for three weeks and happened to cost nothing only because no live tenant existed
+  yet. The same bug after launch is a refund programme.
 - **Deeper smell worth fixing:** the canonical RUNTIME config lives in `schemas/examples/` and reads as test
   data, which is exactly why a pricing change skipped it. Move it to a real config path (e.g.
   `config/global_billing_config.json`) so the next person editing fee rates finds it.
