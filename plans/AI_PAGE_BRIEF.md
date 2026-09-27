@@ -165,10 +165,16 @@ scar that says what happens when three calculations each decide how long a condi
 | 8 | Anything exact — `must_say`, `must_not_say` | ● | ● | ● | skip |
 | 9 | Review | ● | ● | ● | — |
 
-So a **download is 7 steps and never sees a shipping question**; a **service is 9 with two more
-required fields**, because a service page that cannot say how long it takes or whether it is remote
-is not worth generating. That is the author's rule — ask the fulfilment question only when it is not
-obvious — applied by making `kind` carry it.
+**Correction (2026-09-27, while implementing):** an earlier draft of this note claimed "a download
+is 7 steps". It is not — the table above gives every kind the same nine-step frame. The count was
+wrong and the claim is withdrawn.
+
+What actually differs is the *content and the weight* of the kind step, which is the part that
+matters. A **download never sees a shipping or dosage question**, and its whole kind step is optional
+— skippable in one click. A **service's kind step has two required fields**, because a service page
+that cannot say how long it takes or whether it is remote is not worth generating. That is the
+author's rule — ask the fulfilment question only when it is not obvious — applied by making `kind`
+carry it, and it shows up as what is asked rather than as a shorter rail.
 
 **What is never asked because it is derivable:**
 - `digital.delivery` — a digital product is delivered by download; only asked if they say otherwise.
