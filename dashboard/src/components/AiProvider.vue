@@ -1,134 +1,142 @@
 <template>
-  <section class="screen">
-    <header class="screen-head">
+  <section class="page">
+    <header class="page-header">
       <div>
         <h1>AI</h1>
-        <p class="screen-sub">
-          Which AI writes your page copy, and whose account pays for it.
-        </p>
+        <p>Which AI writes your page copy, and whose account pays for it</p>
+      </div>
+      <div class="button-row">
+        <button class="secondary-action" type="button" :disabled="store.loading" @click="store.load()">
+          {{ store.loading ? "Loading..." : "Reload" }}
+        </button>
       </div>
     </header>
 
-    <p v-if="store.loading" class="muted">Loading…</p>
-    <p v-else-if="store.error" class="form-error">{{ store.error }}</p>
+    <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
+    <div v-else-if="store.message" class="keys-status-banner">{{ store.message }}</div>
 
     <template v-if="!store.loading">
-      <!-- Current state first: a tenant who already connected wants to know it still works. -->
-      <div class="card ai-status" :class="{ 'ai-status--on': store.verified }">
-        <div>
-          <h2>{{ store.verified ? "Connected" : "Not connected" }}</h2>
-          <p v-if="store.verified" class="muted">
-            {{ providerLabel }} · {{ store.config.model }}
-            <span v-if="store.config.has_api_key"> · your own API key</span>
+      <section class="dashboard-card">
+        <header class="dashboard-card-header"><h2>Status</h2></header>
+        <div class="dashboard-card-body">
+          <p v-if="store.verified">
+            <strong>{{ providerLabel }}</strong> &middot; {{ modelLabel }}
+            <span v-if="store.config.has_api_key"> &middot; your own API key</span>
           </p>
-          <p v-else class="muted">Turn on AI below to start generating pages.</p>
+          <p v-else>AI is off. Turn it on below to start generating pages.</p>
+          <p v-if="store.verified" class="field-note">{{ usageLabel }} &middot; {{ billedLabel }}</p>
         </div>
-        <div v-if="store.verified" class="ai-usage">
-          <strong>{{ usageLabel }}</strong>
-          <span class="muted">{{ billedLabel }}</span>
-        </div>
-      </div>
+      </section>
 
       <!-- The default path. Nothing for the tenant to sign up for, fund, or paste. -->
-      <div class="card">
-        <h2>Junior Bay AI</h2>
-        <p class="muted">
-          Generations are included with your plan. Nothing to set up and no API key to manage.
-        </p>
-        <template v-if="store.models.length">
-          <div class="field">
-            <label for="ai-platform-model">Model</label>
-            <select id="ai-platform-model" v-model="form.platformModel">
-              <option v-for="m in store.models" :key="m.name" :value="m.name">{{ m.label }}</option>
-            </select>
-          </div>
-          <button class="primary-action" type="button" :disabled="store.connecting" @click="connectPlatform">
-            {{ store.connecting ? "Turning on…" : "Turn on AI" }}
-          </button>
-          <!-- Said out loud because the request really is slow: we run a real generation before
-               saving anything, so a model that cannot answer never becomes a working-looking setting. -->
-          <p class="field-hint">
-            We run one real generation to check everything works. This takes a few seconds.
+      <section class="dashboard-card">
+        <header class="dashboard-card-header"><h2>Junior Bay AI</h2></header>
+        <div class="dashboard-card-body">
+          <p class="field-note">
+            Generations are included with your plan. Nothing to set up and no API key to manage.
           </p>
-        </template>
-        <p v-else class="muted">No models are available right now.</p>
-      </div>
+          <template v-if="store.models.length">
+            <label class="offer-field">
+              <span>Model</span>
+              <select v-model="form.platformModel">
+                <option v-for="m in store.models" :key="m.name" :value="m.name">{{ m.label }}</option>
+              </select>
+            </label>
+            <div class="button-row">
+              <button class="primary-action" type="button" :disabled="store.connecting" @click="connectPlatform">
+                {{ platformButtonLabel }}
+              </button>
+            </div>
+            <!-- Said out loud because the request really is slow: a real generation runs before
+                 anything is saved, so a model that cannot answer never looks configured. -->
+            <p class="field-note">
+              We run one real generation to check everything works. This takes a few seconds.
+            </p>
+          </template>
+          <p v-else class="field-note">No models are available right now.</p>
+        </div>
+      </section>
 
       <!-- Kept, not promoted. Bringing a key means a separate vendor account funded with prepaid
-           credits that expire in a year and never refund -- real friction, worth it only for a tenant
-           who wants more headroom or their own vendor relationship. -->
-      <details class="card ai-advanced">
-        <summary><h2>Use your own AI account</h2></summary>
-        <p class="muted">
-          For higher volume, or if your policy requires generations run under your own vendor account.
-          You supply an API key and they bill you directly.
-        </p>
+           credits that expire in a year and never refund. -->
+      <section class="dashboard-card">
+        <header class="dashboard-card-header">
+          <h2>Use your own AI account</h2>
+          <button class="secondary-action compact" type="button" @click="showByok = !showByok">
+            {{ showByok ? "Hide" : "Show" }}
+          </button>
+        </header>
+        <div v-if="showByok" class="dashboard-card-body">
+          <p class="field-note">
+            For higher volume, or if your policy requires generations run under your own vendor
+            account. You supply an API key and they bill you directly.
+          </p>
 
-        <div class="field">
-          <label for="ai-provider">Provider</label>
-          <select id="ai-provider" v-model="form.provider">
-            <option v-for="p in providers" :key="p.key" :value="p.key">{{ p.label }}</option>
-          </select>
-        </div>
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Provider</span>
+              <select v-model="form.provider">
+                <option v-for="p in providers" :key="p.key" :value="p.key">{{ p.label }}</option>
+              </select>
+            </label>
+            <label class="offer-field">
+              <span>Model</span>
+              <select v-model="form.model">
+                <option v-for="m in selectedProvider.models" :key="m.name" :value="m.name">{{ m.label }}</option>
+              </select>
+            </label>
+          </div>
 
-        <div class="field">
-          <label for="ai-model">Model</label>
-          <select id="ai-model" v-model="form.model">
-            <option v-for="m in selectedProvider.models" :key="m.name" :value="m.name">{{ m.label }}</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label for="ai-key">API key</label>
-          <input
-            id="ai-key"
-            v-model="form.apiKey"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            :placeholder="selectedProvider.keyHint"
-          />
-          <p class="field-hint">
-            Stored encrypted and never shown again — not even to you.
+          <label class="offer-field">
+            <span>API key</span>
+            <input
+              v-model="form.apiKey"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              :placeholder="selectedProvider.keyHint"
+            />
+          </label>
+          <p class="field-note">
+            Stored encrypted and never shown again &mdash; not even to you.
             <a :href="selectedProvider.consoleUrl" target="_blank" rel="noopener noreferrer">
               Get a key from {{ selectedProvider.label }}
             </a>
           </p>
-        </div>
-
-        <!-- Before the button, not after a failure: a subscriber who connects a key and is told to
-             "add credits" by their provider reports it here as a broken feature. -->
-        <div class="field">
-          <p class="field-hint">
+          <!-- Before the button, not after a failure: a subscriber who connects a key and is told to
+               "add credits" by their provider reports it here as a broken feature. -->
+          <p class="field-note">
             {{ selectedProvider.billingNote }} Credits are prepaid, expire a year after purchase, and
-            are not refundable — so buy a small amount first.
+            are not refundable &mdash; so buy a small amount first.
             <a :href="selectedProvider.billingUrl" target="_blank" rel="noopener noreferrer">
               Check your {{ selectedProvider.label }} billing
             </a>
           </p>
+
+          <div class="button-row">
+            <button
+              class="secondary-action"
+              type="button"
+              :disabled="!form.apiKey.trim() || store.connecting"
+              @click="connectByok"
+            >
+              {{ store.connecting ? "Verifying..." : "Connect and verify" }}
+            </button>
+          </div>
         </div>
-
-        <button
-          class="secondary-action"
-          type="button"
-          :disabled="!form.apiKey.trim() || store.connecting"
-          @click="connectByok"
-        >
-          {{ store.connecting ? "Verifying…" : "Connect and verify" }}
-        </button>
-      </details>
-
-      <p v-if="store.message" class="form-success">{{ store.message }}</p>
+      </section>
     </template>
   </section>
 </template>
 
 <script setup>
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { BYOK_PROVIDERS, useAiProviderStore } from "../stores/aiProvider";
 
 const store = useAiProviderStore();
 store.load();
+
+const showByok = ref(false);
 
 const providers = BYOK_PROVIDERS;
 const form = reactive({
@@ -160,6 +168,28 @@ watch(() => store.models, (models) => {
 const providerLabel = computed(() => {
   if (store.config.provider === "bedrock") return "Junior Bay's AI";
   return (providers.find((p) => p.key === store.config.provider) || {}).label || store.config.provider;
+});
+
+// The raw registry id ("sonnet-4.6") is ours, not a name a tenant recognises.
+const modelLabel = computed(() => {
+  const name = store.config.model;
+  const fromPlatform = (store.models || []).find((m) => m.name === name);
+  if (fromPlatform) return fromPlatform.label;
+  for (const p of providers) {
+    const found = (p.models || []).find((m) => m.name === name);
+    if (found) return found.label;
+  }
+  return name || "";
+});
+
+// "Turn on AI" is wrong once it IS on -- the same click then means "switch model" or "re-check".
+const platformButtonLabel = computed(() => {
+  if (store.connecting) return "Checking...";
+  if (!store.verified) return "Turn on AI";
+  if (store.config.provider !== "bedrock") return "Switch to Junior Bay AI";
+  return form.platformModel && form.platformModel !== store.config.model
+    ? "Switch model"
+    : "Re-check connection";
 });
 
 const usageLabel = computed(() => {
