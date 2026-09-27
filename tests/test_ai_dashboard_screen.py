@@ -89,5 +89,16 @@ class HonestyTests(unittest.TestCase):
             self.assertIn(vendor, STORE)
         self.assertIn("billed separately", STORE)
 
-    def test_byok_is_presented_as_available_on_every_plan(self):
-        self.assertIn("Available on every plan", SCREEN)
+    def test_platform_paid_is_the_primary_path_and_byok_is_demoted(self):
+        # Revised 2026-09-27: BYOK needs a separate vendor account funded with non-refundable,
+        # one-year-expiry prepaid credits -- four steps before a tenant sees a page. Platform-paid
+        # costs ~1.9c a generation and removes all of it, so it leads.
+        self.assertLess(SCREEN.index("Junior Bay AI"), SCREEN.index("Use your own AI account"))
+        self.assertIn('class="primary-action"', SCREEN.split("Junior Bay AI", 1)[1].split("<details", 1)[0])
+        self.assertIn("<details", SCREEN)   # kept, not promoted
+
+    def test_byok_warns_that_credits_expire_and_do_not_refund(self):
+        # The friction is the commitment, not the price: a tenant who buys $5 and generates three
+        # pages has paid $1.67 each.
+        self.assertIn("expire a year after purchase", SCREEN)
+        self.assertIn("not refundable", SCREEN)

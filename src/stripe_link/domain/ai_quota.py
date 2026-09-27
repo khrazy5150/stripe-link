@@ -25,9 +25,14 @@ from typing import Any
 # would be 49%, which is where a flat bundle stops working. The free tier gets a real number rather
 # than zero because BYO-key tenants pay their own inference; see `allowance_for`.
 PLATFORM_PAID_ALLOWANCE = {
-    "premium": 50,
+    "premium": 50,   # ~$0.94/month of inference against a $19 plan -- under 5%
     "pro": 50,
-    "basic": 0,   # free tier does not get platform-paid inference; it gets BYO-key
+    # The free tier gets a REAL taste rather than nothing (revised 2026-09-27). It used to be zero on
+    # the theory that free tenants would bring their own key; that theory died when BYO-key turned out
+    # to require a separate vendor account funded with non-refundable, one-year-expiry prepaid credits
+    # -- four steps before a free tenant sees a single page. Five generations costs us ~9 cents and is
+    # enough to see the feature work, which is the whole job of an acquisition feature.
+    "basic": 5,
 }
 # A tenant on their own key still gets a ceiling -- not to ration their spend, which is theirs, but
 # because a generation loop hammering their provider looks like our outage and costs them real money.

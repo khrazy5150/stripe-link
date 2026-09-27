@@ -21,7 +21,7 @@
             {{ providerLabel }} · {{ store.config.model }}
             <span v-if="store.config.has_api_key"> · your own API key</span>
           </p>
-          <p v-else class="muted">Choose a provider below to start generating pages.</p>
+          <p v-else class="muted">Turn on AI below to start generating pages.</p>
         </div>
         <div v-if="store.verified" class="ai-usage">
           <strong>{{ usageLabel }}</strong>
@@ -29,13 +29,39 @@
         </div>
       </div>
 
-      <!-- Bring your own key. Listed FIRST: it works on every plan, and it is the only path that does
-           not depend on this platform's own model access. -->
+      <!-- The default path. Nothing for the tenant to sign up for, fund, or paste. -->
       <div class="card">
-        <h2>Use your own AI account</h2>
+        <h2>Junior Bay AI</h2>
         <p class="muted">
-          You supply an API key from your own provider account, and they bill you directly for what you
-          use. Available on every plan.
+          Generations are included with your plan. Nothing to set up and no API key to manage.
+        </p>
+        <template v-if="store.models.length">
+          <div class="field">
+            <label for="ai-platform-model">Model</label>
+            <select id="ai-platform-model" v-model="form.platformModel">
+              <option v-for="m in store.models" :key="m.name" :value="m.name">{{ m.label }}</option>
+            </select>
+          </div>
+          <button class="primary-action" type="button" :disabled="store.connecting" @click="connectPlatform">
+            {{ store.connecting ? "Turning on…" : "Turn on AI" }}
+          </button>
+          <!-- Said out loud because the request really is slow: we run a real generation before
+               saving anything, so a model that cannot answer never becomes a working-looking setting. -->
+          <p class="field-hint">
+            We run one real generation to check everything works. This takes a few seconds.
+          </p>
+        </template>
+        <p v-else class="muted">No models are available right now.</p>
+      </div>
+
+      <!-- Kept, not promoted. Bringing a key means a separate vendor account funded with prepaid
+           credits that expire in a year and never refund -- real friction, worth it only for a tenant
+           who wants more headroom or their own vendor relationship. -->
+      <details class="card ai-advanced">
+        <summary><h2>Use your own AI account</h2></summary>
+        <p class="muted">
+          For higher volume, or if your policy requires generations run under your own vendor account.
+          You supply an API key and they bill you directly.
         </p>
 
         <div class="field">
@@ -74,7 +100,8 @@
              "add credits" by their provider reports it here as a broken feature. -->
         <div class="field">
           <p class="field-hint">
-            {{ selectedProvider.billingNote }}
+            {{ selectedProvider.billingNote }} Credits are prepaid, expire a year after purchase, and
+            are not refundable — so buy a small amount first.
             <a :href="selectedProvider.billingUrl" target="_blank" rel="noopener noreferrer">
               Check your {{ selectedProvider.label }} billing
             </a>
@@ -82,39 +109,14 @@
         </div>
 
         <button
-          class="primary-action"
+          class="secondary-action"
           type="button"
           :disabled="!form.apiKey.trim() || store.connecting"
           @click="connectByok"
         >
           {{ store.connecting ? "Verifying…" : "Connect and verify" }}
         </button>
-        <!-- Said out loud because the request really is slow: we run a real generation before saving
-             anything, so a key that does not work never becomes a setting you discover is broken later. -->
-        <p class="field-hint">
-          We run one real generation to check the key works before saving it. This takes a few seconds.
-        </p>
-      </div>
-
-      <!-- Platform-paid. Shown second, and only as far as it is actually usable. -->
-      <div class="card">
-        <h2>Use Junior Bay's AI</h2>
-        <p class="muted">
-          No key to manage — generations are included with your plan.
-        </p>
-        <template v-if="store.models.length">
-          <div class="field">
-            <label for="ai-platform-model">Model</label>
-            <select id="ai-platform-model" v-model="form.platformModel">
-              <option v-for="m in store.models" :key="m.name" :value="m.name">{{ m.label }}</option>
-            </select>
-          </div>
-          <button class="secondary-action" type="button" :disabled="store.connecting" @click="connectPlatform">
-            {{ store.connecting ? "Verifying…" : "Use Junior Bay's AI" }}
-          </button>
-        </template>
-        <p v-else class="muted">No platform models are available right now.</p>
-      </div>
+      </details>
 
       <p v-if="store.message" class="form-success">{{ store.message }}</p>
     </template>
@@ -145,6 +147,15 @@ const selectedProvider = computed(
 watch(() => form.provider, () => {
   form.model = selectedProvider.value.models[0].name;
 });
+
+// The platform select starts empty because the catalogue arrives with the first load. Without this the
+// primary button would post an empty model and fall back server-side -- correct, but it would show the
+// tenant a blank dropdown beside a button that works, which reads as broken.
+watch(() => store.models, (models) => {
+  if (!form.platformModel && models.length) {
+    form.platformModel = store.defaultModel || models[0].name;
+  }
+}, { immediate: true });
 
 const providerLabel = computed(() => {
   if (store.config.provider === "bedrock") return "Junior Bay's AI";

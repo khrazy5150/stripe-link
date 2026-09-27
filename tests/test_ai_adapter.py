@@ -249,12 +249,23 @@ class QuotaTests(unittest.TestCase):
     def test_a_platform_paid_tenant_gets_their_plans_bundle(self):
         self.assertEqual(allowance_for(plan_key="premium", provider="bedrock"), 50)
 
-    def test_the_free_tier_gets_no_platform_paid_inference(self):
-        self.assertEqual(allowance_for(plan_key="basic", provider="bedrock"), 0)
+    def test_the_free_tier_gets_a_small_real_allowance(self):
+        # Revised 2026-09-27 from zero. The old zero assumed free tenants would bring their own key,
+        # which died on discovering BYOK needs a separate vendor account funded with non-refundable,
+        # one-year-expiry credits. Five generations costs ~9 cents and is enough to see the feature
+        # work, which is the entire job of an acquisition feature.
+        self.assertEqual(allowance_for(plan_key="basic", provider="bedrock"), 5)
+        self.assertTrue(may_generate(0, allowance_for(plan_key="basic", provider="bedrock"))[0])
 
-    def test_but_the_free_tier_can_still_generate_on_its_own_key(self):
-        # Page generation is the acquisition feature; a free tenant who cannot run it never sees the
-        # payoff that would convert them.
+    def test_the_free_allowance_is_far_smaller_than_the_paid_one(self):
+        free = allowance_for(plan_key="basic", provider="bedrock")
+        paid = allowance_for(plan_key="premium", provider="bedrock")
+        self.assertLess(free, paid)
+        self.assertGreater(paid, 0)
+
+    def test_a_byok_tenant_on_any_plan_still_gets_the_safety_ceiling(self):
+        # Their key, their bill -- the ceiling exists so a runaway loop cannot quietly spend their
+        # money, not to ration them.
         self.assertEqual(allowance_for(plan_key="basic", provider="anthropic"), BYOK_CEILING)
         allowed, _ = may_generate(0, allowance_for(plan_key="basic", provider="anthropic"))
         self.assertTrue(allowed)

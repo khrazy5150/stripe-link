@@ -61,6 +61,35 @@ decisions. This is the strategic payoff of going JSON-first.
     free. This is what keeps page generation — the *acquisition* feature — inside the free tier, where
     a tenant can actually see the payoff of the JSON-first architecture.
   - `provider: bedrock` — **the platform's bill**, gated on plan. The tenant never sees a key field.
+- **REVISED 2026-09-27 (same day): platform-paid is the DEFAULT; BYOK is tabled, kept, demoted.**
+  The original §A.1 reasoning -- "cost is the tenant's" -- assumed bringing a key was roughly free for
+  them. It is not, and the friction is not the price:
+  - A consumer subscription does **not** cover API use. Claude Pro/Max and ChatGPT both cover the chat
+    surfaces only, and **no third-party app can consume a consumer subscription** — not us, not anyone,
+    because the vendors expose no mechanism. (Claude Code authenticating with Pro/Max is first-party
+    and specially arranged.) So the appealing version of BYOK — "use the subscription you already pay
+    for" — cannot be built by anybody. That constraint is permanent and is not a gap in what we built.
+  - API access needs **prepaid credits that expire one year from purchase and never refund**. A tenant
+    must therefore create a vendor account, discover their subscription does not count, commit
+    non-refundable money, and only then paste a key — four steps before their first page. A tenant who
+    buys $5 and generates three pages has paid $1.67 each.
+  - And the cost being avoided is tiny. A measured generation is **$0.0187**: fifty a month is **$0.94
+    per premium tenant** (under 5% of a $19 plan) and five for a free tenant is **9 cents**. BYOK was
+    solving a cost problem that barely exists.
+  - **Bedrock also bills in ARREARS through AWS** — no prepayment, no expiry, no float — which is a
+    more durable advantage over the Anthropic-direct path than the entitlement hassle is a
+    disadvantage. The parked WIF option draws on the same expiring credits.
+
+  So `bedrock` is the default provider and the primary card on the settings screen; BYOK stays behind
+  a disclosure for the tenant who wants headroom or their own vendor relationship, with the credit
+  terms stated before the button. **Allowances: free 5, premium 50.** The free tier moved from zero
+  because platform-paid removes the setup that made a free allowance pointless — and page generation
+  is the acquisition feature, so a free tenant who cannot run it never sees what would convert them.
+
+  **Model: `sonnet-4.6`, entitled and working.** The entitlement impasse only affects models this
+  account did not already have (Sonnet 5, the GPT families); Sonnet 4.6 measured best for this task
+  regardless. The author is pursuing the impasse separately; nothing here waits on it.
+
 - **BOTH SHIPPED 2026-09-27** (slice 1). BYOK reaches each vendor's own API over raw urllib, so
   `src/requirements.txt` stays empty — no SDK is worth ~20MB in every package for one POST. The two
   differ in kind, not decoration: OpenAI's `response_format: json_schema, strict: true` *guarantees*
