@@ -84,7 +84,9 @@ class RepositoryGuardTests(unittest.TestCase):
 
     def test_tenant_range_repository_lists_all_query_pages(self):
         table = PaginatedTenantRangeTable()
-        repository = TenantRangeRepository("jb-customers-dev", id_field="customer_id", table=table)
+        # A mode is now required: an unfiltered read would return test rows alongside live ones.
+        repository = TenantRangeRepository("jb-customers-dev", id_field="customer_id", table=table,
+                                           mode="test")
 
         documents = repository.list_for_tenant("tenant-1")
 

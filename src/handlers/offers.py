@@ -197,7 +197,7 @@ def _expand(tenant_id: str, offer: dict, products_repo=None, services_repo=None,
             if product:
                 products_by_id[product_id] = product
         if service_id and service_id not in services_by_id:
-            repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
+            repo = services_repo or (services_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
             service = repo.get(tenant_id, service_id) if repo else None
             if service:
                 services_by_id[service_id] = service

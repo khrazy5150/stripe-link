@@ -127,6 +127,7 @@ class DynamoDocumentRepository:
         id_field: str,
         table: Any | None = None,
         mode: str | None = None,
+        mode_scoped: bool = False,
     ):
         if not table_name:
             raise RepositoryError("Table name is required.")
@@ -137,7 +138,18 @@ class DynamoDocumentRepository:
         self._table = table
         # When set, this repo is Stripe-mode-scoped: mode is baked into the SK + GSI1PK so a tenant's test and
         # live documents (which may share an id after a test->live promote) are DISTINCT items that coexist in
-        # the one per-deployment table (plans/STRIPE_MODE_DECOUPLING.md). None = mode-agnostic (legacy layout).
+        # the one per-deployment table (plans/STRIPE_MODE_DECOUPLING.md).
+        #
+        # A mode-scoped type with NO mode is refused rather than tolerated. It does not read across test and
+        # live -- it reads a THIRD, empty key space (`ORDER#id` beside `ORDER#test#id` and `ORDER#live#id`),
+        # so the caller gets a confident empty answer instead of an error. Found 2026-09-26 in the refund
+        # return gate: an unmoded product read found nothing, the policy snapshot concluded "no return
+        # required", and every refund would have skipped its gate. Silence is the worst failure mode
+        # available, so this one is loud.
+        if mode_scoped and mode is None:
+            raise RepositoryError(
+                f"'{document_type}' documents are Stripe-mode-scoped; pass mode='test' or mode='live'. "
+                "Omitting it reads an empty key space and answers confidently with nothing.")
         self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
@@ -353,6 +365,7 @@ def products_repository(table: Any | None = None, *, mode: str | None = None) ->
         id_field="product_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -363,6 +376,7 @@ def shipments_repository(table: Any | None = None, *, mode: str | None = None) -
         id_field="shipment_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -373,6 +387,7 @@ def offers_repository(table: Any | None = None, *, mode: str | None = None) -> D
         id_field="offer_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -383,6 +398,7 @@ def coupons_repository(table: Any | None = None, *, mode: str | None = None) -> 
         id_field="coupon_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -395,6 +411,7 @@ def coupon_grants_repository(table: Any | None = None, *, mode: str | None = Non
         id_field="grant_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -410,6 +427,7 @@ def coupon_redemptions_repository(table: Any | None = None, *, mode: str | None 
         id_field="redemption_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -420,6 +438,7 @@ def pages_repository(table: Any | None = None, *, mode: str | None = None) -> Dy
         id_field="page_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -430,6 +449,7 @@ def sites_repository(table: Any | None = None, *, mode: str | None = None) -> Dy
         id_field="site_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -712,6 +732,14 @@ class TenantRangeRepository:
         self._table = table
         # Orders/customers carry globally-unique ids (no cross-mode id reuse), so mode is a filtered ATTRIBUTE
         # here rather than part of the key: stamp on write, filter list/get by mode (plans/STRIPE_MODE_DECOUPLING.md).
+        #
+        # Refused when absent, for the same reason the key-scoped repositories refuse it -- but the failure
+        # here is worse. An unfiltered read does not miss quietly, it returns test money ALONGSIDE real
+        # money, which is how a tenant's revenue total silently includes transactions that never happened.
+        if mode is None:
+            raise RepositoryError(
+                f"'{id_field}' documents are Stripe-mode-scoped; pass mode='test' or mode='live'. "
+                "Omitting it returns test and live rows together.")
         self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
@@ -1118,6 +1146,7 @@ def collections_repository(table: Any | None = None, *, mode: str | None = None)
         id_field="collection_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1128,6 +1157,7 @@ def carts_repository(table: Any | None = None, *, mode: str | None = None) -> Dy
         id_field="cart_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1139,6 +1169,7 @@ def cart_tokens_repository(table: Any | None = None, *, mode: str | None = None)
         id_field="token",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1152,6 +1183,7 @@ def tip_tokens_repository(table: Any | None = None, *, mode: str | None = None) 
         id_field="token",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1164,6 +1196,7 @@ def purchase_tokens_repository(table: Any | None = None, *, mode: str | None = N
         id_field="token",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1193,6 +1226,7 @@ def review_invites_repository(table: Any | None = None, *, mode: str | None = No
         id_field="invite_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1203,6 +1237,7 @@ def services_repository(table: Any | None = None, *, mode: str | None = None) ->
         id_field="service_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1240,6 +1275,7 @@ def appointments_repository(table: Any | None = None, *, mode: str | None = None
         id_field="appointment_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1250,6 +1286,7 @@ def invoices_repository(table: Any | None = None, *, mode: str | None = None) ->
         id_field="invoice_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1271,6 +1308,7 @@ def experiments_repository(table: Any | None = None, *, mode: str | None = None)
         id_field="experiment_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 
@@ -1301,6 +1339,7 @@ def booking_credits_repository(table: Any | None = None, *, mode: str | None = N
         id_field="entitlement_id",
         table=table,
         mode=mode,
+        mode_scoped=True,
     )
 
 

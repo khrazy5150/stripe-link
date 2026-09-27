@@ -37,7 +37,7 @@ from stripe_link.domain.shipping import (
     destination_address_from_invoice,
     destination_address_from_session,
 )
-from stripe_link.domain.silo_routing import resolve_event_silo, routing_log
+from stripe_link.domain.silo_routing import event_belongs_here, resolve_event_silo, routing_log
 from stripe_link.silo import current_silo
 from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
@@ -190,11 +190,16 @@ def handler(
     kind = _webhook_kind(event)
     body = _request_body(event)
 
-    # Derive the mode from the event's own `livemode` (route-by-livemode), so ONE prod endpoint handles both test
-    # and live events. Parse first (unverified) purely to read livemode + pick the matching per-mode signing
-    # secret; the signature is then verified against that secret, so a tampered body still fails below. This
-    # supersedes the deployment-derived mode + the mode-mismatch reject (the old dup-order guard): dev no longer
-    # receives Stripe traffic, and Stripe redelivery is still deduped per events-table by event_id.
+    # Derive the mode from the event's own `livemode`. Parse first (unverified) purely to read livemode and
+    # pick the matching per-mode signing secret; the signature is verified against that secret below, so a
+    # tampered body still fails.
+    #
+    # The event is then processed only if this deployment OWNS that mode -- test belongs to sandbox, live to
+    # production (plans/SILO_MODEL.md, author 2026-09-26). The P3 note that used to sit here said one prod
+    # endpoint should handle both; that was decided before the silo was a modeled concept, and it is what
+    # put a sandbox tenant's orders in jb-orders-prod while their products, upsells and dashboard all lived
+    # in dev. Stripe's test Connect endpoint now points at the sandbox stack; this guard is the same rule in
+    # code, so a configuration that drifts again cannot silently refill the wrong table.
     try:
         stripe_event = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -240,15 +245,25 @@ def handler(
         except RepositoryError:
             events_repo = None  # never block processing on the idempotency store
 
-    # S3: resolve which silo owns this event and LOG it. Nothing is refused yet -- a resolver that starts
-    # dropping events on its first day drops the ones it is wrong about, and the logs are how we find out
-    # which those are before S4 makes it a refusal (plans/SILO_MODEL.md).
+    # S3/S4: resolve which SILO owns this event, log it, and keep only what is ours.
+    #
+    # Every silo registers its own Connect endpoint in both modes, so every endpoint receives every event
+    # and each deployment filters for itself. Routing is by SILO, not by mode: a sandbox tenant's LIVE
+    # sale belongs in the sandbox silo's tables under ORDER#live#, not in production's
+    # (plans/SILO_MODEL.md, author 2026-09-26).
     silo_resolution = resolve_event_silo(
         stripe_event,
         this_silo=current_silo(),
         holds_order=_order_holder(tenant_id, orders_repo),
     )
     print(json.dumps(routing_log(stripe_event, silo_resolution, this_silo=current_silo())))
+
+    belongs, why_not = event_belongs_here(silo_resolution, current_silo(), mode)
+    if not belongs:
+        # 200, not an error: a foreign event is somebody else's, not a failure, and the silo that owns it
+        # has its own copy from its own endpoint. A 4xx would make Stripe retry this forever.
+        return json_response({"received": True, "processed": False, "reason": why_not,
+                              "resolved_silo": silo_resolution.get("silo", "")})
 
     persistence = {}
     if event_type == "charge.refunded" and tenant_id:
@@ -773,13 +788,14 @@ def _service_lines_from_metadata(metadata: dict[str, Any]) -> list[dict[str, Any
     }]
 
 
-def _no_booking_comp_snapshot(tenant_id: str, line: dict[str, Any], services_repo, fulfillers_repo) -> dict[str, Any] | None:
+def _no_booking_comp_snapshot(tenant_id: str, line: dict[str, Any], services_repo, fulfillers_repo,
+                              mode: str = "test") -> dict[str, Any] | None:
     """Freeze the assigned fulfiller's compensation for a no_booking line (payout attribution).
     Best-effort: returns None when unassigned or the service/fulfiller can't be loaded."""
     fulfiller_id = str(line.get("default_fulfiller_id") or "")
     if not fulfiller_id:
         return None
-    services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
+    services_repo = services_repo or (services_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     fulfillers_repo = fulfillers_repo or (fulfillers_repository() if os.environ.get("SERVICES_TABLE") else None)
     if not services_repo or not fulfillers_repo:
         return None
@@ -812,7 +828,7 @@ def _record_service_purchase_on_invoice(
     source["appointment_ids"] = list(appointment_ids)
     line_items = list(invoice.get("line_items") or [])
     for line in no_booking_lines:
-        snapshot = _no_booking_comp_snapshot(tenant_id, line, services_repo, fulfillers_repo)
+        snapshot = _no_booking_comp_snapshot(tenant_id, line, services_repo, fulfillers_repo, mode)
         line_items.append(no_booking_invoice_line(line, currency, rule_snapshot=snapshot))
     try:
         invoices_repo.put({**invoice, "source": source, "line_items": line_items, "updated_at": now})
@@ -1059,7 +1075,7 @@ def persist_appointment_paid(
     appointments_repo.put(updated)
 
     # Route the calendar event to the assigned delegate's calendar + email them (best-effort).
-    services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
+    services_repo = services_repo or (services_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     fulfillers_repo = fulfillers_repo or (fulfillers_repository() if os.environ.get("SERVICES_TABLE") else None)
     connections_repo = connections_repo or (calendar_connections_repository() if os.environ.get("CALENDAR_CONNECTIONS_TABLE") else None)
     tenant_repo = tenant_repo or (tenant_profiles_repository() if os.environ.get("TENANT_PROFILES_TABLE") else None)

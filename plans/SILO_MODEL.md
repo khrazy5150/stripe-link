@@ -420,6 +420,55 @@ default is. For S3 that default decides whether money is processed, so:
 - **S3's disagreement logging must distinguish "no stamp" from "could not read the stamp".** Under the
   current design both look identical, and only one of them is a real unstamped legacy record.
 
+## S4/S5 BUILT 2026-09-26 — every silo has its own endpoint, and keeps only its own
+
+The author settled the model after six rounds of talking past each other, because **both axes use the
+words "dev" and "prod"**:
+
+| | values | what it is |
+|---|---|---|
+| **silo** | sandbox / production / (staging) | one DEPLOYMENT — its own 42 tables, API, hostname. `jb-orders-dev` is the SANDBOX silo's orders table, not "the test table". |
+| **stripe_mode** | test / live | the money axis INSIDE a silo, in the sort key: `ORDER#test#<id>` beside `ORDER#live#<id>`. |
+
+So **a sandbox tenant's LIVE sale belongs in `jb-orders-dev` under `ORDER#live#`.** Routing is by SILO;
+mode then picks the partition within that silo's own tables. Each silo already holds both — no new tables,
+no migration.
+
+**Why one endpoint could not do it.** Stripe splits Connect endpoints by MODE, never by silo, and there
+was exactly one test-mode Connect endpoint pointing at prod. That single registration is what scattered a
+sandbox tenant's sale across two silos: checkout orders in `jb-orders-prod`, upsells and products in dev.
+
+**The fix.** Every silo registers its own Connect endpoint in *both* modes, every endpoint receives every
+event, and each deployment keeps only what resolves to itself. Verified live against both endpoints, all
+six combinations: exactly one silo keeps each, none dropped by both, none taken by both.
+
+**Unstamped events fall back to the legacy correspondence** (live→production, test→sandbox) rather than to
+the read-side "unstamped means sandbox" rule. That rule is right for reading old records and wrong for
+routing money: it would send a legacy PRODUCTION tenant's live sale to sandbox while production declined
+it, so nobody would record it. The fallback is what every unstamped record was actually written under.
+
+**Fails open twice over.** An unknown silo, or a deployment that cannot say which silo it is, keeps the
+event. A row in the wrong table costs a migration; a dropped one costs a sale nobody recorded.
+
+### Adding staging is now four edits
+
+`SiloForEnvironment` gains `stage: {Silo: staging}`; `KNOWN_SILOS` gains `staging`; a
+`[stage.deploy.parameters]` block; two Stripe registrations. It filters for itself by construction.
+
+### The cut-over, and the 22 rows left behind
+
+22 rows sit in `jb-orders-prod` that are all test-mode and all sandbox's (7 stamped, 15 unstamped). They
+are where the misrouted endpoint put them. Nothing new joins them — from 2026-09-26 every test renewal
+lands in `jb-orders-dev`, the new subscription by its stamp and the two old ones by the fallback.
+
+**Author's decision, 2026-09-26: leave them until tonight's renewal confirms the routing, then wipe the
+tables clean rather than migrate.** So each old subscription's history is split at the cut-over until
+then — visible and explainable, and nothing real depends on it.
+
+Note for whoever runs that wipe: `handlers/admin_delete_test_data.py` is **dev-only and tenant-scoped by
+design** — legacy wiped whole tables, which was a multi-tenant bug. Clearing production tables needs a
+deliberate, separate act, not that endpoint.
+
 ## Relationship to other plans
 
 - `plans/STRIPE_MODE_DECOUPLING.md` owns the **Stripe** axis and its P7 owns the isolation debt on it.

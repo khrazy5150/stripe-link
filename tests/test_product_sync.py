@@ -292,11 +292,19 @@ class ProductSyncRepositoryWiringTests(unittest.TestCase):
                 self.assertEqual(self._sk_for(resolve_stripe_mode(event)), self._sk_for(mode))
                 self.assertIn(f"#{mode}#", self._sk_for(mode))
 
-    def test_an_unscoped_repository_would_miss(self):
-        # Guards the regression directly: unscoped is a DIFFERENT key, not a lenient one.
-        from stripe_link.repositories.documents import products_repository
+    def test_an_unscoped_repository_is_now_REFUSED_rather_than_wrong(self):
+        """It used to be a DIFFERENT key, not a lenient one -- `PRODUCT#prod_x` beside
+        `PRODUCT#test#prod_x` -- so an unmoded read answered confidently with nothing.
 
-        self.assertNotEqual(products_repository(table=object())._sk("prod_x"), self._sk_for("test"))
+        Since 2026-09-26 it raises instead. Found in the refund return gate: an unmoded product read
+        found nothing, the policy snapshot concluded "no return required", and every refund would have
+        skipped its gate. A silent empty answer is the worst failure available, so it is loud now.
+        """
+        from stripe_link.repositories.documents import RepositoryError, products_repository
+
+        with self.assertRaises(RepositoryError) as caught:
+            products_repository(table=object())
+        self.assertIn("mode-scoped", str(caught.exception))
 
 
 class ProductSyncModeWiringTests(unittest.TestCase):

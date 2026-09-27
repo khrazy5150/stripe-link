@@ -19,7 +19,7 @@ What remains is two rules and an honest "unknown".
 """
 from typing import Any
 
-from stripe_link.silo import KNOWN_SILOS, SANDBOX, normalize_silo
+from stripe_link.silo import KNOWN_SILOS, PRODUCTION, SANDBOX, normalize_silo
 
 # How the answer was reached, so the logs can say more than which silo won.
 BY_STAMP = "stamp"
@@ -151,5 +151,68 @@ def routing_log(event: dict[str, Any], resolution: dict[str, Any], *, this_silo:
     }
 
 
-__all__ = ["BY_DEFAULT", "BY_HOLDING", "BY_STAMP", "KNOWN_SILOS", "UNRESOLVED",
-           "order_id_for_event", "resolve_event_silo", "routing_log", "stamp_from_event"]
+__all__ = ["BY_DEFAULT", "BY_HOLDING", "BY_STAMP", "KNOWN_SILOS", "PRODUCTION", "SANDBOX", "UNRESOLVED",
+           "event_belongs_here", "order_id_for_event", "resolve_event_silo", "routing_log",
+           "stamp_from_event"]
+
+
+# --- which deployment owns which event ---------------------------------------------------------------
+# The author's model, settled 2026-09-26. Two independent axes that both happen to use the words "dev"
+# and "prod", which is why this took six rounds to say clearly:
+#
+#   SILO         sandbox | production | (staging)   ONE DEPLOYMENT. Its own 42 tables, API, hostname.
+#                                                   The table suffix follows it: jb-orders-dev is the
+#                                                   SANDBOX silo's orders table, not "the test table".
+#   stripe_mode  test | live                        The money axis, INSIDE a silo, in the sort key:
+#                                                   ORDER#test#<id> beside ORDER#live#<id>.
+#
+# So a sandbox tenant's LIVE sale belongs in jb-orders-dev under ORDER#live#. Routing is by SILO; the
+# mode then picks the partition within that silo's own tables.
+#
+# One Connect endpoint cannot express a silo -- Stripe splits endpoints by MODE -- so every silo
+# registers its own endpoint in both modes, every endpoint receives everything, and each deployment keeps
+# only what is its own. Adding staging is one more registration plus SILO=staging; it behaves identically
+# by construction, which is the property that makes a third silo cheap.
+
+
+# When nothing identifies the silo, fall back to the correspondence the legacy app was built on: before
+# silos existed, dev meant test and prod meant live. It is the right fallback precisely because it is what
+# every unstamped record was written under.
+LEGACY_SILO_FOR_MODE = {"test": SANDBOX, "live": PRODUCTION}
+
+
+def event_belongs_here(resolution: dict[str, Any], this_silo: str,
+                       event_mode: str = "") -> tuple[bool, str]:
+    """May this deployment PERSIST this event? Returns `(ok, why_not)`.
+
+    Reads the resolution S3 already produced rather than re-deriving it, so the decision and the log line
+    can never disagree about why.
+
+    Fails OPEN when this deployment cannot say which silo it is. A deployment that does not know itself
+    has no business dropping a paid order on a guess: a row in the wrong table costs a migration, a
+    dropped one costs a sale nobody recorded.
+    """
+    mine = normalize_silo(this_silo)
+    if not mine:
+        return True, ""
+
+    # An event resolved only by the DEFAULT carries no evidence at all -- no stamp, and no order we
+    # already hold. Routing those to sandbox (what the read-side default says) would send a legacy
+    # PRODUCTION tenant's live sale into the sandbox silo, and production would decline it, so nobody
+    # would record it. Fall back to the legacy correspondence instead, which is the rule every unstamped
+    # record was actually written under.
+    source = str((resolution or {}).get("source") or "")
+    if source == BY_DEFAULT:
+        mode = "live" if str(event_mode or "").strip().lower() == "live" else "test"
+        owner = LEGACY_SILO_FOR_MODE[mode]
+        if owner == mine:
+            return True, ""
+        return False, (f"unstamped {mode} event: no silo on it and no order we hold, so it falls to the "
+                       f"{owner} silo; this deployment is {mine}")
+
+    resolved = normalize_silo((resolution or {}).get("silo"))
+    if not resolved:
+        return True, ""
+    if resolved == mine:
+        return True, ""
+    return False, f"this event belongs to the {resolved} silo; this deployment is {mine}"

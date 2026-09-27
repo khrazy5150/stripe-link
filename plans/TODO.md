@@ -2,7 +2,7 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
-## Upsell orders and their parents land in DIFFERENT TABLES — HIGH
+## ✅ FIXED 2026-09-26 — upsell orders and their parents landed in DIFFERENT TABLES
 
 Found 2026-09-25 while fixing the missing upsell shipping address, and it is the more serious half.
 
@@ -21,6 +21,14 @@ are wrong in both; and anything that reasons from the parent (refunds, fulfilmen
 see it. It is also why the shipping-address fix reads Stripe rather than the parent order row -- the row is
 not reliably in the same table.
 
+**Fixed 2026-09-26** (`plans/SILO_MODEL.md`, S4/S5). One Stripe registration caused it: the only
+test-mode Connect endpoint pointed at prod. Every silo now has its own endpoint in both modes, every
+endpoint receives everything, and each deployment keeps only events that resolve to its own silo —
+verified live across all six mode/stamp combinations. Routing is by SILO, not mode: a sandbox tenant's
+LIVE sale belongs in `jb-orders-dev` under `ORDER#live#`. The 22 rows already in `jb-orders-prod` stay
+put pending a table wipe (author, 2026-09-26).
+
+Original diagnosis, kept because it names the confusion that caused it:
 Root cause is the known mode/environment conflation in `plans/STRIPE_MODE_DECOUPLING.md` (the prod webhook
 handles test events by design since P3; test funnel pages are served from the dev bucket and call the dev
 API). **Fix it there, not with a patch here** -- the two writers have to agree which table a sale belongs

@@ -89,7 +89,7 @@ def handler(
         if action == "approve":
             return _approve(requests_repo, request, tenant_id, parse_json_body(event), now,
                             orders_repo=orders_repo or orders_repository(mode=resolve_stripe_mode(event)),
-                            products_repo=products_repo)
+                            products_repo=products_repo, mode=resolve_stripe_mode(event))
         if action == "reject":
             return _set_status(requests_repo, request, "rejected", parse_json_body(event), now, resolved=True)
         if action == "received":
@@ -108,7 +108,7 @@ def handler(
         return error_response(str(exc), code="repository_error")
 
 
-def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=None):
+def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=None, mode="test"):
     """Approve the CLAIM, and decide whether the money waits for the goods.
 
     The snapshot is taken here, once, and everything downstream reads it rather than re-deriving from a
@@ -116,7 +116,9 @@ def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=
     """
     products = []
     try:
-        repo_products = products_repo or products_repository()
+        # The MODE matters here: an unmoded read used to find nothing, the snapshot concluded "no
+        # return required", and every refund skipped its gate. That is why the repository now refuses it.
+        repo_products = products_repo or products_repository(mode=mode)
         products = repo_products.list_for_tenant(tenant_id) or []
     except Exception:  # noqa: BLE001 - an unreadable catalogue must not block a refund decision
         products = []

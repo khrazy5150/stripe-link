@@ -636,10 +636,18 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 185)
         self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3386)
 
-    def test_stripe_webhook_routes_by_livemode_not_environment(self):
-        # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P3): the event's mode is its own `livemode`, NOT the
-        # deployment. A test-mode event (livemode=False) delivered to the prod endpoint is processed AS test and
-        # persisted in test mode -- one prod endpoint handles both modes; the old mode-mismatch reject is gone.
+    def test_a_deployment_declines_an_event_of_the_mode_it_does_not_own(self):
+        """The author's rule, 2026-09-26: live transactions go in jb-orders-prod, test in jb-orders-dev.
+
+        This test asserted the OPPOSITE until today -- P3's "one prod endpoint handles both modes". That
+        was decided before the silo was a modeled concept, and it is what put a sandbox tenant's checkout
+        orders in jb-orders-prod while their products, upsells and dashboard all lived in dev. The table is
+        chosen by the DEPLOYMENT (`ORDERS_TABLE`), so "test goes in the dev tables" means exactly "a test
+        event is processed by the sandbox deployment".
+
+        Stripe's test Connect endpoint now points at the sandbox stack. This is the same rule in code, so a
+        configuration that drifts again cannot silently refill the wrong table.
+        """
         class FakeEvents:
             def get(self, _event_id):
                 return None
@@ -660,7 +668,8 @@ class AccountHandlerTests(unittest.TestCase):
             b"whsec_stable_test", f"{timestamp}.{body}".encode("utf-8"), hashlib.sha256,
         ).hexdigest()
 
-        with patch.dict(os.environ, {"ENVIRONMENT": "prod"}, clear=False):
+        # A TEST event arriving at the PRODUCTION silo: declined, because sandbox owns test.
+        with patch.dict(os.environ, {"ENVIRONMENT": "prod", "SILO": "production"}, clear=False):
             response = stripe_webhook_handler({
                 "httpMethod": "POST",
                 "path": "/webhook/stripe",
@@ -672,11 +681,13 @@ class AccountHandlerTests(unittest.TestCase):
                 now_fn=lambda: timestamp,
             )
 
+        # 200, not an error: a foreign event is somebody else's, not a failure, and Stripe must stop
+        # retrying something this deployment will never take.
         self.assertEqual(response["statusCode"], 200)
-        envelope = json.loads(response["body"])["webhook"]
-        self.assertEqual(envelope["mode"], "test")  # from livemode, despite ENVIRONMENT=prod
-        self.assertEqual(envelope["livemode"], False)
-        self.assertNotIn("reason", json.loads(response["body"]))  # not ignored
+        body_out = json.loads(response["body"])
+        self.assertIs(body_out["processed"], False)
+        self.assertIn("sandbox", body_out["reason"])
+        self.assertNotIn("webhook", body_out)  # it was declined before any persistence ran
 
     def test_stripe_webhook_rejects_invalid_signature(self):
         body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})

@@ -1,7 +1,7 @@
 import os
 import random
 
-from stripe_link.common import error_response, header_value, json_response, path_params
+from stripe_link.common import resolve_stripe_mode, error_response, header_value, json_response, path_params
 from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED
 from stripe_link.repositories.documents import RepositoryError, experiments_repository
 from stripe_link.runtime.artifacts import artifact_paths
@@ -28,7 +28,7 @@ def handler(event, context, *, repository=None, pages_domain=None, choose_fn=Non
     if method != "GET":
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
-    repository = repository or experiments_repository()
+    repository = repository or experiments_repository(mode=resolve_stripe_mode(event))
     pages_domain = pages_domain if pages_domain is not None else os.environ.get("PAGES_DISTRIBUTION_DOMAIN", "")
     choose_fn = choose_fn or (lambda upper: random.randint(0, upper - 1))
 

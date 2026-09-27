@@ -22,7 +22,7 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
     # test-mode purchase must never cause a real person to be asked about a product they never bought.
     invites_repo = invites_repo or review_invites_repository(mode="live")
     if sites_repo is None and os.environ.get("SITES_TABLE"):
-        sites_repo = sites_repository()
+        sites_repo = sites_repository(mode="live")  # live only, same reason as the invites repo
     mailer_send = mailer_send or send_email
     now = int((now_fn or time.time)())
     base_url = os.environ.get("PUBLIC_API_BASE_URL", "")
