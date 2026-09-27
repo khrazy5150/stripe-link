@@ -80,5 +80,14 @@ class HonestyTests(unittest.TestCase):
         self.assertIn("billed to your own account", SCREEN)
         self.assertIn("included with your plan", SCREEN)
 
+    def test_it_warns_that_a_chat_subscription_is_not_api_billing(self):
+        # The trap both vendors share: a Pro/Max or ChatGPT subscription covers the chat apps, not the
+        # API. Without this, every subscriber connects a key, is told by their provider to add
+        # credits, and reports OUR feature as broken. Said before the button, not after a failure.
+        self.assertIn("billingNote", SCREEN)
+        for vendor in ("Claude Pro or Max", "ChatGPT"):
+            self.assertIn(vendor, STORE)
+        self.assertIn("billed separately", STORE)
+
     def test_byok_is_presented_as_available_on_every_plan(self):
         self.assertIn("Available on every plan", SCREEN)

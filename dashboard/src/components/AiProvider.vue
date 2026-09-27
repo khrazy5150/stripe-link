@@ -70,6 +70,17 @@
           </p>
         </div>
 
+        <!-- Before the button, not after a failure: a subscriber who connects a key and is told to
+             "add credits" by their provider reports it here as a broken feature. -->
+        <div class="field">
+          <p class="field-hint">
+            {{ selectedProvider.billingNote }}
+            <a :href="selectedProvider.billingUrl" target="_blank" rel="noopener noreferrer">
+              Check your {{ selectedProvider.label }} billing
+            </a>
+          </p>
+        </div>
+
         <button
           class="primary-action"
           type="button"

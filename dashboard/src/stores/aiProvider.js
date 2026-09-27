@@ -75,7 +75,12 @@ export const BYOK_PROVIDERS = [
     key: "anthropic",
     label: "Anthropic",
     keyHint: "Starts with sk-ant-",
-    consoleUrl: "https://console.anthropic.com/settings/keys",
+    consoleUrl: "https://platform.claude.com/settings/keys",
+    // A Claude Pro/Max subscription covers the chat apps and NOT the API, which is billed separately
+    // through prepaid credits. Said up front because otherwise every subscriber connects a key, gets
+    // "add credits" from Anthropic, and reports it to US as a broken feature.
+    billingNote: "A Claude Pro or Max subscription does not cover API use — the API is billed separately through credits in the Console.",
+    billingUrl: "https://platform.claude.com/settings/billing",
     models: [
       { name: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
       { name: "claude-opus-4-6", label: "Claude Opus 4.6" },
@@ -87,6 +92,9 @@ export const BYOK_PROVIDERS = [
     label: "OpenAI",
     keyHint: "Starts with sk-",
     consoleUrl: "https://platform.openai.com/api-keys",
+    // Same trap on the other vendor: a ChatGPT Plus subscription is not API billing either.
+    billingNote: "A ChatGPT subscription does not cover API use — the API is billed separately.",
+    billingUrl: "https://platform.openai.com/settings/organization/billing",
     models: [
       { name: "gpt-5.6", label: "GPT-5.6" },
       { name: "gpt-6", label: "GPT-6" },
