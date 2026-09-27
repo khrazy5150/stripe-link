@@ -45,11 +45,17 @@ def _exc(name):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_every_model_has_a_profile_id_not_a_bare_model_id(self):
-        # us-west-2 has no In-Region inference for this generation, so a bare id is a 400 in waiting.
+    def test_every_model_calls_the_GLOBAL_profile(self):
+        # Regional costs exactly 10% more for identical output, and a page-composition prompt carries
+        # tenant product copy rather than customer PII, so there is nothing to keep in one geography.
         for name in model_names():
             with self.subTest(name=name):
-                self.assertRegex(profile_id(name), r"^(us|global|eu|apac)\.")
+                self.assertTrue(profile_id(name).startswith("global."))
+
+    def test_a_regional_profile_is_kept_for_whoever_needs_US_only_routing(self):
+        for name in model_names():
+            with self.subTest(name=name):
+                self.assertTrue(model(name)["profile_regional"].startswith("us."))
 
     def test_every_model_declares_its_rate_confidence(self):
         # AWS publishes none of these rates machine-readably; a number without a confidence invites
@@ -70,25 +76,15 @@ class RegistryTests(unittest.TestCase):
         self.assertFalse(allows_page_generation("haiku-4.5"))
 
     def test_cost_reproduces_the_measured_call_at_the_rate_we_actually_pay(self):
-        # The real 2026-09-27 Sonnet 4.6 generation: 1552 in, 714 out. The figure is the REGIONAL rate,
-        # because `profile` is a us. id -- global would be $0.015366, exactly 10% less. That gap is the
-        # whole reason both rates are carried.
-        self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["usd"], 0.016903)
+        # The real 2026-09-27 Sonnet 4.6 generation: 1552 in, 714 out, now priced at the GLOBAL rate we
+        # moved to. Regional would be $0.016903 -- exactly 10% more for the same output.
+        self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["usd"], 0.015366)
         self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["confidence"], "authoritative")
 
-    def test_regional_costs_exactly_ten_percent_more_than_global_for_every_model(self):
-        # Measured across all 15 models on 2026-09-27 with no exceptions. If a future rate refresh
-        # breaks this, the global/regional split has changed and the COGS note needs revisiting.
+    def test_the_regional_premium_is_recorded_so_a_switch_back_can_be_priced(self):
         for name in model_names():
             with self.subTest(name=name):
-                entry = model(name)
-                self.assertAlmostEqual(entry["rate_in"], entry["rate_in_global"] * 1.1, places=4)
-                self.assertAlmostEqual(entry["rate_out"], entry["rate_out_global"] * 1.1, places=4)
-
-    def test_every_model_carries_a_global_profile_alongside_the_regional_one(self):
-        for name in model_names():
-            with self.subTest(name=name):
-                self.assertTrue(model(name)["profile_global"].startswith("global."))
+                self.assertEqual(model(name)["rate_regional_multiplier"], 1.1)
 
     def test_an_unknown_model_costs_nothing_and_says_so(self):
         out = estimate_cost("no-such-model", 1000, 1000)
@@ -123,7 +119,7 @@ class GenerateStructuredTests(unittest.TestCase):
     def test_it_sends_an_inference_profile_id(self):
         fake = FakeConverse(json.dumps(GOOD))
         self.call(fake)
-        self.assertEqual(fake.calls[0]["modelId"], "us.anthropic.claude-sonnet-4-6")
+        self.assertEqual(fake.calls[0]["modelId"], "global.anthropic.claude-sonnet-4-6")
 
     def test_a_single_element_array_wrapper_is_recovered_without_a_repair_round(self):
         # Exactly what openai.gpt-oss-120b did: `[{...}]` for an object-rooted schema. Re-prompting to

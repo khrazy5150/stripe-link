@@ -5,11 +5,10 @@
   "default_model": "sonnet-4.6",
   "models": {
     "sonnet-4.6": {
-      "profile": "us.anthropic.claude-sonnet-4-6",
       "provider": "anthropic",
       "label": "Claude Sonnet 4.6",
-      "rate_in": 3.3,
-      "rate_out": 16.5,
+      "rate_in": 3.0,
+      "rate_out": 15.0,
       "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
       "prompt_cache": {
@@ -17,16 +16,15 @@
         "ttl_seconds": 3600
       },
       "notes": "Best measured result for page composition: richest output and the most careful hedging on facts it was not given. EOL no sooner than 2027-02-17.",
-      "rate_in_global": 3.0,
-      "rate_out_global": 15.0,
-      "profile_global": "global.anthropic.claude-sonnet-4-6"
+      "profile": "global.anthropic.claude-sonnet-4-6",
+      "profile_regional": "us.anthropic.claude-sonnet-4-6",
+      "rate_regional_multiplier": 1.1
     },
     "sonnet-4.5": {
-      "profile": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
       "provider": "anthropic",
       "label": "Claude Sonnet 4.5",
-      "rate_in": 3.3,
-      "rate_out": 16.5,
+      "rate_in": 3.0,
+      "rate_out": 15.0,
       "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
       "prompt_cache": {
@@ -34,16 +32,15 @@
         "ttl_seconds": 3600
       },
       "notes": "Fewer sections than 4.6 and volunteered an invented cancellation term. Kept as a fallback, not a default.",
-      "rate_in_global": 3.0,
-      "rate_out_global": 15.0,
-      "profile_global": "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      "profile": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "profile_regional": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "rate_regional_multiplier": 1.1
     },
     "opus-4.6": {
-      "profile": "us.anthropic.claude-opus-4-6-v1",
       "provider": "anthropic",
       "label": "Claude Opus 4.6",
-      "rate_in": 5.5,
-      "rate_out": 27.5,
+      "rate_in": 5.0,
+      "rate_out": 25.0,
       "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
       "prompt_cache": {
@@ -51,16 +48,15 @@
         "ttl_seconds": 3600
       },
       "notes": "1.6x Sonnet 4.6 for no measured gain on this task, and it invented a cancellation term too. Not for page-gen.",
-      "rate_in_global": 5.0,
-      "rate_out_global": 25.0,
-      "profile_global": "global.anthropic.claude-opus-4-6-v1"
+      "profile": "global.anthropic.claude-opus-4-6-v1",
+      "profile_regional": "us.anthropic.claude-opus-4-6-v1",
+      "rate_regional_multiplier": 1.1
     },
     "haiku-4.5": {
-      "profile": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
       "provider": "anthropic",
       "label": "Claude Haiku 4.5",
-      "rate_in": 1.1,
-      "rate_out": 5.5,
+      "rate_in": 1.0,
+      "rate_out": 5.0,
       "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
       "prompt_cache": {
@@ -69,12 +65,12 @@
       },
       "page_generation": false,
       "notes": "BARRED from page generation (\u00a7A.7): cheapest and the only model that drifted on facts -- turned a given '5g per serving' into '5g per gummy', added a taste claim and an efficacy claim. Fine for classification or extraction where nothing is asserted to a buyer.",
-      "rate_in_global": 1.0,
-      "rate_out_global": 5.0,
-      "profile_global": "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      "profile": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "profile_regional": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "rate_regional_multiplier": 1.1
     }
   },
-  "_scope_comment": "Every model costs exactly 10% MORE on a regional (us.) profile than on a global. one -- measured across all 15 models on 2026-09-27, no exceptions. `profile` is the regional id we call today; `profile_global` is the same model routed anywhere in the world. Switching is a 10% cut in inference COGS and a data-routing decision, so it is recorded here and NOT taken silently.",
+  "_scope_comment": "`profile` is a GLOBAL inference profile (decided 2026-09-27). Every model costs exactly 10% more on a regional (us.) profile than on a global one -- measured across all 15 models, no exceptions -- and a page-composition prompt carries tenant product copy, never customer PII, so there is nothing here that needs to stay in one geography. `profile_regional` is kept for a tenant or region that later needs US-only routing. Note us-west-2 serves NO In-Region inference for this generation, so a bare model id fails either way.",
   "_rate_source": {
     "api": "bedrock:ListFoundationModelAgreementOffers",
     "read_at": "2026-09-27",

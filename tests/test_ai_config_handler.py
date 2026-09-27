@@ -46,6 +46,17 @@ class FakeProfiles:
         return dict(self.profile) if self.profile else None
 
 
+class FakeCipher:
+    """Records what it was asked to bind the ciphertext to, so the encryption context can be asserted."""
+
+    def __init__(self):
+        self.contexts = []
+
+    def encrypt(self, plaintext, *, tenant_id, mode, field):
+        self.contexts.append({"tenant_id": tenant_id, "mode": mode, "field": field})
+        return f"kms:v1:enc({plaintext})"
+
+
 def ok_generator(**kwargs):
     return {"value": {"ok": True}, "usage": {"input": 30, "output": 5, "cache_read": 0},
             "model": kwargs.get("model"), "repairs": 0, "stop_reason": "end_turn"}
@@ -57,6 +68,7 @@ class AiConfigTests(unittest.TestCase):
         self.usage = FakeUsage()
         self.profiles = FakeProfiles(tier_id="premium")
         self.calls = []
+        self.cipher = FakeCipher()
 
     def call(self, method, body=None, *, generator=None, profiles=None, usage=None):
         def recording(**kwargs):
@@ -69,7 +81,7 @@ class AiConfigTests(unittest.TestCase):
             event["body"] = json.dumps(body)
         return handler(event, None, config_repo=self.config, usage_repo=usage or self.usage,
                        tenant_repo=profiles or self.profiles, generator=recording,
-                       now_fn=lambda: 1790000000)
+                       secret_cipher=self.cipher, now_fn=lambda: 1790000000)
 
     # ---- GET ---------------------------------------------------------------------------------
     def test_an_unconfigured_tenant_still_gets_the_catalogue_and_its_allowance(self):
@@ -162,16 +174,78 @@ class AiConfigTests(unittest.TestCase):
         self.assertEqual(json.loads(response["body"])["error"], "unknown_model")
         self.assertEqual(self.calls, [])
 
-    def test_byok_is_refused_as_unbuilt_rather_than_storing_a_key_in_clear(self):
-        response = self.call("POST", {"provider": "anthropic", "model": "sonnet-4.6",
-                                      "api_key": "sk-ant-secret"})
-        self.assertEqual(response["statusCode"], 501)
-        self.assertEqual(self.config.documents, {})
-        self.assertNotIn("sk-ant-secret", json.dumps(response))
+    # ---- bring your own key ------------------------------------------------------------------
+    def test_a_byok_key_is_encrypted_and_never_stored_or_returned_in_clear(self):
+        response = self.call("POST", {"provider": "anthropic", "model": "claude-sonnet-4-6",
+                                      "api_key": "sk-ant-SECRETVALUE"})
+        self.assertEqual(response["statusCode"], 200)
+        stored = self.config.documents["t1"]
+        # Stored as a KMS reference, never the raw key (the fake echoes the plaintext inside enc(...)
+        # on purpose, so that the binding below is assertable).
+        self.assertTrue(stored["api_key_ref"].startswith("kms:v1:"))
+        self.assertNotIn("sk-ant-SECRETVALUE", json.dumps(response))   # nor in what the browser sees
+        self.assertTrue(json.loads(response["body"])["ai_config"]["has_api_key"])
+        self.assertNotIn("api_key_ref", json.loads(response["body"])["ai_config"])
 
-    def test_byok_without_a_key_is_refused_before_anything_else(self):
-        response = self.call("POST", {"provider": "anthropic", "model": "sonnet-4.6"})
+    def test_the_key_is_bound_to_this_tenant_by_the_encryption_context(self):
+        # A ciphertext lifted from one row must not decrypt against another.
+        self.call("POST", {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key": "k"})
+        self.assertEqual(self.cipher.contexts[0], {"tenant_id": "t1", "mode": "ai", "field": "ai_api_key"})
+
+    def test_the_key_is_proven_before_it_is_stored(self):
+        # Verify first, encrypt second: a key that does not work never becomes a saved configuration
+        # the tenant has to discover is broken later.
+        def rejected(**kwargs):
+            raise AiError("401", kind="bad_credentials")
+        response = self.call("POST", {"provider": "anthropic", "model": "claude-sonnet-4-6",
+                                      "api_key": "sk-bad"}, generator=rejected)
+        self.assertEqual(json.loads(response["body"])["error"], "verify_bad_credentials")
+        self.assertEqual(self.config.documents, {})
+        self.assertEqual(self.cipher.contexts, [])   # never even encrypted
+
+    def test_a_rejected_key_says_it_is_the_key(self):
+        def rejected(**kwargs):
+            raise AiError("401", kind="bad_credentials")
+        body = json.loads(self.call("POST", {"provider": "openai", "model": "gpt-5.6",
+                                             "api_key": "sk-bad"}, generator=rejected)["body"])
+        self.assertIn("rejected by the provider", body["message"])
+
+    def test_the_probe_is_routed_to_the_tenants_provider_with_their_key(self):
+        self.call("POST", {"provider": "openai", "model": "gpt-5.6", "api_key": "sk-openai"})
+        self.assertEqual(self.calls[0]["provider"], "openai")
+        self.assertEqual(self.calls[0]["api_key"], "sk-openai")
+
+    def test_byok_model_names_come_from_the_vendor_not_our_bedrock_registry(self):
+        # Their account, their entitlements: "sonnet-4.6" is our registry's name, not Anthropic's.
+        response = self.call("POST", {"provider": "anthropic", "model": "sonnet-4.6", "api_key": "k"})
+        self.assertEqual(json.loads(response["body"])["error"], "unknown_model")
+        self.assertEqual(self.calls, [])
+
+    def test_byok_without_a_key_is_refused_before_anything_is_called(self):
+        response = self.call("POST", {"provider": "anthropic", "model": "claude-sonnet-4-6"})
         self.assertEqual(json.loads(response["body"])["error"], "missing_api_key")
+        self.assertEqual(self.calls, [])
+
+    def test_a_byok_tenant_is_billed_to_themselves_and_gets_the_safety_ceiling(self):
+        self.call("POST", {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key": "k"})
+        usage = json.loads(self.call("GET")["body"])["usage"]
+        self.assertEqual(usage["billed_to"], "tenant")
+        self.assertEqual(usage["allowance"], 200)
+
+    def test_a_failure_to_encrypt_never_falls_through_to_storing_the_key(self):
+        class Broken:
+            contexts = []
+            def encrypt(self, *a, **k):
+                raise RuntimeError("kms unavailable")
+        response = handler({"httpMethod": "POST", "resource": "/ai/connect",
+                            "queryStringParameters": {"tenant_id": "t1"},
+                            "body": json.dumps({"provider": "anthropic", "model": "claude-sonnet-4-6",
+                                                "api_key": "sk-secret"})}, None,
+                           config_repo=self.config, usage_repo=self.usage, tenant_repo=self.profiles,
+                           generator=ok_generator, secret_cipher=Broken(), now_fn=lambda: 1790000000)
+        self.assertEqual(json.loads(response["body"])["error"], "encrypt_failed")
+        self.assertEqual(self.config.documents, {})
+        self.assertNotIn("sk-secret", json.dumps(response))
 
     def test_an_unknown_provider_is_refused(self):
         response = self.call("POST", {"provider": "skynet", "model": "sonnet-4.6"})

@@ -61,6 +61,23 @@ decisions. This is the strategic payoff of going JSON-first.
     free. This is what keeps page generation — the *acquisition* feature — inside the free tier, where
     a tenant can actually see the payoff of the JSON-first architecture.
   - `provider: bedrock` — **the platform's bill**, gated on plan. The tenant never sees a key field.
+- **BOTH SHIPPED 2026-09-27** (slice 1). BYOK reaches each vendor's own API over raw urllib, so
+  `src/requirements.txt` stays empty — no SDK is worth ~20MB in every package for one POST. The two
+  differ in kind, not decoration: OpenAI's `response_format: json_schema, strict: true` *guarantees*
+  conformance (and demands every nested object close `additionalProperties` and list every property in
+  `required`, applied recursively or the request is rejected outright); Anthropic offers one forced
+  tool whose `input_schema` IS the contract. Both normalize to one return, so nothing above
+  `generate_structured` can tell which answered. A BYO key is KMS-encrypted with the same
+  service-scoped context as the Stripe secrets, **proven by a real generation BEFORE it is stored** —
+  a key that does not work never becomes a saved configuration the tenant discovers is broken later —
+  and a failure to encrypt never falls through to storing it in clear. BYOK model names come from the
+  VENDOR, not our Bedrock registry (their account, their entitlements), but from a closed list rather
+  than a passthrough: a typo would otherwise surface as a confusing vendor error and a wrong id as a
+  surprise charge on their bill.
+- **Inference runs on GLOBAL profiles** (decided 2026-09-27). Regional (`us.`) costs exactly 10% more
+  for identical output — measured across all 15 models, no exceptions — and a page-composition prompt
+  carries tenant product copy, never customer PII, so nothing here needs to stay in one geography. The
+  regional id is kept per model against a future tenant or region that needs US-only routing.
 - The original note said a platform-key fallback was "optional and later". It arrives **first**,
   because Bedrock removes the key exchange entirely and boto3 already ships in the Lambda runtime
   (`src/requirements.txt` stays empty). `provider` is in the config from day one so BYOK is a second

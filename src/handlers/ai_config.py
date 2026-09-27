@@ -13,14 +13,22 @@ check.
 """
 import time
 
+from stripe_link.ai_byok import BYOK_MODELS
 from stripe_link.ai_client import AiError, generate_structured
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
 from stripe_link.domain.ai_models import default_model, model, model_names, profile_id
 from stripe_link.domain.ai_provider import (AiConfigError, config_record, is_verified, needs_key,
                                             pays_platform, redacted, validate)
 from stripe_link.domain.ai_quota import allowance_for, may_generate, period_key, remaining
+from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (RepositoryError, ai_provider_config_repository,
                                                 ai_usage_repository, tenant_profiles_repository)
+
+# The encryption context binds the ciphertext to this tenant and this purpose, so a blob lifted from
+# one row cannot be decrypted against another. `mode` is a fixed literal because an AI key has no
+# test/live axis -- the field exists in the cipher's signature, not in this problem.
+KMS_MODE = "ai"
+KMS_FIELD = "ai_api_key"
 
 # The smallest thing that proves a model will answer AND obey a schema. Deliberately tiny: this runs on
 # every connect, the platform pays for it on the Bedrock path, and a bigger probe proves nothing more.
@@ -30,7 +38,7 @@ PROBE_PROMPT = "Reply with {\"ok\": true} and nothing else."
 
 
 def handler(event, context, *, config_repo=None, usage_repo=None, tenant_repo=None,
-            generator=None, now_fn=None):
+            generator=None, now_fn=None, secret_cipher=None):
     method = (event or {}).get("httpMethod", "GET").upper()
     if method == "OPTIONS":
         return json_response({})
@@ -52,7 +60,8 @@ def handler(event, context, *, config_repo=None, usage_repo=None, tenant_repo=No
         if not tenant_id:
             return error_response("tenant_id is required.", code="missing_tenant")
         return _connect(tenant_id, body, config_repo, usage_repo, tenant_repo,
-                        generator or generate_structured, now)
+                        generator or generate_structured, now,
+                        secret_cipher if secret_cipher is not None else KmsSecretCipher())
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -113,33 +122,40 @@ def _read(tenant_id, config_repo, usage_repo, tenant_repo, now):
     })
 
 
-def _connect(tenant_id, body, config_repo, usage_repo, tenant_repo, generator, now):
+def _connect(tenant_id, body, config_repo, usage_repo, tenant_repo, generator, now, cipher):
     provider = str(body.get("provider") or "").strip().lower()
-    chosen = str(body.get("model") or "").strip() or default_model()
-    if not profile_id(chosen):
-        return error_response(f"Unknown model '{chosen}'.", code="unknown_model")
-    if needs_key(provider) and not str(body.get("api_key") or "").strip():
+    byok = needs_key(provider)
+    chosen = str(body.get("model") or "").strip() or ("" if byok else default_model())
+    # A BYO key names models from the TENANT's account, not our Bedrock registry -- their entitlements,
+    # their bill. Still a closed list rather than a passthrough: a typo would otherwise surface as a
+    # confusing vendor error, and a wrong id as a surprise charge.
+    known = chosen in (BYOK_MODELS.get(provider) or {}) if byok else bool(profile_id(chosen))
+    if not known:
+        return error_response(f"Unknown model '{chosen}' for {provider or 'that provider'}.",
+                              code="unknown_model")
+    api_key = str(body.get("api_key") or "").strip()
+    if byok and not api_key:
         return error_response("That provider needs an API key.", code="missing_api_key")
 
-    if needs_key(provider):
-        # Refused BEFORE building the record. Checked after, the record's own validator rejected the
-        # empty api_key_ref first and answered 400 "your config is invalid" for something that is our
-        # missing feature, not the tenant's mistake.
-        # TODO(slice 1b): encrypt with KmsSecretCipher and persist, replacing this refusal.
-        return error_response("Bring-your-own-key providers are not connectable yet.",
-                              status_code=501, code="byok_not_available")
-    try:
-        record = config_record(tenant_id, provider=provider, model=chosen, api_key_ref="", at=now)
-    except AiConfigError as exc:
-        return error_response(str(exc), code="invalid_ai_config")
-
-    # Prove it. A model that cannot answer is not configured, whatever the console says.
+    # Prove it BEFORE anything is stored -- with the plaintext key still in hand, so a key that does not
+    # work never becomes a saved configuration the tenant has to discover is broken later.
     try:
         probe = generator(prompt=PROBE_PROMPT, json_schema=PROBE_SCHEMA, model=chosen,
-                          schema_name="probe", max_tokens=64)
+                          provider=provider, api_key=api_key, schema_name="probe", max_tokens=64)
     except AiError as exc:
         return error_response(_verify_message(exc, chosen), status_code=502,
                               code=f"verify_{exc.kind}")
+
+    key_ref = ""
+    if byok:
+        try:
+            key_ref = cipher.encrypt(api_key, tenant_id=tenant_id, mode=KMS_MODE, field=KMS_FIELD)
+        except Exception as exc:  # noqa: BLE001 - never fall through to storing a key in clear
+            return error_response(f"Could not store that key securely: {exc}", code="encrypt_failed")
+    try:
+        record = config_record(tenant_id, provider=provider, model=chosen, api_key_ref=key_ref, at=now)
+    except AiConfigError as exc:
+        return error_response(str(exc), code="invalid_ai_config")
 
     record["verified_at"] = now
     record["verify_usage"] = probe.get("usage", {})
@@ -157,6 +173,9 @@ def _connect(tenant_id, body, config_repo, usage_repo, tenant_repo, generator, n
 
 def _verify_message(exc: AiError, chosen: str) -> str:
     """Say which side the problem is on. A tenant who cannot tell will ask us either way."""
+    if exc.kind == "bad_credentials":
+        return (f"That API key was rejected by the provider. Check it is correct and still active, and "
+                f"that it has access to {chosen}.")
     if exc.kind == "not_entitled":
         return (f"This platform cannot reach {chosen} yet — the model is not enabled for our AWS "
                 f"account. Nothing is wrong with your settings.")

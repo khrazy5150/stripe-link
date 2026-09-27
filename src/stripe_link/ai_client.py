@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
+from stripe_link.ai_byok import ByokError, generate as byok_generate
 from stripe_link.domain.ai_models import allows_page_generation, cache_checkpoint_worthwhile, profile_id
 
 DEFAULT_REGION = "us-west-2"
@@ -30,12 +31,16 @@ class AiError(Exception):
     def __init__(self, message: str, *, kind: str = "provider_error", detail: str = ""):
         super().__init__(message)
         self.message = message
-        self.kind = kind          # not_entitled | invalid_request | throttled | unusable_output | provider_error
+        self.kind = kind          # not_entitled | bad_credentials | invalid_request | throttled |
+                                  # unusable_output | provider_error
         self.detail = detail
 
 
 # Bedrock says "not available for this account" for a model whose Marketplace agreement is missing.
 # It is worth its own kind because it is the ONE failure a tenant cannot fix and an operator can.
+_KIND_BY_BYOK = {"bad_credentials": "bad_credentials", "throttled": "throttled",
+                 "invalid_request": "invalid_request", "unusable_output": "unusable_output"}
+
 _KIND_BY_EXCEPTION = {
     "AccessDeniedException": "not_entitled",
     "ValidationException": "invalid_request",
@@ -82,6 +87,8 @@ def generate_structured(
     prompt: str,
     json_schema: dict[str, Any],
     model: str,
+    provider: str = "bedrock",
+    api_key: str = "",
     system: str = "",
     schema_name: str = "result",
     validate: Callable[[Any], None] | None = None,
@@ -89,6 +96,7 @@ def generate_structured(
     temperature: float = 1.0,
     region: str = DEFAULT_REGION,
     client: Any = None,
+    byok_sender: Any = None,
     for_page: bool = False,
 ) -> dict[str, Any]:
     """Ask `model` for an object conforming to `json_schema`. Returns
@@ -101,6 +109,12 @@ def generate_structured(
     `for_page=True` refuses a model barred from buyer-facing copy. That check lives here rather than in
     the caller because §A.7's whole point is that the floor must not depend on being remembered.
     """
+    provider = str(provider or "bedrock").strip().lower()
+    if provider != "bedrock":
+        return _byok_loop(provider=provider, api_key=api_key, model=model, prompt=prompt,
+                          json_schema=json_schema, system=system, schema_name=schema_name,
+                          validate=validate, max_tokens=max_tokens, temperature=temperature,
+                          sender=byok_sender)
     if for_page and not allows_page_generation(model):
         raise AiError(f"Model {model!r} may not generate buyer-facing page copy.",
                       kind="invalid_request",
@@ -162,5 +176,41 @@ def generate_structured(
         except Exception as exc:  # noqa: BLE001 - the caller's validator raising is the repair signal
             complaint = f"That did not satisfy the contract: {exc}. Return a corrected JSON object."
 
+    raise AiError("The model could not produce output matching the schema.",
+                  kind="unusable_output", detail=complaint[:400])
+
+
+def _byok_loop(*, provider, api_key, model, prompt, json_schema, system, schema_name, validate,
+               max_tokens, temperature, sender=None) -> dict[str, Any]:
+    """The same repair loop, against the tenant's own account.
+
+    Deliberately a sibling rather than a shared generic: the two paths differ in what they may assume.
+    Bedrock gives us a registry, a cost table and a §A.7 page-generation bar -- none of which apply to
+    a key we do not own. A tenant's own model list is theirs, and so is the bill.
+    """
+    send = sender or byok_generate
+    totals = {"input": 0, "output": 0, "cache_read": 0}
+    complaint = ""
+    for attempt in range(MAX_REPAIRS + 1):
+        body = prompt if not complaint else f"{prompt}\n\n{complaint}"
+        try:
+            reply = send(provider, api_key=api_key, model=model, prompt=body, json_schema=json_schema,
+                         system=system, schema_name=schema_name, max_tokens=max_tokens,
+                         temperature=temperature)
+        except ByokError as exc:
+            raise AiError(exc.message, kind=_KIND_BY_BYOK.get(exc.kind, "provider_error"),
+                          detail=f"{provider} HTTP {exc.status}" if exc.status else provider) from exc
+        for key in totals:
+            totals[key] += int((reply.get("usage") or {}).get(key) or 0)
+        try:
+            value = _coerce(reply.get("text") or "")
+            if validate:
+                validate(value)
+            return {"value": value, "usage": totals, "model": model, "repairs": attempt,
+                    "stop_reason": reply.get("stop_reason", ""), "provider": provider}
+        except json.JSONDecodeError as exc:
+            complaint = f"That was not valid JSON ({exc}). Return ONLY the JSON object."
+        except Exception as exc:  # noqa: BLE001 - the caller's validator raising is the repair signal
+            complaint = f"That did not satisfy the contract: {exc}. Return a corrected JSON object."
     raise AiError("The model could not produce output matching the schema.",
                   kind="unusable_output", detail=complaint[:400])
