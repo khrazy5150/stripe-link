@@ -1,6 +1,6 @@
 # The Page Brief — design note for review
 
-**Status:** for the author's review, nothing built · **Scope:** AI_AND_COMMERCE Part A, §A.3 step 1
+**Status:** REVIEWED — all five questions answered 2026-09-27; nothing built yet · **Scope:** AI_AND_COMMERCE Part A, §A.3 step 1
 · **Written:** 2026-09-27
 
 This settles the *contract* before any of the pipeline is built, because four things meet at it: the
@@ -36,55 +36,78 @@ Not "fill in 12 fields", but "add your guarantee → we can write about your gua
 Flat and boring on purpose: it has to be writable by a form, by a URL scraper, and eventually by an
 API caller, and readable by a grounding check that does substring matching.
 
+**Revised after review (author, 2026-09-27): the brief is a CORE plus a KIND block.** "Number of steps
+matters less than smart steps — a service wizard has more steps than a product wizard." So `kind` is
+asked once, early, and everything downstream derives from it. It is also the fulfilment question,
+asked in plain language and never asked twice: a download has nothing to ship, so it is never asked
+about shipping.
+
 ```jsonc
 {
   "schema_version": "2026-09-27",
   "document_type": "page_brief",
-  "tenant_id": "...",
-  "brief_id": "...",
-  "source": "wizard | url | api",        // provenance; a scraped brief is UNTRUSTED (§A.6)
-  "source_url": "",                       // set only when source == "url"
+  "tenant_id": "...", "brief_id": "...",
+  "source": "wizard | url | api | existing_product",
+  "source_url": "", "source_product_id": "",
 
-  // ---- REQUIRED. Four questions. Nothing generates without these. ----
+  // ---- CORE. Asked for every kind. ----
+  "kind": "physical | digital | service",   // one question; removes several later
   "name": "Poliaxis Creatine Gummies",
   "what_it_is": "Creatine monohydrate in a chewable gummy, sold as a monthly subscription.",
   "price": { "unit_amount": 3291, "currency": "usd",
              "pricing_model": "recurring", "recurring_interval": "month" },
   "audience": "Lifters in their 20s-40s who dislike swallowing powder or pills.",
-
-  // ---- OPTIONAL. Each one licenses a class of claim, and nothing else does. ----
   "facts": ["5g creatine monohydrate per serving", "60 gummies per tub",
-            "third-party lab tested", "made in the USA"],   // free-form, one per line
+            "third-party lab tested", "made in the USA"],
+
+  // ---- PROMISES. Every kind, but the wording differs by kind (see §4). ----
   "guarantee": "30-day money-back guarantee",
-  "shipping": "Ships free in the US",
   "terms": "",                       // cancellation / renewal, in the tenant's own words
-  "usage": "",                       // directions, dosage, how to use
-  "certifications": [],              // only ones the tenant actually holds
-  "evidence": "",                    // studies or results they can stand behind
-  "tone": "direct",                  // direct | warm | playful | technical | premium
-  "category": "supplement",          // drives the palette shortlist (resolve_preset)
-  "brand": "",                       // resolved from the business if blank; never invented
-  "images": [],                      // existing asset URLs; the AI never invents one
-  "must_say": [],                    // lines to include verbatim
-  "must_not_say": []                 // claims the tenant forbids
+  "certifications": [],
+  "evidence": "",                    // KEPT in v1 (author). The only licence for an efficacy claim.
+
+  // ---- VOICE. Every kind. ----
+  "tone": "direct", "category": "supplement", "brand": "",
+  "images": [], "must_say": [], "must_not_say": [],
+
+  // ---- KIND BLOCK. Exactly one of these, and the wizard only ever shows one. ----
+  "physical": {
+    "shipping": "Ships free in the US",
+    "usage": "",                     // directions / dosage
+    "materials": "", "dimensions": ""
+  },
+  "digital": {
+    "format": "PDF, 48 pages",       // what they actually receive
+    "delivery": "Instant download after checkout",   // usually derivable; see §4
+    "access": ""                     // licence, device limits, updates
+  },
+  "service": {
+    "duration_minutes": 60,
+    "location_mode": "in_person | remote",
+    "performed_by": "",              // "me" or a named team
+    "booking": "scheduled | no_booking",
+    "what_happens": ""               // the session itself -- the service analogue of `usage`
+  }
 }
 ```
 
 ### Why these fields and not others
 
 `facts[]` is one list rather than `benefits[]` + `features[]` as §A.3 originally sketched. Tenants do
-not reliably distinguish the two, the split produced empty boxes in testing of similar forms
-elsewhere in this product, and the generator does not need it — the *model* is better at deciding
-what is a benefit than the tenant is at classifying it. One list, one question, richer answers.
+not reliably distinguish the two, the split invites empty boxes, and the generator does not need it —
+the *model* is better at deciding what is a benefit than the tenant is at classifying it.
 
-`must_say[]` / `must_not_say[]` exist because they are the cheapest possible escape hatch. A tenant
-who needs one sentence exactly right should not have to fight the generator for it, and a tenant with
-a legal reason to avoid a word should be able to say so once.
+`must_say[]` / `must_not_say[]` are the cheapest possible escape hatch. A tenant who needs one
+sentence exactly right should not have to fight the generator, and one with a legal reason to avoid a
+word should say it once.
 
-`evidence` is deliberately narrow and deliberately scary-sounding. It is the ONLY thing that licenses
-an efficacy claim, and it should read as a commitment.
+`evidence` is deliberately narrow and deliberately scary-sounding. **Kept in v1 at the author's
+direction.** It is the ONLY thing that licenses an efficacy claim, so it should read as a commitment.
 
----
+The kind blocks mirror documents that already exist: `physical.*` maps onto `Product.fulfillment`,
+and `service.*` onto the `Service` document's `duration_minutes`, `location_mode` and
+`fulfillment_mode`. That is deliberate — the wizard should not invent a vocabulary the rest of the
+product does not use.
 
 ## 3. What each answer unlocks
 
@@ -117,30 +140,49 @@ a commitment, and default to empty.
 
 ## 4. The questions
 
-Nine steps, only four of which can block. Reuses the `ServiceWizard.vue` idiom: one `steps` list, a
-review step, and explicit skip affordances so "leave it" is a click rather than a guess.
+**Two entry points**, because the smartest step is the one already answered:
 
-| # | Step | Asks | Required |
-| --- | --- | --- | --- |
-| 1 | What are you selling | `name`, `what_it_is` | ✅ |
-| 2 | Price | `price` (amount, currency, one-off or recurring) | ✅ |
-| 3 | Who is it for | `audience` | ✅ |
-| 4 | What should people know | `facts[]` — one per line, 3+ encouraged | ✅ (≥1) |
-| 5 | Promises you make | `guarantee`, `shipping`, `terms` | skip |
-| 6 | How it is used | `usage`, `certifications[]`, `evidence` | skip |
-| 7 | Voice | `tone`, `category` | skip (defaults) |
-| 8 | Anything exact | `must_say[]`, `must_not_say[]` | skip |
-| 9 | Review | the brief, plus **what we will and will not be able to say** | — |
+- **From an existing product** — `kind`, `name`, `price` and often `facts` are already known. The
+  wizard opens on the first genuine gap and shows the rest as already-answered. A tenant with a
+  catalogue should never retype it.
+- **From scratch** — the full flow below, which also creates the Product and Offer (§5).
 
-Step 9 is the one that earns its place. Showing "we will not mention cancellation because you did not
-tell us your terms" *before* generating is the difference between a tenant who understands a thin page
-and a tenant who thinks the AI is bad. It is the same list as §3's right-hand column, filtered to
-what is empty.
+**The step list is derived, not fixed** — one `steps(kind)` computed, the `ServiceWizard.vue` idiom,
+so the rail, the labels and the bounds all read the same source. (`LandingPages.vue`'s rail is the
+scar that says what happens when three calculations each decide how long a conditional wizard is.)
 
-**The 30-second path:** steps 1-4 only, then Generate. That is the "AI does everything" experience,
-and it honestly produces a decent, factual, slightly plain page. Steps 5-8 are where it gets good.
+| # | Step | physical | digital | service | Required |
+| --- | --- | :-: | :-: | :-: | --- |
+| 1 | What are you selling — `kind`, `name`, `what_it_is` | ● | ● | ● | ✅ |
+| 2 | Price | ● | ● | ● | ✅ |
+| 3 | Who is it for | ● | ● | ● | ✅ |
+| 4 | What should people know — `facts[]` | ● | ● | ● | ✅ (≥1) |
+| 5a | Shipping & use — `shipping`, `usage`, `materials`, `dimensions` | ● | — | — | skip |
+| 5b | What they receive — `format`, `access` | — | ● | — | skip |
+| 5c | The session — `duration_minutes`, `location_mode`, `performed_by`, `booking`, `what_happens` | — | — | ● | **✅ duration + location** |
+| 6 | Promises — `guarantee`, `terms`, `certifications`, `evidence` | ● | ● | ● | skip |
+| 7 | Voice — `tone`, `category` | ● | ● | ● | skip (defaults) |
+| 8 | Anything exact — `must_say`, `must_not_say` | ● | ● | ● | skip |
+| 9 | Review | ● | ● | ● | — |
 
----
+So a **download is 7 steps and never sees a shipping question**; a **service is 9 with two more
+required fields**, because a service page that cannot say how long it takes or whether it is remote
+is not worth generating. That is the author's rule — ask the fulfilment question only when it is not
+obvious — applied by making `kind` carry it.
+
+**What is never asked because it is derivable:**
+- `digital.delivery` — a digital product is delivered by download; only asked if they say otherwise.
+- `physical.requires_shipping` — implied by `kind`.
+- `service.booking` — defaults to `scheduled`; the `no_booking` case is a checkbox on 5c, not a step.
+- `brand` — resolved from the business profile (`resolve_brand`), asked only if there is none.
+
+Step 9 earns its place by showing **what we will not be able to say**: "we will not mention
+cancellation because you did not tell us your terms." Shown *before* generating, it is the difference
+between a tenant who understands a thin page and one who thinks the AI is bad. Same list as §3's
+right-hand column, filtered to what is empty.
+
+**The 30-second path:** steps 1-4 (plus 5c for a service), then Generate. That is the "AI does
+everything" experience, and it honestly produces a decent, factual, slightly plain page.
 
 ## 5. Brief → Product → Offer, deterministically
 
@@ -169,18 +211,27 @@ tenant must not be left with a half-made thing they cannot see. Proposal: create
 
 ## 6. Open questions for the author
 
-1. **Nine steps, or fewer?** The argument for nine is §1 — more answers, better page. The argument
-   against is that a tenant who wanted "AI does everything" is looking at a form. The 30-second path
-   (steps 1-4) is the compromise; is it enough of one?
-2. **Should `evidence` exist at all in v1?** Leaving it out means the AI can never make an efficacy
-   claim, which is the safest possible default and removes the riskiest field from the product.
-3. **Fulfilment type** — ask it (a tenth question), or infer it from `what_it_is` and let the tenant
-   correct it on the review step? Inferring is friendlier and occasionally wrong; the Products wizard
-   asks outright.
-4. **What does "Generate" cost against the quota when it fails?** Current `ai_usage` releases the slot
-   on provider error. Should a page the tenant *dislikes* be free to regenerate, or does every
-   generation count? (Recommendation: count it; releasing on taste is unbounded.)
-5. **URL adapter (Phase 2) — whose page?** Extracting facts from the tenant's own listing elsewhere is
-   the good case. The design answer that makes it defensible: **extract facts, generate original
-   copy, never reproduce their prose** — which is also better SEO, since duplicate copy does not rank.
-   Worth deciding now, before the feature invites the other use.
+**All five answered by the author, 2026-09-27.** Recorded as decisions, with what each one changed.
+
+1. **Steps.** *"Number of steps doesn't matter as much as smart steps — a service-based wizard will
+   have more steps than a product-based wizard."* → The brief became core + kind block, and the step
+   list is derived from `kind` (§2, §4). This is the revision that reshaped the note.
+2. **`evidence` stays in v1.** It remains the only licence for an efficacy claim, asked last and
+   phrased as a commitment.
+3. **Fulfilment is asked only when not obvious.** *"A downloadable product requires no fulfillment
+   question."* → `kind` is asked once in plain language and carries it; digital never sees shipping.
+4. **A disliked generation still counts against the quota.** Releasing on taste is unbounded. The
+   slot is released only on provider error or unusable output — our failure, not their preference.
+5. **Always generate original copy.** Settled for the Phase-2 URL adapter and as a general rule: we
+   extract FACTS — price, dimensions, materials, specs — and never reproduce a source's prose. Better
+   SEO besides, since duplicate copy does not rank.
+
+### Still open (implementation, not design)
+
+- **Partial failure.** If the Product saves and Stripe sync fails, the tenant must not be left with a
+  half-made thing they cannot see. Proposal: create everything `status: draft`, and let a failed job
+  leave a draft Product they can finish by hand.
+- **Does a service brief create a `Service` document or a `Product` with `product_type: service`?**
+  Settled elsewhere — plans/SERVICE_WIZARD.md §3 chose the Service document with
+  `fulfillment_mode`, and `Products.vue` already hands off to `ServiceWizard` on that basis. The AI
+  wizard must hand off the same way rather than inventing a third path.
