@@ -7,6 +7,8 @@ refunds ledger. This module computes both, so the handler and webhook stay thin.
 
 from typing import Any
 
+from stripe_link.domain.tips import refund_amount as _tip_refund_amount
+
 PAYMENT_STATUSES = {"paid", "partially_refunded", "refunded", "disputed", "cancelled", "completed"}
 
 
@@ -22,6 +24,20 @@ def order_paid_amount(order: dict[str, Any]) -> int:
     return int(order.get("amount_paid") or order.get("amount_total") or 0)
 
 
+def refundable_ceiling(order: dict[str, Any]) -> int:
+    """The most this order can ever give back -- which is not always what was charged.
+
+    A net_guaranteed tip charges the supporter the fees on top of the gift ($11.00 for a $10.00 tip) so
+    the creator receives the round number. Only the gift is the creator's to return; the $1.00 of fees
+    went to Stripe and the platform and never passed through their balance. Left comparing against the
+    charge, a fully-refunded tip would sit forever at "partially refunded, $1.00 refundable" -- inviting
+    a tenant to give back money they never had. For every other order the ceiling IS what was paid.
+    """
+    paid = order_paid_amount(order)
+    ceiling = _tip_refund_amount(order)
+    return min(ceiling, paid) if ceiling else paid
+
+
 def set_refund_aggregates(
     order: dict[str, Any],
     *,
@@ -33,8 +49,9 @@ def set_refund_aggregates(
     """Return the order with refund aggregates set to authoritative totals."""
     amount_paid = order_paid_amount(order)
     amount_refunded = int(amount_refunded)
-    refundable = max(0, amount_paid - amount_refunded)
-    status = "disputed" if disputed else payment_status_after_refund(amount_paid, amount_refunded)
+    ceiling = refundable_ceiling(order)
+    refundable = max(0, ceiling - amount_refunded)
+    status = "disputed" if disputed else payment_status_after_refund(ceiling, amount_refunded)
     return {
         **order,
         "amount_paid": amount_paid,

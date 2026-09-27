@@ -9,6 +9,7 @@ from html import escape
 from typing import Any
 
 from stripe_link.domain.email_layout import ACCENT, button, paragraph, render_email, rows_table
+from stripe_link.domain.tips import fee_breakdown
 
 
 def format_money(cents: Any, currency: str = "usd") -> str:
@@ -59,6 +60,16 @@ def receipt_content(
     total = format_money(order.get("amount_total"), currency)
     order_id = str(order.get("order_id") or "")
     links = download_links or []
+    # A supporter who covered the fees typed $10.00 and was charged $11.00. Show both, the way the tip card
+    # did before they paid -- a receipt carrying only the grossed-up total looks like we charged more than
+    # they chose. It is also the figure a refund returns (domain/tips.py refund_amount), so this is the
+    # buyer's record of what they can ask back. None for every other order, which shows the total alone.
+    breakdown = fee_breakdown(order)
+    money_rows = [("Order", order_id), ("Item", product_name)]
+    if breakdown:
+        tip_amount, fees_covered = breakdown
+        money_rows += [("Tip", format_money(tip_amount, currency)),
+                       ("Fees you covered", format_money(fees_covered, currency))]
 
     # The shop's name belongs in the SUBJECT, not only in the From line: an inbox list shows the subject
     # at full width and truncates the sender. The fallback is the generic one, and seeing it in a real
@@ -73,8 +84,11 @@ def receipt_content(
         "",
         f"Order: {order_id}",
         f"Item: {product_name}",
-        f"Total: {total}",
     ]
+    if breakdown:
+        text_lines += [f"Tip: {format_money(breakdown[0], currency)}",
+                       f"Fees you covered: {format_money(breakdown[1], currency)}"]
+    text_lines += [f"Total: {total}"]
     if links:
         text_lines += ["", "Your downloads:"]
         text_lines += [f"- {link.get('label') or 'Download'}: {link.get('url', '')}" for link in links]
@@ -102,7 +116,7 @@ def receipt_content(
 
     body = (
         paragraph(f"Thanks for your purchase, {customer_name}.")
-        + rows_table([("Order", order_id), ("Item", product_name)], total=("Total", total))
+        + rows_table(money_rows, total=("Total", total))
         + downloads_html
         + (button("Manage or cancel this recurring tip", manage_url) if manage_url else "")
     )

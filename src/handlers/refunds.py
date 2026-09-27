@@ -20,6 +20,7 @@ import time
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.fulfilment import product_index, resolve_order_lines
 from stripe_link.domain.refund_ledger import build_refund_entry, set_refund_aggregates
+from stripe_link.domain.tips import refund_amount as tip_refund_amount
 from stripe_link.domain.returns import (
     RETURN_PENDING,
     RETURN_RECEIVED,
@@ -213,7 +214,12 @@ def _execute(request, tenant_id, now, *, requests_repo, orders_repo, refunds_rep
     if not api_key:
         return error_response(f"No Stripe key configured for {mode} mode.", code="stripe_not_configured")
 
-    order_amount = int(order.get("amount_total") or 0)
+    charged = int(order.get("amount_total") or 0)
+    # A TIP refunds the tip, not the charge (plans/PAY_WHAT_YOU_WANT.md §5f). Under net_guaranteed the
+    # supporter paid the fees on top, so refunding the charge would leave the creator paying back more
+    # than they ever received -- out of pocket for having accepted a gift. Every other order refunds its
+    # total, so this is a no-op outside tips.
+    order_amount = tip_refund_amount(order)
     requested = int((request.get("amount") or {}).get("requested_amount") or 0)
     partial_amount = requested if 0 < requested < order_amount else 0  # 0 => full refund
 
@@ -224,6 +230,9 @@ def _execute(request, tenant_id, now, *, requests_repo, orders_repo, refunds_rep
     }
     if partial_amount:
         data["amount"] = partial_amount
+    elif order_amount and order_amount < charged:
+        # A full refund of a tip is a PARTIAL refund at Stripe: it returns the tip out of a larger charge.
+        data["amount"] = order_amount
 
     try:
         refund = caller(

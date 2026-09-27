@@ -307,3 +307,64 @@ def destination_url(destination: str, handle: str) -> str:
     if any(character in handle for character in " /?#@\\") or ":" in handle:
         return ""
     return template.replace("{handle}", handle)
+
+
+def tip_keyed_amount(order: dict[str, Any] | None) -> int | None:
+    """The tip the supporter meant to GIVE, frozen onto the order at checkout. None if this is not a tip.
+
+    Read from the order's metadata, where `handlers/checkout.py` puts it via
+    `metadata[tip_keyed_amount]`, because a TYPED amount exists nowhere else once the request is gone.
+    """
+    metadata = (order or {}).get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    raw = metadata.get("tip_keyed_amount")
+    if raw in (None, ""):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def refund_amount(order: dict[str, Any] | None) -> int:
+    """What a FULL refund of this order returns. A tip returns the TIP, not the charge.
+
+    plans/PAY_WHAT_YOU_WANT.md §5f, decided 2026-09-14: a refund returns the tip, and whoever paid the
+    fees loses them. That single rule gives the right answer under both fee modes, which is why it is one
+    rule rather than two:
+
+      net_guaranteed (default)   supporter paid $11.00 so the creator kept $10.00. Refund $10.00: the
+                                 creator ends at exactly $0.00, and the supporter loses the fee they
+                                 volunteered to cover.
+      standard                   supporter paid $10.00 and the creator kept ~$8.90. Refund $10.00: the
+                                 creator absorbs ~11% for doing nothing -- which the wizard says out loud,
+                                 because it is a real consequence of choosing that mode.
+
+    Refunding the CHARGE instead would leave a net_guaranteed creator paying back more than they ever
+    received -- out of pocket for accepting a gift.
+
+    Anything that is not a tip refunds its total, unchanged.
+    """
+    keyed = tip_keyed_amount(order)
+    if keyed is None:
+        return int((order or {}).get("amount_total") or 0)
+    # Never more than was actually charged: a mis-keyed tip must not refund money that never arrived.
+    return min(keyed, int((order or {}).get("amount_total") or keyed))
+
+
+def fee_breakdown(order: dict[str, Any] | None) -> tuple[int, int] | None:
+    """`(tip, fees_covered)` when a supporter paid the fees on top, else None.
+
+    Only net_guaranteed (and split, partially) produce a charge larger than the typed tip, and only then
+    is there anything to break out. The buyer saw this split on the tip card before they paid; a receipt
+    that shows the grossed-up total alone reads as though we quietly charged more than they typed.
+    """
+    keyed = tip_keyed_amount(order)
+    if keyed is None:
+        return None
+    charged = int((order or {}).get("amount_total") or 0)
+    if charged <= keyed:
+        return None
+    return keyed, charged - keyed
