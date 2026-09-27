@@ -366,9 +366,9 @@ Connect client-id pair.
 
 ## Data isolation
 
-### ⭐⭐ HIGH — the webhook checks which silo an event belongs to, then bypasses the check (found 2026-09-23)
+### ✅ FIXED 2026-09-26 — the webhook checked which silo an event belongs to, then bypassed the check (found 2026-09-23)
 
-Plan: **`plans/SILO_MODEL.md`**. Not built.
+Plan: **`plans/SILO_MODEL.md`**. S0–S5 shipped dev + prod 2026-09-26. The webhook now resolves the silo (stamp, then "do I hold this order?", then the legacy correspondence) and keeps only events that resolve to itself. Every silo registers its own Connect endpoint in both modes; verified live across all six mode/stamp combinations, exactly one silo keeping each. S2 was SKIPPED with evidence — see the plan.
 
 `stripe_webhook.py:221` resolves the tenant by looking the connected account up in THIS deployment's
 `stripe_keys` — which IS the silo-membership check — and then throws it away:
@@ -491,7 +491,7 @@ storefront). The work is to ENUMERATE the class — which tables both modes writ
 reader of one passes a mode — not to fix a fourth instance. Full audit and the reasoning in
 `plans/STRIPE_MODE_DECOUPLING.md` **P7**.
 
-### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
+### ✅ FIXED 2026-09-26 — webhook data landed in the wrong deployment; stamp origin on the session (found 2026-09-20)
 
 > **2026-09-23: this and the entry above are ONE problem, and `plans/SILO_MODEL.md` now holds the design.**
 > Root cause named by the author: *the silo is not a modeled concept.* The decoupling split Stripe mode
@@ -718,7 +718,7 @@ what real traffic on these paths looks like.
 `X-Robots-Tag` over the whole artifact namespace plus the Worker stripping the inherited header and setting
 its own from `route.noindex`. It does nothing about commerce, and this item does nothing about indexing.
 
-### ⭐⭐ HIGH — the API never verifies who is calling — PHASE 1 BUILT 2026-09-25, nothing enforced yet (found 2026-09-15)
+### ⭐⭐ HIGH — the API never verifies who is calling — PHASE 2 (enforcement) STILL OPEN; phase 1 measured it 2026-09-25 (found 2026-09-15)
 
 Noticed while smoke-testing a newly deployed endpoint on prod, NOT introduced by it. This is repo-wide and
 pre-existing.
@@ -1568,10 +1568,17 @@ does not re-derive it as a bug.
 **QA is outstanding and is tracked as its own HIGH item below** — the author owns it (see "QA: watch a real
 subscription renew"). Nothing here has been exercised against live Stripe.
 
-### ⭐ HIGH — QA: watch a real subscription renew (author's, 2026-09-15)
+### ✅ DONE 2026-09-26 — QA: watch a real subscription renew (author's, 2026-09-15)
 
 **Owner: the author.** This is manual QA against live Stripe test mode, not a code task — recorded here so it
 is not mistaken for done just because the unit tests are green.
+
+**Done, and it earned its place.** Five renewals watched 2026-09-24 to 09-26. The unit tests were green
+throughout and the renewals were still wrong in three separate ways, every one of them invisible to the
+suite: the order was written but HOLLOW (empty subscription_id, empty price/product ids, no metadata)
+because the account is on an API version that moved three fields; the receipt line read "1 x $197.92 (at
+$197.92 / day)" because with no product id there was nothing to name it; and no renewal carried a shipping
+address because subscription checkout never asked for one. Watching it happen is what found all three.
 
 Recurring pricing shipped to dev on 2026-09-15 with 32 tests walking the chain (see the entry above), but
 every one of them stops at the payload. **Nothing has been watched actually happen at Stripe.** That matters
