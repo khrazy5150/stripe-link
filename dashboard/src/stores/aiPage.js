@@ -1,0 +1,151 @@
+import { defineStore } from "pinia";
+import { apiRequest } from "../api/client";
+
+// The AI page wizard (plans/AI_PAGE_BRIEF.md). Writes a brief, posts it, gets back a Product, an Offer
+// and a DRAFT page.
+//
+// The organising rule, and the reason this store tracks `withheld`: every question the tenant does not
+// answer is a fact the AI is not allowed to assert. The §A.7 floor rejects ungrounded claims, so a thin
+// brief does not make a shorter page -- it makes a cautious one. Showing what will be WITHHELD before
+// generating is what makes a thin page understandable instead of disappointing.
+
+export const KINDS = [
+  { key: "physical", label: "Something physical", hint: "You ship it to them." },
+  { key: "digital", label: "A download", hint: "They get a file or access straight after paying." },
+  { key: "service", label: "A service you perform", hint: "Sessions, appointments, consulting." },
+];
+
+export const TONES = ["direct", "warm", "playful", "technical", "premium"];
+
+// Mirrors domain/page_brief.py steps_for(). The kind decides the shape -- a download is never asked
+// about shipping, because asking it is the fulfilment question asked twice.
+const COMMON_HEAD = ["identity", "price", "audience", "facts"];
+const KIND_STEP = { physical: "shipping_use", digital: "delivery", service: "session" };
+const COMMON_TAIL = ["promises", "voice", "exact", "review"];
+
+export const STEP_LABELS = {
+  identity: "What you're selling", price: "Price", audience: "Who it's for",
+  facts: "What people should know", shipping_use: "Shipping & use",
+  delivery: "What they receive", session: "The session", promises: "Promises you make",
+  voice: "Voice", exact: "Anything exact", review: "Review",
+};
+
+// Steps a tenant may leave untouched. "Leave it" should be one click, not a guess -- the ServiceWizard
+// lesson. Note `session` is NOT here: a service page that cannot say how long it takes is not worth
+// generating, so it blocks.
+export const SKIPPABLE = new Set(["shipping_use", "delivery", "promises", "voice", "exact"]);
+
+export function stepsFor(kind) {
+  if (!KIND_STEP[kind]) return ["identity"];
+  return [...COMMON_HEAD, KIND_STEP[kind], ...COMMON_TAIL];
+}
+
+function emptyBrief() {
+  return {
+    kind: "", name: "", what_it_is: "", audience: "", facts: "",
+    price: { unit_amount: null, currency: "usd", pricing_model: "one_time", recurring_interval: "month" },
+    guarantee: "", terms: "", certifications: "", evidence: "",
+    tone: "direct", category: "", must_say: "", must_not_say: "",
+    physical: { shipping: "", usage: "", materials: "", dimensions: "" },
+    digital: { format: "", access: "" },
+    service: { duration_minutes: 60, location_mode: "remote", performed_by: "", what_happens: "" },
+  };
+}
+
+// Lines in the textarea become a list; the server accepts either, but sending the shape it stores
+// keeps the wire honest.
+function lines(value) {
+  return String(value || "").split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+export const useAiPageStore = defineStore("aiPage", {
+  state: () => ({
+    brief: emptyBrief(),
+    step: 0,
+    generating: false,
+    error: "",
+    result: null,       // { product, offer, page, withheld, decisions, generation }
+  }),
+  getters: {
+    steps: (state) => stepsFor(state.brief.kind),
+    stepKey() { return this.steps[this.step] || "identity"; },
+    stepLabels() { return this.steps.map((s) => STEP_LABELS[s]); },
+    onLastStep() { return this.step >= this.steps.length - 1; },
+    // What the generated page will NOT be able to say, computed locally so the review step is
+    // instant. The server returns its own authoritative copy after generating.
+    withheld(state) {
+      const b = state.brief;
+      const kindBlock = b[b.kind] || {};
+      const gaps = [
+        [!b.terms, "cancellation", "Tell us your cancellation terms and we can answer \"can I cancel anytime?\""],
+        [!b.guarantee, "guarantee", "Add your guarantee and we can write about it."],
+        [!lines(b.certifications).length, "certification", "List certifications you hold and we can name them."],
+        [!b.evidence, "efficacy", "Add evidence you can stand behind and we can describe results."],
+      ];
+      if (b.kind === "physical") {
+        gaps.push([!kindBlock.shipping, "shipping", "Tell us your shipping and we can mention delivery."]);
+        gaps.push([!kindBlock.usage, "dosage", "Add directions and we can explain how to use it."]);
+      }
+      if (b.kind === "service") {
+        gaps.push([!kindBlock.what_happens, "dosage", "Describe the session and we can explain what happens."]);
+      }
+      return gaps.filter(([missing]) => missing).map(([, claimClass, prompt]) => ({ claimClass, prompt }));
+    },
+    canAdvance(state) {
+      const b = state.brief;
+      switch (this.stepKey) {
+        case "identity": return !!(b.kind && b.name.trim() && b.what_it_is.trim());
+        case "price": return Number(b.price.unit_amount) > 0;
+        case "audience": return !!b.audience.trim();
+        case "facts": return lines(b.facts).length > 0;
+        // The only kind block that can block, and deliberately: a service page unable to say how long
+        // it takes or whether it is remote is not worth generating.
+        case "session": return Number(b.service.duration_minutes) > 0 && !!b.service.location_mode;
+        default: return true;
+      }
+    },
+  },
+  actions: {
+    reset() { this.brief = emptyBrief(); this.step = 0; this.result = null; this.error = ""; },
+    next() { if (this.canAdvance && !this.onLastStep) this.step += 1; },
+    back() { if (this.step > 0) this.step -= 1; },
+    goTo(index) { if (index >= 0 && index < this.steps.length) this.step = index; },
+
+    payload() {
+      const b = this.brief;
+      const price = {
+        unit_amount: Math.round(Number(b.price.unit_amount) * 100),
+        currency: b.price.currency,
+        pricing_model: b.price.pricing_model,
+      };
+      if (price.pricing_model === "recurring") price.recurring_interval = b.price.recurring_interval;
+      const brief = {
+        source: "wizard", kind: b.kind, name: b.name.trim(), what_it_is: b.what_it_is.trim(),
+        audience: b.audience.trim(), facts: lines(b.facts), price,
+        guarantee: b.guarantee.trim(), terms: b.terms.trim(),
+        certifications: lines(b.certifications), evidence: b.evidence.trim(),
+        tone: b.tone, category: b.category.trim(),
+        must_say: lines(b.must_say), must_not_say: lines(b.must_not_say),
+      };
+      brief[b.kind] = { ...b[b.kind] };
+      return brief;
+    },
+
+    async generate(mode = "test") {
+      this.generating = true;
+      this.error = "";
+      try {
+        this.result = await apiRequest("/ai/generate", {
+          method: "POST",
+          body: { brief: this.payload(), mode },
+        });
+        return true;
+      } catch (error) {
+        this.error = error.message || "The page could not be generated.";
+        return false;
+      } finally {
+        this.generating = false;
+      }
+    },
+  },
+});

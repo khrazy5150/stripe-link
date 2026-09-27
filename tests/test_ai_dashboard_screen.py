@@ -138,3 +138,64 @@ class HonestyTests(unittest.TestCase):
         # pages has paid $1.67 each.
         self.assertIn("expire a year after purchase", SCREEN)
         self.assertIn("not refundable", SCREEN)
+
+
+WIZARD = (ROOT / "dashboard" / "src" / "components" / "AiPageWizard.vue").read_text(encoding="utf-8")
+PAGE_STORE = (ROOT / "dashboard" / "src" / "stores" / "aiPage.js").read_text(encoding="utf-8")
+
+
+class WizardTests(unittest.TestCase):
+    """The AI page wizard (plans/AI_PAGE_BRIEF.md)."""
+
+    def test_it_uses_classes_the_stylesheet_defines(self):
+        css = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
+        used = set()
+        for attr in re.findall(r'\sclass="([^"]+)"', WIZARD):
+            used.update(c for c in attr.split() if c and "{" not in c)
+        for name in sorted(used):
+            with self.subTest(name=name):
+                self.assertRegex(css, rf"\.{re.escape(name)}\b")
+
+    def test_the_step_list_is_derived_from_the_kind(self):
+        # The author's rule: smart steps, not fewer. One derived list feeds the rail, the labels and
+        # the bounds -- LandingPages.vue's rail is the scar that says what happens otherwise.
+        self.assertIn("export function stepsFor", PAGE_STORE)
+        self.assertIn("KIND_STEP", PAGE_STORE)
+
+    def test_a_download_is_never_asked_about_shipping(self):
+        block = WIZARD.split("key === 'delivery'", 1)[1].split("</template>", 1)[0]
+        self.assertNotIn("shipping", block.lower())
+
+    def test_the_wizard_step_list_matches_the_server(self):
+        # The server validates what the wizard collects; a step here with no field there is a dead
+        # question, and a required field there with no step here is an unreachable wizard.
+        from stripe_link.domain.page_brief import steps_for
+        for kind in ("physical", "digital", "service"):
+            with self.subTest(kind=kind):
+                server = steps_for(kind)
+                declared = re.search(r"const KIND_STEP = \{([^}]*)\}", PAGE_STORE).group(1)
+                self.assertIn(f"{kind}:", declared)
+                for step in server:
+                    self.assertIn(f"{step}:", PAGE_STORE, f"{step} has no label in the store")
+
+    def test_the_review_step_says_what_will_be_withheld_before_generating(self):
+        review = WIZARD.split("key === 'review'", 1)[1].split("</template>", 1)[0]
+        self.assertIn("What we won't be able to say", review)
+        self.assertIn("store.withheld", review)
+
+    def test_the_session_step_is_not_skippable(self):
+        # A service page that cannot say how long it takes or whether it is remote is not worth
+        # generating, so this is the one kind block that blocks.
+        skippable = PAGE_STORE.split("export const SKIPPABLE", 1)[1].split("\n", 1)[0]
+        self.assertNotIn("session", skippable)
+        self.assertIn("delivery", skippable)
+
+    def test_the_result_never_claims_anything_is_live(self):
+        done = WIZARD.split("Your draft page is ready", 1)[1]
+        self.assertIn("draft", done.lower())
+        self.assertIn("Nothing is live", done)
+
+    def test_it_is_reachable_from_the_menu_and_the_app(self):
+        self.assertIn('view: "aiPage"', MENU)
+        self.assertIn("activeView === 'aiPage'", APP)
+        self.assertIn("AiPageWizard", APP)
