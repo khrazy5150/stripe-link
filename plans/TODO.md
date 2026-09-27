@@ -2472,6 +2472,73 @@ a directory add is DISCOVERABILITY — finding a creator by name — which is wo
 
 ## Commerce
 
+### ⭐⭐ HIGH — AI page generation (AI_AND_COMMERCE Part A) — Bedrock VERIFIED 2026-09-27, adapter not built
+
+Plan: **plans/AI_AND_COMMERCE_ARCHITECTURE.md**. The plan's own entry, which it did not have until
+2026-09-27 — a 288-line locked design was tracked only as a footnote to the Offer Semantic Analyzer's
+P4.1 gate, at the bottom of this file. That is why its status read as untouched when most of it had
+shipped. Phase mapping, so the next reader does not repeat the mistake:
+
+| Phase | Where it actually is |
+| --- | --- |
+| 0 — foundations | mostly ✅ but credited elsewhere: composition refactor (Page Composer), media pipeline (`image-processing`), `offer_type` validated. **Open:** actual-fee reconciliation = "transaction ledger P&L" below; order → `line_items[]` + per-line `tax_amount` = "Listicle L3 ripples" below |
+| 1 — AI MVP | **the real work, unbuilt.** Only the provider adapter was ever tracked; resolvers (A.4), blueprint library, generation policy (A.5), the pipeline (A.3) and A.6/A.7 security were tracked nowhere |
+| 2 — AI expansion | tracked nowhere. Carries the SSRF + prompt-injection surface, and there is no VPC, so all of it is code |
+| 3/4 — listicle + cart | ✅ shipped, see "Listicle L2" below. Nothing said these were this plan's phases |
+| 5 — tax | only the §D.4 "not our job" half (Stripe Tax monitoring). **§D.2 "reserve tax fields NOW" never happened** — no `tax_amount` anywhere, and orders are the one document with no schema at all |
+| 6+ | deferred by design, correctly absent |
+
+**Measured 2026-09-27 (~$0.02 of real Bedrock calls, `us-west-2`) — the central bet holds.** Four
+Claude models emitted schema-valid JSON that rendered through the real `runtime/html.py` **first try,
+zero repair rounds**, against production section shapes. Full numbers and all eight findings in the
+plan's §A.7. The ones that change what gets built:
+
+- **The guardrail named the wrong risk.** Told not to invent reviews, the models complied. What they
+  invented was **commercial terms** — two of four volunteered "no lock-in, no fees" — and, on the
+  cheapest model, **dosing and efficacy claims** ("5g per gummy" from a given "5g per serving").
+  §A.7 is now a resolver-owned field floor absent from the generation schema. **FAQ is the highest-risk
+  surface**, because "can I cancel anytime?" invites a policy statement.
+- **The cheap model is the dangerous one.** Haiku 4.5 was 4x cheaper and did all the factual drifting.
+  "Use a cheap model for page-gen to save COGS" is closed.
+- **`Page.schema.json` is not a sufficient AI contract** — `sections[]` is `additionalProperties: true`
+  needing only `id`+`type`, so unrenderable output validates. The generation schema must derive from
+  the section catalog, stricter, with a test locking them equivalent.
+- **`list-foundation-models` lists models the account cannot call.** Every GPT-5.x/6 and Claude 5.x is
+  `AccessDeniedException` while showing `ACTIVE` with a live profile. So connect/verify must *invoke*.
+- **The one entitled OpenAI model fails the contract** (`gpt-oss-120b`: array-wrapped, then malformed
+  JSON). Provider-agnosticism is **unproven** until a frontier OpenAI model is enabled — console action
+  pending with the author.
+- **Rates are not machine-readable.** All 1052 `us-west-2` Bedrock price records carry zero
+  current-generation models. Cost table is hand-maintained config — same trap as the stale
+  `global_billing_config.json` fee table.
+
+**Billing, revised (§A.1):** two paths behind one `provider` setting — `byok` (tenant's key, tenant's
+bill, every plan incl. free, so the acquisition feature stays in the free tier) and `bedrock` (platform's
+bill, plan-gated). Bedrock reverses who pays, so **the bundled allowance must be countable and the
+per-tenant cap ships in the first commit** — no usage metering exists anywhere in this repo today, and
+it is the same counter as A.6's abuse cap. At ~$0.046/generation (Sonnet 4.6, tripled for a full page),
+**50 generations/month is ~12% of a $19 subscription**; 200/month is 49%.
+
+**Slice order** (Phase 1 is five slices, not one): (1) adapter + provider config + verify-by-invoking —
+self-contained, and the gate on P4.1, the ad-copy generator and page-gen at once; (2) resolvers +
+the §A.7 floor, deterministic, zero API calls; (3) manual brief → deterministic Product+Offer;
+(4) Page JSON + validate/repair → draft; (5) job polling + builder hand-off. URL ingestion stays in
+Phase 2 where the plan put it.
+
+**Ready to build against:** `KmsSecretCipher` + `stripe_keys.py` (the BYOK pattern), `stripe_client.py`
+(raw-urllib, no deps — and Bedrock needs none since boto3 ships in the runtime, so
+`src/requirements.txt` stays empty), `semantic_schema.py`'s `check_schema` (the repair loop's validator,
+built for exactly this), the three `rate(15 minutes)` sweeps (the async pattern — no Step Functions
+exist, and the plan permits a worker Lambda for the MVP), the A/B engine (A.5 policy tests),
+`composition_rules.json` (the section catalog), `TenantProfile.brand`, and `POST /upload/from-url` in
+`image-processing` (A.3 step 5 needs a proxy route, not new infra). 213 of 500 CFN resources used.
+**Verify before committing:** that the python3.12 runtime's *bundled* boto3 is new enough for
+`converse` — if not, vendoring boto3 is the ~24MB/6.5s cold-start problem `requirements.txt` exists to
+prevent. **Design in from commit one:** prompt caching (1024-token min, 1h TTL) — the system prompt is
+byte-identical across generations and grows with the catalog, making it a bigger COGS lever than model
+choice.
+
+
 ### ⭐ SaaS billing paywall + trial-first onboarding — SHIPPED PROD 2026-08-03
 - **Shipped:** table-driven `PlatformPlansTable` (Bay Pass $9.58/mo, editable) + repo/cached loader; subscribe via
   Stripe Checkout(subscription) + Billing Portal; SEPARATE platform-billing webhook (`/webhook/platform-billing`,
@@ -3305,7 +3372,13 @@ Social and lead-specific elements still wait for those page types to exist.
 
 ## Offer Semantic Model
 
-### ⭐ HIGH — AI provider adapter (AI_AND_COMMERCE Phase 1) — SEQUENCED AFTER the other modules
+### ⭐ HIGH — AI provider adapter (AI_AND_COMMERCE Phase 1) — MOVED 2026-09-27 to `## Commerce`
+
+**This entry is now a pointer.** The adapter is Phase 1 of a seven-phase plan, and tracking it here —
+inside the Offer Semantic Model section, as a gate on P4.1 — is what kept the whole AI plan invisible
+for a month. See **"⭐⭐ HIGH — AI page generation (AI_AND_COMMERCE Part A)"** under `## Commerce` for
+the phase mapping, the 2026-09-27 Bedrock measurements, the §A.7 field floor, and the slice order.
+Everything below is the original sequencing note, kept because the gate history matters.
 
 **Priority HIGH, but deliberately NOT next.** Author's sequencing 2026-08-30: pick this up
 once the remaining modules are complete — the pre-launch work first (see "Media field
@@ -3315,6 +3388,10 @@ parity: video FILE upload + drag-reorder", tagged BEFORE LAUNCH).
 2026-09-02. The sequencing intent (finish the remaining modules first) still stands, but the one
 blocker this entry named by name is done — so re-read the intent rather than treating this as
 still-blocked.
+
+**Note 2026-09-27: the sequencing intent has effectively cleared too.** "Finish the remaining modules
+first" meant Parts B/C/D, and the audit found them substantially shipped under other entries. The
+author moved to this plan deliberately on 2026-09-27.
 
 **Why it is on the critical path at all:** it is the gate on the Offer Semantic Analyzer's
 last phase. P1-P3 and P4.0 are SHIPPED; `smart_offer_slug` is already a thin wrapper over
