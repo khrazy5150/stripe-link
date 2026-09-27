@@ -81,7 +81,7 @@
     "dimension_note": "newer models use *_input_tokens_global_standard; models predating 2026-09 use AFS1_InputTokenCount_Global. Both are handled."
   },
   "unavailable": {
-    "_comment": "Agreement created 2026-09-27 and reported AVAILABLE on all four flags (agreement, entitlement, authorization, region) -- yet converse still returned AccessDenied 15+ minutes later, in us-west-2 AND us-east-1. Rates below are real; availability is not.",
+    "_comment": "Rates are real; availability is not. These have model agreements reporting AVAILABLE on all four Bedrock flags (agreement, entitlement, authorization, region) and converse still returns AccessDenied -- in us-west-2 and us-east-1, hours later. PROVEN ORTHOGONAL 2026-09-27: deleting sonnet-4.5's agreement left it invoking perfectly (NOT_AVAILABLE + works), while these sit at AVAILABLE + denied. So create_foundation_model_agreement is NOT what grants access; entitlement is granted elsewhere and appears to need AWS approval (the error's own advice is 'contact AWS Sales', and put_use_case_for_model_access exists as a separate reviewed submission). Nothing here is selectable until an invocation proves otherwise.",
     "sonnet-5": {
       "profile": "us.anthropic.claude-sonnet-5",
       "rate_in_global": 2.0,

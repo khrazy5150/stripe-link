@@ -199,10 +199,17 @@ Confirmed by this:
 - **Strict structured output rejects `minItems` > 1.** Cardinality belongs in the prompt, not the schema.
 - **`us-west-2` has no In-Region inference** for these models; the model id must be a `us.`- or
   `global.`-prefixed inference profile. Bare `anthropic.claude-sonnet-4-6` fails.
-- **`list-foundation-models` lists models the account cannot call.** Every `openai.gpt-5.x`/`gpt-6`
-  and every Claude 5.x returned `AccessDeniedException` while appearing `ACTIVE` with a live profile.
-  Entitlement is a separate axis from the catalog, and only a real call reveals it — so the adapter's
-  connect/verify step must *invoke*, not merely look the model up.
+- **Entitlement is orthogonal to EVERY readable flag** — the strongest form of "verify by invoking".
+  Three layers were measured lying in sequence on 2026-09-27: `list-foundation-models` lists models
+  the account cannot call; `get-foundation-model-availability` then reports all four flags green
+  (agreement / entitlement / authorization / region `AVAILABLE`) for those same models; and finally
+  `create_foundation_model_agreement` succeeds, flips the flag to `AVAILABLE` in 20 seconds, and still
+  does not grant access. The control: **deleting `sonnet-4.5`'s agreement left it invoking perfectly**
+  (`NOT_AVAILABLE` + works) while newly-agreed models sat at `AVAILABLE` + denied. Agreements are not
+  the gate. Whatever is appears to need AWS approval — the error advises contacting AWS Sales, and
+  `put_use_case_for_model_access` is a separate reviewed submission. **Consequence for the adapter:
+  there is no readable field that means "this model will answer."** `/ai/connect` must make a real
+  generation, and a model's availability must be re-proven rather than cached from a status call.
 - **The one entitled OpenAI model does not honour the contract.** `gpt-oss-120b` wrapped the object in
   an array and then emitted malformed JSON at char 2467 with `stopReason: end_turn`. Provider-agnosticism
   is therefore **unproven** until a frontier OpenAI model is enabled and measured.
