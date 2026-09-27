@@ -1817,9 +1817,14 @@ products and it all resolves.
 Do both. (2) alone would fix this symptom, but (1) is what keeps the three lists this screen reasons about
 honest after a write.
 
-### ⭐ HIGH — Tip Jar ("Customer chooses") is half-imported and MIS-PRICES TODAY (plan plans/PAY_WHAT_YOU_WANT.md, 2026-09-13)
+### Tip Jar ("Customer chooses") — BUILT; two POLICY questions remain (plan plans/PAY_WHAT_YOU_WANT.md, 2026-09-13)
 
-A live bug, not a missing feature. stripe-cart ships this; stripe-link imported the fee class and the form
+**The "MIS-PRICES TODAY" headline this entry carried until 2026-09-26 was three weeks stale** — the price
+model, wizard and runtime all shipped 2026-09-13 and the net refund 2026-09-26. What is left is not code:
+the refund WORDING and whether a tip is an order, both of which need a decision before an implementation.
+Kept in full below because the original diagnosis is the useful part of the record.
+
+Originally: a live bug, not a missing feature. stripe-cart ships this; stripe-link imported the fee class and the form
 control and stopped. `pricing.js` writes `min_amount`/`suggested_amount` on top of a normal `unit_amount` from
 the Sales price field, and `pricing_model` appears NOWHERE in `checkout.py`, `pricing.py` or
 `runtime/html.py` — so a tip jar saves without error and **sells at whatever the tenant typed**. A plausible
@@ -1842,13 +1847,25 @@ is the closed-schema default doing its job with nobody reading the result.
 - ✅ **Runtime DONE 2026-09-13** — a card per preset plus an optional "Other" box priced through the server's
   own `/prices/calculate`; `apply_tip_amount` re-decides the charge at checkout; a repeating tip becomes a
   Stripe subscription; the page composes as `tip_jar` (no trust badges — nothing ships).
-- ⭐ **Refund a tip NET, not gross** (DECIDED 2026-09-14, plan §5f): a refund returns the TIP, and whoever
-  paid the fees loses them — the fee mode applied a second time. Under `net_guaranteed` (the default) the
-  creator ends at $0.00 on a refunded tip; under `standard` they absorb ~11% for doing nothing, which the
-  wizard should say. Needs, in order: (1) **record the keyed amount on the order** — a typed custom amount
-  exists only in the checkout request today (`handlers/checkout.py` writes no `tip_keyed_amount`), so the
-  net is uncomputable afterwards; (2) refund the net in `handlers/refunds.py`, which today refunds
-  `order.amount_total`; (3) say it on the receipt and the refund confirmation, not only on the card.
+- ✅ **Refund a tip NET, not gross DONE 2026-09-26** (DECIDED 2026-09-14, plan §5f): a refund returns the TIP,
+  and whoever paid the fees loses them — the fee mode applied a second time. Under `net_guaranteed` (the
+  default) the creator ends at $0.00 on a refunded tip; under `standard` they absorb ~11% for doing nothing.
+  One rule gives the right answer under both modes, which is why `domain/tips.py refund_amount()` is one
+  function: refund the keyed amount, clamped to what was actually charged.
+  - (1) The keyed amount was ALREADY being recorded — `checkout.py:746` writes `metadata[tip_keyed_amount]`
+    on the session and `:756` on `subscription_data`, and both order builders carry the metadata block onto
+    the order verbatim, so a recurring tip's renewals refund net as well. The TODO's premise was stale.
+  - (2) `handlers/refunds.py` now refunds `refund_amount(order)`. The subtlety: a FULL refund of a tip is a
+    PARTIAL refund at Stripe, so the amount has to be stated explicitly — omitting it is exactly what tells
+    Stripe to return the whole charge.
+  - (3) Two surfaces, one of which does not exist yet. The receipt now breaks out "Tip" and "Fees you
+    covered" beside the total (the split the buyer already saw on the card), and `refundable_ceiling()` makes
+    the ORDER read as fully refunded instead of sitting at "partially refunded, $1.00 refundable" — which
+    would have invited a tenant to give back money that never reached their balance. `amount_paid` stays the
+    real charge. **There is no refund-confirmation email in the codebase at all**; that half rides with
+    `docs/NOTIFICATION_EMITTERS.md`, not with this entry.
+  - Untested against real data: 0 of 22 prod orders carry `tip_keyed_amount`, because no tip has been sold
+    through the live path yet. The first one is the real verification.
 - **Open: the refund policy WORDING** (plan §5f, raised 2026-09-13). There is nothing to return, so the policy has
   to answer a different question: how long may a supporter change their mind, and who decides? Known so far:
   Stripe sets no card-refund deadline (the 180-day limit is ACH/SEPA); Ko-fi and Buy Me a Coffee both say
