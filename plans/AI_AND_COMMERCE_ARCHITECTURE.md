@@ -74,6 +74,66 @@ decisions. This is the strategic payoff of going JSON-first.
   VENDOR, not our Bedrock registry (their account, their entitlements), but from a closed list rather
   than a passthrough: a typo would otherwise surface as a confusing vendor error and a wrong id as a
   surprise charge on their bill.
+- **DEFERRED 2026-09-27 — a third provider: Anthropic Workload Identity Federation.** Parked with the
+  research done, because it is worth reaching for later and expensive to re-derive.
+
+  *What it is.* A Lambda calls `sts:GetWebIdentityToken` for an AWS-signed OIDC JWT asserting its IAM
+  role, exchanges it at `https://api.anthropic.com/v1/oauth/token`, and receives a short-lived
+  `sk-ant-oat01-…` token (600s default) used as `authorization: Bearer`. AWS IAM becomes the trust
+  anchor. It needs `boto3` + `urllib` only, so `requirements.txt` stays empty, and it would slot in as
+  a third `provider` value — platform-paid, no key — which `pays_platform()` already accounts for:
+  adding it is one entry in `PLATFORM_PAID` and the quota, the billing label and the free-tier logic
+  all keep working.
+
+  *Why it is attractive.* No long-lived secret exists to store, rotate or leak — strictly better than
+  a platform API key in Secrets Manager. And it **bypasses Bedrock entitlement entirely**, which is
+  the thing currently blocking every model this account did not already have.
+
+  *Setup it would need.* Outbound web identity federation is an account-level flag, **off** on
+  `150544707159` (checked). Then `sts:GetWebIdentityToken` on the function role, and an issuer + rule
+  in the Claude console — scoped to the exact role ARN, because a `subject_prefix` ending in `/*` lets
+  any principal who can assume any role in the account mint tokens on our bill.
+
+  *Why deferred (author, 2026-09-27).* It is a platform credential: one identity, one bill, serving
+  every tenant. It does not and cannot serve BYOK, since a tenant has no workload in our AWS account
+  to federate. BYOK carries the feature for now; this is the platform-paid path when one is wanted.
+
+- **The multi-tenant tolerance of ONE shared AI credential** (measured 2026-09-27, applies to WIF and
+  to any platform key). Rate limits are not the constraint; the **spend cap** is, and the risk is
+  blast radius rather than capacity.
+
+  Against the real slice-2 generation (2,239 in / 800 out on Sonnet 4.6, $0.0187):
+
+  | Tier | Monthly cap | Generations | Premium tenants @ 50/mo | Binding rate limit |
+  | --- | --- | --- | --- | --- |
+  | Start | $500 | ~26,700 | ~530 | OTPM, ~500 generations/min |
+  | Build | $1,000 | ~53,400 | ~1,070 | ~1,250/min |
+  | Scale | $200,000 | ~10.7M | ~214,000 | ~2,500/min |
+
+  Throughput is a non-issue — and **cached input tokens do not count toward ITPM**, so the identical
+  system prompt raises effective headroom as well as lowering cost. A new organization also starts in
+  an **Evaluation** tier *below* Start, so the first weeks are tighter than the table.
+
+  **The hazard:** reaching the cap pauses ALL usage until 00:00 UTC on the 1st — HTTP 429,
+  `error_code: enforced_spend_limit_reached`, **no `retry-after`**, retries fail. One shared credential
+  is one shared outage: a single runaway tenant takes generation down for everyone, for up to a month.
+  Anthropic offers workspace-level spend and rate limits but **nothing per-tenant** — the API has no
+  concept of our tenants — so §A.6's per-tenant quota is not defence in depth, it is the only thing
+  between one tenant and everyone else's outage.
+
+  Mitigations to apply if a platform path ships: keep BYOK first-class so heavy tenants pay their own
+  way and cannot hurt anyone else; set our own spend limit BELOW the tier cap (that yields a softer
+  400 before the hard 429); separate workspaces for sandbox and production so a dev mistake cannot
+  exhaust production's budget. **Open question not yet checked:** passing an end-user identifier per
+  request for abuse attribution, which matters if one tenant's content triggers a policy review.
+
+- **KNOWN GAP, not yet fixed** (found 2026-09-27): `ai_byok.py` maps every 429 to `throttled`, which
+  the handler renders as "busy right now, try again in a moment". For a spend-cap 429 that is wrong —
+  the honest answer is "the monthly budget is exhausted until the 1st", and the two are
+  distinguishable by `error_code: enforced_spend_limit_reached` plus the absent `retry-after`. Harmless
+  while only BYOK ships (it is then the tenant's own cap, and the message still points them at their
+  provider), and it must be fixed before any platform-paid path.
+
 - **Inference runs on GLOBAL profiles** (decided 2026-09-27). Regional (`us.`) costs exactly 10% more
   for identical output — measured across all 15 models, no exceptions — and a page-composition prompt
   carries tenant product copy, never customer PII, so nothing here needs to stay in one geography. The

@@ -2519,6 +2519,16 @@ per-tenant cap ships in the first commit** — no usage metering exists anywhere
 it is the same counter as A.6's abuse cap. At ~$0.046/generation (Sonnet 4.6, tripled for a full page),
 **50 generations/month is ~12% of a $19 subscription**; 200/month is 49%.
 
+**Deferred with the research done** (plan §A.1): **Anthropic Workload Identity Federation** as a third,
+platform-paid provider — no stored secret, short-lived IAM-anchored tokens, and it bypasses Bedrock
+entitlement entirely. Parked because it is a PLATFORM credential and cannot serve BYOK. Parked with it:
+the measured tolerance of one shared AI credential across tenants — throughput is a non-issue (~500
+generations/min at the entry tier) but the **monthly spend cap is a shared outage** (~$500 at Start,
+~530 premium tenants' worth; reaching it pauses everyone until the 1st with no `retry-after`).
+Anthropic has no per-tenant limits, so our own quota is the only thing between one tenant and everyone
+else. **One known gap to fix before any platform path ships:** `ai_byok.py` maps a spend-cap 429 to
+"busy, try again shortly" when the truth is "exhausted until the 1st".
+
 **Slice order** (Phase 1 is five slices, not one): (1) adapter + provider config + verify-by-invoking —
 self-contained, and the gate on P4.1, the ad-copy generator and page-gen at once; (2) resolvers +
 the §A.7 floor, deterministic, zero API calls; (3) manual brief → deterministic Product+Offer;
