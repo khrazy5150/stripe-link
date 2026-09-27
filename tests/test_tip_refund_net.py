@@ -159,3 +159,51 @@ class TipRefundHandlerTests(unittest.TestCase):
         stripe = FakeStripe()
         self.execute(stripe)
         self.assertEqual(stripe.calls[0]["data"]["amount"], 250)
+
+
+class RefundRequestCeilingTests(unittest.TestCase):
+    """The tenant's dialog must name the figure the server will actually send."""
+
+    def test_the_request_records_what_a_refund_can_return(self):
+        from stripe_link.domain.purchase_lookup import refund_request_doc
+        doc = refund_request_doc(
+            {"tenant_id": "t1", "order_id": "order_tip", "currency": "usd", "amount_total": 1100,
+             "amount_paid": 1100, "metadata": {"tip_keyed_amount": "1000"}, "customer": {"email": "a@b.com"}},
+            request_id="rr_1", reason="changed my mind", now=1781230000)
+        self.assertEqual(doc["amount"]["paid_amount"], 1100)     # what the supporter paid
+        self.assertEqual(doc["amount"]["refundable_amount"], 1000)  # what comes back
+
+    def test_the_two_are_equal_for_an_ordinary_order(self):
+        from stripe_link.domain.purchase_lookup import refund_request_doc
+        doc = refund_request_doc(
+            {"tenant_id": "t1", "order_id": "order_z", "currency": "usd", "amount_total": 1834,
+             "amount_paid": 1834, "customer": {"email": "a@b.com"}},
+            request_id="rr_2", reason="", now=1781230000)
+        self.assertEqual(doc["amount"]["refundable_amount"], 1834)
+
+    def test_the_schema_admits_the_field(self):
+        # RefundRequest.schema.json is closed, house style -- the field would be silently refused otherwise,
+        # which is exactly how the tip jar's price model was lost for three weeks.
+        import json
+        import pathlib
+        schema = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                             / "schemas" / "RefundRequest.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("refundable_amount", schema["properties"]["amount"]["properties"])
+
+    def test_the_dialog_states_the_tip_case_rather_than_claiming_the_full_charge(self):
+        import pathlib
+        vue = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+               / "Refunds.vue").read_text(encoding="utf-8")
+        dialog = vue.split('title="Issue refund?"', 1)[1].split("</ConfirmDialog>", 1)[0]
+        self.assertIn("refundKeepsFees(pendingExecute)", dialog)
+        self.assertIn("covered the fees on top", dialog)
+        # and the ordinary sentence survives for every other order
+        self.assertIn("out of your own pocket", dialog)
+
+    def test_the_amount_shown_prefers_the_ceiling_over_the_charge(self):
+        import pathlib
+        store = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "stores"
+                 / "refunds.js").read_text(encoding="utf-8")
+        fn = store.split("export function refundRequestedAmount", 1)[1].split("\n}", 1)[0]
+        self.assertIn("refundable_amount", fn)
+        self.assertIn("paid_amount", fn)  # fallback for requests created before the ceiling existed

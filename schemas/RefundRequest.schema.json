@@ -104,6 +104,10 @@
         "paid_amount": {
           "type": "integer",
           "minimum": 0
+        },
+        "refundable_amount": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

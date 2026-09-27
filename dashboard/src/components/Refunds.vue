@@ -100,7 +100,19 @@
              back"). Here they can still offer a replacement or a partial instead. -->
         <p class="refund-fee-note">
           <strong>Stripe's fee and the Junior Bay fee are not returned.</strong>
-          You refund the full amount your customer paid, and those fees come out of your own pocket.
+          <!-- A tip is the one case where the refund is SMALLER than the charge: the supporter paid the fees
+               on top, so only the gift ever reached the tenant and only the gift goes back. Saying "the full
+               amount your customer paid" there would name a number the server will not send. -->
+          <template v-if="refundKeepsFees(pendingExecute)">
+            Your customer paid
+            {{ formatMoneyCents(pendingExecute.amount?.paid_amount, pendingExecute.amount?.currency) }}
+            and covered the fees on top, so this returns the
+            {{ formatMoneyCents(refundRequestedAmount(pendingExecute), pendingExecute.amount?.currency) }}
+            that reached you. The fees stay with Stripe and Junior Bay.
+          </template>
+          <template v-else>
+            You refund the full amount your customer paid, and those fees come out of your own pocket.
+          </template>
         </p>
       </template>
     </ConfirmDialog>
@@ -125,6 +137,7 @@ import {
   refundStatusLabel,
   refundStatusClass,
   refundRequestedAmount,
+  refundKeepsFees,
   formatMoneyCents,
 } from "../stores/refunds";
 import { formatEpochDate } from "../utils/format";

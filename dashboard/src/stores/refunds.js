@@ -38,7 +38,22 @@ export function refundStatusClass(status) {
 export function refundRequestedAmount(request) {
   const amount = request?.amount || {};
   const requested = Number(amount.requested_amount || 0);
-  return requested > 0 ? requested : Number(amount.paid_amount || 0);
+  if (requested > 0) return requested;
+  // What a refund RETURNS, which is not always what was paid: a net_guaranteed tip charged the supporter
+  // the fees on top and only the gift reached the creator, so the server refunds the gift. The dialog has
+  // to state the figure the server will actually send. Falls back to paid_amount for requests created
+  // before the ceiling was recorded, where the two were always equal anyway.
+  const ceiling = Number(amount.refundable_amount || 0);
+  return ceiling > 0 ? ceiling : Number(amount.paid_amount || 0);
+}
+
+export function refundKeepsFees(request) {
+  // True when the charge was larger than what comes back -- the supporter covered the fees on top, so the
+  // "you refund what they paid" sentence would be wrong here.
+  const amount = request?.amount || {};
+  const paid = Number(amount.paid_amount || 0);
+  const ceiling = Number(amount.refundable_amount || 0);
+  return ceiling > 0 && paid > ceiling;
 }
 
 export const useRefundsStore = defineStore("refunds", {

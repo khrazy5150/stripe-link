@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from stripe_link.domain.refund_ledger import refundable_ceiling
+
 # What the contact index stores. NOT hashed, deliberately: it sits on the orders table beside
 # `customer.email` in plain text, so hashing it would protect nothing from anyone who can read the row
 # while costing every future debugging session. Hashing earns its place in the CROSS-TENANT lookup table
@@ -194,6 +196,11 @@ def refund_request_doc(
         "amount": {
             "currency": str(order.get("currency") or "usd"),
             "paid_amount": int(order.get("amount_total") or 0),
+            # What a refund can actually return, which is not always what was paid: a net_guaranteed tip
+            # charged the supporter the fees on top, and only the gift ever reached the creator. Frozen here,
+            # from the order in hand, so the tenant's confirm dialog can state the real figure without a
+            # second read -- and so it cannot drift if the order is edited later.
+            "refundable_amount": refundable_ceiling(order),
         },
         "reason": str(reason or "").strip()[:2000],
         "created_at": int(now),
