@@ -56,6 +56,8 @@ class RegistryTests(unittest.TestCase):
         # someone to quote it to a tenant as fact.
         for name in model_names():
             with self.subTest(name=name):
+                # Authoritative now that the Marketplace rate card turned out to carry them; the field
+                # stays because a hand-edited future entry must be able to admit it is a guess.
                 self.assertIn(model(name)["rate_confidence"], {"authoritative", "indicative", "unknown"})
 
     def test_the_default_model_exists_and_may_write_pages(self):
@@ -67,10 +69,26 @@ class RegistryTests(unittest.TestCase):
         # claim. The bar lives in the registry so it cannot depend on being remembered.
         self.assertFalse(allows_page_generation("haiku-4.5"))
 
-    def test_cost_reproduces_the_measured_call(self):
-        # The real 2026-09-27 Sonnet 4.6 generation: 1552 in, 714 out.
-        self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["usd"], 0.015366)
-        self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["confidence"], "indicative")
+    def test_cost_reproduces_the_measured_call_at_the_rate_we_actually_pay(self):
+        # The real 2026-09-27 Sonnet 4.6 generation: 1552 in, 714 out. The figure is the REGIONAL rate,
+        # because `profile` is a us. id -- global would be $0.015366, exactly 10% less. That gap is the
+        # whole reason both rates are carried.
+        self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["usd"], 0.016903)
+        self.assertEqual(estimate_cost("sonnet-4.6", 1552, 714)["confidence"], "authoritative")
+
+    def test_regional_costs_exactly_ten_percent_more_than_global_for_every_model(self):
+        # Measured across all 15 models on 2026-09-27 with no exceptions. If a future rate refresh
+        # breaks this, the global/regional split has changed and the COGS note needs revisiting.
+        for name in model_names():
+            with self.subTest(name=name):
+                entry = model(name)
+                self.assertAlmostEqual(entry["rate_in"], entry["rate_in_global"] * 1.1, places=4)
+                self.assertAlmostEqual(entry["rate_out"], entry["rate_out_global"] * 1.1, places=4)
+
+    def test_every_model_carries_a_global_profile_alongside_the_regional_one(self):
+        for name in model_names():
+            with self.subTest(name=name):
+                self.assertTrue(model(name)["profile_global"].startswith("global."))
 
     def test_an_unknown_model_costs_nothing_and_says_so(self):
         out = estimate_cost("no-such-model", 1000, 1000)

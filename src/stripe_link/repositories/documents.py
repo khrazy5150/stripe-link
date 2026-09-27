@@ -594,6 +594,69 @@ class SimpleKeyRepository:
         return response.get("Item")
 
 
+class AiUsageRepository:
+    """The per-tenant AI generation counter (PK=`tenant_id`, SK=`period`).
+
+    Increments with DynamoDB's atomic ADD rather than get-then-put, and that is the whole reason this
+    is its own class instead of `SimpleKeyRepository`. A read-modify-write counter loses increments
+    under concurrency, and a quota that undercounts is not a quota -- under the platform-paid Bedrock
+    path it is our money that leaks. The write returns the NEW value so the caller can enforce on the
+    number it just created rather than one it read a moment ago.
+
+    A period rolls over by not existing: absent row means zero used. Rows carry a TTL so spent periods
+    expire on their own instead of accumulating forever.
+    """
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("AI usage table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def used(self, tenant_id: str, period: str) -> int:
+        item = (self.table.get_item(Key={"tenant_id": str(tenant_id), "period": str(period)})
+                or {}).get("Item") or {}
+        return int(item.get("used") or 0)
+
+    def consume(self, tenant_id: str, period: str, *, at: int, expires_at: int = 0, by: int = 1) -> int:
+        """Count one generation and return the running total AFTER it."""
+        response = self.table.update_item(
+            Key={"tenant_id": str(tenant_id), "period": str(period)},
+            UpdateExpression="ADD #used :by SET updated_at = :at, expires_at = :exp",
+            ExpressionAttributeNames={"#used": "used"},
+            ExpressionAttributeValues={":by": int(by), ":at": int(at),
+                                       ":exp": int(expires_at or (int(at) + 90 * 24 * 3600))},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int((response.get("Attributes") or {}).get("used") or 0)
+
+    def release(self, tenant_id: str, period: str, *, at: int) -> int:
+        """Give a generation back when it never happened.
+
+        The count is taken BEFORE the call, so the tenant is not billed for our outage: a provider
+        error or an unusable answer refunds the slot. A completed generation is never released, even
+        if the tenant dislikes the page.
+        """
+        response = self.table.update_item(
+            Key={"tenant_id": str(tenant_id), "period": str(period)},
+            UpdateExpression="ADD #used :neg SET updated_at = :at",
+            ConditionExpression="attribute_exists(tenant_id) AND #used > :zero",
+            ExpressionAttributeNames={"#used": "used"},
+            ExpressionAttributeValues={":neg": -1, ":at": int(at), ":zero": 0},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int((response.get("Attributes") or {}).get("used") or 0)
+
+
 class StripeKeysRepository:
     """A tenant's Stripe keys for BOTH modes, isolated in ONE per-deployment table (Stripe-mode decoupling,
     plans/STRIPE_MODE_DECOUPLING.md). Mode is part of the composite key (PK=`tenant_id`, SK=`mode`) — NOT a
@@ -999,6 +1062,21 @@ def shipping_config_repository(table: Any | None = None) -> SimpleKeyRepository:
         key_field="tenant_id",
         table=table,
     )
+
+
+def ai_provider_config_repository(table: Any | None = None) -> SimpleKeyRepository:
+    # NOT mode-scoped: there is no test/live axis for an AI provider, so a mode here would be a field
+    # nobody could answer. Its own table rather than a field on TenantConfig, mirroring stripe_keys --
+    # a per-tenant secret is worth isolating even when the Bedrock path carries no secret at all.
+    return SimpleKeyRepository(
+        os.environ.get("AI_PROVIDER_CONFIG_TABLE", ""),
+        key_field="tenant_id",
+        table=table,
+    )
+
+
+def ai_usage_repository(table: Any | None = None) -> AiUsageRepository:
+    return AiUsageRepository(os.environ.get("AI_USAGE_TABLE", ""), table=table)
 
 
 def customers_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:

@@ -1,49 +1,141 @@
 {
-  "_comment": "The AI model registry: what we may call, how to address it, and what it costs. AI_AND_COMMERCE_ARCHITECTURE.md §A.2/§A.7. Ships WITH the code on purpose -- the fee table went stale for three weeks because the deployed S3 config silently outranked the code default (plans/TODO.md, 'the DEPLOYED fee table was three weeks stale'), so this has exactly one source and travels with the deploy that uses it.",
-
-  "_rates_comment": "USD per 1,000,000 tokens. AWS publishes NONE of these machine-readably: all 1052 us-west-2 Bedrock price records carry zero current-generation models (Anthropic stops at Claude 3; the only OpenAI rows are gpt-oss), and the pricing page lists the models without per-token rates. So these are hand-maintained and each carries its confidence. Reconcile against Cost Explorer, which bills third-party models under the PROVIDER, not under Bedrock.",
-
+  "_comment": "The AI model registry: what we may call, how to address it, and what it costs. AI_AND_COMMERCE_ARCHITECTURE.md \u00a7A.2/\u00a7A.7. Ships WITH the code on purpose -- the fee table went stale for three weeks because the deployed S3 config silently outranked the code default (plans/TODO.md, 'the DEPLOYED fee table was three weeks stale'), so this has exactly one source and travels with the deploy that uses it.",
+  "_rates_comment": "USD per 1,000,000 tokens, AUTHORITATIVE -- read from the model's own Marketplace rate card via bedrock list-foundation-model-agreement-offers, which is where Bedrock pricing actually lives. The AWS Pricing API does NOT have it: all 1052 us-west-2 records carry zero current-generation models, and the pricing page lists the models without rates. Refresh with tools/refresh_ai_rates.py.",
   "_id_comment": "`profile` is an inference-profile id, never a bare model id: us-west-2 offers no In-Region inference for this generation, so `anthropic.claude-sonnet-4-6` fails where `us.anthropic.claude-sonnet-4-6` works.",
-
   "default_model": "sonnet-4.6",
-
   "models": {
     "sonnet-4.6": {
       "profile": "us.anthropic.claude-sonnet-4-6",
       "provider": "anthropic",
       "label": "Claude Sonnet 4.6",
-      "rate_in": 3.0, "rate_out": 15.0, "rate_confidence": "indicative",
+      "rate_in": 3.3,
+      "rate_out": 16.5,
+      "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
-      "prompt_cache": {"min_tokens": 1024, "ttl_seconds": 3600},
-      "notes": "Best measured result for page composition: richest output and the most careful hedging on facts it was not given. EOL no sooner than 2027-02-17."
+      "prompt_cache": {
+        "min_tokens": 1024,
+        "ttl_seconds": 3600
+      },
+      "notes": "Best measured result for page composition: richest output and the most careful hedging on facts it was not given. EOL no sooner than 2027-02-17.",
+      "rate_in_global": 3.0,
+      "rate_out_global": 15.0,
+      "profile_global": "global.anthropic.claude-sonnet-4-6"
     },
     "sonnet-4.5": {
       "profile": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
       "provider": "anthropic",
       "label": "Claude Sonnet 4.5",
-      "rate_in": 3.0, "rate_out": 15.0, "rate_confidence": "indicative",
+      "rate_in": 3.3,
+      "rate_out": 16.5,
+      "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
-      "prompt_cache": {"min_tokens": 1024, "ttl_seconds": 3600},
-      "notes": "Fewer sections than 4.6 and volunteered an invented cancellation term. Kept as a fallback, not a default."
+      "prompt_cache": {
+        "min_tokens": 1024,
+        "ttl_seconds": 3600
+      },
+      "notes": "Fewer sections than 4.6 and volunteered an invented cancellation term. Kept as a fallback, not a default.",
+      "rate_in_global": 3.0,
+      "rate_out_global": 15.0,
+      "profile_global": "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     },
     "opus-4.6": {
       "profile": "us.anthropic.claude-opus-4-6-v1",
       "provider": "anthropic",
       "label": "Claude Opus 4.6",
-      "rate_in": 5.0, "rate_out": 25.0, "rate_confidence": "indicative",
+      "rate_in": 5.5,
+      "rate_out": 27.5,
+      "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
-      "prompt_cache": {"min_tokens": 1024, "ttl_seconds": 3600},
-      "notes": "1.6x Sonnet 4.6 for no measured gain on this task, and it invented a cancellation term too. Not for page-gen."
+      "prompt_cache": {
+        "min_tokens": 1024,
+        "ttl_seconds": 3600
+      },
+      "notes": "1.6x Sonnet 4.6 for no measured gain on this task, and it invented a cancellation term too. Not for page-gen.",
+      "rate_in_global": 5.0,
+      "rate_out_global": 25.0,
+      "profile_global": "global.anthropic.claude-opus-4-6-v1"
     },
     "haiku-4.5": {
       "profile": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
       "provider": "anthropic",
       "label": "Claude Haiku 4.5",
-      "rate_in": 1.0, "rate_out": 5.0, "rate_confidence": "indicative",
+      "rate_in": 1.1,
+      "rate_out": 5.5,
+      "rate_confidence": "authoritative",
       "structured_output": "verified 2026-09-27",
-      "prompt_cache": {"min_tokens": 1024, "ttl_seconds": 3600},
+      "prompt_cache": {
+        "min_tokens": 1024,
+        "ttl_seconds": 3600
+      },
       "page_generation": false,
-      "notes": "BARRED from page generation (§A.7): cheapest and the only model that drifted on facts -- turned a given '5g per serving' into '5g per gummy', added a taste claim and an efficacy claim. Fine for classification or extraction where nothing is asserted to a buyer."
+      "notes": "BARRED from page generation (\u00a7A.7): cheapest and the only model that drifted on facts -- turned a given '5g per serving' into '5g per gummy', added a taste claim and an efficacy claim. Fine for classification or extraction where nothing is asserted to a buyer.",
+      "rate_in_global": 1.0,
+      "rate_out_global": 5.0,
+      "profile_global": "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    }
+  },
+  "_scope_comment": "Every model costs exactly 10% MORE on a regional (us.) profile than on a global. one -- measured across all 15 models on 2026-09-27, no exceptions. `profile` is the regional id we call today; `profile_global` is the same model routed anywhere in the world. Switching is a 10% cut in inference COGS and a data-routing decision, so it is recorded here and NOT taken silently.",
+  "_rate_source": {
+    "api": "bedrock:ListFoundationModelAgreementOffers",
+    "read_at": "2026-09-27",
+    "dimension_note": "newer models use *_input_tokens_global_standard; models predating 2026-09 use AFS1_InputTokenCount_Global. Both are handled."
+  },
+  "unavailable": {
+    "_comment": "Agreement created 2026-09-27 and reported AVAILABLE on all four flags (agreement, entitlement, authorization, region) -- yet converse still returned AccessDenied 15+ minutes later, in us-west-2 AND us-east-1. Rates below are real; availability is not.",
+    "sonnet-5": {
+      "profile": "us.anthropic.claude-sonnet-5",
+      "rate_in_global": 2.0,
+      "rate_out_global": 10.0
+    },
+    "opus-5": {
+      "profile": "us.anthropic.claude-opus-5",
+      "rate_in_global": 5.0,
+      "rate_out_global": 25.0
+    },
+    "opus-5.5": {
+      "profile": "us.anthropic.claude-opus-5-5",
+      "rate_in_global": 4.0,
+      "rate_out_global": 20.0
+    },
+    "opus-4.8": {
+      "profile": "us.anthropic.claude-opus-4-8",
+      "rate_in_global": 5.0,
+      "rate_out_global": 25.0
+    },
+    "gpt-6-astra": {
+      "profile": "us.openai.gpt-6-astra",
+      "rate_in_global": 10.0,
+      "rate_out_global": 50.0
+    },
+    "gpt-6-sol": {
+      "profile": "us.openai.gpt-6-sol",
+      "rate_in_global": 2.0,
+      "rate_out_global": 10.0
+    },
+    "gpt-6-luna": {
+      "profile": "us.openai.gpt-6-luna",
+      "rate_in_global": 0.1,
+      "rate_out_global": 0.5
+    },
+    "gpt-5.6-terra": {
+      "profile": "us.openai.gpt-5.6-terra",
+      "rate_in_global": 4.0,
+      "rate_out_global": 18.0
+    },
+    "gpt-5.6-sol": {
+      "profile": "us.openai.gpt-5.6-sol",
+      "rate_in_global": 8.0,
+      "rate_out_global": 30.0
+    },
+    "gpt-5.6-luna": {
+      "profile": "us.openai.gpt-5.6-luna",
+      "rate_in_global": 0.4,
+      "rate_out_global": 1.8
+    },
+    "gpt-5.5": {
+      "profile": "us.openai.gpt-5.5",
+      "rate_in_global": 10.0,
+      "rate_out_global": 45.0
     }
   }
 }

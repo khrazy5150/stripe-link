@@ -3572,6 +3572,43 @@ Resources:
         - AttributeName: tenant_id
           KeyType: HASH
 
+  AiProviderConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-ai-provider-config-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+
+  # The AI generation counter. Sorted by period so a month rolls over by not existing, and spent
+  # periods expire on their own rather than accumulating for the life of the account.
+  AiUsageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-ai-usage-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: period
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+        - AttributeName: period
+          KeyType: RANGE
+
   TenantProfilesTable:
     Type: AWS::DynamoDB::Table
     Properties:
