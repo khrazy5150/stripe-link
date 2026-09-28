@@ -10,6 +10,11 @@ AI_AND_COMMERCE §A.3. The order of operations is the design:
   4. Generate ONLY the copy, against the §A.7-floored schema, grounded on the brief.
   5. Save as a draft. Never published: the tenant reviews in the builder and publishes deliberately.
 
+REGENERATING. Pass `page_id` and only the COPY is rewritten -- the product, the offer and their
+Stripe sync are left exactly alone. That is the difference between "I want different words" and "I
+want a different thing", and conflating them would leave a duplicate product behind every retry. It
+still costs a generation: the model ran, and releasing on taste is unbounded (author, 2026-09-27).
+
 Runs inline rather than as a job. §A.3 says "Step Functions (or a single worker Lambda for the MVP)";
 a generation measured 13-20 seconds against API Gateway's 30-second ceiling, which is thin but real
 for one page. The moment a critic pass or image work is added this must become a job -- noted here
@@ -76,6 +81,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
             "performs them. Start there and generate the page afterwards.",
             status_code=409, code="service_handoff")
 
+    regenerate_page_id = str(body.get("page_id") or "").strip()
     mode = str(body.get("mode") or "test").strip().lower()
     mode = "live" if mode == "live" else "test"
     try:
@@ -117,8 +123,12 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         return error_response(_message_for(exc), status_code=502, code=f"generate_{exc.kind}")
 
     try:
-        saved = _persist(brief, result, tenant_id=tenant_id, mode=mode, now=now, pick=pick,
-                         products_repo=products_repo, offers_repo=offers_repo, pages_repo=pages_repo)
+        if regenerate_page_id:
+            saved = _rewrite(brief, result, tenant_id=tenant_id, page_id=regenerate_page_id, now=now,
+                             pages_repo=pages_repo, offers_repo=offers_repo)
+        else:
+            saved = _persist(brief, result, tenant_id=tenant_id, mode=mode, now=now, pick=pick,
+                             products_repo=products_repo, offers_repo=offers_repo, pages_repo=pages_repo)
     except (DocumentValidationError, RepositoryError, ValueError) as exc:
         _release(usage_repo, tenant_id, period, now)
         return error_response(f"The page could not be saved: {exc}", code="save_failed")
@@ -204,6 +214,27 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
     offers_repo.put(offer)
     pages_repo.put(page)
     return {"product": product, "offer": offer, "page": page,
+            "residual_violations": result["residual_violations"]}
+
+
+def _rewrite(brief, result, *, tenant_id, page_id, now, pages_repo, offers_repo):
+    """New copy on a page that already exists. The commercial records are not touched.
+
+    A published page is refused rather than quietly rewritten: replacing the words under a live URL
+    without the tenant asking is the one thing the draft-only rule exists to prevent.
+    """
+    page = pages_repo.get(tenant_id, page_id)
+    if not page:
+        raise ValueError("That page no longer exists.")
+    if str(page.get("status") or "") == "published":
+        raise ValueError("Unpublish the page first — regenerating would replace the words on a live page.")
+    page = {**page, "sections": result["sections"], "updated_at": now}
+    page.setdefault("theme", {})["preset"] = result["preset"]
+    assign_short_code(None, page)      # older provisioned pages predate it
+    validate_page_document(page)
+    pages_repo.put(page)
+    offer = offers_repo.get(tenant_id, str(page.get("offer_id") or "")) if page.get("offer_id") else None
+    return {"product": None, "offer": offer, "page": page,
             "residual_violations": result["residual_violations"]}
 
 

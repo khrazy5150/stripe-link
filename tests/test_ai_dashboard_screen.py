@@ -215,6 +215,20 @@ class WizardTests(unittest.TestCase):
         block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
         self.assertIn("not written on the page", block)
 
+    def test_the_brief_survives_a_regenerate_and_an_edit(self):
+        # The brief is the expensive part -- the answers took minutes, the words took seconds. Only
+        # "Start fresh" throws it away.
+        self.assertIn("store.regenerate()", WIZARD)
+        self.assertIn("store.editAnswers()", WIZARD)
+        reset_fn = PAGE_STORE.split("reset()", 1)[1].split("\n", 1)[0]
+        self.assertIn("emptyBrief()", reset_fn)
+        edit_fn = PAGE_STORE.split("editAnswers()", 1)[1].split("},", 1)[0]
+        self.assertNotIn("emptyBrief", edit_fn)
+
+    def test_regenerating_says_what_it_leaves_alone(self):
+        self.assertIn("Your product, price and offer stay as they", WIZARD)
+        self.assertIn("uses one generation", WIZARD)
+
     def test_the_result_never_claims_anything_is_live(self):
         done = WIZARD.split("Your draft page is ready", 1)[1]
         self.assertIn("draft", done.lower())

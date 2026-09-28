@@ -41,8 +41,20 @@
         </template>
         <div class="button-row">
           <button class="primary-action" type="button" @click="openPage">Open in the builder</button>
-          <button class="secondary-action" type="button" @click="store.reset()">Build another</button>
+          <!-- Same brief, same product, new words. The brief took minutes; the words took seconds. -->
+          <button class="secondary-action" type="button" :disabled="store.generating"
+                  @click="store.regenerate()">
+            {{ store.generating ? "Rewriting…" : "Regenerate the copy" }}
+          </button>
+          <button class="secondary-action" type="button" @click="store.editAnswers()">
+            Change my answers
+          </button>
+          <button class="secondary-action" type="button" @click="store.reset()">Start fresh</button>
         </div>
+        <p class="field-note">
+          Regenerating rewrites the words on this page. Your product, price and offer stay as they
+          are. It uses one generation.
+        </p>
       </div>
     </section>
 

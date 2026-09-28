@@ -67,6 +67,78 @@ def ok_generator(**kwargs):
             "model": kwargs.get("model"), "repairs": 0, "stop_reason": "end_turn"}
 
 
+class FakeStore(FakeDocs):
+    """A repository that can also read back, for the regenerate path."""
+
+    def __init__(self, *docs):
+        super().__init__()
+        self.rows = {(d["tenant_id"], d.get("page_id") or d.get("offer_id")): d for d in docs}
+    def get(self, tenant_id, doc_id):
+        found = self.rows.get((tenant_id, doc_id))
+        return dict(found) if found else None
+    def put(self, document):
+        self.rows[(document["tenant_id"], document.get("page_id") or document.get("offer_id"))] = document
+        return super().put(document)
+
+
+class RegenerateTests(unittest.TestCase):
+    """`page_id` rewrites the COPY. The product, the offer and their Stripe sync are untouched --
+    otherwise every retry leaves a duplicate product behind."""
+
+    def setUp(self):
+        self.existing = {"schema_version": "2026-05-29", "document_type": "page", "tenant_id": "t1",
+                         "page_id": "page_X", "name": "Whey", "status": "draft", "published_at": None,
+                         "stripe_mode": "test", "route": {"slug": "whey"}, "offer_id": "offer_X",
+                         "theme": {"preset": "clean-slate"}, "short_code": "abc123",
+                         "sections": [{"id": "old", "type": "headline", "text": "Old words"}],
+                         "created_at": 1, "updated_at": 1}
+        self.pages = FakeStore(self.existing)
+        self.offers = FakeStore({"tenant_id": "t1", "offer_id": "offer_X", "status": "active"})
+        self.products = FakeDocs()
+        self.usage = FakeUsage()
+
+    def call(self, page_id="page_X", *, page=None):
+        if page is not None:
+            self.pages = FakeStore(page)
+        return handler({"httpMethod": "POST", "resource": "/ai/generate",
+                        "queryStringParameters": {"tenant_id": "t1"},
+                        "body": json.dumps({"brief": BRIEF, "page_id": page_id})}, None,
+                       products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
+                       config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
+                       usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
+                       generator=ok_generator, now_fn=lambda: 1790500000,
+                       randomiser=lambda a: a[0])
+
+    def test_it_replaces_the_copy_and_creates_no_duplicate_product(self):
+        body = json.loads(self.call()["body"])
+        self.assertEqual(self.products.saved, [])
+        self.assertEqual(body["page"]["page_id"], "page_X")
+        self.assertEqual([s["type"] for s in body["page"]["sections"]], ["headline", "subheadline"])
+        self.assertNotIn("Old words", json.dumps(body["page"]["sections"]))
+
+    def test_the_page_keeps_its_identity(self):
+        # Same id, same slug, same short_code -- the preview link a tenant may already have shared.
+        body = json.loads(self.call()["body"])
+        self.assertEqual(body["page"]["short_code"], "abc123")
+        self.assertEqual(body["page"]["route"]["slug"], "whey")
+
+    def test_it_still_costs_a_generation(self):
+        # The model ran. Releasing on taste is unbounded.
+        self.call()
+        self.assertEqual(self.usage.consumed, 1)
+        self.assertEqual(self.usage.released, 0)
+
+    def test_a_published_page_is_refused_rather_than_rewritten(self):
+        # Replacing the words under a live URL unasked is what the draft-only rule exists to prevent.
+        response = self.call(page=dict(self.existing, status="published", published_at=1790000000))
+        self.assertEqual(json.loads(response["body"])["error"], "save_failed")
+        self.assertIn("Unpublish", json.loads(response["body"])["message"])
+
+    def test_a_missing_page_is_refused(self):
+        response = self.call("page_gone")
+        self.assertEqual(json.loads(response["body"])["error"], "save_failed")
+
+
 class GenerateTests(unittest.TestCase):
     def setUp(self):
         self.products, self.offers, self.pages = FakeDocs(), FakeDocs(), FakeDocs()

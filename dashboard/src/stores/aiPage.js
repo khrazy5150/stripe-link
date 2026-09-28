@@ -109,7 +109,18 @@ export const useAiPageStore = defineStore("aiPage", {
     },
   },
   actions: {
+    // A full wipe. Separate from `editAnswers` and `regenerate` because the BRIEF is the expensive
+    // part -- the answers took minutes, the generation took seconds. Throwing the brief away to get
+    // different words was the original flaw in this flow.
     reset() { this.brief = emptyBrief(); this.step = 0; this.result = null; this.error = ""; },
+
+    // Back into the wizard with every answer intact, landing on the review step so a small change is
+    // one edit away rather than nine Next clicks.
+    editAnswers() {
+      this.result = null;
+      this.error = "";
+      this.step = Math.max(0, this.steps.length - 1);
+    },
     next() { if (this.canAdvance && !this.onLastStep) this.step += 1; },
     back() { if (this.step > 0) this.step -= 1; },
     goTo(index) { if (index >= 0 && index < this.steps.length) this.step = index; },
@@ -134,14 +145,15 @@ export const useAiPageStore = defineStore("aiPage", {
       return brief;
     },
 
-    async generate(mode = "test") {
+    // `pageId` rewrites the copy on a page that already exists: same product, same offer, same Stripe
+    // sync, new words. Without it every retry would leave a duplicate product behind.
+    async generate(mode = "test", pageId = "") {
       this.generating = true;
       this.error = "";
       try {
-        this.result = await apiRequest("/ai/generate", {
-          method: "POST",
-          body: { brief: this.payload(), mode },
-        });
+        const body = { brief: this.payload(), mode };
+        if (pageId) body.page_id = pageId;
+        this.result = await apiRequest("/ai/generate", { method: "POST", body });
         return true;
       } catch (error) {
         this.error = error.message || "The page could not be generated.";
@@ -149,6 +161,10 @@ export const useAiPageStore = defineStore("aiPage", {
       } finally {
         this.generating = false;
       }
+    },
+
+    regenerate(mode = "test") {
+      return this.generate(mode, this.result?.page?.page_id || "");
     },
   },
 });
