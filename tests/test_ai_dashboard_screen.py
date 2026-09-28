@@ -215,6 +215,20 @@ class WizardTests(unittest.TestCase):
         block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
         self.assertIn("not written on the page", block)
 
+    def test_an_unanswered_kind_does_not_read_as_the_last_step(self):
+        # Reported from the deployed wizard: with no kind chosen it said "Step 1 of 1" and offered
+        # "Generate the page" on an empty brief, because the placeholder step list has one item.
+        self.assertIn("!!this.brief.kind && this.step", PAGE_STORE)
+        self.assertIn("totalSteps", PAGE_STORE)
+        self.assertIn("store.totalSteps", WIZARD)
+
+    def test_the_step_total_is_honest_before_a_kind_is_picked(self):
+        # Every kind is nine steps -- only the CONTENT of the kind step differs -- so the count can be
+        # promised up front.
+        from stripe_link.domain.page_brief import steps_for
+        lengths = {len(steps_for(k)) for k in ("physical", "digital", "service")}
+        self.assertEqual(len(lengths), 1, "kinds differ in length; totalSteps can no longer promise one")
+
     def test_the_brief_survives_a_regenerate_and_an_edit(self):
         # The brief is the expensive part -- the answers took minutes, the words took seconds. Only
         # "Start fresh" throws it away.

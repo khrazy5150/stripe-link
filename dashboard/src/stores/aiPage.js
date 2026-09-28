@@ -73,7 +73,13 @@ export const useAiPageStore = defineStore("aiPage", {
     steps: (state) => stepsFor(state.brief.kind),
     stepKey() { return this.steps[this.step] || "identity"; },
     stepLabels() { return this.steps.map((s) => STEP_LABELS[s]); },
-    onLastStep() { return this.step >= this.steps.length - 1; },
+    // Every kind is the same LENGTH -- only the content of the kind step differs -- so the total is
+    // honest before a kind is picked. Showing `steps.length` there said "Step 1 of 1", because the
+    // shape is unknown until the kind is answered and the list is a single placeholder.
+    totalSteps() { return this.brief.kind ? this.steps.length : stepsFor("physical").length; },
+    // And a one-item placeholder list must not read as "you are on the last step", which offered
+    // "Generate the page" on an empty brief.
+    onLastStep() { return !!this.brief.kind && this.step >= this.steps.length - 1; },
     // What the generated page will NOT be able to say, computed locally so the review step is
     // instant. The server returns its own authoritative copy after generating.
     withheld(state) {

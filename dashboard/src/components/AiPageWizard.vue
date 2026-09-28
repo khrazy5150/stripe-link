@@ -63,7 +63,7 @@
       <section class="dashboard-card">
         <header class="dashboard-card-header">
           <h2>{{ stepLabel }}</h2>
-          <span class="field-note">Step {{ store.step + 1 }} of {{ store.steps.length }}</span>
+          <span class="field-note">Step {{ store.step + 1 }} of {{ store.totalSteps }}</span>
         </header>
         <div class="dashboard-card-body">
 
