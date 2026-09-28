@@ -1891,10 +1891,30 @@ Resources:
       CodeUri: src/
       Handler: handlers.ai_generate.handler
       Description: A page brief becomes a Product, an Offer and a DRAFT page — the platform owns every id, the AI writes only floored copy (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.3, plans/AI_PAGE_BRIEF.md).
-      # A generation measured 13-20s. 60s leaves room for a repair round; API Gateway still caps the
-      # REQUEST at 30s, so this becomes a job the moment a critic pass or image work is added.
+      # A generation measured 13-20s. 60s leaves room for a repair round; the REQUEST path answers in
+      # milliseconds, so this ceiling only ever applies to the queued worker.
       Timeout: 60
       MemorySize: 512
+      # THE POINT OF THIS NUMBER IS WHAT IT LEAVES BEHIND. The account has 1000 concurrent executions
+      # shared by 74 functions and nothing reserved, so a thousand tenants pressing Build with AI at
+      # once would consume the entire pool and throttle checkout, the Stripe webhook and page serving.
+      # An AI feature must never be able to stop payments.
+      #
+      # 30 is sized against BEDROCK, not picked for safety: a generation takes ~10s, so 30 in flight is
+      # ~3/second, and the entry-tier ceiling is ~500/minute bound by output tokens. It stays inside
+      # what Bedrock will actually serve while leaving 970 executions for everything that earns money.
+      # Excess async invocations are NOT rejected -- Lambda queues them internally for up to 6 hours
+      # and drains at this rate, so a thousand-job spike clears in about six minutes.
+      ReservedConcurrentExecutions: 30
+      EventInvokeConfig:
+        # Lambda retries an async invoke twice and then drops it silently. A dropped job would sit at
+        # `queued` forever, the dashboard would poll until it gave up, and the tenant's generation
+        # would never be refunded. The reaper below is the safety net; this makes the drop visible.
+        MaximumRetryAttempts: 1
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt AiGenerateDeadLetterQueue.Arn
       Environment:
         Variables:
           AI_PROVIDER_CONFIG_TABLE: !Ref AiProviderConfigTable
@@ -1911,6 +1931,8 @@ Resources:
             Effect: Allow
             Action: lambda:InvokeFunction
             Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectPrefix}-ai-generate-api-${Environment}"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AiGenerateDeadLetterQueue.QueueName
         # Read the allowance and SPEND against it -- the counter is written on every generation.
         - DynamoDBCrudPolicy:
             TableName: !Ref AiUsageTable
@@ -1945,6 +1967,13 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /ai/jobs/{job_id}
             Method: GET
+        # The reaper. Same function, a third invocation mode -- a job abandoned by a Lambda drop or a
+        # worker timeout is indistinguishable from one still running, so nothing else can tell.
+        AiJobReaper:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Input: '{"internal_reap": true}'
   UpsellFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3734,6 +3763,14 @@ Resources:
   # until a richer brief pushed one generation to 35s against API Gateway's hard 29s ceiling -- the
   # Lambda succeeded, the browser saw "Failed to fetch", and the tenant was charged for work they
   # could not see. Rows expire: a finished job is of no interest a week later.
+  # Where a generation goes when Lambda gives up on it. Not for recovery -- the reaper already fails
+  # the job and refunds the tenant -- but so an operator can see that it happened at all.
+  AiGenerateDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectPrefix}-ai-generate-dlq-${Environment}"
+      MessageRetentionPeriod: 1209600
+
   AiJobsTable:
     Type: AWS::DynamoDB::Table
     Properties:

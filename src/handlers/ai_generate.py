@@ -23,6 +23,17 @@ charged a generation for work they could not see, which is the worst shape a fai
 So the request path QUEUES and the event path GENERATES -- the same function, invoked asynchronously
 by itself. One function rather than two because the work and the queueing share all their validation,
 and a second Lambda is a second thing to keep in step.
+
+CONCURRENCY. The worker reserves 30 executions. That number exists for what it leaves behind: the
+account has 1000 shared by 74 functions, so an unbounded AI spike would throttle checkout and the
+Stripe webhook. An AI feature must never be able to stop payments. Excess async invocations are not
+rejected -- Lambda queues them internally and drains at the reserved rate, so the reservation IS the
+queue and a spike becomes a wait rather than a failure.
+
+And a third mode: the REAPER, on a five-minute schedule. Lambda retries an async invoke twice and
+then drops it silently, and a dropped job is indistinguishable from a slow one -- it would sit at
+`queued` forever while the tenant's generation was never refunded. Nothing else can tell the
+difference, so something has to look.
 """
 import json
 import os
@@ -72,6 +83,10 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         jobs_repo = jobs_repo or ai_jobs_repository()
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
+
+    # The REAPER path.
+    if (event or {}).get("internal_reap"):
+        return _reap(jobs_repo, usage_repo=usage_repo, now=now)
 
     # The EVENT path: this is the async self-invoke, doing the work the request path queued.
     if (event or {}).get("internal_job"):
@@ -388,3 +403,40 @@ def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_
         "generation": {"model": job.get("model"), "repairs": result["repairs"],
                        "tokens": result["usage"]}}})
     return {"ok": True}
+
+
+# How long a job may go without finishing before it is presumed dead. Generously above the measured
+# 10-35 seconds and above the worker's own 60-second ceiling, because a job waiting behind the
+# concurrency reservation is still perfectly healthy -- it just has not started yet.
+STALE_AFTER_SECONDS = 900
+
+
+def _reap(jobs_repo, *, usage_repo=None, now: int):
+    """Fail jobs nothing is going to finish, and give the tenant their generation back.
+
+    The refund is the point. A job Lambda dropped has cost the tenant a slot for work that never
+    happened, and without this the only way to notice is a support ticket weeks later about an
+    allowance that does not add up.
+    """
+    try:
+        usage_repo = usage_repo or ai_usage_repository()
+        candidates = jobs_repo.unfinished()
+    except Exception as exc:  # noqa: BLE001 - a reaper that crashes silently is worse than none
+        return {"ok": False, "reason": f"unreadable: {exc}"}
+
+    reaped = 0
+    for job in candidates:
+        age = now - int(job.get("updated_at") or job.get("created_at") or now)
+        if age < STALE_AFTER_SECONDS:
+            continue
+        tenant_id = str(job.get("tenant_id") or "")
+        _release(usage_repo, tenant_id, str(job.get("period") or ""), now)
+        try:
+            jobs_repo.put({**job, "status": "failed", "updated_at": now, "error": {
+                "code": "abandoned",
+                "message": "That generation stopped unexpectedly and did not use one of your "
+                           "generations. Try again."}})
+            reaped += 1
+        except Exception:  # noqa: BLE001 - one unwritable row must not strand the rest
+            continue
+    return {"ok": True, "reaped": reaped, "examined": len(candidates)}

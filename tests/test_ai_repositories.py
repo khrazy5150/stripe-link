@@ -64,3 +64,40 @@ class FactoryTests(unittest.TestCase):
                         repository.put(bad)
         finally:
             os.environ.pop("AI_JOBS_TABLE", None)
+
+
+class ConcurrencyGuardTests(unittest.TestCase):
+    """The generate worker must never be able to starve the functions that take money.
+
+    The account has 1000 concurrent executions shared by 74 functions with nothing reserved, so an
+    unbounded AI spike would throttle checkout, the Stripe webhook and page serving. This is a
+    template test because the protection lives in the template.
+    """
+
+    TEMPLATE = None
+
+    @classmethod
+    def setUpClass(cls):
+        import pathlib
+        cls.TEMPLATE = (pathlib.Path(__file__).resolve().parents[1]
+                        / "template.yaml").read_text(encoding="utf-8")
+
+    def _block(self):
+        return self.TEMPLATE.split("AiGenerateFunction:", 1)[1].split("\n  Ai", 1)[0]
+
+    def test_the_generate_worker_reserves_a_bounded_slice(self):
+        block = self._block()
+        self.assertIn("ReservedConcurrentExecutions:", block)
+        reserved = int(block.split("ReservedConcurrentExecutions:", 1)[1].split("\n", 1)[0].strip())
+        # Sized against Bedrock (~10s a generation, ~500/min entry-tier ceiling), not picked for
+        # safety -- and small enough that the money paths keep almost the whole pool.
+        self.assertGreaterEqual(reserved, 5)
+        self.assertLessEqual(reserved, 100)
+
+    def test_a_dropped_invocation_is_not_silent(self):
+        # Lambda retries twice then discards. Without a destination nobody ever learns it happened.
+        self.assertIn("OnFailure:", self._block())
+
+    def test_abandoned_jobs_are_swept_on_a_schedule(self):
+        self.assertIn("internal_reap", self._block())
+        self.assertIn("Type: Schedule", self._block())

@@ -481,3 +481,85 @@ class JobTests(unittest.TestCase):
                             "queryStringParameters": {"tenant_id": "someone_else"}}, None,
                            **self.kwargs())
         self.assertEqual(response["statusCode"], 404)
+
+
+class ReaperTests(unittest.TestCase):
+    """Lambda retries an async invoke twice and then drops it silently.
+
+    A dropped job is indistinguishable from a slow one: it sits at `queued`, the dashboard polls
+    until it gives up, and the tenant's generation is never refunded. Nothing else can tell, so
+    something has to look.
+    """
+
+    def setUp(self):
+        self.usage = FakeUsage()
+        self.rows = {}
+        outer = self
+        class Jobs(FakeJobs):
+            def unfinished(self, limit=200):
+                return [dict(j) for j in outer.rows.values()
+                        if j.get("status") in ("queued", "running")]
+        self.jobs = Jobs()
+        self.jobs.rows = self.rows
+
+    def job(self, job_id, *, status="queued", age):
+        row = {"tenant_id": "t1", "job_id": job_id, "status": status, "period": "2026-09",
+               "created_at": 1790500000 - age, "updated_at": 1790500000 - age}
+        self.rows[("t1", job_id)] = row
+        return row
+
+    def reap(self):
+        return handler({"internal_reap": True}, None, jobs_repo=self.jobs, usage_repo=self.usage,
+                       now_fn=lambda: 1790500000)
+
+    def test_an_abandoned_job_is_failed_and_the_generation_refunded(self):
+        self.job("job_dead", age=3600)
+        result = self.reap()
+        self.assertEqual(result["reaped"], 1)
+        self.assertEqual(self.jobs.get("t1", "job_dead")["status"], "failed")
+        self.assertEqual(self.usage.released, 1)
+
+    def test_the_tenant_is_told_it_did_not_cost_them(self):
+        self.job("job_dead", age=3600)
+        self.reap()
+        message = self.jobs.get("t1", "job_dead")["error"]["message"]
+        self.assertIn("did not use one of your generations", message)
+
+    def test_a_job_still_waiting_behind_the_concurrency_cap_is_left_alone(self):
+        # Excess async invocations queue rather than fail, so a job that has not started yet is
+        # healthy. Reaping it would refund work that is about to happen.
+        self.job("job_waiting", age=60)
+        self.assertEqual(self.reap()["reaped"], 0)
+        self.assertEqual(self.jobs.get("t1", "job_waiting")["status"], "queued")
+
+    def test_a_running_job_is_reaped_too_once_it_is_clearly_dead(self):
+        # A worker killed mid-generation leaves `running` behind, which is just as stuck.
+        self.job("job_hung", status="running", age=3600)
+        self.assertEqual(self.reap()["reaped"], 1)
+
+    def test_finished_jobs_are_never_touched(self):
+        self.rows[("t1", "job_done")] = {"tenant_id": "t1", "job_id": "job_done", "status": "complete",
+                                         "created_at": 1, "updated_at": 1}
+        self.assertEqual(self.reap()["reaped"], 0)
+        self.assertEqual(self.usage.released, 0)
+
+    def test_one_unwritable_row_does_not_strand_the_rest(self):
+        self.job("job_a", age=3600)
+        self.job("job_b", age=3600)
+        original = self.jobs.put
+        def flaky(document):
+            if document["job_id"] == "job_a":
+                raise RuntimeError("conditional check failed")
+            return original(document)
+        self.jobs.put = flaky
+        self.assertEqual(self.reap()["reaped"], 1)
+
+    def test_an_unreadable_table_reports_rather_than_crashing(self):
+        # A reaper that dies silently is worse than no reaper: nothing would ever be refunded again.
+        class Broken(FakeJobs):
+            def unfinished(self, limit=200):
+                raise RuntimeError("dynamo is having a day")
+        result = handler({"internal_reap": True}, None, jobs_repo=Broken(), usage_repo=self.usage,
+                         now_fn=lambda: 1790500000)
+        self.assertFalse(result["ok"])
+        self.assertIn("unreadable", result["reason"])

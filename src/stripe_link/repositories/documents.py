@@ -692,6 +692,22 @@ class AiJobsRepository:
         response = self.table.get_item(Key={"tenant_id": str(tenant_id), "job_id": str(job_id)})
         return response.get("Item")
 
+    def unfinished(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Jobs that have not reached a terminal state, across all tenants.
+
+        A SCAN, deliberately and with a cap. The alternative is a GSI on status, and this runs once
+        every five minutes over a table whose rows expire after a week -- an index would cost more to
+        carry than the scan costs to run. If that stops being true the scan will be slow before it is
+        wrong, which is the safer way round.
+        """
+        response = self.table.scan(
+            FilterExpression="#s IN (:queued, :running)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":queued": "queued", ":running": "running"},
+            Limit=int(limit),
+        )
+        return list(response.get("Items") or [])
+
 
 class StripeKeysRepository:
     """A tenant's Stripe keys for BOTH modes, isolated in ONE per-deployment table (Stripe-mode decoupling,
