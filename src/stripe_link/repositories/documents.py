@@ -1079,6 +1079,16 @@ def ai_usage_repository(table: Any | None = None) -> AiUsageRepository:
     return AiUsageRepository(os.environ.get("AI_USAGE_TABLE", ""), table=table)
 
 
+def ai_jobs_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    # Not mode-scoped: a job is a unit of WORK, not commerce. The mode it generates in is a field on
+    # the job, so a tenant sees their own jobs whichever mode they are looking at.
+    return DynamoDocumentRepository(
+        os.environ.get("AI_JOBS_TABLE", ""),
+        id_field="job_id",
+        table=table,
+    )
+
+
 def customers_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:
     return TenantRangeRepository(
         os.environ.get("CUSTOMERS_TABLE", ""),

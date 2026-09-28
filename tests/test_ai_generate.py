@@ -100,14 +100,16 @@ class RegenerateTests(unittest.TestCase):
     def call(self, page_id="page_X", *, page=None):
         if page is not None:
             self.pages = FakeStore(page)
-        return handler({"httpMethod": "POST", "resource": "/ai/generate",
-                        "queryStringParameters": {"tenant_id": "t1"},
-                        "body": json.dumps({"brief": BRIEF, "page_id": page_id})}, None,
-                       products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
-                       config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
-                       usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
-                       generator=ok_generator, now_fn=lambda: 1790500000,
-                       randomiser=lambda a: a[0])
+        self.jobs = FakeJobs()
+        kwargs = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
+                      config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
+                      usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
+                      jobs_repo=self.jobs, generator=ok_generator, now_fn=lambda: 1790500000,
+                      randomiser=lambda a: a[0])
+        return run_to_completion(
+            {"httpMethod": "POST", "resource": "/ai/generate",
+             "queryStringParameters": {"tenant_id": "t1"},
+             "body": json.dumps({"brief": BRIEF, "page_id": page_id})}, self.jobs, kwargs)
 
     def test_it_replaces_the_copy_and_creates_no_duplicate_product(self):
         body = json.loads(self.call()["body"])
@@ -139,10 +141,45 @@ class RegenerateTests(unittest.TestCase):
         self.assertEqual(json.loads(response["body"])["error"], "save_failed")
 
 
+def run_to_completion(event, jobs, kwargs):
+    """Queue, run the job inline, and flatten the outcome to the old request-shaped reply.
+
+    The endpoint answers 202 with a job id now, because generation outlives API Gateway's 29-second
+    ceiling. These tests care about the PIPELINE, not the queueing, so the job is run synchronously
+    and its terminal state is presented the way the caller used to receive it.
+    """
+    def run_now(job):
+        handler({"internal_job": True, "tenant_id": job["tenant_id"], "job_id": job["job_id"]},
+                None, **kwargs)
+    queued = handler(event, None, invoker=run_now, **kwargs)
+    if queued.get("statusCode") != 202:
+        return queued
+    job = jobs.get("t1", json.loads(queued["body"])["job"]["job_id"])
+    if job.get("status") == "failed":
+        return {"statusCode": 400,
+                "body": json.dumps({"error": job["error"]["code"], "message": job["error"]["message"]})}
+    return {"statusCode": 201, "body": json.dumps({**job["result"], "usage": job["usage"],
+                                                   "withheld": job["withheld"]})}
+
+
+class FakeJobs:
+    """Tenant+job keyed, like DynamoDocumentRepository."""
+
+    def __init__(self):
+        self.rows = {}
+    def put(self, document):
+        self.rows[(document["tenant_id"], document["job_id"])] = dict(document)
+        return document
+    def get(self, tenant_id, job_id):
+        found = self.rows.get((tenant_id, job_id))
+        return dict(found) if found else None
+
+
 class GenerateTests(unittest.TestCase):
     def setUp(self):
         self.products, self.offers, self.pages = FakeDocs(), FakeDocs(), FakeDocs()
         self.usage = FakeUsage()
+        self.jobs = FakeJobs()
         self.config = FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6", "verified_at": 1})
         self.profiles = FakeProfiles(tier_id="premium")
         self.seen = []
@@ -154,12 +191,12 @@ class GenerateTests(unittest.TestCase):
         event = {"httpMethod": "POST", "resource": "/ai/generate",
                  "queryStringParameters": {"tenant_id": "t1"},
                  "body": json.dumps({"brief": BRIEF if brief is None else brief})}
-        # A fixed picker keeps generated ids deterministic across a test run.
-        return handler(event, None, products_repo=self.products, offers_repo=self.offers,
-                       pages_repo=self.pages, config_repo=config or self.config,
-                       usage_repo=usage or self.usage, tenant_repo=profiles or self.profiles,
-                       generator=recording, now_fn=lambda: 1790500000,
-                       randomiser=lambda alphabet: alphabet[0])
+        kwargs = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
+                      config_repo=config or self.config, usage_repo=usage or self.usage,
+                      tenant_repo=profiles or self.profiles, jobs_repo=self.jobs,
+                      generator=recording, now_fn=lambda: 1790500000,
+                      randomiser=lambda alphabet: alphabet[0])
+        return run_to_completion(event, self.jobs, kwargs)
 
     # ---- the happy path ------------------------------------------------------------------------
     def test_it_creates_a_product_an_offer_and_a_draft_page(self):
@@ -263,7 +300,6 @@ class GenerateTests(unittest.TestCase):
         def failing(**kwargs):
             raise AiError("boom", kind="throttled")
         response = self.call(generator=failing)
-        self.assertEqual(response["statusCode"], 502)
         self.assertEqual(self.usage.released, 1)
         self.assertIn("did not use a generation", json.loads(response["body"])["message"])
 
@@ -323,3 +359,125 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(self.offers.saved, [])
         self.assertEqual(self.pages.saved, [])
         self.assertEqual(self.usage.released, 1)
+
+
+class JobTests(unittest.TestCase):
+    """Queueing, polling, and the failure modes that only exist once the work is asynchronous.
+
+    This became a job because it had to: a four-fact brief measured 35.3s against API Gateway's hard
+    29s ceiling. The Lambda succeeded and wrote every document while the browser showed "Failed to
+    fetch" -- work done, quota spent, invisible.
+    """
+
+    def setUp(self):
+        self.jobs = FakeJobs()
+        self.usage = FakeUsage()
+        self.products, self.offers, self.pages = FakeDocs(), FakeDocs(), FakeDocs()
+        self.queued = []
+
+    def kwargs(self, **over):
+        base = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
+                    config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
+                    usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
+                    jobs_repo=self.jobs, generator=ok_generator, now_fn=lambda: 1790500000,
+                    randomiser=lambda a: a[0])
+        base.update(over)
+        return base
+
+    def post(self, **over):
+        return handler({"httpMethod": "POST", "resource": "/ai/generate",
+                        "queryStringParameters": {"tenant_id": "t1"},
+                        "body": json.dumps({"brief": BRIEF})}, None,
+                       invoker=self.queued.append, **self.kwargs(**over))
+
+    def run_queued(self, **over):
+        job = self.queued[-1]
+        return handler({"internal_job": True, "tenant_id": job["tenant_id"], "job_id": job["job_id"]},
+                       None, **self.kwargs(**over))
+
+    def test_the_request_answers_immediately_with_a_job(self):
+        response = self.post()
+        self.assertEqual(response["statusCode"], 202)      # not 201 -- nothing exists yet
+        body = json.loads(response["body"])
+        self.assertEqual(body["job"]["status"], "queued")
+        self.assertTrue(body["job"]["job_id"])
+        self.assertEqual(self.pages.saved, [])             # no work done on the request path
+
+    def test_the_brief_is_not_echoed_back_to_the_poller(self):
+        # The client sent it; returning it on every poll is bytes for nothing.
+        self.assertNotIn("brief", json.loads(self.post()["body"])["job"])
+
+    def test_the_quota_is_spent_at_QUEUE_time(self):
+        # Otherwise two requests both pass the allowance check while neither has generated yet.
+        self.post()
+        self.assertEqual(self.usage.consumed, 1)
+
+    def test_running_the_job_produces_the_documents(self):
+        self.post()
+        self.run_queued()
+        job = self.jobs.get("t1", self.queued[-1]["job_id"])
+        self.assertEqual(job["status"], "complete")
+        self.assertEqual(len(self.pages.saved), 1)
+        self.assertEqual(job["result"]["page"]["status"], "draft")
+
+    def test_polling_reports_each_state(self):
+        self.post()
+        job_id = self.queued[-1]["job_id"]
+        def poll():
+            response = handler({"httpMethod": "GET", "resource": "/ai/jobs/{job_id}",
+                                "pathParameters": {"job_id": job_id},
+                                "queryStringParameters": {"tenant_id": "t1"}}, None,
+                               **self.kwargs())
+            return json.loads(response["body"])["job"]["status"]
+        self.assertEqual(poll(), "queued")
+        self.run_queued()
+        self.assertEqual(poll(), "complete")
+
+    def test_a_failed_generation_reaches_the_job_and_refunds(self):
+        # A job stuck at `running` is indistinguishable from one still going, and the poller would
+        # spin forever.
+        def failing(**kwargs):
+            raise AiError("boom", kind="throttled")
+        self.post()
+        self.run_queued(generator=failing)
+        job = self.jobs.get("t1", self.queued[-1]["job_id"])
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("busy", job["error"]["message"])
+        self.assertEqual(self.usage.released, 1)
+
+    def test_an_unexpected_failure_still_reaches_the_job(self):
+        def exploding(**kwargs):
+            raise RuntimeError("something nobody predicted")
+        self.post()
+        self.run_queued(generator=exploding)
+        self.assertEqual(self.jobs.get("t1", self.queued[-1]["job_id"])["status"], "failed")
+        self.assertEqual(self.usage.released, 1)
+
+    def test_a_redelivered_job_does_not_run_twice(self):
+        # Lambda's async invoke is at-least-once, and running twice would create a second product.
+        self.post()
+        self.run_queued()
+        self.run_queued()
+        self.assertEqual(len(self.pages.saved), 1)
+        self.assertEqual(len(self.products.saved), 1)
+
+    def test_a_failure_to_queue_refunds_and_says_so(self):
+        def broken(job):
+            raise RuntimeError("lambda is unreachable")
+        response = self.post(**{})  # placeholder to build kwargs
+        self.usage.consumed = 0
+        response = handler({"httpMethod": "POST", "resource": "/ai/generate",
+                            "queryStringParameters": {"tenant_id": "t1"},
+                            "body": json.dumps({"brief": BRIEF})}, None,
+                           invoker=broken, **self.kwargs())
+        self.assertEqual(response["statusCode"], 502)
+        self.assertEqual(json.loads(response["body"])["error"], "enqueue_failed")
+        self.assertEqual(self.usage.released, 1)
+
+    def test_another_tenants_job_is_not_readable(self):
+        self.post()
+        response = handler({"httpMethod": "GET", "resource": "/ai/jobs/{job_id}",
+                            "pathParameters": {"job_id": self.queued[-1]["job_id"]},
+                            "queryStringParameters": {"tenant_id": "someone_else"}}, None,
+                           **self.kwargs())
+        self.assertEqual(response["statusCode"], 404)

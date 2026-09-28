@@ -1899,9 +1899,18 @@ Resources:
         Variables:
           AI_PROVIDER_CONFIG_TABLE: !Ref AiProviderConfigTable
           AI_USAGE_TABLE: !Ref AiUsageTable
+          AI_JOBS_TABLE: !Ref AiJobsTable
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AiProviderConfigTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiJobsTable
+        # Invoke ITSELF asynchronously: the request path queues, the event path generates. Same code,
+        # same deploy, no second function to keep in step.
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectPrefix}-ai-generate-api-${Environment}"
         # Read the allowance and SPEND against it -- the counter is written on every generation.
         - DynamoDBCrudPolicy:
             TableName: !Ref AiUsageTable
@@ -1930,6 +1939,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /ai/generate
             Method: POST
+        AiJobGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ai/jobs/{job_id}
+            Method: GET
   UpsellFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3713,6 +3728,31 @@ Resources:
         - AttributeName: tenant_id
           KeyType: HASH
         - AttributeName: period
+          KeyType: RANGE
+
+  # Generation jobs. AI_AND_COMMERCE §A.3 always said "a job, not a request"; running inline held
+  # until a richer brief pushed one generation to 35s against API Gateway's hard 29s ceiling -- the
+  # Lambda succeeded, the browser saw "Failed to fetch", and the tenant was charged for work they
+  # could not see. Rows expire: a finished job is of no interest a week later.
+  AiJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-ai-jobs-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+        - AttributeName: job_id
           KeyType: RANGE
 
   TenantProfilesTable:

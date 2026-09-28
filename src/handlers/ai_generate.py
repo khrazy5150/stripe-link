@@ -15,11 +15,17 @@ Stripe sync are left exactly alone. That is the difference between "I want diffe
 want a different thing", and conflating them would leave a duplicate product behind every retry. It
 still costs a generation: the model ran, and releasing on taste is unbounded (author, 2026-09-27).
 
-Runs inline rather than as a job. §A.3 says "Step Functions (or a single worker Lambda for the MVP)";
-a generation measured 13-20 seconds against API Gateway's 30-second ceiling, which is thin but real
-for one page. The moment a critic pass or image work is added this must become a job -- noted here
-because the ceiling is what will break first, and it will break as a timeout rather than an error.
+Runs as a JOB, which §A.3 always specified. It ran inline first and the ceiling broke exactly as
+predicted, sooner: a four-fact brief took 35.3 seconds against API Gateway's hard 29-second limit.
+The Lambda succeeded and wrote every document; the browser saw "Failed to fetch". The tenant was
+charged a generation for work they could not see, which is the worst shape a failure can take.
+
+So the request path QUEUES and the event path GENERATES -- the same function, invoked asynchronously
+by itself. One function rather than two because the work and the queueing share all their validation,
+and a second Lambda is a second thing to keep in step.
 """
+import json
+import os
 import random
 import time
 
@@ -38,10 +44,10 @@ from stripe_link.domain.documents import (DocumentValidationError, validate_offe
 from handlers.pages import assign_short_code
 from stripe_link.domain.page_brief import BriefError, grounding_text, validate as validate_brief
 from stripe_link.domain.page_brief import withheld
-from stripe_link.repositories.documents import (RepositoryError, ai_provider_config_repository,
-                                                ai_usage_repository, offers_repository,
-                                                pages_repository, products_repository,
-                                                tenant_profiles_repository)
+from stripe_link.repositories.documents import (RepositoryError, ai_jobs_repository,
+                                                ai_provider_config_repository, ai_usage_repository,
+                                                offers_repository, pages_repository,
+                                                products_repository, tenant_profiles_repository)
 from stripe_link.domain.documents import SUPPORTED_THEME_PRESETS
 
 SYSTEM = (
@@ -57,12 +63,25 @@ SYSTEM = (
 
 
 def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=None,
-            config_repo=None, usage_repo=None, tenant_repo=None, generator=None, now_fn=None,
-            randomiser=None):
-    if (event or {}).get("httpMethod", "POST").upper() == "OPTIONS":
-        return json_response({})
+            config_repo=None, usage_repo=None, tenant_repo=None, jobs_repo=None, generator=None,
+            now_fn=None, randomiser=None, invoker=None):
     now = int((now_fn or time.time)())
     pick = randomiser or random.SystemRandom().choice
+    try:
+        jobs_repo = jobs_repo or ai_jobs_repository()
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+
+    # The EVENT path: this is the async self-invoke, doing the work the request path queued.
+    if (event or {}).get("internal_job"):
+        return _run_job(event, jobs_repo=jobs_repo, products_repo=products_repo,
+                        offers_repo=offers_repo, pages_repo=pages_repo, usage_repo=usage_repo,
+                        generator=generator, now=now, pick=pick)
+
+    if (event or {}).get("httpMethod", "POST").upper() == "OPTIONS":
+        return json_response({})
+    if (event or {}).get("httpMethod", "").upper() == "GET":
+        return _read_job(event, jobs_repo)
     body = parse_json_body(event) or {}
     tenant_id = tenant_id_from_event(event, body)
     if not tenant_id:
@@ -115,30 +134,33 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     except Exception:  # noqa: BLE001
         return error_response("Could not reserve an AI generation. Try again shortly.", code="quota_unavailable")
 
+    job = {
+        "schema_version": "2026-09-27", "document_type": "ai_generation_job",
+        "tenant_id": tenant_id, "job_id": new_id("job", pick), "status": "queued",
+        "brief": brief, "mode": mode, "model": model, "provider": str(config.get("provider")),
+        "page_id": regenerate_page_id, "period": period,
+        "usage": {"period": period, "used": used + 1, "allowance": allowance},
+        "withheld": withheld(brief),
+        "created_at": now, "updated_at": now,
+        # A finished job is of no interest a week later, and an abandoned one even less.
+        "expires_at": now + 7 * 24 * 3600,
+    }
     try:
-        result = _generate(brief, model=model, provider=str(config.get("provider")), generator=generator)
-    except AiError as exc:
-        # OUR failure, not their preference -- give the slot back.
+        jobs_repo.put(job)
+    except RepositoryError as exc:
         _release(usage_repo, tenant_id, period, now)
-        return error_response(_message_for(exc), status_code=502, code=f"generate_{exc.kind}")
+        return error_response(str(exc), code="repository_error")
 
     try:
-        if regenerate_page_id:
-            saved = _rewrite(brief, result, tenant_id=tenant_id, page_id=regenerate_page_id, now=now,
-                             pages_repo=pages_repo, offers_repo=offers_repo)
-        else:
-            saved = _persist(brief, result, tenant_id=tenant_id, mode=mode, now=now, pick=pick,
-                             products_repo=products_repo, offers_repo=offers_repo, pages_repo=pages_repo)
-    except (DocumentValidationError, RepositoryError, ValueError) as exc:
+        _enqueue(job, invoker)
+    except Exception as exc:  # noqa: BLE001 - nothing is generating, so refund and say so
         _release(usage_repo, tenant_id, period, now)
-        return error_response(f"The page could not be saved: {exc}", code="save_failed")
-
-    return json_response({**saved,
-                          "usage": {"period": period, "used": used + 1, "allowance": allowance},
-                          "withheld": withheld(brief),
-                          "decisions": result["decisions"],
-                          "generation": {"model": model, "repairs": result["repairs"],
-                                         "tokens": result["usage"]}}, status_code=201)
+        job = {**job, "status": "failed", "error": {"code": "enqueue_failed", "message": str(exc)}}
+        jobs_repo.put(job)
+        return error_response("Could not start the generation. Try again shortly.",
+                              status_code=502, code="enqueue_failed")
+    # 202, not 201: nothing exists yet. The dashboard polls /ai/jobs/{job_id}.
+    return json_response({"job": _public(job)}, status_code=202)
 
 
 def _plan(tenant_id, tenant_repo):
@@ -249,3 +271,90 @@ def _message_for(exc: AiError) -> str:
         return ("The AI could not produce a page that met our content rules. This did not use a "
                 "generation — try again, or add more detail to the brief.")
     return f"The page could not be generated: {exc.message}"
+
+
+def _public(job: dict) -> dict:
+    """What the poller sees. The brief is omitted -- the client sent it and does not need it back."""
+    return {key: value for key, value in (job or {}).items() if key != "brief"}
+
+
+def _enqueue(job: dict, invoker=None) -> None:
+    """Hand the job to ourselves, asynchronously.
+
+    InvocationType Event returns as soon as Lambda accepts it, so the request path answers in
+    milliseconds no matter how long the generation takes. The same function on the other side means
+    the work and its validation cannot drift apart.
+    """
+    if invoker is not None:
+        invoker(job)
+        return
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+    if not function_name:
+        raise RuntimeError("No function name to invoke; generation cannot be queued.")
+    import boto3
+
+    boto3.client("lambda").invoke(
+        FunctionName=function_name,
+        InvocationType="Event",
+        Payload=json.dumps({"internal_job": True, "tenant_id": job["tenant_id"],
+                            "job_id": job["job_id"]}).encode("utf-8"),
+    )
+
+
+def _read_job(event, jobs_repo):
+    tenant_id = tenant_id_from_event(event)
+    job_id = str(((event or {}).get("pathParameters") or {}).get("job_id") or "").strip()
+    if not tenant_id or not job_id:
+        return error_response("tenant_id and job_id are required.", code="missing_job")
+    try:
+        job = jobs_repo.get(tenant_id, job_id)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+    if not job:
+        return error_response("That generation was not found.", status_code=404, code="job_not_found")
+    return json_response({"job": _public(job)})
+
+
+def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_repo, generator,
+             now, pick):
+    """The event path. Every exit updates the job, because a job stuck at `running` is indistinguishable
+    from one still going, and the dashboard would poll forever."""
+    tenant_id = str(event.get("tenant_id") or "")
+    job = jobs_repo.get(tenant_id, str(event.get("job_id") or ""))
+    if not job:
+        return {"ok": False, "reason": "job_not_found"}
+    if job.get("status") not in ("queued", None):
+        return {"ok": True, "reason": "already_" + str(job.get("status"))}   # Lambda retries at-least-once
+
+    brief, mode = job.get("brief") or {}, str(job.get("mode") or "test")
+    jobs_repo.put({**job, "status": "running", "updated_at": now})
+    usage_repo = usage_repo or ai_usage_repository()
+    try:
+        products_repo = products_repo or products_repository(mode=mode)
+        offers_repo = offers_repo or offers_repository(mode=mode)
+        pages_repo = pages_repo or pages_repository(mode=mode)
+        result = _generate(brief, model=str(job.get("model") or ""),
+                           provider=str(job.get("provider") or ""), generator=generator)
+        if job.get("page_id"):
+            saved = _rewrite(brief, result, tenant_id=tenant_id, page_id=str(job["page_id"]), now=now,
+                             pages_repo=pages_repo, offers_repo=offers_repo)
+        else:
+            saved = _persist(brief, result, tenant_id=tenant_id, mode=mode, now=now, pick=pick,
+                             products_repo=products_repo, offers_repo=offers_repo, pages_repo=pages_repo)
+    except AiError as exc:
+        _release(usage_repo, tenant_id, str(job.get("period") or ""), now)
+        jobs_repo.put({**job, "status": "failed", "updated_at": now,
+                       "error": {"code": f"generate_{exc.kind}", "message": _message_for(exc)}})
+        return {"ok": False, "reason": exc.kind}
+    except Exception as exc:  # noqa: BLE001 - any failure must reach the job, or the poller hangs
+        _release(usage_repo, tenant_id, str(job.get("period") or ""), now)
+        jobs_repo.put({**job, "status": "failed", "updated_at": now,
+                       "error": {"code": "save_failed",
+                                 "message": f"The page could not be saved: {exc}"}})
+        return {"ok": False, "reason": "save_failed"}
+
+    jobs_repo.put({**job, "status": "complete", "updated_at": now, "result": {
+        **saved, "decisions": result["decisions"],
+        "generation": {"model": job.get("model"), "repairs": result["repairs"],
+                       "tokens": result["usage"]}}})
+    return {"ok": True}

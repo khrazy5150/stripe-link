@@ -239,6 +239,25 @@ class WizardTests(unittest.TestCase):
         edit_fn = PAGE_STORE.split("editAnswers()", 1)[1].split("},", 1)[0]
         self.assertNotIn("emptyBrief", edit_fn)
 
+    def test_the_wizard_polls_rather_than_waiting_on_the_request(self):
+        # Generation outlives API Gateway's 29-second ceiling: a measured 35.3s run succeeded while
+        # the browser reported "Failed to fetch".
+        self.assertIn("awaitJob", PAGE_STORE)
+        self.assertIn("/ai/jobs/", PAGE_STORE)
+        self.assertIn("job.status === \"complete\"", PAGE_STORE)
+        self.assertIn("job.status === \"failed\"", PAGE_STORE)
+
+    def test_the_poller_gives_up_rather_than_spinning_forever(self):
+        self.assertIn("took longer than expected", PAGE_STORE)
+
+    def test_list_items_do_not_carry_the_tucking_margin(self):
+        # .field-note has margin-top:-1rem to sit under a field; on consecutive <li> it stacked them
+        # on top of each other.
+        for line in WIZARD.splitlines():
+            if "<li" in line:
+                with self.subTest(line=line.strip()[:60]):
+                    self.assertNotIn("field-note", line)
+
     def test_regenerating_says_what_it_leaves_alone(self):
         self.assertIn("Your product, price and offer stay as they", WIZARD)
         self.assertIn("uses one generation", WIZARD)

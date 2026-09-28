@@ -34,9 +34,7 @@
             We only write what you told us. Add these and regenerate to say more:
           </p>
           <ul>
-            <li v-for="w in store.result.withheld" :key="w.claim_class" class="field-note">
-              {{ w.prompt }}
-            </li>
+            <li v-for="w in store.result.withheld" :key="w.claim_class">{{ w.prompt }}</li>
           </ul>
         </template>
         <div class="button-row">
@@ -289,7 +287,7 @@
           <template v-else-if="key === 'review'">
             <p>We'll create a product, an offer and a <strong>draft</strong> page. Nothing goes live.</p>
             <ul>
-              <li v-for="row in summary" :key="row.label" class="field-note">
+              <li v-for="row in summary" :key="row.label">
                 <strong>{{ row.label }}:</strong> {{ row.value }}
               </li>
             </ul>
@@ -298,7 +296,7 @@
             <template v-if="store.withheld.length">
               <h3>What we won't be able to say</h3>
               <ul>
-                <li v-for="w in store.withheld" :key="w.claimClass" class="field-note">{{ w.prompt }}</li>
+                <li v-for="w in store.withheld" :key="w.claimClass">{{ w.prompt }}</li>
               </ul>
               <p class="field-note">
                 You can go back and add these, or generate now and fill them in later.
@@ -321,11 +319,12 @@
           {{ SKIPPABLE.has(key) ? "Skip" : "Next" }}
         </button>
         <button v-else class="primary-action" type="button" :disabled="store.generating" @click="generate">
-          {{ store.generating ? "Writing your page…" : "Generate the page" }}
+          {{ store.generating ? "Working…" : "Generate the page" }}
         </button>
       </div>
       <p v-if="store.generating" class="field-note">
-        This takes a few seconds &mdash; we're writing and checking every line against what you told us.
+        {{ store.progress }} This usually takes under a minute &mdash; we're writing every line and
+        checking it against what you told us. You can leave this page; the work carries on.
       </p>
     </template>
   </section>

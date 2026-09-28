@@ -66,6 +66,7 @@ export const useAiPageStore = defineStore("aiPage", {
     brief: emptyBrief(),
     step: 0,
     generating: false,
+    progress: "",
     error: "",
     result: null,       // { product, offer, page, withheld, decisions, generation }
   }),
@@ -153,19 +154,57 @@ export const useAiPageStore = defineStore("aiPage", {
 
     // `pageId` rewrites the copy on a page that already exists: same product, same offer, same Stripe
     // sync, new words. Without it every retry would leave a duplicate product behind.
+    //
+    // POST only QUEUES -- generation runs past API Gateway's 29-second ceiling, so the answer is a job
+    // id and the rest is polling. A measured 35s generation is what made this necessary: the work
+    // succeeded and the browser reported "Failed to fetch".
     async generate(mode = "test", pageId = "") {
       this.generating = true;
       this.error = "";
+      this.progress = "Starting…";
       try {
         const body = { brief: this.payload(), mode };
         if (pageId) body.page_id = pageId;
-        this.result = await apiRequest("/ai/generate", { method: "POST", body });
-        return true;
+        const queued = await apiRequest("/ai/generate", { method: "POST", body });
+        return await this.awaitJob(queued.job.job_id);
       } catch (error) {
         this.error = error.message || "The page could not be generated.";
+        this.generating = false;
+        return false;
+      }
+    },
+
+    async awaitJob(jobId) {
+      // Generation measured 13-35s, so a 2s poll is ~10 reads. The ceiling is generous rather than
+      // tight: a job that outlives it has almost certainly failed in a way that never reached the
+      // record, and saying so beats spinning forever.
+      const started = Date.now();
+      try {
+        for (;;) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          const body = await apiRequest(`/ai/jobs/${encodeURIComponent(jobId)}`);
+          const job = body.job || {};
+          if (job.status === "complete") {
+            this.result = { ...job.result, usage: job.usage, withheld: job.withheld };
+            return true;
+          }
+          if (job.status === "failed") {
+            this.error = job.error?.message || "The page could not be generated.";
+            return false;
+          }
+          this.progress = job.status === "running" ? "Writing your page…" : "Waiting to start…";
+          if (Date.now() - started > 180000) {
+            this.error = "That took longer than expected. Check Landing Pages before trying again — "
+              + "it may have finished.";
+            return false;
+          }
+        }
+      } catch (error) {
+        this.error = error.message || "Lost contact with the generation.";
         return false;
       } finally {
         this.generating = false;
+        this.progress = "";
       }
     },
 
