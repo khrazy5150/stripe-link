@@ -657,6 +657,42 @@ class AiUsageRepository:
         return int((response.get("Attributes") or {}).get("used") or 0)
 
 
+class AiJobsRepository:
+    """Generation jobs (PK=`tenant_id`, SK=`job_id`).
+
+    Plain attribute keys rather than `DynamoDocumentRepository`'s PK/SK, matching `AiUsageRepository`
+    beside it: these two tables are operational records, not tenant documents, and neither needs the
+    mode-scoping or GSI machinery that the document repository exists to provide. Not mode-scoped for
+    the same reason -- a job is a unit of WORK, and the mode it generates in is a field on it.
+    """
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("AI jobs table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def put(self, document: dict[str, Any]) -> dict[str, Any]:
+        for field in ("tenant_id", "job_id"):
+            if not str(document.get(field) or "").strip():
+                raise RepositoryError(f"Job {field} is required.")
+        self.table.put_item(Item=dynamodb_safe_document(document))
+        return document
+
+    def get(self, tenant_id: str, job_id: str) -> dict[str, Any] | None:
+        response = self.table.get_item(Key={"tenant_id": str(tenant_id), "job_id": str(job_id)})
+        return response.get("Item")
+
+
 class StripeKeysRepository:
     """A tenant's Stripe keys for BOTH modes, isolated in ONE per-deployment table (Stripe-mode decoupling,
     plans/STRIPE_MODE_DECOUPLING.md). Mode is part of the composite key (PK=`tenant_id`, SK=`mode`) — NOT a
@@ -1079,14 +1115,8 @@ def ai_usage_repository(table: Any | None = None) -> AiUsageRepository:
     return AiUsageRepository(os.environ.get("AI_USAGE_TABLE", ""), table=table)
 
 
-def ai_jobs_repository(table: Any | None = None) -> DynamoDocumentRepository:
-    # Not mode-scoped: a job is a unit of WORK, not commerce. The mode it generates in is a field on
-    # the job, so a tenant sees their own jobs whichever mode they are looking at.
-    return DynamoDocumentRepository(
-        os.environ.get("AI_JOBS_TABLE", ""),
-        id_field="job_id",
-        table=table,
-    )
+def ai_jobs_repository(table: Any | None = None) -> AiJobsRepository:
+    return AiJobsRepository(os.environ.get("AI_JOBS_TABLE", ""), table=table)
 
 
 def customers_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:
