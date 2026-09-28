@@ -190,6 +190,31 @@ class WizardTests(unittest.TestCase):
         self.assertNotIn("session", skippable)
         self.assertIn("delivery", skippable)
 
+    def test_the_category_field_reuses_the_shared_component(self):
+        # A free-text box beside a real taxonomy is a second source of truth, and the tenant cannot
+        # see what categories exist. ProductCategoryField already does curated + promoted + their own.
+        self.assertIn("ProductCategoryField", WIZARD)
+        self.assertNotIn('placeholder="supplement"', WIZARD)
+
+    def test_parcel_measurements_are_separate_numbers(self):
+        # These ARE the packer's inputs -- fulfillment.dimensions and weight_lb, which label_readiness
+        # gates on. One free-text "size or weight" box could only be parsed by guessing.
+        block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
+        for field in ("length_in", "width_in", "height_in", "weight_lb"):
+            with self.subTest(field=field):
+                self.assertIn(f"b.physical.{field}", block)
+                self.assertIn('type="number"', block)
+
+    def test_the_shipping_question_does_not_presume_free(self):
+        block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
+        self.assertIn("flat", block)             # a non-free example is offered
+        self.assertIn("in your words", block)
+
+    def test_measurements_are_marked_as_not_appearing_on_the_page(self):
+        # They license no claim, and a tenant should not expect to see them in the copy.
+        block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
+        self.assertIn("not written on the page", block)
+
     def test_the_result_never_claims_anything_is_live(self):
         done = WIZARD.split("Your draft page is ready", 1)[1]
         self.assertIn("draft", done.lower())

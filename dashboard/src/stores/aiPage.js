@@ -46,7 +46,10 @@ function emptyBrief() {
     price: { unit_amount: null, currency: "usd", pricing_model: "one_time", recurring_interval: "month" },
     guarantee: "", terms: "", certifications: "", evidence: "",
     tone: "direct", category: "", must_say: "", must_not_say: "",
-    physical: { shipping: "", usage: "", materials: "", dimensions: "" },
+    // Measurements are separate NUMBERS, not one free-text box: these are the packer's own inputs
+    // (fulfillment.dimensions + weight_lb), and label_readiness gates buying a label on them.
+    physical: { shipping: "", usage: "", materials: "",
+                length_in: null, width_in: null, height_in: null, weight_lb: null },
     digital: { format: "", access: "" },
     service: { duration_minutes: 60, location_mode: "remote", performed_by: "", what_happens: "" },
   };

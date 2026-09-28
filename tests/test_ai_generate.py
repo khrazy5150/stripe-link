@@ -114,6 +114,35 @@ class GenerateTests(unittest.TestCase):
         # And the checkout mode follows it -- a recurring price behind a payment session charges once.
         self.assertEqual(body["offer"]["checkout"]["mode"], "subscription")
 
+    def test_the_offer_is_active_so_the_page_can_be_previewed_and_edited(self):
+        # pricing.py refuses to price a non-active offer at all, so a draft offer left the builder
+        # showing "Offer ... is not active" and nothing else. The PAGE's draft status is the gate.
+        self.assertEqual(json.loads(self.call()["body"])["offer"]["status"], "active")
+
+    def test_the_page_gets_a_short_code_so_its_preview_link_works(self):
+        # The dashboard keys the test viewer on short_code; without one a card falls through to the
+        # live preview distribution, which is both the wrong host and an S3 AccessDenied.
+        self.assertTrue(json.loads(self.call()["body"])["page"]["short_code"])
+
+    def test_real_measurements_reach_the_product_so_it_can_be_shipped(self):
+        brief = {**BRIEF, "physical": {"shipping": "Ships free in the US", "length_in": 4,
+                                       "width_in": 4, "height_in": 6, "weight_lb": 1.2}}
+        fulfillment = json.loads(self.call(brief)["body"])["product"]["fulfillment"]
+        self.assertEqual(fulfillment["weight_lb"], 1.2)
+        self.assertEqual(fulfillment["dimensions"], {"length_in": 4, "width_in": 4, "height_in": 6})
+
+    def test_missing_measurements_stay_null_rather_than_guessed(self):
+        # label_readiness gates on these; an invented weight is a confidently wrong quote.
+        fulfillment = json.loads(self.call()["body"])["product"]["fulfillment"]
+        self.assertIsNone(fulfillment["weight_lb"])
+        self.assertIsNone(fulfillment["dimensions"]["length_in"])
+
+    def test_a_measurement_licenses_no_claim(self):
+        # Giving us a weight is not authorising a sentence about shipping.
+        brief = {**BRIEF, "guarantee": "", "physical": {"weight_lb": 1.2}}
+        classes = {w["claim_class"] for w in json.loads(self.call(brief)["body"])["withheld"]}
+        self.assertIn("shipping", classes)
+
     def test_the_model_only_writes_copy(self):
         body = json.loads(self.call()["body"])
         self.assertEqual([s["type"] for s in body["page"]["sections"]], ["headline", "subheadline"])

@@ -30,6 +30,7 @@ from stripe_link.domain.ai_resolvers import resolve_preset, resolve_sections, re
 from stripe_link.domain.ai_schema import describe_vocabulary, page_sections_schema
 from stripe_link.domain.documents import (DocumentValidationError, validate_offer_document,
                                           validate_page_document, validate_product_document)
+from handlers.pages import assign_short_code
 from stripe_link.domain.page_brief import BriefError, grounding_text, validate as validate_brief
 from stripe_link.domain.page_brief import withheld
 from stripe_link.repositories.documents import (RepositoryError, ai_provider_config_repository,
@@ -189,6 +190,11 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
     page = page_document(brief, tenant_id=tenant_id, page_id=page_id, offer_id=offer_id, slug=slug,
                          sections=result["sections"], preset=result["preset"], mode=mode, now=now,
                          provenance=provenance)
+    # The SHARED assigner, not a local one. Writing the page straight to the repository skipped
+    # `create_page` and therefore this, and a page without a short_code is not merely missing a field:
+    # the dashboard's pageUrl() keys the test viewer on it, so the card fell through to the live
+    # preview distribution where no artifact exists -- a wrong host AND an S3 AccessDenied.
+    assign_short_code(None, page)
     # Validate ALL THREE before writing any: a product saved beside a rejected page is the half-made
     # thing the tenant cannot finish, and validation is free next to a partial write.
     validate_product_document(product)

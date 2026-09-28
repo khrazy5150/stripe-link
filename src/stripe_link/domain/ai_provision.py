@@ -32,6 +32,21 @@ ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 PRODUCT_TYPE_FOR_KIND = {PHYSICAL: "physical", DIGITAL: "digital"}
 
 
+def _number(value: Any) -> float | None:
+    """A real measurement or None. Never a guess.
+
+    The wizard asks for length, width, height and weight as separate numbers rather than one free-text
+    box, because these ARE the packer's inputs -- `fulfillment.dimensions` and `weight_lb` are what
+    `label_readiness` gates label buying on. A parsed "about 4x4x6 inches" would be a confident guess,
+    and a wrong shipping quote is worse than no quote (plans/SHIPPING_PROVIDERS.md).
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def new_id(prefix: str, randomiser) -> str:
     """`local_xxxxxxxxxxx` and friends -- the format the dashboard already mints, so a generated row
     sorts and reads exactly like a hand-made one."""
@@ -126,8 +141,10 @@ def product_document(brief: dict[str, Any], *, tenant_id: str, product_id: str, 
         "fulfillment": {
             "requires_shipping": kind == PHYSICAL,
             "ship_from": None,
-            "weight_lb": None,
-            "dimensions": {"length_in": None, "width_in": None, "height_in": None},
+            "weight_lb": _number(block.get("weight_lb")),
+            "dimensions": {"length_in": _number(block.get("length_in")),
+                           "width_in": _number(block.get("width_in")),
+                           "height_in": _number(block.get("height_in"))},
         },
         "sync": {"status": "pending"},
         "tags": [],
@@ -136,10 +153,6 @@ def product_document(brief: dict[str, Any], *, tenant_id: str, product_id: str, 
         "created_at": int(now),
         "updated_at": int(now),
     }
-    if kind == PHYSICAL and str(block.get("dimensions") or "").strip():  # noqa: SIM102
-        # Free text, kept where a human will see it. Parsing "about 4x4x6 inches" into a packer's
-        # numbers is a guess, and a wrong shipping quote is worse than no quote (SHIPPING_PROVIDERS.md).
-        document["fulfillment"]["notes"] = str(block.get("dimensions")).strip()
     return document
 
 
@@ -148,8 +161,11 @@ def offer_document(brief: dict[str, Any], *, tenant_id: str, offer_id: str, prod
                    provenance: dict[str, Any]) -> dict[str, Any]:
     """The offer that points at the product. Both ids are the platform's own.
 
-    `status: draft` here, where the schema does allow it, so nothing is sellable until the tenant
-    publishes the page.
+    `status: active`, even though the schema permits draft. `domain/pricing.py` refuses to price a
+    non-active offer at all, so a draft offer makes the page unpreviewable AND uneditable -- the
+    builder reports "Offer ... is not active" and shows nothing. The PAGE's draft status is the real
+    gate, exactly as it is for the product: an active offer behind an unpublished page is for sale
+    nowhere.
     """
     name = str(brief.get("name") or "").strip()
     # Checkout mode follows the PRICE, and getting this wrong is a bug this repo has shipped before:
@@ -163,7 +179,7 @@ def offer_document(brief: dict[str, Any], *, tenant_id: str, offer_id: str, prod
         "offer_id": offer_id,
         "slug": slug,
         "name": name,
-        "status": "draft",
+        "status": "active",
         "stripe_mode": mode,
         "product_intent": "transaction",
         "offer_type": "single",

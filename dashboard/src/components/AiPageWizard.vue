@@ -134,21 +134,47 @@
           <!-- 5a. physical -->
           <template v-else-if="key === 'shipping_use'">
             <label class="offer-field">
-              <span>Shipping</span>
-              <input v-model="b.physical.shipping" type="text" placeholder="Ships free in the US" />
+              <span>What do you tell buyers about shipping?</span>
+              <input v-model="b.physical.shipping" type="text"
+                     placeholder="e.g. Free in the US &middot; $5 flat &middot; Ships in 2 business days" />
             </label>
+            <p class="field-note">
+              Whatever you actually offer, in your words &mdash; free, flat rate, calculated at
+              checkout. We'll only say what you put here. Leave it empty and the page won't mention
+              shipping at all.
+            </p>
             <label class="offer-field">
               <span>How is it used?</span>
-              <textarea v-model="b.physical.usage" rows="2" placeholder="Two gummies a day."></textarea>
+              <textarea v-model="b.physical.usage" rows="2" placeholder="One scoop in your drink."></textarea>
             </label>
+            <label class="offer-field">
+              <span>Materials</span>
+              <input v-model="b.physical.materials" type="text" />
+            </label>
+
+            <h3>Parcel size and weight</h3>
+            <p class="field-note">
+              Used to quote shipping and buy labels &mdash; not written on the page. Leave blank if you
+              haven't measured yet; you can add them on the product later.
+            </p>
             <div class="offer-two-column">
               <label class="offer-field">
-                <span>Materials</span>
-                <input v-model="b.physical.materials" type="text" />
+                <span>Length (in)</span>
+                <input v-model.number="b.physical.length_in" type="number" min="0" step="0.1" />
               </label>
               <label class="offer-field">
-                <span>Size or weight</span>
-                <input v-model="b.physical.dimensions" type="text" placeholder="About 4x4x6 inches" />
+                <span>Width (in)</span>
+                <input v-model.number="b.physical.width_in" type="number" min="0" step="0.1" />
+              </label>
+            </div>
+            <div class="offer-two-column">
+              <label class="offer-field">
+                <span>Height (in)</span>
+                <input v-model.number="b.physical.height_in" type="number" min="0" step="0.1" />
+              </label>
+              <label class="offer-field">
+                <span>Weight (lb)</span>
+                <input v-model.number="b.physical.weight_lb" type="number" min="0" step="0.01" />
               </label>
             </div>
           </template>
@@ -228,12 +254,11 @@
                   <option v-for="t in TONES" :key="t" :value="t">{{ t }}</option>
                 </select>
               </label>
-              <label class="offer-field">
-                <span>Category</span>
-                <input v-model="b.category" type="text" placeholder="supplement" />
-              </label>
             </div>
-            <p class="field-note">Category picks the colour palette.</p>
+            <ProductCategoryField v-model="b.category" :product-type="categoryScope" :required="false" />
+            <p class="field-note">
+              Category picks the colour palette, and files the product alongside your others.
+            </p>
           </template>
 
           <!-- 8. exact -->
@@ -297,6 +322,7 @@
 <script setup>
 import { computed, inject } from "vue";
 import { KINDS, SKIPPABLE, STEP_LABELS, TONES, useAiPageStore } from "../stores/aiPage";
+import ProductCategoryField from "./products/ProductCategoryField.vue";
 
 const store = useAiPageStore();
 const navigateTo = inject("navigateTo", null);
@@ -304,6 +330,9 @@ const navigateTo = inject("navigateTo", null);
 const b = computed(() => store.brief);
 const key = computed(() => store.stepKey);
 const stepLabel = computed(() => STEP_LABELS[key.value] || "");
+// Category suggestions are scoped by product type, and a service brief never reaches this wizard's
+// generate step -- but the field still needs a scope while the tenant is on it.
+const categoryScope = computed(() => (store.brief.kind === "digital" ? "digital" : "physical"));
 
 const summary = computed(() => {
   const brief = store.brief;

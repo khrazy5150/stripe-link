@@ -32,6 +32,12 @@ BOOKING_MODES = ("scheduled", "no_booking")
 
 # Which brief field licenses which class of claim in `ai_floor.CLAIM_CLASSES`. This mapping IS the
 # review step: everything empty on the left is a sentence the page will not contain.
+# Measurements the packer actually uses. Asked as separate numbers because that is what they are --
+# `fulfillment.dimensions` and `weight_lb` on the product, which `label_readiness` gates label buying
+# on. They license no CLAIM, so they are absent from LICENCES: a tenant who gives us a weight has not
+# thereby authorised a sentence about shipping.
+MEASUREMENTS = ("length_in", "width_in", "height_in", "weight_lb")
+
 LICENCES: dict[str, str] = {
     "guarantee": "guarantee",
     "terms": "cancellation",
