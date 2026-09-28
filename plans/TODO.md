@@ -2472,6 +2472,37 @@ a directory add is DISCOVERABILITY — finding a creator by name — which is wo
 
 ## Commerce
 
+### Smart Pricing — cost profiles, and a price the tenant does not have to guess (plan plans/SMART_PRICING.md, 2026-09-28)
+
+A tenant states what a thing costs them and what they want to earn; the platform states what to
+charge. Raised while testing the AI wizard, which forces a price up front and so makes tenants guess
+before they have thought about cost.
+
+**Most of it already exists.** `fees.py`'s net_guaranteed gross-up IS the solve — some costs are fixed
+per unit and others are a percentage of the sale, so a higher price raises the fees that raised it,
+and you solve rather than multiply. The tip jar already ships the reverse engine in miniature
+("creator nets $10, charge $11"). Smart Pricing computes the cost base and hands it to
+`calculate_price`; there must never be a second pricing engine.
+
+**Decided in the plan:** one generic list of cost lines with three kinds (`fixed`, `pct_of_cost` for
+duties levied on landed cost, `pct_of_price`), plus `returns` as its own kind because a return costs
+the whole sale plus outbound shipping plus the platform fee we keep — not a percentage of price.
+Markup applies to TOTAL cost including fees, which the original sketch's own worked example got wrong
+(it printed 12% beside a profit that was 10.8%). The profile lives on the PRICE, since that is the
+sellable unit and variants share one today. Stripe and platform fees are never tenant-entered.
+
+**`pricing_readiness`** joins `product_readiness` and `label_readiness`: an unpriced product exists,
+is editable and can have its page generated, but is blocked from Stripe sync and publishing. That is
+the honest form of "price this later".
+
+**AI has almost nothing to do with it** — a deterministic primitive the AI merely uses. It must never
+suggest a price from what comparable products sell for: market data we do not hold, which the model
+will confabulate, and the tenant will act on. Belongs on the §A.7 floor.
+
+Step 1 (cost profile + pure engine) earns its keep alone: it is the same data the transaction ledger
+P&L needs, and profit cannot be reported without knowing cost.
+
+
 ### ⭐⭐ HIGH — AI page generation (AI_AND_COMMERCE Part A) — Bedrock VERIFIED 2026-09-27, adapter not built
 
 Plan: **plans/AI_AND_COMMERCE_ARCHITECTURE.md**. The plan's own entry, which it did not have until
