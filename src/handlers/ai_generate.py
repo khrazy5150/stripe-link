@@ -31,6 +31,7 @@ import time
 
 from stripe_link.ai_client import AiError, generate_structured
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
+from stripe_link.domain.ai_elements import assert_contracts, violations as contract_violations
 from stripe_link.domain.ai_floor import assert_within_floor, claim_violations
 from stripe_link.domain.ai_models import default_model
 from stripe_link.domain.ai_provision import (needs_service_handoff, new_id, offer_document,
@@ -186,24 +187,53 @@ def _generate(brief, *, model, provider, generator=None):
     grounding = grounding_text(brief)
     system = SYSTEM.format(vocabulary=describe_vocabulary(sections["value"]),
                            tone=str(brief.get("tone") or "direct"))
+    def check(value):
+        # Two independent contracts, both raising into the repair loop. The floor asks "is this claim
+        # grounded"; the element contracts ask "is this the right element for it". A page can pass
+        # either and fail the other -- a perfectly grounded fact in the wrong card is exactly the V1
+        # failure, and it was grounded.
+        assert_within_floor(value, grounding)
+        assert_contracts(value)
+
     run = generator or generate_structured
     result = run(prompt=_prompt(brief, grounding), json_schema=schema, model=model,
                  provider=provider, system=system, schema_name="page_sections",
-                 validate=lambda value: assert_within_floor(value, grounding), for_page=True)
-    emitted = (result.get("value") or {}).get("sections") or []
-    return {"sections": emitted, "preset": preset["value"], "repairs": result.get("repairs", 0),
+                 validate=check, for_page=True)
+    value = result.get("value") or {}
+    emitted = value.get("sections") or []
+    by_id = {str(s.get("id") or ""): str(s.get("type") or "") for s in emitted if isinstance(s, dict)}
+    return {"sections": emitted,
+            # The model's own reasoning, kept OFF the page and ON the job: a bad element choice should
+            # be readable back -- "source_fact: easy to clean -> bragging_points" says the boundary is
+            # wrong -- rather than inferred from rendered HTML.
+            "classification": [
+                {**c, "element": by_id.get(str(c.get("section_id") or ""), "")}
+                for c in (value.get("classification") or []) if isinstance(c, dict)],
+            "preset": preset["value"], "repairs": result.get("repairs", 0),
             "usage": result.get("usage", {}),
             # Recorded so a page the tenant dislikes is arguable. "the AI chose it" is not a diagnosis.
             "decisions": resolution_log({"preset": preset, "sections": sections}),
-            # Belt to the floor's braces: if anything survived the repair loop, say so rather than
+            # Belt to the braces: if anything survived the repair loop, say so rather than
             # discovering it on a published page.
-            "residual_violations": claim_violations(emitted, grounding)}
+            "residual_violations": claim_violations(emitted, grounding) + contract_violations(emitted)}
 
 
 def _prompt(brief, grounding):
     must_not = [str(x).strip() for x in (brief.get("must_not_say") or []) if str(x).strip()]
-    lines = ["Compose the page sections for this offer.", "", "THE BRIEF -- everything you may assert:",
-             grounding]
+    lines = [
+        "Compose the page sections for this offer.",
+        "",
+        # The correction to V1, said plainly. The brief is SOURCE MATERIAL, not a set of answers with
+        # element assignments already implied by the question that produced them.
+        "HOW TO WORK. The brief below is unstructured source material, NOT a list of things to put on "
+        "the page. For each fact in it, first decide what job that fact does -- is it evidence, a "
+        "feature, a benefit, an objection, a positioning line? -- and only then choose the element "
+        "whose contract matches that job. Record both on the section: `source_fact` is the fact you "
+        "used, `fact_kind` is the job you decided it does, `reason` is why that element fits it. A "
+        "fact the tenant wanted people to know is not automatically evidence.",
+        "",
+        "THE BRIEF -- everything you may assert:",
+        grounding]
     if must_not:
         lines += ["", "NEVER say any of these:"] + [f"- {x}" for x in must_not]
     return "\n".join(lines)
@@ -354,7 +384,7 @@ def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_
         return {"ok": False, "reason": "save_failed"}
 
     jobs_repo.put({**job, "status": "complete", "updated_at": now, "result": {
-        **saved, "decisions": result["decisions"],
+        **saved, "decisions": result["decisions"], "classification": result["classification"],
         "generation": {"model": job.get("model"), "repairs": result["repairs"],
                        "tokens": result["usage"]}}})
     return {"ok": True}

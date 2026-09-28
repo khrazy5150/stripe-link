@@ -18,9 +18,27 @@ from __future__ import annotations
 
 from typing import Any
 
+from stripe_link.domain.ai_elements import for_prompt, routes_for
 from stripe_link.domain.ai_floor import may_generate_section
 
 _TEXT = {"type": "string"}
+
+
+# The model must say WHERE each section came from and WHY that element fits -- it forces the
+# classification to happen before the content, which is the whole correction to V1. That generator
+# went brief -> element directly, so the questionnaire's shape became the semantics and "things you
+# want people to know" collapsed into "desirable things -> bragging points".
+#
+# It is a PARALLEL ARRAY rather than three fields on every branch, and that is not a style choice:
+# per-branch fields multiply by the number of elements, and Bedrock rejected the result outright --
+# "the compiled grammar is too large". Eleven branches x three properties is 33 extra slots in the
+# grammar; one extra object shape is four. Same discipline, a fraction of the complexity.
+CLASSIFICATION_ITEM = {
+    "section_id": {"type": "string"},
+    "source_fact": {"type": "string"},
+    "fact_kind": {"type": "string"},
+    "reason": {"type": "string"},
+}
 
 
 def _obj(props: dict[str, Any], required=None) -> dict[str, Any]:
@@ -67,16 +85,32 @@ def page_sections_schema(section_types) -> dict[str, Any]:
         _obj({"id": _TEXT, "type": {"type": "string", "enum": [name]}, **SECTION_SHAPES[name]})
         for name in allowed
     ]
-    return _obj({"sections": {"type": "array", "items": {"anyOf": branches}}}, required=["sections"])
+    return _obj({
+        "sections": {"type": "array", "items": {"anyOf": branches}},
+        "classification": {"type": "array", "items": _obj(CLASSIFICATION_ITEM)},
+    }, required=["sections", "classification"])
 
 
 def describe_vocabulary(section_types) -> str:
-    """The section list as prompt text.
+    """The element contracts, as prompt text.
 
-    Cardinality lives here rather than in the schema because strict structured output rejects
-    `minItems` above 1 -- the constraint is real, it just cannot be expressed where it belongs.
+    This used to be a list of field names, which told the model what each element LOOKED like and
+    nothing about what it was FOR -- and a model that only knows shapes will put a sentence in a card
+    built for a number. The contracts lead with the job and the do-not-use boundary instead.
+
+    Cardinality is stated here rather than in the schema because strict structured output rejects
+    `minItems` above 1: the constraint is real, it just cannot live where it belongs.
     """
     allowed = generatable_with_shape(section_types)
-    lines = [f"- {name}: {', '.join(sorted(SECTION_SHAPES[name].keys()))}" for name in allowed]
-    return ("Use each section at most once, in this order, and include at least four:\n"
-            + "\n".join(lines))
+    routing = []
+    for name in allowed:
+        for kind in routes_for(name):
+            routing.append(f"- a {kind.replace('_', ' ')} goes in {name}")
+    return (
+        "ELEMENTS YOU MAY USE. Use each at most once, in this order, and include at least four.\n\n"
+        + for_prompt(allowed)
+        + "\n\n### Where each kind of fact goes\n"
+        + "Junior Bay has no `feature` or `benefit` element. Route them:\n"
+        + "\n".join(routing)
+        + "\n\nAn attributed customer quote has NO element here and must not be written at all."
+    )
