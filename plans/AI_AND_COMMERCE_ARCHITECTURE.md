@@ -383,12 +383,33 @@ protection is gate 3, which is a reason to build gate 3 properly rather than a r
 
 #### Gate 2 — quota
 
+**The numbers are DATA, not code** (author, 2026-09-29). `ai_generations` on the plan row,
+`ai_trial_generations` / `ai_free_generations` on the CONFIG row, both in `PlatformPlansTable` and editable
+from the Admin Site without a deploy — the same path `entitlements` and `fee_tier` already take
+(`docs/PLATFORM_PLANS.md`). The constants in `ai_quota.py` are fallbacks for an unreadable row and are
+documented as such; citing them as the pricing is how the fee table ended up disagreeing with itself.
+
 | Source | Allowance | Counter |
 | --- | --- | --- |
-| Trial | **3 generations, LIFETIME** | period `"trial"` |
-| Premium / Pro | 50 / calendar month | period `YYYY-MM` |
+| Trial | **lifetime**, `config.ai_trial_generations` (3) | period `"trial"` |
+| Subscriber | `tenant.ai_generations`, off the plan row | period `YYYY-MM` |
+| Free / expired trial | `config.ai_free_generations` (0) | — |
 | BYOK | `BYOK_CEILING` safety ceiling | never consumes trial or platform allowance |
 | `exempt` | UNLIMITED | test accounts; must survive this change |
+
+**The ladder agreed 2026-09-29: $19 → 20 · $39 → 50 · $69 → 100**, trial 3. It replaced a flat 50, which at
+~$0.105/generation gives away 27%+ of a $19 subscription at the model layer alone. The AI ladder is
+deliberately shallower than the price ladder, because AI is not why anyone buys the upper tiers. Only the $19
+plan exists today.
+
+**Set these from the ledger, not from argument.** After 100–500 real generations, `ai_generation_events` can
+give P50/P75/P95 cost per generation and the pricing becomes empirical: at a P95 of $0.07 twenty generations
+cost $1.40; at $0.25 it is a different business.
+
+**The allowance is keyed on the PLAN, never on `tier_id`.** `tier_id` is the transaction-FEE tier, which the
+webhook writes from `fee_tier` — and every paid plan carries `pro`, so a ladder keyed there collapses to one
+number the moment a second paid plan exists. The old table also held a `"premium"` key that never matched
+anything, because no tenant's `tier_id` is ever `"premium"`.
 
 **3, not 2, and called "3 AI generations" — never "2 pages."** One generation to discover, one to refine, one
 to experience the value; two ends the demo at "still not quite." And the counter counts generations, which is

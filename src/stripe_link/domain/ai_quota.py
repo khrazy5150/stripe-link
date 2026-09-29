@@ -20,26 +20,27 @@ from __future__ import annotations
 import time
 from typing import Any
 
-# Allowance per billing period, by plan key. Measured 2026-09-27: a full page generation on the
-# default model runs ~$0.046 (§A.7), so 50/month is ~12% of a $19 subscription -- comfortable. 200
-# would be 49%, which is where a flat bundle stops working. The free tier gets a real number rather
-# than zero because BYO-key tenants pay their own inference; see `allowance_for`.
-PLATFORM_PAID_ALLOWANCE = {
-    "premium": 50,   # ~$0.94/month of inference against a $19 plan -- under 5%
-    "pro": 50,
-    # The free tier gets a REAL taste rather than nothing (revised 2026-09-27). It used to be zero on
-    # the theory that free tenants would bring their own key; that theory died when BYO-key turned out
-    # to require a separate vendor account funded with non-refundable, one-year-expiry prepaid credits
-    # -- four steps before a free tenant sees a single page. Five generations costs us ~9 cents and is
-    # enough to see the feature work, which is the whole job of an acquisition feature.
-    "basic": 5,
-}
-# The plan an unknown or unreadable plan key resolves to. NOT zero, which is what this used to do
-# while two comments and a test name all claimed it fell back to "the free tier". Zero renders as "AI
-# is not included on your plan", which is a lie to a tenant whose profile read merely blipped -- and
-# the exposure being defended against is five generations, about nine cents. The floor is the free
-# tier; a tenant is never worse off than a free one.
-FALLBACK_PLAN = "basic"
+# NOTHING here is the pricing. Allowances are DATA -- `ai_generations` on the plan row in PlatformPlansTable,
+# and `ai_trial_generations` / `ai_free_generations` on its CONFIG row -- so they can be edited from the Admin
+# Site without a deploy, the same way `entitlements` and `fee_tier` already are (docs/PLATFORM_PLANS.md).
+# Hardcoding them in Python would repeat the fee-table mistake exactly: code saying one thing while the
+# deployed table says another, and the table winning.
+#
+# The numbers below are FALLBACKS for when the data cannot be read -- a subscriber whose webhook has not run
+# yet, a config row that predates this field. They are not policy and must never be cited as the pricing.
+#
+# For the record, the ladder agreed with the author 2026-09-29: $19 -> 20, $39 -> 50, $69 -> 100, trial -> 3.
+# It replaced a flat 50, which at ~$0.105/generation gives away 27%+ of a $19 subscription at the model layer
+# alone. Prod holds exactly one paid plan today (`PLAN#premium`, $19), so the upper rungs are numbers waiting
+# for plan rows, not code waiting to be written.
+DEFAULT_PLAN_ALLOWANCE = 20      # lowest paid rung: a paying tenant is never left with nothing
+DEFAULT_TRIAL_ALLOWANCE = 3
+DEFAULT_FREE_ALLOWANCE = 0
+
+# The trial's counter is a LIFETIME one, so it does not live in a calendar period. `period_key` is the month,
+# and a trial starting 25 September spans two of them -- handing out the allowance twice.
+TRIAL_PERIOD = "trial"
+
 # A tenant on their own key still gets a ceiling -- not to ration their spend, which is theirs, but
 # because a generation loop hammering their provider looks like our outage and costs them real money.
 BYOK_CEILING = 200
@@ -58,19 +59,70 @@ def period_key(at: int | None = None) -> str:
     return f"{stamp.tm_year:04d}-{stamp.tm_mon:02d}"
 
 
-def allowance_for(*, plan_key: str = "", provider: str = "", exempt: bool = False) -> int:
-    """How many generations this tenant may run this period. `UNLIMITED` (-1) means uncapped."""
-    if exempt:
-        return UNLIMITED
-    provider = str(provider or "").strip().lower()
-    if not provider:
+def is_live_trial(tenant: dict[str, Any] | None, now: int | None = None) -> bool:
+    """An unsubscribed platform trial that has not run out. Mirrors `entitlements.tenant_capabilities`."""
+    from stripe_link.domain.billing_status import is_trial_expired
+
+    profile = tenant or {}
+    # An EMPTY profile is not a trial. `_profile()` returns {} when the read fails, and defaulting an absent
+    # billing_status to "trial" (which is right elsewhere) would turn an unreadable tenant into three free
+    # platform-paid generations -- an open tap on exactly the path that must fail closed.
+    if not profile:
+        return False
+    if profile.get("stripe_subscription_id"):
+        return False
+    if str(profile.get("billing_status") or "trial") != "trial":
+        return False
+    return not is_trial_expired(profile, now)
+
+
+def entitlement_for(tenant: dict[str, Any] | None, *, provider: str = "", now: int | None = None,
+                    trial_allowance: int | None = None,
+                    free_allowance: int | None = None) -> dict[str, Any]:
+    """What this tenant may spend, and which counter it comes out of.
+
+    Returns `{"allowance", "period", "source"}`. Pure: the numbers arrive as arguments or off the tenant, so
+    this never reads a table. The PERIOD is part of the answer rather than something the caller derives,
+    because the trial's counter is a lifetime one and a caller reaching for `period_key()` out of habit would
+    hand a trial tenant a fresh three every calendar month.
+
+    A subscriber's allowance comes from `tenant.ai_generations`, denormalized off the plan row by the billing
+    webhook exactly as `entitlements` and `tier_id` are. It is deliberately NOT keyed on `tier_id`: that is
+    the transaction-FEE tier, which every paid plan shares, so a 20/50/100 ladder keyed there would collapse
+    to one number the moment a second paid plan existed.
+    """
+    profile = tenant or {}
+    monthly = period_key(now)
+    if profile.get("billing_exempt"):
+        return {"allowance": UNLIMITED, "period": monthly, "source": "exempt"}
+
+    key = str(provider or "").strip().lower()
+    if not key:
         # NOTHING configured is not the same as "not Bedrock". Reading the absence as BYOK handed every
         # tenant who had never opened the screen a 200-generation ceiling.
-        return 0
-    if provider != "bedrock":
-        return BYOK_CEILING  # their key, their bill -- a safety ceiling, not a ration
-    key = str(plan_key or "").strip().lower()
-    return int(PLATFORM_PAID_ALLOWANCE.get(key, PLATFORM_PAID_ALLOWANCE[FALLBACK_PLAN]))
+        return {"allowance": 0, "period": monthly, "source": "unconfigured"}
+    if key != "bedrock":
+        return {"allowance": BYOK_CEILING, "period": monthly, "source": "byok"}
+
+    if is_live_trial(profile, now):
+        allowance = DEFAULT_TRIAL_ALLOWANCE if trial_allowance is None else int(trial_allowance)
+        return {"allowance": allowance, "period": TRIAL_PERIOD, "source": "trial"}
+    if profile.get("stripe_subscription_id"):
+        # Off the tenant, put there by the webhook from the plan row. Absent means the webhook has not run
+        # for this subscriber yet -- they are PAYING, so they get the lowest rung rather than nothing.
+        return {"allowance": _int_or(profile.get("ai_generations"), DEFAULT_PLAN_ALLOWANCE),
+                "period": monthly, "source": "plan"}
+    # Free tier, or a trial that has run out. No platform-paid generations; their own key still works.
+    allowance = DEFAULT_FREE_ALLOWANCE if free_allowance is None else int(free_allowance)
+    return {"allowance": allowance, "period": monthly, "source": "free"}
+
+
+def _int_or(value: Any, fallback: int) -> int:
+    """DynamoDB hands numbers back as Decimal, so coerce numerically rather than by isinstance."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
 
 
 def remaining(used: int, allowance: int) -> int:
@@ -79,7 +131,7 @@ def remaining(used: int, allowance: int) -> int:
     return max(0, int(allowance) - int(used or 0))
 
 
-def may_generate(used: int, allowance: int) -> tuple[bool, str]:
+def may_generate(used: int, allowance: int, source: str = "") -> tuple[bool, str]:
     """May this tenant run one more? Returns (allowed, reason-if-not).
 
     The refusal text is the tenant's, not a log line: it says what ran out and what to do, because the
@@ -91,6 +143,10 @@ def may_generate(used: int, allowance: int) -> tuple[bool, str]:
         return False, ("AI generation is not included on your plan. Upgrade, or connect your own AI "
                        "provider key to use your own account.")
     if int(used or 0) >= int(allowance):
+        if source == "trial":
+            # No reset date to offer, because there isn't one -- the trial allowance is a lifetime count.
+            return False, (f"You have used all {int(allowance)} AI generations included with your trial. "
+                           f"Upgrade to keep using AI Builder, or connect your own AI provider key.")
         return False, (f"You have used all {int(allowance)} AI generations included this month. They "
                        f"reset on the 1st, or you can connect your own AI provider key.")
     return True, ""

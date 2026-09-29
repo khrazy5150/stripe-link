@@ -66,7 +66,10 @@ class AiConfigTests(unittest.TestCase):
     def setUp(self):
         self.config = FakeKeyed()
         self.usage = FakeUsage()
-        self.profiles = FakeProfiles(tier_id="premium")
+        # A paying subscriber: the allowance rides on the profile now, denormalized off the plan row, not
+        # derived from tier_id (which is the transaction-FEE tier that every paid plan shares).
+        self.profiles = FakeProfiles(billing_status="active", stripe_subscription_id="sub_1",
+                                     billing_plan_key="premium", ai_generations=20)
         self.calls = []
         self.cipher = FakeCipher()
 
@@ -107,19 +110,21 @@ class AiConfigTests(unittest.TestCase):
         self.call("POST", {"provider": "bedrock", "model": "sonnet-4.6"})
         usage = json.loads(self.call("GET")["body"])["usage"]
         self.assertEqual(usage["billed_to"], "platform")
-        self.assertEqual(usage["allowance"], 50)
+        self.assertEqual(usage["allowance"], 20, "whatever the PLAN row carried, not a number in code")
         self.assertEqual(usage["period"], "2026-09")
 
-    def test_an_unreadable_tenant_profile_falls_to_the_free_tier(self):
-        # The FREE TIER, which is what this test's name always claimed and what the code did not do:
-        # it resolved to zero, which renders as "AI is not included on your plan" -- a lie to a tenant
-        # whose profile read merely blipped. A tenant is never worse off than a free one.
+    def test_an_unreadable_tenant_profile_gets_the_free_tier_which_is_now_ZERO(self):
+        # Reversed 2026-09-29. This used to resolve to a small allowance on the grounds that zero "is a lie
+        # to a tenant whose profile read merely blipped". Once the free tier carries no AI, an unreadable
+        # profile is indistinguishable from a free one -- and guessing generously on the platform's Bedrock
+        # bill is an open tap on the path that must fail closed.
         class Broken:
             def get(self, tenant_id):
                 raise RuntimeError("dynamo is having a day")
         self.call("POST", {"provider": "bedrock", "model": "sonnet-4.6"})   # a provider IS configured
         usage = json.loads(self.call("GET", profiles=Broken())["body"])["usage"]
-        self.assertEqual(usage["allowance"], 5)
+        self.assertEqual(usage["allowance"], 0)
+        self.assertEqual(usage["source"], "free")
 
     def test_no_provider_configured_is_its_own_zero(self):
         # Distinct from an unknown PLAN: a tenant who has not turned AI on has no allowance because

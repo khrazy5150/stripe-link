@@ -41,7 +41,8 @@ plans reference test-mode Stripe prices and live plans reference live-mode price
   "highlight": true,                   // visually emphasized plan card
   "features": [],                      // optional display-only bullet strings for the plan card
   "fee_tier": "pro",                   // ⭐ the TRANSACTION-FEE tier this plan grants (see below)
-  "entitlements": { "...": true }      // ⭐ the FEATURES this plan unlocks (see below)
+  "entitlements": { "...": true },     // ⭐ the FEATURES this plan unlocks (see below)
+  "ai_generations": 20                 // ⭐ platform-paid AI generations per calendar month
 }
 ```
 
@@ -58,6 +59,45 @@ On subscribe, the billing webhook writes this value onto the tenant as `tier_id`
 
 On cancellation (`customer.subscription.deleted`, fired at period end), `tier_id` reverts to `basic`
 automatically — the tenant keeps premium fees until their paid-through date.
+
+### `ai_generations` — the AI allowance this plan grants
+
+Platform-paid AI generations per calendar month. Denormalized onto the tenant as `ai_generations` by the
+billing webhook, exactly like `entitlements` and `fee_tier`, so the generation path reads a number off the
+profile and never touches this table.
+
+**Deliberately NOT derived from `fee_tier`.** Every paid plan carries `fee_tier: "pro"` because they all earn
+premium transaction rates, so an allowance keyed there would give a $19 and a $69 plan the same number. The
+fee tier and the AI allowance are different axes that happen to coincide while only one paid plan exists.
+
+Agreed ladder (2026-09-29): **$19 → 20 · $39 → 50 · $69 → 100**, with the 14-day trial at 3. Only `premium`
+($19) exists today; the upper rungs are numbers waiting for plan rows. A missing field falls back to 20 — the
+lowest paid rung, so a subscriber whose webhook has not run is never left with nothing.
+
+On cancellation the webhook sets it to **0** alongside `entitlements: []` and `tier_id: basic`. Left behind,
+a canceled tenant would keep generating on the platform's Bedrock bill.
+
+**Revisit empirically, not by argument.** `ai_generation_events` records input tokens, output tokens and
+estimated cost for every generation. After 100–500 real ones, compute the P50/P75/P95 cost and set these
+numbers from measurement — at a P95 of $0.07 twenty generations is $1.40, and at $0.25 it is a different
+business.
+
+### CONFIG row — trial and free allowances
+
+A trial is not a plan, so its allowance lives on the `CONFIG` item rather than a `PLAN#` item:
+
+| field | meaning | default if absent |
+|---|---|---|
+| `ai_trial_generations` | **lifetime** allowance for a live 14-day trial | 3 |
+| `ai_free_generations` | allowance for the free tier / an expired trial | 0 |
+
+**Lifetime, not monthly.** The quota counter's period is the calendar month, and a trial starting 25 September
+spans two of them — a monthly trial allowance would be handed out twice. Trial usage is counted under the
+period key `"trial"`, which never rolls over because there is no next trial period.
+
+`ai_free_generations` is 0 today: the free tier's taste is the trial's job now, and a free tenant who wants
+more brings their own key, which costs the platform nothing. It is editable rather than hardcoded because that
+decision has already been reversed once.
 
 ### `entitlements` — what features this plan unlocks
 

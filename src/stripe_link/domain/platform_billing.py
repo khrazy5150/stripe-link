@@ -56,6 +56,40 @@ def default_platform_plan_key(mode: str, repository: Any | None = None) -> str |
     return cached_platform_billing(mode, repository)["config"].get("default_plan_key")
 
 
+# AI allowances live on the plan row and the CONFIG row so they are editable from the Admin Site without a
+# deploy, like every other plan field (docs/PLATFORM_PLANS.md). These constants are the fallback for a row
+# that predates the field -- never the pricing.
+DEFAULT_PLAN_AI_GENERATIONS = 20
+DEFAULT_TRIAL_AI_GENERATIONS = 3
+DEFAULT_FREE_AI_GENERATIONS = 0
+
+
+def _as_int(value: Any, fallback: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+
+
+def plan_ai_generations(plan: dict[str, Any] | None) -> int:
+    """The monthly AI allowance this plan grants. Denormalized onto the tenant by the billing webhook, the
+    same path `entitlements` and `fee_tier` take, so the generation path never reads this table."""
+    return _as_int((plan or {}).get("ai_generations"), DEFAULT_PLAN_AI_GENERATIONS)
+
+
+def trial_ai_generations(mode: str, repository: Any | None = None) -> int:
+    """The LIFETIME allowance a 14-day trial carries. Not a plan field: a trial is not a plan."""
+    config = cached_platform_billing(mode, repository)["config"]
+    return _as_int(config.get("ai_trial_generations"), DEFAULT_TRIAL_AI_GENERATIONS)
+
+
+def free_ai_generations(mode: str, repository: Any | None = None) -> int:
+    """What the free tier gets. Zero today — the taste is the trial's job — but editable rather than assumed,
+    because that decision has already been reversed once."""
+    config = cached_platform_billing(mode, repository)["config"]
+    return _as_int(config.get("ai_free_generations"), DEFAULT_FREE_AI_GENERATIONS)
+
+
 def platform_promo(mode: str, promo_code: str, repository: Any | None = None) -> dict[str, Any] | None:
     """A special-link promotion (a trial override and/or a Stripe discount). Read FRESH (not cached) so expiry and
     redemption limits are current; subscribe is low-frequency. See plans/SAAS_BILLING_PAYWALL.md."""

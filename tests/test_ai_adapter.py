@@ -14,7 +14,7 @@ from stripe_link.domain.ai_models import (allows_page_generation, cache_checkpoi
                                           default_model, estimate_cost, model, model_names, profile_id)
 from stripe_link.domain.ai_provider import (AiConfigError, config_record, is_verified, needs_key,
                                             pays_platform, redacted, validate)
-from stripe_link.domain.ai_quota import (BYOK_CEILING, UNLIMITED, allowance_for, may_generate,
+from stripe_link.domain.ai_quota import (BYOK_CEILING, UNLIMITED, entitlement_for, may_generate,
                                          period_key, remaining, usage_record)
 
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["sections"],
@@ -243,45 +243,86 @@ class ProviderConfigTests(unittest.TestCase):
 
 
 class QuotaTests(unittest.TestCase):
+    """The allowance is DATA, and these tests exist to keep it that way.
+
+    Nothing here asserts a price. The numbers live on the plan row (`ai_generations`) and the CONFIG row
+    (`ai_trial_generations` / `ai_free_generations`) in PlatformPlansTable so the Admin Site can edit them
+    without a deploy -- the same path `entitlements` and `fee_tier` already take. A test asserting "premium
+    means 20" would quietly become the pricing, which is how the fee table ended up disagreeing with itself.
+    """
+
     def test_the_period_is_a_calendar_month(self):
         self.assertEqual(period_key(1790000000), "2026-09")
 
-    def test_a_platform_paid_tenant_gets_their_plans_bundle(self):
-        self.assertEqual(allowance_for(plan_key="premium", provider="bedrock"), 50)
+    def test_a_subscriber_gets_the_allowance_the_PLAN_carried(self):
+        # Off the tenant, put there by the billing webhook from the plan row. Whatever the Admin Site set.
+        tenant = {"stripe_subscription_id": "sub_1", "billing_plan_key": "premium", "ai_generations": 37}
+        entitlement = entitlement_for(tenant, provider="bedrock")
+        self.assertEqual(entitlement["allowance"], 37)
+        self.assertEqual(entitlement["source"], "plan")
 
-    def test_the_free_tier_gets_a_small_real_allowance(self):
-        # Revised 2026-09-27 from zero. The old zero assumed free tenants would bring their own key,
-        # which died on discovering BYOK needs a separate vendor account funded with non-refundable,
-        # one-year-expiry credits. Five generations costs ~9 cents and is enough to see the feature
-        # work, which is the entire job of an acquisition feature.
-        self.assertEqual(allowance_for(plan_key="basic", provider="bedrock"), 5)
-        self.assertTrue(may_generate(0, allowance_for(plan_key="basic", provider="bedrock"))[0])
+    def test_the_allowance_is_not_keyed_on_the_fee_tier(self):
+        # The bug this replaced. `tier_id` is the TRANSACTION-FEE tier and every paid plan carries "pro", so
+        # an allowance keyed there gives a $19 and a $69 plan the same number. Two subscribers on the same
+        # fee tier must be able to hold different allowances.
+        cheap = {"stripe_subscription_id": "s", "tier_id": "pro", "ai_generations": 20}
+        dear = {"stripe_subscription_id": "s", "tier_id": "pro", "ai_generations": 100}
+        self.assertNotEqual(entitlement_for(cheap, provider="bedrock")["allowance"],
+                            entitlement_for(dear, provider="bedrock")["allowance"])
 
-    def test_an_unknown_plan_resolves_to_the_free_tier_not_to_nothing(self):
-        self.assertEqual(allowance_for(plan_key="", provider="bedrock"), 5)
-        self.assertEqual(allowance_for(plan_key="some-future-plan", provider="bedrock"), 5)
+    def test_a_paying_tenant_whose_webhook_has_not_run_still_gets_something(self):
+        # They are paying. The missing denormalization is our failure, and the exposure is the lowest rung.
+        entitlement = entitlement_for({"stripe_subscription_id": "sub_1"}, provider="bedrock")
+        self.assertGreater(entitlement["allowance"], 0)
 
-    def test_the_free_allowance_is_far_smaller_than_the_paid_one(self):
-        free = allowance_for(plan_key="basic", provider="bedrock")
-        paid = allowance_for(plan_key="premium", provider="bedrock")
-        self.assertLess(free, paid)
-        self.assertGreater(paid, 0)
+    def test_a_live_trial_draws_on_a_LIFETIME_counter(self):
+        # Not a calendar period: a trial starting 25 September spans two months and would otherwise be
+        # handed its allowance twice.
+        trial = {"billing_status": "trial", "trial_ends_at": 1790000000}
+        entitlement = entitlement_for(trial, provider="bedrock", now=1789000000, trial_allowance=3)
+        self.assertEqual(entitlement["allowance"], 3)
+        self.assertEqual(entitlement["period"], "trial")
+        self.assertEqual(entitlement["source"], "trial")
+
+    def test_an_expired_trial_falls_to_the_free_tier(self):
+        trial = {"billing_status": "trial", "trial_ends_at": 1789000000}
+        entitlement = entitlement_for(trial, provider="bedrock", now=1790000000, free_allowance=0)
+        self.assertEqual(entitlement["allowance"], 0)
+        self.assertEqual(entitlement["source"], "free")
+
+    def test_the_free_tier_is_refused_with_a_reason_a_tenant_can_act_on(self):
+        entitlement = entitlement_for({}, provider="bedrock", free_allowance=0)
+        allowed, why = may_generate(0, entitlement["allowance"], entitlement["source"])
+        self.assertFalse(allowed)
+        self.assertIn("not included on your plan", why)
+
+    def test_an_exhausted_trial_is_not_told_to_wait_for_a_reset(self):
+        # There is no reset. Saying "they reset on the 1st" to a trial tenant is simply false.
+        _, why = may_generate(3, 3, "trial")
+        self.assertIn("trial", why)
+        self.assertNotIn("reset on the 1st", why)
+
+    def test_an_unconfigured_provider_gets_nothing(self):
+        # Absence is not "not Bedrock": reading it as BYOK handed every tenant a 200-generation ceiling.
+        self.assertEqual(entitlement_for({}, provider="")["allowance"], 0)
 
     def test_a_byok_tenant_on_any_plan_still_gets_the_safety_ceiling(self):
         # Their key, their bill -- the ceiling exists so a runaway loop cannot quietly spend their
         # money, not to ration them.
-        self.assertEqual(allowance_for(plan_key="basic", provider="anthropic"), BYOK_CEILING)
-        allowed, _ = may_generate(0, allowance_for(plan_key="basic", provider="anthropic"))
+        self.assertEqual(entitlement_for({}, provider="anthropic")["allowance"], BYOK_CEILING)
+        allowed, _ = may_generate(0, entitlement_for({}, provider="anthropic")["allowance"])
         self.assertTrue(allowed)
 
     def test_a_tenant_with_no_provider_configured_gets_nothing(self):
         # "Not bedrock" is not the same as "BYOK": reading the absence as BYOK granted every tenant who
         # had never opened the screen a 200-generation ceiling.
-        self.assertEqual(allowance_for(plan_key="premium", provider=""), 0)
-        self.assertFalse(may_generate(0, allowance_for(plan_key="premium", provider=""))[0])
+        self.assertEqual(entitlement_for({"stripe_subscription_id": "s"}, provider="")["allowance"], 0)
+        self.assertFalse(
+            may_generate(0, entitlement_for({"stripe_subscription_id": "s"}, provider="")["allowance"])[0])
 
     def test_an_exempt_tenant_is_uncapped(self):
-        self.assertEqual(allowance_for(plan_key="basic", provider="bedrock", exempt=True), UNLIMITED)
+        self.assertEqual(
+            entitlement_for({"billing_exempt": True}, provider="bedrock")["allowance"], UNLIMITED)
         self.assertTrue(may_generate(10_000, UNLIMITED)[0])
         self.assertEqual(remaining(10_000, UNLIMITED), UNLIMITED)
 

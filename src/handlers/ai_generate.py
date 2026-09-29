@@ -50,7 +50,7 @@ from stripe_link.domain.ai_provision import (needs_service_handoff, new_id, offe
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
-from stripe_link.domain.ai_quota import allowance_for, may_generate, period_key
+from stripe_link.domain.ai_quota import entitlement_for, may_generate
 from stripe_link.domain.ai_resolvers import resolve_preset, resolve_sections, resolution_log
 from stripe_link.domain.ai_schema import describe_vocabulary, page_sections_schema
 from stripe_link.domain.documents import (DocumentValidationError, validate_offer_document,
@@ -135,9 +135,15 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         return error_response("Turn on AI in Settings before generating a page.", code="ai_not_configured")
     model = str(config.get("model") or default_model())
 
-    period = period_key(now)
-    plan_key, exempt = _plan(tenant_id, tenant_repo)
-    allowance = allowance_for(plan_key=plan_key, provider=str(config.get("provider")), exempt=exempt)
+    # The tenant decides BOTH numbers -- how many, and which counter. The period is returned rather than
+    # derived, because a trial's counter is a LIFETIME one and reaching for period_key() out of habit would
+    # hand a trial tenant a fresh three every calendar month (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8).
+    profile = _profile(tenant_id, tenant_repo)
+    entitlement = entitlement_for(profile, provider=str(config.get("provider")), now=now,
+                                  **_configured_allowances())
+    allowance, period = entitlement["allowance"], entitlement["period"]
+    plan_key = str(profile.get("billing_plan_key") or "")
+    exempt = bool(profile.get("billing_exempt"))
     # The WRITE decides, not a read before it. Checking `used` and then incrementing is two round trips with
     # a window between them: two requests at `used=2` of an allowance of 3 both passed the check and both
     # incremented, producing four generations -- under a comment asserting that could not happen. The
@@ -149,7 +155,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     if not taken["allowed"]:
         # `may_generate` still writes the refusal, because the message a tenant reads is its job: it
         # distinguishes "not included on your plan" from "you have used this month's".
-        _, why_not = may_generate(taken["used"], allowance)
+        _, why_not = may_generate(taken["used"], allowance, entitlement["source"])
         return error_response(
             why_not or "You have used your AI generations.", status_code=429, code="quota_exhausted")
     used = taken["used"] - 1  # what was already spent BEFORE this one, for the job record below
@@ -161,7 +167,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     generation_id = new_id("gen", pick)
     event_row = events.started(
         generation_id=generation_id, tenant_id=tenant_id, job_id="", created_at=now,
-        source=events.source_for(provider=str(config.get("provider")), plan_key=plan_key, exempt=exempt),
+        source=entitlement["source"],
         model=model, provider=str(config.get("provider")), brief=brief, stripe_mode=mode, period=period)
 
     job = {
@@ -201,12 +207,34 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     return json_response({"job": _public(job)}, status_code=202)
 
 
-def _plan(tenant_id, tenant_repo):
+def _configured_allowances():
+    """Trial and free allowances from the CONFIG row, so the Admin Site can change them without a deploy.
+
+    Best-effort: an unreadable config falls back to the constants in `ai_quota`, which are documented as
+    fallbacks and not as the pricing. Failing a generation because a settings row could not be read would be
+    the wrong trade -- the numbers are small and bounded either way.
+    """
     try:
-        profile = (tenant_repo or tenant_profiles_repository()).get(tenant_id) or {}
-    except Exception:  # noqa: BLE001 - a missing profile is the FREE tier, never an open tap
-        return "", False
-    return str(profile.get("tier_id") or profile.get("billing_plan_key") or ""), bool(profile.get("billing_exempt"))
+        from stripe_link.domain.platform_billing import (free_ai_generations, platform_billing_mode,
+                                                         trial_ai_generations)
+
+        mode = platform_billing_mode()
+        return {"trial_allowance": trial_ai_generations(mode), "free_allowance": free_ai_generations(mode)}
+    except Exception:  # noqa: BLE001 - see docstring
+        return {}
+
+
+def _profile(tenant_id, tenant_repo):
+    """The tenant profile the entitlement is read from. An unreadable one is the FREE tier, never an open tap.
+
+    Returns the whole profile rather than a plan key, because the allowance now depends on the SUBSCRIPTION
+    (plan key, trial state, exemption) rather than on `tier_id` -- which is the transaction-FEE tier, a
+    different axis that every paid plan shares.
+    """
+    try:
+        return (tenant_repo or tenant_profiles_repository()).get(tenant_id) or {}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _record_event(events_repo, event_row):

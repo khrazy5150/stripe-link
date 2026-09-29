@@ -19,7 +19,7 @@ from stripe_link.common import error_response, json_response, parse_json_body, t
 from stripe_link.domain.ai_models import default_model, model, model_names, profile_id
 from stripe_link.domain.ai_provider import (AiConfigError, config_record, is_verified, needs_key,
                                             pays_platform, redacted, validate)
-from stripe_link.domain.ai_quota import allowance_for, may_generate, period_key, remaining
+from stripe_link.domain.ai_quota import entitlement_for, may_generate, remaining
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (RepositoryError, ai_provider_config_repository,
                                                 ai_usage_repository, tenant_profiles_repository)
@@ -65,26 +65,41 @@ def handler(event, context, *, config_repo=None, usage_repo=None, tenant_repo=No
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def _plan_key(tenant_id: str, tenant_repo) -> tuple[str, bool]:
+def _configured_allowances():
+    """Trial/free allowances from the CONFIG row — the same source the generator reads, so the settings
+    screen can never quote a number the generator will not honour."""
+    try:
+        from stripe_link.domain.platform_billing import (free_ai_generations, platform_billing_mode,
+                                                         trial_ai_generations)
+
+        mode = platform_billing_mode()
+        return {"trial_allowance": trial_ai_generations(mode), "free_allowance": free_ai_generations(mode)}
+    except Exception:  # noqa: BLE001 - a settings row must not break the settings screen
+        return {}
+
+
+def _profile(tenant_id: str, tenant_repo) -> dict:
     """The tenant's plan and exemption. Unreadable profile means the FREE tier, never an open tap."""
     try:
-        profile = (tenant_repo or tenant_profiles_repository()).get(tenant_id) or {}
+        return (tenant_repo or tenant_profiles_repository()).get(tenant_id) or {}
     except Exception:  # noqa: BLE001 - a missing profile must not hand out platform-paid inference
-        return "", False
-    return str(profile.get("tier_id") or profile.get("billing_plan_key") or ""), bool(profile.get("billing_exempt"))
+        return {}
 
 
 def _usage_block(tenant_id, config, usage_repo, tenant_repo, now):
-    plan_key, exempt = _plan_key(tenant_id, tenant_repo)
     provider = str((config or {}).get("provider") or "")
-    allowance = allowance_for(plan_key=plan_key, provider=provider, exempt=exempt)
-    period = period_key(now)
+    # The screen must read the SAME counter the generator will spend from, period included: showing a trial
+    # tenant a monthly period here while the generator spends from the lifetime one would put two different
+    # numbers in front of the same person.
+    entitlement = entitlement_for(_profile(tenant_id, tenant_repo), provider=provider, now=now,
+                                  **_configured_allowances())
+    allowance, period = entitlement["allowance"], entitlement["period"]
     try:
         used = usage_repo.used(tenant_id, period)
     except Exception:  # noqa: BLE001 - a counter read must not break the settings screen
         used = 0
-    allowed, reason = may_generate(used, allowance)
-    return {"period": period, "used": used, "allowance": allowance,
+    allowed, reason = may_generate(used, allowance, entitlement["source"])
+    return {"period": period, "used": used, "allowance": allowance, "source": entitlement["source"],
             "remaining": remaining(used, allowance), "can_generate": allowed, "reason": reason,
             # Who pays. The screen has to say this plainly -- "included" and "billed to your own key"
             # are different products and a tenant should never have to infer which one they are on.

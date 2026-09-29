@@ -87,6 +87,13 @@ class FakeProfiles:
         return dict(self.p) if self.p else None
 
 
+def subscriber(allowance=20, **extra):
+    """A paying tenant. The allowance rides on the PROFILE, denormalized off the plan row by the billing
+    webhook -- it is not derived from tier_id, which is the transaction-fee tier every paid plan shares."""
+    return FakeProfiles(billing_status="active", stripe_subscription_id="sub_1",
+                        billing_plan_key="premium", ai_generations=allowance, **extra)
+
+
 def ok_generator(**kwargs):
     return {"value": {"sections": SECTIONS}, "usage": {"input": 2000, "output": 700, "cache_read": 0},
             "model": kwargs.get("model"), "repairs": 0, "stop_reason": "end_turn"}
@@ -128,7 +135,7 @@ class RegenerateTests(unittest.TestCase):
         self.jobs = FakeJobs()
         kwargs = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
                       config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
-                      usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
+                      usage_repo=self.usage, tenant_repo=subscriber(),
                       jobs_repo=self.jobs, generator=ok_generator, events_repo=FakeEvents(),
                       now_fn=lambda: 1790500000, randomiser=lambda a: a[0])
         return run_to_completion(
@@ -206,7 +213,7 @@ class GenerateTests(unittest.TestCase):
         self.usage = FakeUsage()
         self.jobs = FakeJobs()
         self.config = FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6", "verified_at": 1})
-        self.profiles = FakeProfiles(tier_id="premium")
+        self.profiles = subscriber()
         self.events = FakeEvents()
         self.seen = []
 
@@ -379,10 +386,29 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(json.loads(response["body"])["error"], "quota_unavailable")
         self.assertEqual(self.seen, [])
 
-    def test_a_missing_tenant_profile_falls_to_the_free_allowance(self):
+    def test_a_missing_tenant_profile_gets_NOTHING(self):
+        # Reversed 2026-09-29. It used to fall to a small free allowance, on the theory that zero "is a lie
+        # to a tenant whose profile read merely blipped". That theory does not survive the free tier losing
+        # AI: an unreadable profile now looks exactly like a free tenant, and guessing generously on the
+        # platform's Bedrock bill is an open tap on the one path that must fail closed.
         response = self.call(profiles=FakeProfiles())      # no profile at all
-        self.assertEqual(response["statusCode"], 201)      # free tier still gets a few
-        self.assertEqual(self.usage.consumed, 1)
+        self.assertEqual(response["statusCode"], 429)
+        self.assertEqual(json.loads(response["body"])["error"], "quota_exhausted")
+        self.assertEqual(self.usage.consumed, 0)
+
+    def test_a_live_trial_may_generate_without_a_subscription(self):
+        # The acquisition path: every signup starts here, and the trial is what carries the taste now that
+        # the free tier carries none.
+        trial = FakeProfiles(billing_status="trial", trial_ends_at=1790600000)
+        response = self.call(profiles=trial)
+        self.assertEqual(response["statusCode"], 201)
+
+    def test_a_trial_spends_from_the_LIFETIME_counter(self):
+        trial = FakeProfiles(billing_status="trial", trial_ends_at=1790600000)
+        self.call(profiles=trial)
+        period = [row["period"] for row in self.jobs.rows.values()][-1]
+        self.assertEqual(period, "trial",
+                         "a calendar period would hand a trial its allowance again next month")
 
     # ---- refusals ------------------------------------------------------------------------------
     def test_an_invalid_brief_costs_nothing(self):
@@ -435,7 +461,7 @@ class JobTests(unittest.TestCase):
     def kwargs(self, **over):
         base = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
                     config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
-                    usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
+                    usage_repo=self.usage, tenant_repo=subscriber(),
                     jobs_repo=self.jobs, generator=ok_generator, now_fn=lambda: 1790500000,
                     randomiser=lambda a: a[0])
         base.update(over)
@@ -652,7 +678,7 @@ class GenerationLedgerTests(GenerateTests):
         # "Why was this tenant charged a generation?" has to be answerable by following one identifier.
         self.call()
         row = self.events.rows[0]
-        job = self.jobs.saved[-1] if hasattr(self.jobs, "saved") else None
+        job = ([row for row in self.jobs.rows.values()] or [None])[-1]
         self.assertTrue(row["job_id"], "the ledger references the job it came from")
         if job:
             self.assertEqual(job.get("generation_id"), row["generation_id"])

@@ -2,6 +2,7 @@ import time
 from typing import Any, Callable
 
 from stripe_link.domain.entitlements import plan_entitlements
+from stripe_link.domain.platform_billing import plan_ai_generations
 from stripe_link.domain.fees import normalize_tier_id
 from stripe_link.domain.platform_billing import billing_status_from_stripe, platform_plan
 
@@ -98,6 +99,9 @@ def reconcile_platform_subscription_event(
             updates["billing_status"] = "canceled"
             updates["entitlements"] = []
             updates["tier_id"] = "basic"
+            # Drop the paid allowance with the rest of the plan. Left behind, a canceled tenant would keep
+            # generating on the platform's Bedrock bill indefinitely.
+            updates["ai_generations"] = 0
             updates["cancel_at_period_end"] = False  # the pending cancel has now happened
         else:
             updates["cancel_at_period_end"] = bool(obj.get("cancel_at_period_end"))
@@ -112,6 +116,11 @@ def reconcile_platform_subscription_event(
                 # premium plans carry fee_tier "pro" (2%/0%); default to pro so a plan row without the field still
                 # grants the premium fee a subscriber is paying for.
                 updates["tier_id"] = normalize_tier_id((plan or {}).get("fee_tier") or "pro")
+                # The AI allowance travels the same way, and for the same reason: the generation path reads a
+                # number off the profile rather than the plans table. Deliberately NOT derived from tier_id --
+                # that is the FEE tier, which every paid plan shares, so an allowance keyed there would give
+                # a $19 and a $69 plan the same number (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8).
+                updates["ai_generations"] = plan_ai_generations(plan)
         current_period_end = obj.get("current_period_end")
         if isinstance(current_period_end, int):
             updates["current_period_end"] = current_period_end
