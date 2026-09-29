@@ -48,18 +48,30 @@ def _site_allowed_origins(site):
 
 
 def _redirect_base(site, origin_host):
-    """The host to keep the funnel on. Prefer the buyer's own origin (a funnel entered on the platform host stays
-    there; one entered on the custom domain stays there) — but ONLY when it's a legitimate Site origin, so a
-    forged `origin` can't open-redirect the buyer off-Site. Falls back to the verified custom domain, then to ""
-    (interim artifact URL)."""
+    """The host to keep the funnel on, after payment.
+
+    Prefer the buyer's own origin -- a funnel entered on the platform host stays there, one entered on the
+    custom domain stays there -- but ONLY when it is a legitimate Site origin, so a forged `origin` cannot
+    open-redirect the buyer off-Site.
+
+    The fallback order then walks `_site_allowed_origins`, which already knows every host this Site is
+    legitimately served from. It used to check the verified custom domain alone and return "" otherwise,
+    which sent the buyer to the raw artifact URL. Measured 2026-09-28: NO site in dev or prod has a
+    custom domain and none is verified, while ten have a working platform hostname -- so that branch had
+    never once been taken and every post-purchase redirect on the platform was landing on the artifact.
+    The data to route them properly was already on the record and simply not read.
+
+    This matters beyond tidiness. Closing the artifact route (plans/ARTIFACT_ACCESS_BOUNDARY.md) breaks
+    post-purchase wherever this still falls through, and the TODO expected that to be "the newest
+    tenants who have not set up a domain yet". It is everyone.
+    """
     origin_host = str(origin_host or "").strip().rstrip("/")
     allowed = _site_allowed_origins(site)
     if origin_host and origin_host in allowed:
         return origin_host
-    custom_domain = str(((site or {}).get("hosting") or {}).get("custom_domain") or "")
-    if site_domain_verified(site) and custom_domain:
-        return f"https://{custom_domain}"
-    return ""
+    # First legitimate origin, in the order _site_allowed_origins lists them: verified custom domain,
+    # then the free platform host. One source for "where may this Site be served", not two.
+    return allowed[0] if allowed else ""
 
 
 def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None, mode="live"):

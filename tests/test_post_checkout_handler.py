@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+from handlers import post_checkout
 from handlers.post_checkout import handler
 from tests.fakes import FakeDocumentRepository
 
@@ -462,11 +463,98 @@ class PostCheckoutOriginAwareTests(unittest.TestCase):
         self.assertEqual(location.netloc, "bean-co.jbay.uk")
         self.assertEqual(location.path, "/upsell")
 
-    def test_platform_only_site_forged_origin_falls_back_to_interim_artifact(self):
-        # No verified custom domain to fall back to → the interim platform artifact URL (never the forged host).
+    def test_platform_only_site_forged_origin_falls_back_to_the_platform_host(self):
+        """A forged origin is refused; the buyer lands on the Site's OWN platform host.
+
+        This used to assert the interim artifact URL -- and "interim" was the giveaway. A platform-only
+        Site has a perfectly good governed host, and sending a paying buyer to the raw CloudFront
+        artifact instead was the fallthrough that blocks closing that route at all
+        (plans/ARTIFACT_ACCESS_BOUNDARY.md). Changed deliberately 2026-09-28.
+        """
         location = self._call(origin="https://evil.example.com", site=self._site(custom=False))
-        self.assertEqual(location.netloc, "pages.example.com")
-        self.assertEqual(location.path, "/page_entry__upsell_1/index.html")
+        self.assertNotEqual(location.netloc, "evil.example.com")
+        self.assertEqual(location.netloc, "bean-co.jbay.uk")
+        self.assertEqual(location.path, "/upsell")
+
+
+class RedirectBaseTests(unittest.TestCase):
+    """Where a paying buyer is sent after checkout.
+
+    `_redirect_base` used to check the verified custom domain alone and return "" otherwise, which
+    sent the buyer to the raw CloudFront artifact URL. Measured 2026-09-28: NO site in dev or prod has
+    a custom domain and none is verified, while ten have a working platform hostname -- so that branch
+    had never once been taken and every post-purchase redirect on the platform was landing on the
+    artifact, with the data to route it properly sitting unread on the record.
+
+    That is the prerequisite for closing the artifact route (plans/ARTIFACT_ACCESS_BOUNDARY.md). The
+    TODO expected the fallthrough to affect "the newest tenants who have not set up a domain yet". It
+    is everyone.
+    """
+
+    PLATFORM = "poliaxis-nutrition.jbay.uk"
+    CUSTOM = "shop.poliaxis.com"
+
+    def setUp(self):
+        self._flag = os.environ.get("PLATFORM_SERVING_ENABLED")
+        os.environ["PLATFORM_SERVING_ENABLED"] = "true"
+
+    def tearDown(self):
+        if self._flag is None:
+            os.environ.pop("PLATFORM_SERVING_ENABLED", None)
+        else:
+            os.environ["PLATFORM_SERVING_ENABLED"] = self._flag
+
+    def site(self, *, custom="", verified=False, platform=""):
+        hosting = {}
+        if custom:
+            hosting["custom_domain"] = custom
+            hosting["verification"] = {"verified": bool(verified)}
+        if platform:
+            hosting["platform_hostname"] = platform
+        return {"hosting": hosting}
+
+    def test_a_platform_host_is_used_instead_of_the_artifact_url(self):
+        # The shape every real site has today.
+        self.assertEqual(
+            post_checkout._redirect_base(self.site(platform=self.PLATFORM), None),
+            f"https://{self.PLATFORM}")
+
+    def test_a_verified_custom_domain_still_wins(self):
+        self.assertEqual(
+            post_checkout._redirect_base(
+                self.site(custom=self.CUSTOM, verified=True, platform=self.PLATFORM), None),
+            f"https://{self.CUSTOM}")
+
+    def test_an_unverified_custom_domain_is_not_trusted(self):
+        # Verification is what proves the tenant controls it; redirecting a paying buyer to an
+        # unverified domain would send them somewhere we cannot vouch for.
+        self.assertEqual(
+            post_checkout._redirect_base(
+                self.site(custom=self.CUSTOM, verified=False, platform=self.PLATFORM), None),
+            f"https://{self.PLATFORM}")
+
+    def test_the_buyer_stays_on_the_host_they_entered_on(self):
+        site = self.site(custom=self.CUSTOM, verified=True, platform=self.PLATFORM)
+        self.assertEqual(
+            post_checkout._redirect_base(site, f"https://{self.PLATFORM}"),
+            f"https://{self.PLATFORM}")
+
+    def test_a_forged_origin_cannot_redirect_the_buyer_off_site(self):
+        # The open-redirect guard, and the reason this reads an allow-list rather than the header.
+        self.assertEqual(
+            post_checkout._redirect_base(self.site(platform=self.PLATFORM), "https://evil.example.com"),
+            f"https://{self.PLATFORM}")
+
+    def test_platform_serving_off_means_the_platform_host_is_not_a_redirect_target(self):
+        # It is not served, so sending a buyer there would be a dead end.
+        os.environ["PLATFORM_SERVING_ENABLED"] = "false"
+        self.assertEqual(post_checkout._redirect_base(self.site(platform=self.PLATFORM), None), "")
+
+    def test_a_site_with_nowhere_to_serve_still_returns_nothing(self):
+        # The genuine remainder, and what the artifact-route work has to answer before it can deny.
+        for site in (None, {}, {"hosting": {}}):
+            with self.subTest(site=site):
+                self.assertEqual(post_checkout._redirect_base(site, None), "")
 
 
 if __name__ == "__main__":
