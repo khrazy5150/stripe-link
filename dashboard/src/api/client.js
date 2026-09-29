@@ -178,31 +178,57 @@ export function getClientId() {
 }
 
 export function getAuthSession() {
-  const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+  // The session lives in localStorage, NOT sessionStorage (moved 2026-09-28).
+  //
+  // sessionStorage is per-tab and dies with the tab, so a reopened dashboard had a tenant id (localStorage)
+  // and no token -- and because `Authorization` was attached conditionally, it cheerfully issued tenant-scoped
+  // requests with no credentials, which the API answered 200. That is measurable in the logs: nine such calls
+  // across eight screens inside 3.7 seconds, one per page load (plans/API_AUTHENTICATION.md). The moment the
+  // Cognito authorizer lands those become 401 on every screen, so the two halves of the identity have to
+  // live in the same place and last as long as each other.
+  let raw = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!raw) {
+    // Carry a signed-in user across the change instead of logging everyone out on deploy.
+    const legacy = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (legacy) {
+      localStorage.setItem(SESSION_STORAGE_KEY, legacy);
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      raw = legacy;
+    }
+  }
   if (!raw) return null;
   try {
     return JSON.parse(raw);
   } catch {
-    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    localStorage.removeItem(SESSION_STORAGE_KEY);
     return null;
   }
 }
 
 export function setAuthSession(session) {
   if (!session) {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     return;
   }
-  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
   if (session.tenant_id || session.client_id) setTenantId(session.tenant_id || session.client_id);
 }
 
 export function clearAuthSession() {
-  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  localStorage.removeItem(SESSION_STORAGE_KEY);
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);  // the pre-2026-09-28 location
   localStorage.removeItem(TENANT_ID_STORAGE_KEY);
 }
 
-export async function apiRequest(path, { method = "GET", body, params = {}, mode, raw = false } = {}) {
+export class UnauthenticatedError extends Error {
+  constructor() {
+    super("Your session has ended. Please sign in again.");
+    this.name = "UnauthenticatedError";
+  }
+}
+
+export async function apiRequest(path, { method = "GET", body, params = {}, mode, raw = false, anonymous = false } = {}) {
   // Backend base is hostname-derived (release channel). `mode` (test/live) is a DATA filter sent as ?mode=;
   // pass an explicit `mode` to target the OTHER Stripe mode on the same backend (cross-mode copy).
   const base = getApiBase();
@@ -212,6 +238,17 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
   const session = getAuthSession();
+
+  // Fail CLOSED, the same way the server's route table does (stripe_link/api_auth.py): a caller that cannot
+  // name itself does not get to send a tenant-scoped request. Without this the client did something worse
+  // than going unauthenticated -- `getTenantId()` falls back to localStorage and then to a hardcoded
+  // "tenant_demo", so a token-less dashboard CLAIMED a specific tenant id. `anonymous` is the explicit opt-in
+  // for the handful of calls that legitimately precede a session (the /auth/* family), rather than the client
+  // keeping its own copy of the public-route list and letting it drift from the server's.
+  if (!anonymous && !session?.access_token) {
+    clearAuthSession();
+    throw new UnauthenticatedError();
+  }
 
   const response = await fetch(url, {
     method,

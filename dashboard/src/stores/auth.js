@@ -66,6 +66,7 @@ export const useAuthStore = defineStore("auth", {
         const body = await apiRequest("/auth/login", {
           method: "POST",
           body: this.loginForm,
+          anonymous: true,
         });
         this.setSession(body.session);
         this.message = "Signed in.";
@@ -77,6 +78,7 @@ export const useAuthStore = defineStore("auth", {
         const body = await apiRequest("/auth/register", {
           method: "POST",
           body: this.registerForm,
+          anonymous: true,
         });
         this.confirmForm.email = this.registerForm.email;
         this.loginForm.email = this.registerForm.email;
@@ -90,6 +92,7 @@ export const useAuthStore = defineStore("auth", {
         const body = await apiRequest("/auth/confirm", {
           method: "POST",
           body: this.confirmForm,
+          anonymous: true,
         });
         if (body.session) this.setSession(body.session);
         this.message = body.message || "Email confirmed. You can sign in now.";
@@ -102,6 +105,7 @@ export const useAuthStore = defineStore("auth", {
         const body = await apiRequest("/auth/forgot", {
           method: "POST",
           body: this.forgotForm,
+          anonymous: true,
         });
         this.resetForm.email = this.forgotForm.email;
         this.message = body.message || "Password reset code sent.";
@@ -113,6 +117,7 @@ export const useAuthStore = defineStore("auth", {
         const body = await apiRequest("/auth/reset", {
           method: "POST",
           body: this.resetForm,
+          anonymous: true,
         });
         this.loginForm.email = this.resetForm.email;
         this.message = body.message || "Password updated. You can sign in now.";
