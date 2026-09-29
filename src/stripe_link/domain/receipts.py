@@ -5,6 +5,7 @@ render the buyer's receipt. Optional download_links are appended for digital pro
 """
 
 import re
+import time
 from html import escape
 from typing import Any
 
@@ -125,6 +126,73 @@ def receipt_content(
         title=subject,
         body=body,
         preheader=f"{product_name} — {total}",
+        reply_to=support_email,
+        footer_note=f"You can also reach us at {support_email}." if support_email else "",
+    )
+    return {"subject": subject, "html": html, "text": "\n".join(text_lines)}
+
+
+def cancellation_content(
+    *,
+    business_name: str = "",
+    product: str = "",
+    ends_at: int = 0,
+    manage_url: str = "",
+    support_email: str = "",
+) -> dict[str, str]:
+    """Confirming a cancellation the CUSTOMER made, in writing.
+
+    Cancelling used to render a web page and send nothing, so the only record was a tab the customer
+    could close. That is the shape that produces a chargeback -- not "I was charged after
+    cancelling", which `cancel_at_period_end` already prevents, but "I think I cancelled, I have
+    nothing that says so, and I cannot tell whether another payment is coming". Someone in that state
+    calls their bank, which costs the seller a dispute fee and their ratio (found 2026-09-28).
+
+    Three things earn their place. That no further payment is coming, because that is the actual
+    question. WHEN access ends, because a cancelled subscription is still `active` until then and
+    "cancelled" on something still running reads as a failure. And the manage link again -- cancelling
+    and wanting money back are usually the same conversation, and the refund route is otherwise a link
+    they have just navigated away from.
+    """
+    business = str(business_name or "").strip()
+    item = str(product or "").strip() or "your subscription"
+    ends = ""
+    if ends_at:
+        try:
+            ends = time.strftime("%d %B %Y", time.gmtime(int(ends_at)))
+        except (ValueError, OSError, OverflowError):
+            ends = ""
+
+    subject = f"You cancelled {item}" if not business else f"You cancelled {item} — {business}"
+    text_lines = [
+        f"This confirms you cancelled {item}"
+        + (f" from {business}" if business else "") + ".",
+        "",
+        "You will not be charged again.",
+    ]
+    if ends:
+        text_lines += ["", f"You keep access until {ends}. Nothing else is needed from you."]
+    if manage_url:
+        text_lines += ["", "Changed your mind about a payment already made? You can ask for a refund "
+                           f"here:\n{manage_url}"]
+    if support_email:
+        text_lines += ["", f"Questions? Reply to this email or contact {support_email}."]
+
+    body = (
+        paragraph(f"This confirms you cancelled <strong>{escape(item)}</strong>"
+                  + (f" from {escape(business)}" if business else "") + ".")
+        + paragraph("<strong>You will not be charged again.</strong>")
+        + (paragraph(f"You keep access until {escape(ends)}. Nothing else is needed from you.")
+           if ends else "")
+        + (button("Ask for a refund", manage_url) if manage_url else "")
+        + (paragraph("Payments already made are not returned by cancelling. If you want one back, "
+                     "use the button above.", muted=True) if manage_url else "")
+    )
+    html = render_email(
+        business_name=business,
+        title=subject,
+        body=body,
+        preheader="You will not be charged again.",
         reply_to=support_email,
         footer_note=f"You can also reach us at {support_email}." if support_email else "",
     )

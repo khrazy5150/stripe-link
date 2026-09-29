@@ -600,3 +600,108 @@ class MultiplePurchaseTests(unittest.TestCase):
     def test_an_unreadable_date_does_not_cost_the_email(self):
         sent = self.send([dict(self.orders()[0], created_at="not-a-date")])
         self.assertIn("Premium Bundle", sent["text"])
+
+
+class CancellationEmailTests(unittest.TestCase):
+    """Cancelling used to render a page and send nothing.
+
+    The only record was a tab the customer could close. That is the shape that produces a chargeback
+    -- not "I was charged after cancelling", which cancel_at_period_end already prevents, but "I think
+    I cancelled, I have nothing saying so, and I cannot tell whether another payment is coming".
+    Someone in that state calls their bank, which is the dispute this flow exists to avoid.
+    """
+
+    PERIOD_END = 1790714125     # 29 September 2026
+
+    def setUp(self):
+        self.sent = []
+        self.calls = []
+        self._stripe, self._creds, self._business, self._identity = (
+            pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity)
+        pm.stripe_request = lambda method, path, **kwargs: (
+            self.calls.append((method, path, kwargs.get("data")))
+            or {"id": "sub_1", "cancel_at_period_end": True,
+                "items": {"data": [{"current_period_end": self.PERIOD_END}]}})
+        pm.checkout_credentials = lambda *a, **k: ("sk_test", "acct_1")
+        pm._business_name = lambda tenant_id: "Poliaxis"
+        pm.tenant_email_identity = lambda tenant_id: {"business_name": "Poliaxis",
+                                                      "reply_to": "hi@poliaxis.com"}
+        self.tokens = FakeTokens()
+        self.tokens.put(purchase_token_doc("t1", "good", order_id="o1",
+                                           email="sam@example.com", now=0))
+
+    def tearDown(self):
+        pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity = (
+            self._stripe, self._creds, self._business, self._identity)
+
+    class Keys:
+        def get(self, tenant_id, mode="test"):
+            return {"connect_account_id": "acct_1"}
+
+    def cancel(self, **over):
+        kwargs = dict(tokens_repo=self.tokens, orders_repo=FakeOrders(), stripe_repo=self.Keys(),
+                      mailer_send=lambda **kw: self.sent.append(kw))
+        kwargs.update(over)
+        return pm.handler({"httpMethod": "POST", "body": "action=cancel&t=good"}, None, **kwargs)
+
+    def test_cancelling_confirms_in_writing(self):
+        self.cancel()
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0]["to"], "sam@example.com")
+
+    def test_the_email_answers_the_actual_question(self):
+        # "Am I going to be charged again?" is the only thing they want to know.
+        self.cancel()
+        self.assertIn("will not be charged again", self.sent[0]["text"])
+
+    def test_the_email_says_when_access_ends(self):
+        # A cancelled subscription stays ACTIVE until period end; without the date, a customer who
+        # checks and finds it running reads "cancelled" as a failure.
+        self.cancel()
+        self.assertIn("29 September 2026", self.sent[0]["text"])
+
+    def test_the_email_carries_the_refund_route(self):
+        # Cancelling and wanting money back are usually the same conversation, and the refund link is
+        # otherwise a page they have just navigated away from.
+        self.cancel()
+        self.assertIn("t=good", self.sent[0]["text"])
+
+    def test_the_page_says_when_access_ends_and_that_we_emailed(self):
+        body = self.cancel()["body"]
+        self.assertIn("29 September 2026", body)
+        self.assertIn("sam@example.com", body)
+
+    def test_a_failed_email_never_reports_the_cancellation_as_failed(self):
+        # The cancellation SUCCEEDED at Stripe. Telling the customer otherwise would have them cancel
+        # again, or call their bank.
+        def broken(**kwargs):
+            raise RuntimeError("SES is having a day")
+        response = self.cancel(mailer_send=broken)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("Payments stopped", response["body"])
+        self.assertNotIn("emailed a confirmation", response["body"])
+
+    def test_an_unreadable_period_end_omits_the_date_rather_than_guessing(self):
+        pm.stripe_request = lambda method, path, **kwargs: {"id": "sub_1"}
+        response = self.cancel()
+        self.assertIn("Payments stopped", response["body"])
+        self.assertNotIn("You keep access until", response["body"])
+        self.assertIn("will not be charged again", self.sent[0]["text"])
+
+    def test_the_period_end_is_read_from_the_item_as_well_as_the_subscription(self):
+        # The 2026-05-27 API version moved fields down onto the line item, and that move has already
+        # cost this codebase once.
+        self.assertEqual(pm._period_end({"items": {"data": [{"current_period_end": 99}]}}), 99)
+        self.assertEqual(pm._period_end({"current_period_end": 42}), 42)
+        self.assertEqual(pm._period_end({"cancel_at": 7}), 7)
+        self.assertEqual(pm._period_end({}), 0)
+
+    def test_nothing_is_emailed_without_an_address(self):
+        class NoEmail(FakeOrders):
+            def get(self, tenant_id, order_id):
+                order = dict(super().get(tenant_id, order_id) or {})
+                order["customer"] = {}
+                return order
+        response = self.cancel(orders_repo=NoEmail())
+        self.assertEqual(self.sent, [])
+        self.assertIn("Payments stopped", response["body"])

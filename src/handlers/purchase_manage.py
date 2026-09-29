@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlencode
 from urllib.request import urlopen
 
 from stripe_link.common import error_response, query_params
-from stripe_link.domain.receipts import format_money
+from stripe_link.domain.receipts import cancellation_content, format_money
 from stripe_link.domain.leads import HONEYPOT_FIELD, is_spam
 from stripe_link.domain.purchase_lookup import (
     contact_key,
@@ -153,7 +153,8 @@ def handler(
     if action in {"cancel", "refund"}:
         return _act(action, body, tokens_repo=tokens_repo, orders_repo=orders_repo,
                     refunds_repo=refunds_repo, notifications_repo=notifications_repo,
-                    stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener, now_fn=now_fn)
+                    stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener,
+                    now_fn=now_fn, mailer_send=mailer_send)
     return _html(_EXPIRED_HTML, 404)
 
 
@@ -372,7 +373,7 @@ def _transaction_page(token, *, tokens_repo, orders_repo):
 
 
 def _act(action, body, *, tokens_repo, orders_repo, refunds_repo, notifications_repo,
-         stripe_repo, secret_cipher, opener, now_fn):
+         stripe_repo, secret_cipher, opener, now_fn, mailer_send=None):
     record, order, mode = _resolve(str(body.get("t") or "").strip(), tokens_repo, orders_repo)
     if not record or not order:
         return _html(_EXPIRED_HTML, 404)
@@ -380,13 +381,32 @@ def _act(action, body, *, tokens_repo, orders_repo, refunds_repo, notifications_
     business = _business_name(tenant_id)
 
     if action == "cancel":
-        return _cancel(order, tenant_id, mode, business,
-                       stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener)
+        return _cancel(order, tenant_id, mode, business, token=str(body.get("t") or "").strip(),
+                       stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener,
+                       mailer_send=mailer_send)
     return _request_refund(order, tenant_id, business, str(body.get("reason") or ""), mode=mode,
                            refunds_repo=refunds_repo, notifications_repo=notifications_repo, now_fn=now_fn)
 
 
-def _cancel(order, tenant_id, mode, business, *, stripe_repo, secret_cipher, opener):
+def _period_end(subscription: dict) -> int:
+    """When the cancelled subscription actually stops.
+
+    Checked on the ITEM as well as the subscription: the 2026-05-27 API version moved several fields
+    down onto the line item, and that move has already cost this codebase once (plans/TODO.md, the
+    API-version drift). Zero when unreadable, and the email simply omits the date rather than guessing.
+    """
+    for source in ((subscription.get("items") or {}).get("data") or [{}])[:1] + [subscription]:
+        value = (source or {}).get("current_period_end") or (source or {}).get("cancel_at")
+        if value:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _cancel(order, tenant_id, mode, business, *, token="", stripe_repo, secret_cipher, opener,
+            mailer_send=None):
     """Self-serve, immediately: stopping future charges costs the seller nothing, and refusing it only
     sends the customer to their bank instead — which costs the seller a dispute fee and their ratio."""
     subscription = subscription_id(order)
@@ -403,14 +423,43 @@ def _cancel(order, tenant_id, mode, business, *, stripe_repo, secret_cipher, ope
     try:
         # cancel_at_period_end, not an immediate delete: they paid for the period they are in, and taking it
         # away is a refund nobody asked for.
-        stripe_request(
+        updated = stripe_request(
             "POST", f"/subscriptions/{subscription}",
             api_key=api_key, stripe_account=stripe_account, opener=opener or urlopen,
             data={"cancel_at_period_end": True},
-        )
+        ) or {}
     except StripeApiError:
         return _html(_UNAVAILABLE_HTML, 503)
-    return _html(render_cancelled(business))
+
+    ends_at = _period_end(updated)
+    email = str((order.get("customer") or {}).get("email") or "").strip()
+    # The confirmation is the point of this change. Cancelling used to render a page and send nothing,
+    # so the only record was a tab the customer could close -- and someone unsure whether they
+    # cancelled calls their bank, which is the dispute this flow exists to prevent.
+    if email:
+        identity = tenant_email_identity(tenant_id)
+        content = cancellation_content(
+            business_name=identity.get("business_name") or (business if business != "the seller" else ""),
+            product=order_label(order),
+            ends_at=ends_at,
+            # The same link back, because cancelling and wanting money back are usually the same
+            # conversation and the refund route is otherwise a page they have just navigated away from.
+            manage_url=f"{_manage_url()}?{urlencode({'t': token})}" if token else "",
+            support_email=identity.get("reply_to", ""),
+        )
+        try:
+            (mailer_send or send_email)(to=email, subject=content["subject"], html=content["html"],
+                                        text=content["text"], tenant_id=tenant_id)
+        except Exception:  # noqa: BLE001 - the cancellation SUCCEEDED; a failed email must not say otherwise
+            email = ""
+
+    ends = ""
+    if ends_at:
+        try:
+            ends = time.strftime("%d %B %Y", time.gmtime(ends_at))
+        except (ValueError, OSError, OverflowError):
+            ends = ""
+    return _html(render_cancelled(business, ends=ends, emailed_to=email))
 
 
 def _request_refund(order, tenant_id, business, reason, *, mode="test", refunds_repo, notifications_repo, now_fn):

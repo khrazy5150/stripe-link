@@ -158,11 +158,25 @@ you directly.</p>
 """)
 
 
-def render_cancelled(business: str = "") -> str:
+def render_cancelled(business: str = "", ends: str = "", emailed_to: str = "") -> str:
+    """Confirming a cancellation.
+
+    `ends` is said out loud because a cancelled subscription stays ACTIVE until its period ends --
+    Stripe's `cancel_at_period_end` stops the renewal, it does not revoke what was paid for. Without
+    the date, a customer who checks and finds it still running reads "cancelled" as a failure and
+    calls their bank.
+    """
+    ending = (f"<p>You keep access until {escape(ends)}. Nothing else is needed from you.</p>"
+              if ends else "")
+    # Naming the address turns a page they might close into something they know to look for.
+    confirmation = (f"<p>We have emailed a confirmation to {escape(emailed_to)}.</p>"
+                    if emailed_to else "")
     return _shell("Payments stopped", f"""
 <h1>Payments stopped</h1>
 <p>No further payments will be taken{f" by {escape(business)}" if business else ""}. You will not be charged
 again.</p>
+{ending}
+{confirmation}
 <p class="fine">Payments already made are not returned by this. If you want one of them back, use the link
 again and send a refund request.</p>
 """)
