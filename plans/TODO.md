@@ -683,9 +683,24 @@ payment**, for exactly the newest tenants who have not set up a domain yet. Reco
 cannot be lost inside the boundary work: it is a prerequisite, and on its own it is invisible — no behaviour
 change for anyone.
 
-### ⭐⭐ HIGH — a detached page still takes money; reachable is conflated with authorized (found 2026-09-21)
+### ⭐⭐ HIGH — a detached page still takes money; reachable is conflated with authorized — PHASE 1 BUILT 2026-09-28, not deployed (found 2026-09-21)
 
 Plan: `plans/COMMERCE_ELIGIBILITY.md`. Found while tracing A/B indexing, not introduced by it.
+
+**P1 (observe, refuse nothing) is built:** `domain/commerce_eligibility.py`, wired into `checkout.py` and
+`cart_checkout.py`, switched by `ELIGIBILITY_ENFORCEMENT` (`observe` default / `enforce` / `off`). It emits one
+JSON line per interesting verdict in the same shape as the api_auth phase-1 measurement below. Both checkout
+functions gained the `SitesTable` + `ExperimentsTable` IAM reads they were missing — without those the whole
+measurement is silently `undecided`, which is the failure that looks like success.
+
+**Three things the build settled.** Legacy Site-less pages need no migration: every page in both silos is
+debris and goes in the table wipe, so P2 can refuse "no Site at all" outright. `upsell.py` is deliberately
+NOT wired — it receives no `page_id` and writes `attribution.page_id = ""`, so it has no identity to measure
+until the funnel screen posts one or an order lookup by `session_id` exists. And synthetic funnel page ids
+(`{source}__upsell_N`) are never in a Site's `pages` map, so P2 needs a third identity case — a synthetic id
+stands for its source page — or enforcement refuses every post-purchase upsell.
+
+**Next:** deploy, watch `undecided` vs `not_attached`, and only then decide the rule is right.
 
 **Verified:** the published artifact is publicly readable at the pages-distribution URL (200, full HTML) and
 carries an absolute, self-contained checkout href — `clientID`, `offer`, `page_id`, `price_id`, `mode` all
@@ -769,6 +784,34 @@ look like a fix and not be one. The boundary has to be drawn once, at the API.
 tip jar provision writes four documents and claims a GLOBALLY UNIQUE platform subdomain that is never
 recycled by design. Squatting those under another tenant's id is the kind of damage that cannot be fully
 undone by deleting rows.
+
+**RE-MEASURED 2026-09-28, and the answer changed.** Three days of traffic, both silos, every log group:
+**1,546 samples** (the 2026-09-25 read had 20). `tenant_mismatch = 0` and `unreadable_token = 0` — the
+precondition this plan set for enforcing is MET. But the 21 `no_token` records are not misclassified public
+routes, which is what the measurement existed to rule out: **nine of prod's ten land inside 3.7 seconds across
+eight different dashboard screens**, which is one dashboard page load, not a probe.
+
+**The blocker is now specific and small: the dashboard treats the token as optional.**
+`dashboard/src/api/client.js:221` sends `Authorization` only `if (session?.access_token)`, while
+`getTenantId()` falls back past the session to localStorage and then to a hardcoded `"tenant_demo"`. The
+session lives in sessionStorage (per-tab); the tenant id in localStorage (persists). So a fresh tab sends
+tenant-scoped requests with a tenant id and no token — 200 today, **401 on every screen** once the authorizer
+lands. The client fix must ship BEFORE the authorizer, same ordering as the artifact boundary.
+
+**Client fix built 2026-09-28 (undeployed):** session moved to localStorage with a migration from
+sessionStorage, and `apiRequest` now refuses to send a tenant-scoped request without an `access_token`
+(`anonymous: true` opts in the five `/auth/*` calls). Decided with the user: localStorage over a per-tab
+session, so the token lasts as long as the tenant id it travels with.
+
+**A correction that came out of that fix, and it downgrades the measurement.** The shadow logger decodes
+claims WITHOUT checking signature or expiry, so `would_allow` counts EXPIRED tokens as fine — and nothing
+refreshes. `handlers/auth.py:295-296` returns `refresh_token` and `expires_in` and **neither is read
+anywhere**; there is no `/auth/refresh` route. A Cognito access token lasts an hour, so after enforcement an
+open dashboard starts 401ing about an hour in, wherever the session is stored — and moving it to localStorage
+makes sessions live long enough to reach that, which is the price of fixing the token-less tab. **A refresh
+path is therefore a hard Phase 2 prerequisite, not Phase 3 polish:** one `POST /auth/refresh` using Cognito
+`REFRESH_TOKEN_AUTH`, plus a client that retries once on 401. Read `would_allow = 1,340` as "carried a
+token-shaped thing", not "would have been admitted".
 
 **Phase 1 built 2026-09-25** — `plans/API_AUTHENTICATION.md`. The boundary is written down as data in
 `stripe_link/api_auth.py`: 58 public routes of 202, classified per METHOD (`POST /leads` is a stranger

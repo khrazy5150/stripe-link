@@ -1,6 +1,7 @@
 # The API never verifies who is calling
 
-**Status: PHASE 1 BUILT 2026-09-25 (measurement only, nothing enforced).**
+**Status: PHASE 1 BUILT 2026-09-25. Re-measured 2026-09-28: the stated precondition is MET, but the
+measurement found a prerequisite nobody had written down — see "What the measurement actually says".**
 
 `tenant_id` is read from the request — body, `?tenant_id=`, `X-Tenant-Id`, `X-Client-Id` — and nothing
 checks the caller. The dashboard sends `Authorization: Bearer <access_token>` on every request and **no
@@ -67,6 +68,89 @@ Four verdicts, and they are different problems:
 The claims it reads are decoded **without checking the signature**. That is a measurement and never a
 control — anyone can mint one, which is the whole reason verifying exists. Nothing in the logger can
 raise; a handler must not fail because a measurement did.
+
+## What the measurement actually says (re-read 2026-09-28)
+
+Three days of real traffic, aggregated over every Lambda log group in both silos. The first read (2026-09-25)
+had 20 samples and was too thin to conclude anything; this one has **1,546**.
+
+| verdict | dev | prod |
+|---|---|---|
+| `would_allow` | 1,340 | 185 |
+| `no_token` | 11 | 10 |
+| `unreadable_token` | 0 | 0 |
+| **`tenant_mismatch`** | **0** | **0** |
+
+**`tenant_mismatch` is zero, which is the precondition this plan set.** No attack signal, and — just as
+important — no legitimate admin tool that legitimately crosses tenants and would have to be accommodated.
+
+**The `no_token` records are the finding.** They are NOT misclassified public routes, and that was the
+possibility this measurement existed to rule out. Nine of prod's ten arrive inside **3.7 seconds** —
+00:49:50.449 to 00:49:53.475 — across eight different dashboard screens: `/platform-billing/plans`,
+`/customers`, `/notifications` ×2, `/invoices`, `/billing/connect-card` ×2, `/stripe/keys` ×2. That shape is
+one dashboard page load, not a probe. Dev's eleven are `/ai/*` and `/orders` calls from CLI testing during
+the AI work, which are mine and uninteresting.
+
+### The prerequisite: the dashboard treats the token as optional
+
+`dashboard/src/api/client.js:221` attaches the header conditionally:
+
+```js
+...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+```
+
+and `getTenantId()` (`client.js:168`) falls back **past** the session:
+
+```js
+getAuthSession()?.tenant_id || getAuthSession()?.client_id
+  || localStorage.getItem(TENANT_ID_STORAGE_KEY) || DEFAULT_TENANT_ID   // "tenant_demo"
+```
+
+The two halves live in different stores: the session in **sessionStorage** (per-tab, dies with the tab), the
+tenant id in **localStorage** (persists). So reopening the dashboard in a fresh tab produces exactly the burst
+above — tenant-scoped GETs carrying a tenant id and no token. Today they answer **200**. The moment the
+authorizer lands they answer **401, on every screen**, and the app has no path back except a manual login.
+
+Two things follow, and they are separable:
+
+1. **A client that cannot name its caller must not issue a private request.** It should route to login rather
+   than send a tenant-scoped call unauthenticated. `DEFAULT_TENANT_ID = "tenant_demo"` makes this sharper than
+   "unauthenticated": a session-less dashboard doesn't merely omit identity, it *claims a specific tenant id*.
+2. **Fixing (1) exposes a UX question the hole is currently masking.** Because the session is per-tab, every
+   new tab genuinely has no token — and only the missing authorizer is what makes that invisible today. So
+   enforcing without deciding where the session lives turns "open a new tab" into "log in again". That is a
+   decision about session lifetime (localStorage, or a refresh-token flow), not a detail to be picked while
+   wiring an authorizer.
+
+**Ordering, and it is the same shape as the artifact-boundary item: the client fix ships BEFORE the
+authorizer.** Reversed, the dashboard 401s in production.
+
+**FIXED 2026-09-28 (undeployed):** the session moved to `localStorage` with a one-time migration from
+`sessionStorage`, so a reopened tab keeps its token instead of keeping only its tenant id; and `apiRequest`
+now fails **closed** — no `access_token` means no request, with `anonymous: true` as the explicit opt-in for
+the five `/auth/*` calls that legitimately precede a session. The client deliberately does NOT keep its own
+copy of the public-route list; that would drift from `api_auth.py`.
+
+### `would_allow` does not mean the token would pass — the refresh gap
+
+**A correction to the table above, found while fixing the client.** The shadow logger decodes claims
+**without verifying the signature and without checking expiry** — by design, since it is a measurement. So
+`would_allow` counts an EXPIRED token as fine, and the real authorizer will not.
+
+That matters because nothing refreshes. `handlers/auth.py:295-296` returns `refresh_token` and `expires_in`
+in the session payload, and **neither value is read anywhere** — no dashboard code touches them, and there is
+no `/auth/refresh` route (no `REFRESH_TOKEN_AUTH` in `auth.py`). A Cognito access token lasts an hour by
+default. So once the authorizer lands, an open dashboard starts 401ing about an hour into every session,
+wherever the session is stored.
+
+**Moving the session to localStorage makes this MORE visible, not less** — that was the right call for the
+token-less-tab bug, and its direct consequence is that sessions now survive long enough to reach expiry
+rather than dying with the tab. The two fixes are a pair.
+
+**So a refresh path is a hard prerequisite for Phase 2, not a Phase 3 nicety.** The backend already stores
+what it needs: one `POST /auth/refresh` calling Cognito `REFRESH_TOKEN_AUTH`, plus a client that retries once
+on 401. Until that exists, `would_allow = 1,340` should be read as "1,340 requests carried a token-shaped
+thing", which is a weaker claim than it looks.
 
 ### Phase 2 — enforce, once the logs are quiet
 
