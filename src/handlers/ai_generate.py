@@ -48,6 +48,8 @@ from stripe_link.domain.ai_models import default_model
 from stripe_link.domain.ai_provision import (needs_service_handoff, new_id, offer_document,
                                              page_document, product_document, provenance_block,
                                              slugify)
+from stripe_link.domain import ai_generation_events as events
+from stripe_link.domain.ai_models import estimate_cost
 from stripe_link.domain.ai_quota import allowance_for, may_generate, period_key
 from stripe_link.domain.ai_resolvers import resolve_preset, resolve_sections, resolution_log
 from stripe_link.domain.ai_schema import describe_vocabulary, page_sections_schema
@@ -76,7 +78,7 @@ SYSTEM = (
 
 def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=None,
             config_repo=None, usage_repo=None, tenant_repo=None, jobs_repo=None, generator=None,
-            now_fn=None, randomiser=None, invoker=None):
+            events_repo=None, now_fn=None, randomiser=None, invoker=None):
     now = int((now_fn or time.time)())
     pick = randomiser or random.SystemRandom().choice
     try:
@@ -92,7 +94,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     if (event or {}).get("internal_job"):
         return _run_job(event, jobs_repo=jobs_repo, products_repo=products_repo,
                         offers_repo=offers_repo, pages_repo=pages_repo, usage_repo=usage_repo,
-                        generator=generator, now=now, pick=pick)
+                        events_repo=events_repo, generator=generator, now=now, pick=pick)
 
     if (event or {}).get("httpMethod", "POST").upper() == "OPTIONS":
         return json_response({})
@@ -152,6 +154,16 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
             why_not or "You have used your AI generations.", status_code=429, code="quota_exhausted")
     used = taken["used"] - 1  # what was already spent BEFORE this one, for the job record below
 
+    # The PERMANENT record, written the moment the slot is spent -- not on success. The ledger answers "what
+    # did we charge this tenant for?", and a generation that failed still consumed a slot until something
+    # releases it (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.9). It carries its own copy of the brief because
+    # the job row it references is gone in seven days.
+    generation_id = new_id("gen", pick)
+    event_row = events.started(
+        generation_id=generation_id, tenant_id=tenant_id, job_id="", created_at=now,
+        source=events.source_for(provider=str(config.get("provider")), plan_key=plan_key, exempt=exempt),
+        model=model, provider=str(config.get("provider")), brief=brief, stripe_mode=mode, period=period)
+
     job = {
         "schema_version": "2026-09-27", "document_type": "ai_generation_job",
         "tenant_id": tenant_id, "job_id": new_id("job", pick), "status": "queued",
@@ -159,6 +171,9 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         "page_id": regenerate_page_id, "period": period,
         "usage": {"period": period, "used": used + 1, "allowance": allowance},
         "withheld": withheld(brief),
+        # The correlation id, carried on all three records so one identifier follows a generation from the
+        # slot it spent, through the work, to what it cost.
+        "generation_id": generation_id, "event_key": event_row["event_key"],
         "created_at": now, "updated_at": now,
         # A finished job is of no interest a week later, and an abandoned one even less.
         "expires_at": now + 7 * 24 * 3600,
@@ -168,6 +183,11 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     except RepositoryError as exc:
         _release(usage_repo, tenant_id, period, now)
         return error_response(str(exc), code="repository_error")
+
+    # Best-effort, and deliberately AFTER the job is safely queued: an unwritable ledger row must never fail a
+    # generation the tenant has already spent a slot on. A missing row is visible in the data (the counter
+    # will not reconcile) which is a better failure than a 500 after the money went.
+    _record_event(events_repo, {**event_row, "job_id": job["job_id"]})
 
     try:
         _enqueue(job, invoker)
@@ -187,6 +207,28 @@ def _plan(tenant_id, tenant_repo):
     except Exception:  # noqa: BLE001 - a missing profile is the FREE tier, never an open tap
         return "", False
     return str(profile.get("tier_id") or profile.get("billing_plan_key") or ""), bool(profile.get("billing_exempt"))
+
+
+def _record_event(events_repo, event_row):
+    """Write the permanent ledger row. Never raises: the ledger is evidence, not a gate."""
+    try:
+        (events_repo or ai_generation_events_repository()).put(event_row)
+    except Exception as exc:  # noqa: BLE001 - see the call site
+        print(f"[ai] generation event not recorded for {event_row.get('generation_id')}: "
+              f"{type(exc).__name__}: {exc}")
+
+
+def _complete_event(events_repo, job, patch):
+    """Merge the outcome onto the ledger row this job created. Never raises, same reason."""
+    key = str(job.get("event_key") or "")
+    if not key:
+        return
+    try:
+        (events_repo or ai_generation_events_repository()).complete(
+            str(job.get("tenant_id") or ""), key, patch)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ai] generation event not completed for {job.get('generation_id')}: "
+              f"{type(exc).__name__}: {exc}")
 
 
 def _release(usage_repo, tenant_id, period, now):
@@ -362,7 +404,7 @@ def _read_job(event, jobs_repo):
     return json_response({"job": _public(job)})
 
 
-def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_repo, generator,
+def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_repo, events_repo, generator,
              now, pick):
     """The event path. Every exit updates the job, because a job stuck at `running` is indistinguishable
     from one still going, and the dashboard would poll forever."""
@@ -392,18 +434,35 @@ def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_
         _release(usage_repo, tenant_id, str(job.get("period") or ""), now)
         jobs_repo.put({**job, "status": "failed", "updated_at": now,
                        "error": {"code": f"generate_{exc.kind}", "message": _message_for(exc)}})
+        # RELEASED, not failed: the slot was given back, so the ledger must not read as a generation the
+        # tenant was charged for. That distinction is the whole reason the ledger records spend rather than
+        # success.
+        _complete_event(events_repo, job, events.completion(
+            status=events.STATUS_RELEASED, at=now, error=f"generate_{exc.kind}"))
         return {"ok": False, "reason": exc.kind}
     except Exception as exc:  # noqa: BLE001 - any failure must reach the job, or the poller hangs
         _release(usage_repo, tenant_id, str(job.get("period") or ""), now)
         jobs_repo.put({**job, "status": "failed", "updated_at": now,
                        "error": {"code": "save_failed",
                                  "message": f"The page could not be saved: {exc}"}})
+        _complete_event(events_repo, job, events.completion(
+            status=events.STATUS_RELEASED, at=now, error="save_failed"))
         return {"ok": False, "reason": "save_failed"}
 
     jobs_repo.put({**job, "status": "complete", "updated_at": now, "result": {
         **saved, "decisions": result["decisions"], "classification": result["classification"],
         "generation": {"model": job.get("model"), "repairs": result["repairs"],
                        "tokens": result["usage"]}}})
+    # What it actually cost. The token counts come back from the provider; the USD is OUR arithmetic over a
+    # hand-maintained rate table, so `rate_confidence` travels with it and any display must say so
+    # (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.9).
+    tokens = result.get("usage") or {}
+    priced = estimate_cost(str(job.get("model") or ""),
+                           int(tokens.get("input") or 0), int(tokens.get("output") or 0))
+    _complete_event(events_repo, job, events.completion(
+        status=events.STATUS_SUCCEEDED, at=now,
+        input_tokens=int(tokens.get("input") or 0), output_tokens=int(tokens.get("output") or 0),
+        estimated_usd=priced["usd"], rate_confidence=priced["confidence"]))
     return {"ok": True}
 
 

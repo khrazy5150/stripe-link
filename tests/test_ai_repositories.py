@@ -197,3 +197,85 @@ class AtomicConsumptionTests(unittest.TestCase):
         self.assertTrue(first["allowed"])
         self.assertFalse(second["allowed"], "the loser is refused by the write, not by Python")
         self.assertEqual(table.rows[("t1", "trial")]["used"], 3, "never more than the allowance")
+
+
+class GenerationEventsRepositoryTests(unittest.TestCase):
+    """The real ledger class, not a fake — the key format is the part a fake cannot get wrong for you."""
+
+    def _repo(self):
+        from stripe_link.repositories.documents import AiGenerationEventsRepository
+
+        class FakeTable:
+            def __init__(self):
+                self.items, self.updates = {}, []
+            def put_item(self, Item):  # noqa: N803
+                self.items[(Item["tenant_id"], Item["event_key"])] = dict(Item)
+            def update_item(self, **kwargs):
+                self.updates.append(kwargs)
+
+        table = FakeTable()
+        return AiGenerationEventsRepository("jb-probe-dev", table=table), table
+
+    def test_a_row_without_its_keys_is_refused(self):
+        from stripe_link.repositories.documents import RepositoryError
+
+        repo, _ = self._repo()
+        with self.assertRaises(RepositoryError):
+            repo.put({"tenant_id": "t1"})
+
+    def test_the_factory_refuses_an_unconfigured_table(self):
+        from stripe_link.repositories.documents import (RepositoryError,
+                                                        ai_generation_events_repository)
+
+        os.environ.pop("AI_GENERATION_EVENTS_TABLE", None)
+        with self.assertRaises(RepositoryError):
+            ai_generation_events_repository()
+
+    def test_completion_merges_only_the_fields_it_was_given(self):
+        repo, table = self._repo()
+        repo.complete("t1", "0001790500000#gen_a", {"status": "succeeded", "input_tokens": 10})
+        self.assertEqual(len(table.updates), 1)
+        update = table.updates[0]
+        self.assertEqual(update["Key"], {"tenant_id": "t1", "event_key": "0001790500000#gen_a"})
+        self.assertEqual(sorted(update["ExpressionAttributeValues"].values(), key=str),
+                         sorted(["succeeded", 10], key=str))
+
+    def test_an_empty_patch_writes_nothing(self):
+        repo, table = self._repo()
+        repo.complete("t1", "k", {})
+        self.assertEqual(table.updates, [])
+
+
+class EventKeyTests(unittest.TestCase):
+    def test_the_key_sorts_chronologically_as_a_string(self):
+        # The reason the epoch is zero-padded. Unpadded, "9..." sorts AFTER "10...", so a date-range query
+        # silently returns the wrong window — and it would only start being wrong in 2286, or immediately for
+        # any test that uses small timestamps.
+        from stripe_link.domain.ai_generation_events import event_key
+
+        keys = [event_key(9, "gen_b"), event_key(10, "gen_a"), event_key(1790500000, "gen_c")]
+        self.assertEqual(sorted(keys), keys)
+
+    def test_the_key_is_unique_per_generation_within_a_second(self):
+        from stripe_link.domain.ai_generation_events import event_key
+
+        self.assertNotEqual(event_key(100, "gen_a"), event_key(100, "gen_b"))
+
+
+class GenerationSourceTests(unittest.TestCase):
+    def test_byok_is_never_charged_to_the_platform(self):
+        from stripe_link.domain.ai_generation_events import SOURCE_BYOK, source_for
+
+        self.assertEqual(source_for(provider="anthropic", plan_key="basic"), SOURCE_BYOK)
+
+    def test_trial_and_plan_are_distinguishable_after_the_fact(self):
+        # The plan a tenant is on changes; what they were on when we spent the slot does not.
+        from stripe_link.domain.ai_generation_events import SOURCE_PLAN, SOURCE_TRIAL, source_for
+
+        self.assertEqual(source_for(provider="bedrock", trial=True), SOURCE_TRIAL)
+        self.assertEqual(source_for(provider="bedrock", plan_key="premium"), SOURCE_PLAN)
+
+    def test_exempt_is_its_own_source(self):
+        from stripe_link.domain.ai_generation_events import SOURCE_EXEMPT, source_for
+
+        self.assertEqual(source_for(provider="bedrock", exempt=True), SOURCE_EXEMPT)

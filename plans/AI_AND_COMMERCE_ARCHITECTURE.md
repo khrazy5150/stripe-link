@@ -459,6 +459,43 @@ times daily. Its job is **reconciliation**, not display — the same estimate-th
 already runs for Stripe fees against balance transactions. Show tier 1 as the live number, reconcile against
 tier 3 monthly, and show the drift rather than hiding it.
 
+#### Three record types, three lifecycles — BUILT 2026-09-29
+
+The rule, and it generalises beyond AI (author, 2026-09-29):
+
+> **If deleting a record would lose evidence of what Junior Bay charged, generated, or authorized, it does not
+> belong in an expiring operational table.**
+
+| Table | Answers | Retention |
+| --- | --- | --- |
+| `ai_usage` | how much quota has this tenant consumed? | expires with its period (90d TTL) |
+| `ai_jobs` | what work is happening right now? | 7-day TTL |
+| **`ai_generation_events`** | **what was the AI authorized to generate, and what did it cost?** | **never expires** |
+
+Two separate discoveries forced the split, not one. Cost history cannot live on the quota counter, whose rows
+expire by design. And the **brief snapshot** — decided in AI_PAGE_BRIEF v2 as "an immutable record of what the
+AI was licensed to assert" — was going onto the JOB, whose rows expire after seven days. A record that answers
+*why did the model say that?* is worthless if it is gone before anyone thinks to ask.
+
+**The event owns its own evidence.** `job_id` is a reference, never a dependency: the brief, model, source and
+cost are all copied onto the event, so a job vanishing after a week leaves the history intelligible.
+`generation_id` is the correlation id carried on all three records, so one identifier answers "why was this
+tenant charged a generation?" end to end.
+
+**Written when the slot is spent, not on success** — the ledger answers what we CHARGED for, and a failed
+generation still consumed a slot until something releases it. A released slot is recorded `status: released`
+rather than `failed`, so the ledger and the counter can be reconciled against each other; a ledger that only
+recorded successes could never explain a counter that disagreed with it.
+
+**Keys:** PK `tenant_id`, SK `{epoch:010d}#{generation_id}`. Time-first because `new_id` is random, so a date
+range is a key query rather than a scan or a GSI. Zero-padded because unpadded epochs sort `9…` after `10…`
+and the range window comes back silently wrong. **No TTL attribute on the table at all**, so enabling one is a
+visible decision rather than a default copied from the tables beside it.
+
+**The ledger is evidence, not a gate.** Both writes are best-effort and neither can fail a generation: by the
+time they run, the tenant has already spent a slot, and failing there would take their generation and give
+them nothing. A row stuck at `started` is the visible failure, which beats a 500 after the money went.
+
 **Two traps this design has to carry:**
 
 - **The rate table is hand-maintained.** All 1052 `us-west-2` Bedrock price records carry zero current-

@@ -2633,6 +2633,14 @@ small and independent of everything else here.**
 can claim to be a trial tenant. That makes the platform budget the only real protection today, and it is
 another reason the API-auth Phase 2 above matters.
 
+**LEDGER BUILT 2026-09-29** (`ai_generation_events`, undeployed): a third AI record type, because three
+lifecycles were hiding inside "AI usage" — quota state expires with its period, job state expires in 7 days,
+and the permanent record of what was charged and authorized must not expire at all. The second reason only
+surfaced while building it: the brief snapshot decided in AI_PAGE_BRIEF v2 was going onto the JOB, so the
+evidence of what the model was licensed to assert would have been gone in a week. `generation_id` correlates
+all three. The rule, which generalises beyond AI: **if deleting a record would lose evidence of what Junior Bay
+charged, generated, or authorized, it does not belong in an expiring operational table.**
+
 **Cost accounting (§A.9):** AI inference is exact and real-time and accumulates on the existing `ai_usage` row
 as integer `cost_micros` — no new table. Infrastructure per tenant is an *allocation*, not a measurement. The
 real AWS bill lags a day and is account-level only, so it is a reconciliation anchor rather than a display,

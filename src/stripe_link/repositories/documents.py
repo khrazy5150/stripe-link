@@ -707,6 +707,72 @@ class AiUsageRepository:
         return int((response.get("Attributes") or {}).get("used") or 0)
 
 
+class AiGenerationEventsRepository:
+    """The permanent AI ledger (PK=`tenant_id`, SK=`event_key` = zero-padded epoch + generation id).
+
+    No TTL, and the table has no TTL attribute configured either -- deliberately, so enabling one is a visible
+    decision rather than a default someone copies from the tables beside it. The rule (author, 2026-09-29): if
+    deleting a record would lose evidence of what Junior Bay charged, generated, or authorized, it does not
+    belong in an expiring operational table.
+
+    Time-first sort key because `new_id` is random: "this tenant's generations in October" is a range query on
+    the key rather than a scan or a secondary index.
+    """
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("AI generation events table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def put(self, event: dict[str, Any]) -> dict[str, Any]:
+        if not event.get("tenant_id") or not event.get("event_key"):
+            raise RepositoryError("A generation event needs a tenant_id and an event_key.")
+        self.table.put_item(Item=event)
+        return event
+
+    def complete(self, tenant_id: str, event_key: str, patch: dict[str, Any]) -> None:
+        """Merge the outcome onto an existing event.
+
+        Best-effort by contract: the caller is on the generation path and an unwritable ledger row must never
+        fail a generation the tenant has already paid a slot for. A missing outcome is visible in the data --
+        the row stays `started` -- which is a better failure than a 500 after the money was spent.
+        """
+        if not patch:
+            return
+        names = {f"#f{i}": key for i, key in enumerate(patch)}
+        values = {f":v{i}": value for i, value in enumerate(patch.values())}
+        expression = "SET " + ", ".join(f"{n} = :v{i}" for i, n in enumerate(names))
+        self.table.update_item(
+            Key={"tenant_id": str(tenant_id), "event_key": str(event_key)},
+            UpdateExpression=expression,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+
+    def for_tenant(self, tenant_id: str, *, since: int = 0, until: int = 0, limit: int = 100) -> list:
+        """A tenant's generations, newest first, optionally within a window."""
+        from boto3.dynamodb.conditions import Key
+
+        condition = Key("tenant_id").eq(str(tenant_id))
+        if since or until:
+            low = f"{int(since or 0):010d}#"
+            high = f"{int(until or 9_999_999_999):010d}#~"
+            condition = condition & Key("event_key").between(low, high)
+        response = self.table.query(
+            KeyConditionExpression=condition, ScanIndexForward=False, Limit=int(limit))
+        return list(response.get("Items") or [])
+
+
 class AiJobsRepository:
     """Generation jobs (PK=`tenant_id`, SK=`job_id`).
 
@@ -1175,6 +1241,10 @@ def ai_provider_config_repository(table: Any | None = None) -> SimpleKeyReposito
         key_field="tenant_id",
         table=table,
     )
+
+
+def ai_generation_events_repository(table: Any | None = None) -> AiGenerationEventsRepository:
+    return AiGenerationEventsRepository(os.environ.get("AI_GENERATION_EVENTS_TABLE", ""), table=table)
 
 
 def ai_usage_repository(table: Any | None = None) -> AiUsageRepository:

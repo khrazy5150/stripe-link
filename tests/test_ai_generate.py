@@ -65,6 +65,21 @@ class FakeUsage:
         self.released += 1
 
 
+class FakeEvents:
+    """The permanent ledger. Records what was written so the tests can assert on evidence, not on silence."""
+    def __init__(self, fail=False):
+        self.rows, self.patches, self.fail = [], [], fail
+    def put(self, event):
+        if self.fail:
+            raise RuntimeError("ledger table is unreachable")
+        self.rows.append(dict(event))
+        return event
+    def complete(self, tenant_id, event_key, patch):
+        if self.fail:
+            raise RuntimeError("ledger table is unreachable")
+        self.patches.append((tenant_id, event_key, dict(patch)))
+
+
 class FakeProfiles:
     def __init__(self, **p):
         self.p = p
@@ -114,8 +129,8 @@ class RegenerateTests(unittest.TestCase):
         kwargs = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
                       config_repo=FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6"}),
                       usage_repo=self.usage, tenant_repo=FakeProfiles(tier_id="premium"),
-                      jobs_repo=self.jobs, generator=ok_generator, now_fn=lambda: 1790500000,
-                      randomiser=lambda a: a[0])
+                      jobs_repo=self.jobs, generator=ok_generator, events_repo=FakeEvents(),
+                      now_fn=lambda: 1790500000, randomiser=lambda a: a[0])
         return run_to_completion(
             {"httpMethod": "POST", "resource": "/ai/generate",
              "queryStringParameters": {"tenant_id": "t1"},
@@ -192,9 +207,12 @@ class GenerateTests(unittest.TestCase):
         self.jobs = FakeJobs()
         self.config = FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6", "verified_at": 1})
         self.profiles = FakeProfiles(tier_id="premium")
+        self.events = FakeEvents()
         self.seen = []
 
-    def call(self, brief=None, *, generator=None, usage=None, config=None, profiles=None):
+    def call(self, brief=None, *, generator=None, usage=None, config=None, profiles=None, events=None):
+        if events is not None:
+            self.events = events
         def recording(**kwargs):
             self.seen.append(kwargs)
             return (generator or ok_generator)(**kwargs)
@@ -204,7 +222,7 @@ class GenerateTests(unittest.TestCase):
         kwargs = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
                       config_repo=config or self.config, usage_repo=usage or self.usage,
                       tenant_repo=profiles or self.profiles, jobs_repo=self.jobs,
-                      generator=recording, now_fn=lambda: 1790500000,
+                      generator=recording, events_repo=self.events, now_fn=lambda: 1790500000,
                       randomiser=lambda alphabet: alphabet[0])
         return run_to_completion(event, self.jobs, kwargs)
 
@@ -602,3 +620,70 @@ class ReaperTests(unittest.TestCase):
                          now_fn=lambda: 1790500000)
         self.assertFalse(result["ok"])
         self.assertIn("unreadable", result["reason"])
+
+
+class GenerationLedgerTests(GenerateTests):
+    """The permanent record: what was authorized, and what it cost.
+
+    Separate from the quota counter on purpose. `ai_usage` expires with its period and `ai_jobs` after seven
+    days, and the brief snapshot -- the evidence of what the model was LICENSED to assert -- was going onto
+    the job, so it would have been gone in a week (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.9).
+    """
+
+    def test_the_ledger_records_the_generation_when_the_slot_is_spent(self):
+        self.call()
+        self.assertEqual(len(self.events.rows), 1)
+        row = self.events.rows[0]
+        self.assertEqual(row["status"], "started")
+        self.assertEqual(row["tenant_id"], "t1")
+        self.assertTrue(row["generation_id"].startswith("gen_"))
+        self.assertEqual(row["source"], "plan")
+
+    def test_the_ledger_carries_its_own_copy_of_the_brief(self):
+        # The point of the table. The job holds a brief too, and the job is gone in seven days.
+        row = (self.call(), self.events.rows[0])[1]
+        self.assertEqual(row["brief_snapshot"], BRIEF)
+
+    def test_the_ledger_row_never_expires(self):
+        self.call()
+        self.assertNotIn("expires_at", self.events.rows[0])
+
+    def test_one_id_correlates_the_job_and_the_ledger(self):
+        # "Why was this tenant charged a generation?" has to be answerable by following one identifier.
+        self.call()
+        row = self.events.rows[0]
+        job = self.jobs.saved[-1] if hasattr(self.jobs, "saved") else None
+        self.assertTrue(row["job_id"], "the ledger references the job it came from")
+        if job:
+            self.assertEqual(job.get("generation_id"), row["generation_id"])
+
+    def test_a_successful_generation_records_tokens_and_cost(self):
+        self.call()
+        self.assertTrue(self.events.patches, "the outcome must reach the ledger")
+        _, _, patch = self.events.patches[-1]
+        self.assertEqual(patch["status"], "succeeded")
+        self.assertEqual(patch["input_tokens"], 2000)
+        self.assertEqual(patch["output_tokens"], 700)
+        self.assertGreater(patch["estimated_cost_micros"], 0)
+        self.assertTrue(patch["rate_confidence"], "a hand-maintained rate must travel with its confidence")
+
+    def test_cost_is_an_integer_so_it_can_be_summed_without_drift(self):
+        self.call()
+        _, _, patch = self.events.patches[-1]
+        self.assertIsInstance(patch["estimated_cost_micros"], int)
+
+    def test_a_released_slot_is_not_recorded_as_a_charge(self):
+        # A provider failure refunds the slot, so the ledger must not read as a generation the tenant paid
+        # for -- otherwise the counter and the ledger disagree and neither can be trusted.
+        def failing(**kwargs):
+            raise AiError("boom", kind="throttled")
+        self.call(generator=failing)
+        _, _, patch = self.events.patches[-1]
+        self.assertEqual(patch["status"], "released")
+        self.assertEqual(self.usage.released, 1)
+
+    def test_an_unwritable_ledger_never_fails_a_generation(self):
+        # Evidence, not a gate. The tenant has already spent a slot by this point; failing here would take
+        # their generation AND give them nothing.
+        response = self.call(events=FakeEvents(fail=True))
+        self.assertIn(response["statusCode"], (200, 201))

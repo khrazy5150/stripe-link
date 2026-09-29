@@ -1951,11 +1951,16 @@ Resources:
           AI_PROVIDER_CONFIG_TABLE: !Ref AiProviderConfigTable
           AI_USAGE_TABLE: !Ref AiUsageTable
           AI_JOBS_TABLE: !Ref AiJobsTable
+          AI_GENERATION_EVENTS_TABLE: !Ref AiGenerationEventsTable
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AiProviderConfigTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AiJobsTable
+        # The permanent ledger: written when a slot is spent, updated with tokens and cost when the call
+        # returns. Crud rather than Write because the outcome is merged onto the row the request created.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiGenerationEventsTable
         # Invoke ITSELF asynchronously: the request path queues, the event path generates. Same code,
         # same deploy, no second function to keep in step.
         - Statement:
@@ -3796,6 +3801,30 @@ Resources:
         - AttributeName: tenant_id
           KeyType: HASH
         - AttributeName: period
+          KeyType: RANGE
+
+  # The permanent AI ledger (AI_AND_COMMERCE §A.9). NOTE THE ABSENCE OF TimeToLiveSpecification: it is the
+  # design, not an oversight. Three AI record types have three lifecycles -- ai_usage is quota state and
+  # expires with its period, ai_jobs is work-queue state and expires in 7 days, and this is the durable record
+  # of what Junior Bay charged for and what the model was authorized to assert. The rule (author 2026-09-29):
+  # if deleting a record would lose evidence of what was charged, generated or authorized, it does not belong
+  # in an expiring operational table. Do not add a TTL here without revisiting that.
+  AiGenerationEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-ai-generation-events-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: event_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+        - AttributeName: event_key
           KeyType: RANGE
 
   # Generation jobs. AI_AND_COMMERCE §A.3 always said "a job, not a request"; running inline held
