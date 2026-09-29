@@ -51,6 +51,8 @@ def handler(
             return confirm(event, cognito, tenant_repository, tenant_registration_repositories, user_repository)
         if path.endswith("/auth/login"):
             return login(event, cognito, tenant_repository, user_repository)
+        if path.endswith("/auth/refresh"):
+            return refresh_session(event, cognito)
         if path.endswith("/auth/forgot"):
             return forgot_password(event, cognito)
         if path.endswith("/auth/reset"):
@@ -181,6 +183,59 @@ def login(event, cognito, tenant_repository, user_repository):
         tenant = _rebuilt_tenant_profile(session, now)
         tenant_repository.put(tenant)
     return json_response({"session": session, "tenant": tenant})
+
+
+def refresh_session(event, cognito):
+    """Mint a new access token from the refresh token the session already holds.
+
+    Until now NOTHING refreshed. `session_from_cognito_user` has always returned `refresh_token` and
+    `expires_in`, and no code anywhere read either value -- invisible only because no authorizer verifies the
+    access token yet, so an expired one worked exactly as well as a fresh one. The day an authorizer lands, an
+    open dashboard starts 401ing about an hour in: this pool leaves AccessTokenValidity unset (Cognito default
+    60 minutes) while the refresh token lasts 30 days (plans/API_AUTHENTICATION.md).
+
+    **Public by necessity, and safe by construction.** The refresh token IS the credential, so there is nothing
+    to authenticate this call with. That is also why the response carries ONLY tokens: the caller does not get
+    to say who it is, and we do not look a user up on its word. Identity comes from the minted token, which is
+    the thing the authorizer will verify.
+
+    A refresh that Cognito rejects answers **401**, not 400, because the client's correct reaction is to drop
+    the session and show the login screen -- a distinction a generic 400 would bury among validation errors.
+    """
+    body = parse_json_body(event)
+    token = required(body, "refresh_token")
+    try:
+        result = cognito.initiate_auth(
+            ClientId=user_pool_client_id(),
+            AuthFlow="REFRESH_TOKEN_AUTH",
+            AuthParameters={"REFRESH_TOKEN": token},
+        )
+    except Exception as exc:  # noqa: BLE001 - a rejected refresh is expected traffic, not a fault
+        if not is_cognito_client_error(exc):
+            raise
+        code = exc.response.get("Error", {}).get("Code", "CognitoError")
+        if code in {"NotAuthorizedException", "UserNotFoundException"}:
+            return error_response(
+                "Your session has expired. Please sign in again.", status_code=401, code="refresh_rejected")
+        return cognito_error(exc)
+
+    auth = result.get("AuthenticationResult") or {}
+    if not auth.get("AccessToken"):
+        # Cognito answered 200 with no token -- a CHALLENGE (e.g. MFA enrolment) rather than a refusal. Not
+        # something a silent refresh can satisfy, so it is a re-login too.
+        return error_response(
+            "Your session could not be renewed. Please sign in again.",
+            status_code=401, code="refresh_incomplete")
+    return json_response({"session": {
+        "access_token": auth.get("AccessToken"),
+        "id_token": auth.get("IdToken"),
+        # REFRESH_TOKEN_AUTH returns a new refresh token only when rotation is enabled on the app client, so
+        # fall back to the one we were given rather than blanking the caller's only way to refresh again.
+        "refresh_token": auth.get("RefreshToken") or token,
+        "expires_in": auth.get("ExpiresIn"),
+        "token_type": auth.get("TokenType"),
+        "refreshed_at": epoch(),
+    }})
 
 
 def _rebuilt_user_profile(session, now):

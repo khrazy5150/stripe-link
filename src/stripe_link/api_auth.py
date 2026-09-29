@@ -28,6 +28,7 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
 
     # --- Getting a session in the first place ---
     ("POST", "/auth/login"): "there is no token before login",
+    ("POST", "/auth/refresh"): "the refresh token is the credential; an expired access token cannot renew itself",
     ("POST", "/auth/register"): "nor before registration",
     ("POST", "/auth/confirm"): "email confirmation, follows a link",
     ("POST", "/auth/forgot"): "password reset request",

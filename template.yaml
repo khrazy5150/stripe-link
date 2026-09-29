@@ -2205,6 +2205,14 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /auth/login
             Method: POST
+        # Renew an access token from the refresh token the session already holds. Public by necessity: the
+        # refresh token IS the credential (plans/API_AUTHENTICATION.md).
+        AuthRefresh:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/refresh
+            Method: POST
         AuthForgot:
           Type: Api
           Properties:
