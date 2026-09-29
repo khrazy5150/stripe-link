@@ -175,6 +175,13 @@ what must not be reachable by guessing a `tenant_id`.
 
 ## 3. Open questions, before any of it is built
 
+> ⚠️ **Nothing here is a security boundary until the authorizer ships.** Capability and role checks in this
+> repo rest on a `tenant_id` the REQUEST supplies, so an admin screen gated that way is gated against
+> honesty, not against an attacker. `api_auth.resolved_tenant()` reports whether an identity was actually
+> proven — it returns `authoritative: False` for every request today — and `note_capability_decision` counts
+> the grants made without one. Build the screens; do not describe them as authorization until that count is
+> the whole story.
+
 - **Who is an admin, and how is that proven?** stripe-cart had `checkPlatformAdminStatus`. This repo has no
   admin role at all. This is the prerequisite for everything above — and it lands squarely on the
   ⭐⭐ authorization gap already in plans/TODO.md (no authorizer; `tenant_id` comes from the request). An

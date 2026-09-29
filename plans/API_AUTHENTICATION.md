@@ -183,6 +183,31 @@ Client side (`dashboard/src/api/client.js`):
   alone was not enough: the store keeps its own copy of the session, which is what `App.vue` gates on, so a
   silent wipe left the dashboard rendered and authenticated-looking while every screen failed.
 
+### Authoritative resolution exists as a code path — BUILT 2026-09-29
+
+> **AI Builder capability enforcement assumes authoritative tenant resolution. Until the authorizer is
+> deployed, endpoint-level capability checks are NOT a security boundary, because `tenant_id` remains
+> request-supplied.** The same caveat applies to every plan-gated feature and to the Admin Site.
+
+`tenant_id from request → capability → quota` is not authorization, however correct each step is. The real
+shape is `authenticated principal → authoritative tenant → capability → quota → generation`, and three pieces
+of it now exist:
+
+- **`api_auth.verified_claims(event)`** — claims an AUTHORIZER wrote to `requestContext.authorizer.claims`,
+  which API Gateway only populates after checking signature and expiry. Distinct from `unverified_claims`,
+  which decodes the raw header and is a measurement. A `Bearer` token alone is verified by nobody.
+- **`api_auth.resolved_tenant(event)`** → `(tenant_id, authoritative)`. False on every request today.
+- **`tenant_id_from_event`** now prefers the verified identity and falls back to the request. The verified
+  branch never fires yet; it is written first so Phase 2 is *attaching an authorizer and deleting a fallback*
+  rather than re-deriving the tenant across 63 handlers.
+
+**The marker, which is deliberately not a gate.** `ai_builder` must not become responsible for solving this
+(author, 2026-09-29). `note_capability_decision` records the single event that matters — a capability
+**granted** to a caller nobody verified — as `{"capability_gate": {...}}`. Refusals are not logged: the caller
+was told no, and a forged `tenant_id` gains nothing by being refused more precisely. The phase-1 `api_auth`
+line also gained an `authoritative` field, so both measurements answer "is enforcement safe yet?" with a count
+instead of an argument.
+
 **What remains for Phase 2 is now only the authorizer itself** — the Cognito authorizer with
 `DefaultAuthorizer`, `Auth: Authorizer: NONE` on the public routes, and `tenant_id_from_event` reading
 `requestContext.authorizer.claims` for private ones.

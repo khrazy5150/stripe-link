@@ -135,6 +135,37 @@ def bearer_token(event: dict[str, Any]) -> str:
     return ""
 
 
+def note_capability_decision(event: dict[str, Any], *, capability: str, tenant_id: str,
+                             granted: bool) -> None:
+    """Record that a plan-gated decision was made, and whether anything had proved who was asking.
+
+    This is a MARKER, not a gate, and the distinction is the whole design (author, 2026-09-29): `ai_builder`
+    must not become responsible for solving the authorization gap. It records the one event that matters --
+    **a capability GRANTED to a caller nobody verified** -- so "is enforcement safe yet?" is a count rather
+    than an argument.
+
+    Only grants are logged. A refusal on an unproven identity is harmless: the caller was told no, and a
+    forged tenant_id gains nothing by being refused more precisely.
+
+    Never raises; a measurement must not be able to fail a request.
+    """
+    try:
+        if not granted:
+            return
+        _, authoritative = resolved_tenant(event)
+        if authoritative:
+            return
+        import json as _json
+
+        print(_json.dumps({"capability_gate": {
+            "phase": "A1", "capability": str(capability), "tenant": str(tenant_id),
+            "resource": str((event or {}).get("resource") or ""),
+            "authoritative": False, "enforced": False,
+        }}))
+    except Exception:  # noqa: BLE001 - see docstring
+        pass
+
+
 def verified_claims(event: dict[str, Any]) -> dict[str, Any]:
     """Claims API Gateway has ALREADY verified, when an authorizer is attached.
 
@@ -166,6 +197,34 @@ def unverified_claims(event: dict[str, Any]) -> dict[str, Any]:
         return json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
     except Exception:  # noqa: BLE001 - a malformed token is a measurement, not an error
         return {}
+
+
+def verified_claims(event: dict[str, Any]) -> dict[str, Any]:
+    """Claims an AUTHORIZER put there, which is the only kind worth trusting.
+
+    API Gateway writes `requestContext.authorizer.claims` only after it has verified the token's signature
+    and expiry, so anything here has been checked by something that can actually check it. Contrast
+    `unverified_claims`, which decodes the raw header and is a measurement rather than a control.
+
+    Empty today, on every request, because no authorizer is attached yet (plans/API_AUTHENTICATION.md Phase
+    2). The function exists NOW so that authoritative resolution is a code path rather than a future
+    refactor: the day the authorizer lands, this starts returning claims and everything downstream of it
+    becomes real without being rewritten.
+    """
+    authorizer = ((event or {}).get("requestContext") or {}).get("authorizer") or {}
+    claims = authorizer.get("claims")
+    return claims if isinstance(claims, dict) else {}
+
+
+def resolved_tenant(event: dict[str, Any]) -> tuple[str, bool]:
+    """`(tenant_id, authoritative)` — who the caller IS, and whether anything proved it.
+
+    `authoritative` is False for every request today. It is not decoration: it is the difference between a
+    capability check and a security boundary, and it is what makes "is enforcement safe yet?" a number
+    somebody can read rather than a judgement call.
+    """
+    tenant = caller_tenant(verified_claims(event))
+    return (tenant, True) if tenant else ("", False)
 
 
 def caller_tenant(claims: dict[str, Any]) -> str:

@@ -126,11 +126,24 @@ def header_value(event: dict[str, Any], name: str) -> str:
 
 
 def tenant_id_from_event(event: dict[str, Any], body: dict[str, Any] | None = None) -> str:
-    """The tenant this request CLAIMS to be. Client-supplied, and nothing verifies it yet.
+    """The tenant this request speaks for: the VERIFIED identity when one exists, else the claimed one.
 
     Every handler funnels through here, which is why the measurement below lives here rather than being
-    repeated 63 times. It changes nothing about what is returned -- see `_log_auth_gap`.
+    repeated 63 times.
+
+    The verified branch never fires today -- no authorizer is attached, so `requestContext.authorizer.claims`
+    is always absent (plans/API_AUTHENTICATION.md Phase 2). It is written first anyway, because "authoritative
+    tenant resolution" has to be a code path before it can be a control: with it here, Phase 2 is attaching
+    the authorizer and deleting a fallback rather than re-deriving the tenant in 63 handlers. Until then the
+    request supplies it and `_log_auth_gap` records that it did.
     """
+    from stripe_link.api_auth import resolved_tenant
+
+    verified, authoritative = resolved_tenant(event)
+    if authoritative:
+        _log_auth_gap(event, verified, authoritative=True)
+        return verified
+
     body = body or {}
     claimed = (
         str(body.get("tenant_id") or "").strip()
@@ -143,7 +156,7 @@ def tenant_id_from_event(event: dict[str, Any], body: dict[str, Any] | None = No
     return claimed
 
 
-def _log_auth_gap(event: dict[str, Any], claimed: str) -> None:
+def _log_auth_gap(event: dict[str, Any], claimed: str, *, authoritative: bool = False) -> None:
     """Report what an authorizer WOULD have done, and enforce nothing.
 
     plans/API_AUTHENTICATION.md phase 1. Enforcement is an API Gateway Cognito authorizer, which cannot be
@@ -174,6 +187,9 @@ def _log_auth_gap(event: dict[str, Any], claimed: str) -> None:
         print(json.dumps({"api_auth": {
             "phase": "A1", "verdict": verdict, "method": method, "resource": resource,
             "claimed_tenant": claimed, "token_tenant": caller, "enforced": False,
+            # Whether the tenant above was PROVEN or merely asserted. False on every request until an
+            # authorizer is attached, and the number that says when enforcement is safe to turn on.
+            "authoritative": bool(authoritative),
         }}))
     except Exception:  # noqa: BLE001 - a measurement must never be able to fail a request
         pass

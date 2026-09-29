@@ -52,7 +52,8 @@ from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
 from stripe_link.domain.ai_quota import (PLATFORM_TENANT, entitlement_for, may_generate,
                                           period_key, within_platform_budget)
-from stripe_link.domain.entitlements import can_use_ai_builder
+from stripe_link.api_auth import note_capability_decision
+from stripe_link.domain.entitlements import AI_BUILDER, can_use_ai_builder
 from stripe_link.domain.ai_resolvers import resolve_preset, resolve_sections, resolution_log
 from stripe_link.domain.ai_schema import describe_vocabulary, page_sections_schema
 from stripe_link.domain.documents import (DocumentValidationError, validate_offer_document,
@@ -144,7 +145,12 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     # GATE 1 -- may they use AI Builder at all? Separate from "how many", and asked first so the refusal says
     # "not on your plan" rather than "you have used 0 of 0" (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8). A
     # verified own-key configuration passes regardless of plan: the platform is not paying for those.
-    if not can_use_ai_builder(profile, provider_config=config, now=now):
+    entitled = can_use_ai_builder(profile, provider_config=config, now=now)
+    # A marker, deliberately not a gate: ai_builder must not become responsible for solving the
+    # authorization gap. It records a capability GRANTED to a caller nobody verified, which is the count
+    # that says when enforcement is safe (plans/API_AUTHENTICATION.md).
+    note_capability_decision(event, capability=AI_BUILDER, tenant_id=tenant_id, granted=entitled)
+    if not entitled:
         return error_response(
             "AI Builder is not included on your plan. Upgrade, or connect your own AI provider key.",
             status_code=403, code="ai_builder_not_entitled")
