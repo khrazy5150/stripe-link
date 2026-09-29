@@ -9,7 +9,8 @@ import time
 from html import escape
 from typing import Any
 
-from stripe_link.domain.email_layout import ACCENT, button, paragraph, render_email, rows_table
+from stripe_link.domain.email_layout import (ACCENT, button, emphasis, paragraph,
+                                             render_email, rows_table)
 from stripe_link.domain.tips import fee_breakdown
 
 
@@ -178,10 +179,13 @@ def cancellation_content(
     if support_email:
         text_lines += ["", f"Questions? Reply to this email or contact {support_email}."]
 
+    # PLAIN TEXT into `paragraph`. It escapes what it is given -- rightly, since these carry
+    # tenant-supplied product names -- so markup passed to it arrives as visible <strong> tags. This
+    # is the second email to ship that way; `emphasis()` exists now so there is a correct way to do it.
     body = (
-        paragraph(f"This confirms you cancelled <strong>{escape(item)}</strong>"
-                  + (f" from {escape(business)}" if business else "") + ".")
-        + paragraph("<strong>You will not be charged again.</strong>")
+        paragraph(f"This confirms you cancelled {item}"
+                  + (f" from {business}" if business else "") + ".")
+        + emphasis("You will not be charged again.")
         + (paragraph(f"You keep access until {escape(ends)}. Nothing else is needed from you.")
            if ends else "")
         + (button("Ask for a refund", manage_url) if manage_url else "")

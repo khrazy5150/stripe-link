@@ -62,6 +62,20 @@ def paragraph(text: str, *, muted: bool = False) -> str:
             f'color:{colour}">{escape(str(text))}</p>')
 
 
+def emphasis(text: str) -> str:
+    """A paragraph that stands out, without the caller writing markup.
+
+    `paragraph` escapes its argument, which is right -- these bodies carry tenant-supplied product
+    names and buyer-entered text. But it left no way to bold a line, so two emails were written by
+    passing `<strong>` into it and shipped showing the tags to customers. The emphasis belongs in the
+    layer that owns the styling, so a caller never has a reason to hand it HTML.
+    """
+    if not str(text or "").strip():
+        return ""
+    return (f'<p style="margin:0 0 14px;font-family:{FONT_STACK};font-size:15px;line-height:1.6;'
+            f'font-weight:700;color:{INK}">{escape(str(text))}</p>')
+
+
 def rows_table(rows: list, *, total: tuple | None = None) -> str:
     """A line-item table: `[(label, value), ...]`, with an optional emphasised total row.
 
