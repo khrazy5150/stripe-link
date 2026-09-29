@@ -2537,6 +2537,26 @@ a directory add is DISCOVERABILITY — finding a creator by name — which is wo
 
 ## Commerce
 
+### LOW — the default trust badges assert facts on the tenant's behalf (found 2026-09-29)
+
+`LandingPages.vue:3532` seeds every new trust_badges element with three hardcoded badges:
+
+    🚀 Fast Checkout · ✅ Satisfaction Guarantee · 🇺🇸 Ships from USA
+
+**"Ships from USA" is a checkable claim about provenance**, applied by default to a tenant who may ship from
+anywhere, and "Satisfaction Guarantee" states a policy the tenant may not offer. The platform is making these
+assertions on the tenant's behalf, and a tenant who never opens that element never knows.
+
+Found while auditing a generated page for fabricated claims. **The AI was not the culprit and could not have
+been** — `trust_badges` is in `ai_floor.FLOOR_SECTIONS` ("a badge asserts a certification someone can check")
+and has no generation shape, so the model cannot emit one. The floor did its job; the DEFAULTS predate it.
+Which is the interesting part: the AI is now held to a standard the builder is not.
+
+**Fix shape, not yet decided.** Either default to badges that assert nothing about the seller (a payment-
+security badge is true because Stripe makes it true), or ship the element empty and let the tenant choose,
+or derive shipping origin from `ShippingConfig.ship_from` — which exists and is the honest source. The last
+is the most work and the only one that is actually right for a badge that names a country.
+
 ### Smart Pricing — cost profiles, and a price the tenant does not have to guess (plan plans/SMART_PRICING.md, 2026-09-28)
 
 A tenant states what a thing costs them and what they want to earn; the platform states what to
