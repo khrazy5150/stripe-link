@@ -22,17 +22,22 @@ is no cross-tenant index and no platform-wide buyer graph. See plan §5a for wid
 import os
 import secrets
 import time
+from html import escape
 from urllib.parse import parse_qs, urlencode
 from urllib.request import urlopen
 
 from stripe_link.common import error_response, query_params
+from stripe_link.domain.receipts import format_money
 from stripe_link.domain.leads import HONEYPOT_FIELD, is_spam
 from stripe_link.domain.purchase_lookup import (
     contact_key,
+    is_recurring,
+    order_epoch,
+    order_label,
     purchase_summary,
     purchase_token_doc,
     refund_request_doc,
-    select_order,
+    select_orders,
     subscription_id,
 )
 from stripe_link.domain.request_throttle import (
@@ -190,19 +195,26 @@ def _lookup(body, *, orders_repo, tokens_repo, throttles_repo, mailer_send, now_
         # Both modes: a tenant testing their own page has test orders, and a real buyer has live ones. The
         # token records which, so the action taken later runs against the right Stripe account.
         for mode in ("live", "test"):
-            orders = _orders_for(tenant_id, orders_repo, mode)
-            order = select_order(orders, key, approximate_date=when)
-            if not order:
+            orders = select_orders(_orders_for(tenant_id, orders_repo, mode), key,
+                                   approximate_date=when)
+            if not orders:
                 continue
-            token = secrets.token_urlsafe(24)
+            # ONE TOKEN PER ORDER, still. `purchase_token_doc` is scoped to a single order on purpose
+            # -- "a leaked link can never sweep a history" -- and listing several purchases must not
+            # weaken that. So the CHOICE lives in the email, which only reaches the verified address,
+            # and each link remains a capability for exactly one purchase.
             repo = tokens_repo or purchase_tokens_repository(mode=mode)
-            repo.put(purchase_token_doc(
-                tenant_id, token,
-                order_id=str(order.get("order_id") or ""),
-                email=str((order.get("customer") or {}).get("email") or ""),
-                mode=mode, now=now,
-            ))
-            _send_link(order, token, tenant_id, mailer_send)
+            minted = []
+            for order in orders:
+                token = secrets.token_urlsafe(24)
+                repo.put(purchase_token_doc(
+                    tenant_id, token,
+                    order_id=str(order.get("order_id") or ""),
+                    email=str((order.get("customer") or {}).get("email") or ""),
+                    mode=mode, now=now,
+                ))
+                minted.append((order, token))
+            _send_link(minted, tenant_id, mailer_send)
             break
     except Exception:  # noqa: BLE001 - a lookup failure must look exactly like a miss, never like an error
         pass
@@ -243,38 +255,78 @@ def _throttled(tenant_id, key, throttles_repo, now) -> bool:
     return False
 
 
-def _send_link(order, token, tenant_id, mailer_send):
-    email = str((order.get("customer") or {}).get("email") or "").strip()
+def _send_link(minted, tenant_id, mailer_send):
+    """One email listing every purchase we found, each with its own link.
+
+    Listing rather than picking is the fix. `select_order` returned the newest match and stopped, so a
+    buyer with four subscriptions could cancel exactly one and had no route to the other three -- and a
+    customer who cannot cancel goes to their bank, which is the dispute this flow exists to prevent.
+    """
+    if not minted:
+        return
+    email = str((minted[0][0].get("customer") or {}).get("email") or "").strip()
     if not email:
         return
-    url = f"{_manage_url()}?{urlencode({'t': token})}"
-    business = _business_name(tenant_id) or "the seller"
-    text = (
-        f"Here is the link to your purchase from {business}.\n\n{url}\n\n"
-        "From there you can stop future payments or ask for a refund. The link works for seven days.\n\n"
-        "If you did not ask for this, you can ignore it — nothing has changed."
-    )
-    identity = tenant_email_identity(tenant_id)
+    tenant_id_str = tenant_id
+    business = _business_name(tenant_id_str) or "the seller"
+    identity = tenant_email_identity(tenant_id_str)
+    several = len(minted) > 1
+
+    def line(order, token):
+        url = f"{_manage_url()}?{urlencode({'t': token})}"
+        label = order_label(order)
+        amount = format_money(order.get("amount_total"), str(order.get("currency") or "usd"))
+        # Say which are recurring: "cancel" means nothing on a one-off, and a buyer scanning a list
+        # needs to know which charge is the one that keeps coming back.
+        kind = "subscription" if is_recurring(order) else "one-time"
+        when = _when(order)
+        return label, amount, kind, when, url
+
+    rows = [line(order, token) for order, token in minted]
+
+    if several:
+        intro = (f"You have {len(rows)} purchases from {business}. Pick the one you want to manage — "
+                 f"each link opens just that purchase, where you can stop future payments or ask for "
+                 f"a refund.")
+    else:
+        intro = ("Here is the link to your purchase. From there you can stop future payments or ask "
+                 "for a refund.")
+
+    text = [f"{intro}\n"]
+    for label, amount, kind, when, url in rows:
+        text.append(f"- {label} — {amount} {kind}{when}\n  {url}")
+    text.append("\nThe links work for seven days. If you did not ask for this, you can ignore this "
+                "email — nothing has changed.")
+
+    body = paragraph(intro)
+    for label, amount, kind, when, url in rows:
+        body += paragraph(f"<strong>{escape(label)}</strong> — {escape(amount)} "
+                          f"{escape(kind)}{escape(when)}")
+        body += button(f"Manage this {kind}" if several else "Manage this purchase", url)
+    body += paragraph("The links work for seven days. If you did not ask for this, you can ignore "
+                      "this email — nothing has changed.", muted=True)
+
+    subject = (f"Your {len(rows)} purchases from {business}" if several
+               else f"Your purchase from {business}")
     html = render_email(
         business_name=identity.get("business_name") or (business if business != "the seller" else ""),
-        title=f"Your purchase from {business}",
-        body=(
-            paragraph("Here is the link to your purchase. From there you can stop future payments or "
-                      "ask for a refund.")
-            + button("Manage this purchase", url)
-            + paragraph("The link works for seven days. If you did not ask for this, you can ignore it "
-                        "— nothing has changed.", muted=True)
-        ),
-        preheader="Your secure link to manage this purchase.",
+        title=subject, body=body,
+        preheader=("Pick which purchase to manage." if several
+                   else "Your secure link to manage this purchase."),
         reply_to=identity.get("reply_to", ""),
     )
-    (mailer_send or send_email)(
-        to=email,
-        subject=f"Your purchase from {business}",
-        html=html,
-        text=text,
-        tenant_id=tenant_id,
-    )
+    (mailer_send or send_email)(to=email, subject=subject, html=html, text="\n".join(text),
+                                tenant_id=tenant_id_str)
+
+
+def _when(order) -> str:
+    """" on 28 Sep 2026", or "" when the date is unreadable. Two purchases of the same product on
+    different days are otherwise indistinguishable in the list."""
+    try:
+        return time.strftime(" on %d %b %Y", time.gmtime(order_epoch(order)))
+    except Exception:  # noqa: BLE001 - a missing date must not cost the whole email
+        return ""
+
 
 
 def _parse_date(value: str):

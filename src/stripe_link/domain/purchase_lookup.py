@@ -86,6 +86,64 @@ def select_order(
     return max(matches, key=order_epoch)
 
 
+# How many purchases one lookup will list. A cap rather than everything: the email has to stay
+# readable, and a contact with fifty orders is asking a question this flow cannot answer anyway.
+MAX_LISTED = 10
+
+
+def select_orders(
+    orders: list[dict[str, Any]],
+    key: str,
+    *,
+    approximate_date: int | None = None,
+    limit: int = MAX_LISTED,
+) -> list[dict[str, Any]]:
+    """EVERY order this contact could mean, newest first.
+
+    `select_order` answers "which one did they mean" and is right when there is one. It is wrong the
+    moment a buyer has two: it silently returned the newest, so a customer with four subscriptions
+    could cancel exactly one and had no route to the rest -- which sends them to their bank instead,
+    the dispute this whole flow exists to avoid (measured 2026-09-28).
+
+    An approximate date still NARROWS rather than picking: the orders nearest that date come first,
+    so "it was around March" reorders the list instead of collapsing it to a guess.
+    """
+    if not key:
+        return []
+    matches = [order for order in orders if key in order_contact_keys(order)]
+    if approximate_date:
+        matches.sort(key=lambda order: abs(order_epoch(order) - int(approximate_date)))
+    else:
+        matches.sort(key=order_epoch, reverse=True)
+    return matches[:max(1, int(limit))]
+
+
+def order_label(order: dict[str, Any]) -> str:
+    """What this purchase is, as a buyer would recognise it.
+
+    They are choosing between their own purchases, so the product name is the only thing that tells
+    them apart -- an order id means nothing to the person who paid.
+    """
+    product = (order.get("product") or {}).get("name")
+    if str(product or "").strip():
+        return str(product).strip()
+    lines = order.get("line_items") or []
+    if lines:
+        name = str((lines[0] or {}).get("name") or "").strip()
+        # Stripe writes a renewal line as "1 x Creatine Gummies (at $32.91 / month)". The quantity and
+        # price are shown beside it, so the leading count and trailing price are noise here.
+        name = re.sub(r"^\s*\d+\s*[x\u00d7]\s*", "", name)
+        name = re.sub(r"\s*\(at .*\)\s*$", "", name).strip()
+        if name:
+            return name
+    return "Your purchase"
+
+
+def is_recurring(order: dict[str, Any]) -> bool:
+    """Whether stopping this one stops anything. A one-off has nothing to cancel."""
+    return bool(subscription_id(order))
+
+
 def is_refundable(order: dict[str, Any]) -> bool:
     """Whether there is money left on this order to ask about. Paid, and not already fully refunded."""
     if str(order.get("payment_status") or "") not in {"paid", ""}:

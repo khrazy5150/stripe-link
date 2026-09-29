@@ -463,3 +463,140 @@ class ThrottleCounterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiplePurchaseTests(unittest.TestCase):
+    """One buyer, several purchases — the case that shipped broken.
+
+    Found 2026-09-28 against real money: four daily subscriptions under one email, and the lookup
+    returned the newest and stopped. The customer could cancel exactly one and had no route to the
+    other three, which is precisely the situation that sends someone to their bank instead — the
+    dispute this whole flow exists to prevent, caused by the flow itself.
+    """
+
+    CONTACT = "buyer@example.com"
+
+    def orders(self):
+        return [
+            {"order_id": "o_sub_a", "customer": {"email": self.CONTACT}, "created_at": 300,
+             "amount_total": 19792, "currency": "usd", "subscription_id": "sub_a",
+             "product": {"name": "Premium Bundle"}},
+            {"order_id": "o_sub_b", "customer": {"email": self.CONTACT}, "created_at": 200,
+             "amount_total": 3291, "currency": "usd", "subscription_id": "sub_b",
+             "line_items": [{"name": "1 × Creatine Gummies (at $32.91 / day)"}]},
+            {"order_id": "o_once", "customer": {"email": self.CONTACT}, "created_at": 100,
+             "amount_total": 1445, "currency": "usd", "product": {"name": "Shaker Bottle"}},
+            {"order_id": "o_other", "customer": {"email": "someone@else.com"}, "created_at": 400,
+             "amount_total": 999, "currency": "usd"},
+        ]
+
+    # ---- the matcher --------------------------------------------------------------------------
+    def test_every_purchase_for_the_contact_is_returned(self):
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        found = select_orders(self.orders(), contact_key(self.CONTACT))
+        self.assertEqual([o["order_id"] for o in found], ["o_sub_a", "o_sub_b", "o_once"])
+
+    def test_another_contacts_purchase_is_never_included(self):
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        found = select_orders(self.orders(), contact_key(self.CONTACT))
+        self.assertNotIn("o_other", [o["order_id"] for o in found])
+
+    def test_a_date_reorders_rather_than_collapsing_the_list(self):
+        # "it was around March" should narrow, not guess -- the old behaviour picked one and stopped.
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        found = select_orders(self.orders(), contact_key(self.CONTACT), approximate_date=100)
+        self.assertEqual(found[0]["order_id"], "o_once")
+        self.assertEqual(len(found), 3)
+
+    def test_the_list_is_capped(self):
+        from stripe_link.domain.purchase_lookup import MAX_LISTED, contact_key, select_orders
+        many = [{"order_id": f"o{n}", "customer": {"email": self.CONTACT}, "created_at": n}
+                for n in range(50)]
+        self.assertEqual(len(select_orders(many, contact_key(self.CONTACT))), MAX_LISTED)
+
+    def test_an_unknown_contact_gets_nothing(self):
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        self.assertEqual(select_orders(self.orders(), contact_key("nobody@example.com")), [])
+
+    # ---- labelling ----------------------------------------------------------------------------
+    def test_a_purchase_is_named_the_way_the_buyer_would_recognise_it(self):
+        from stripe_link.domain.purchase_lookup import order_label
+        self.assertEqual(order_label(self.orders()[0]), "Premium Bundle")
+
+    def test_a_renewal_line_is_stripped_back_to_the_product_name(self):
+        # Stripe writes "1 × Creatine Gummies (at $32.91 / day)"; the count and price are shown beside it.
+        from stripe_link.domain.purchase_lookup import order_label
+        self.assertEqual(order_label(self.orders()[1]), "Creatine Gummies")
+
+    def test_an_unnameable_purchase_still_gets_a_label(self):
+        from stripe_link.domain.purchase_lookup import order_label
+        self.assertEqual(order_label({"order_id": "x"}), "Your purchase")
+
+    def test_recurring_and_one_off_are_distinguishable(self):
+        # "Cancel" means nothing on a one-off, and a buyer scanning a list needs to know which charge
+        # is the one that keeps coming back.
+        from stripe_link.domain.purchase_lookup import is_recurring
+        self.assertTrue(is_recurring(self.orders()[0]))
+        self.assertFalse(is_recurring(self.orders()[2]))
+
+    # ---- the email ------------------------------------------------------------------------------
+    def send(self, orders):
+        import handlers.purchase_manage as pm
+        captured = {}
+        pm._send_link([(o, f"tok_{o['order_id']}") for o in orders], "t1", lambda **kw: captured.update(kw))
+        return captured
+
+    def test_the_email_lists_every_purchase_with_its_own_link(self):
+        sent = self.send(self.orders()[:3])
+        for order_id in ("o_sub_a", "o_sub_b", "o_once"):
+            self.assertIn(f"tok_{order_id}", sent["text"])
+            self.assertIn(f"tok_{order_id}", sent["html"])
+
+    def test_each_link_is_a_separate_token(self):
+        """One token per order, still. purchase_token_doc is scoped to a single order on purpose --
+        "a leaked link can never sweep a history" -- so listing several must not hand one token
+        several purchases."""
+        sent = self.send(self.orders()[:3])
+        tokens = {line.split("t=")[1] for line in sent["text"].splitlines() if "t=" in line}
+        self.assertEqual(len(tokens), 3)
+
+    def test_the_email_says_what_each_purchase_is_and_costs(self):
+        sent = self.send(self.orders()[:3])
+        self.assertIn("Premium Bundle", sent["text"])
+        self.assertIn("197.92", sent["text"])
+        self.assertIn("Creatine Gummies", sent["text"])
+
+    def test_the_email_marks_which_ones_recur(self):
+        sent = self.send(self.orders()[:3])
+        self.assertIn("subscription", sent["text"])
+        self.assertIn("one-time", sent["text"])
+
+    def test_the_date_disambiguates_two_of_the_same_product(self):
+        same = [dict(self.orders()[1], order_id="o_a", created_at=1790627700),
+                dict(self.orders()[1], order_id="o_b", created_at=1790541300)]
+        sent = self.send(same)
+        self.assertIn("28 Sep 2026", sent["text"])
+        self.assertIn("27 Sep 2026", sent["text"])
+
+    def test_one_purchase_still_reads_as_one_purchase(self):
+        # The common case must not become a list of one with a "pick one" instruction.
+        sent = self.send(self.orders()[:1])
+        self.assertNotIn("Pick the one", sent["text"])
+        self.assertIn("Your purchase from", sent["subject"])
+
+    def test_several_purchases_say_how_many(self):
+        sent = self.send(self.orders()[:3])
+        self.assertIn("3 purchases", sent["subject"])
+        self.assertIn("Pick the one", sent["text"])
+
+    def test_nothing_is_sent_without_an_address(self):
+        sent = self.send([{"order_id": "x", "customer": {}, "created_at": 1}])
+        self.assertEqual(sent, {})
+
+    def test_an_empty_match_sends_nothing(self):
+        sent = self.send([])
+        self.assertEqual(sent, {})
+
+    def test_an_unreadable_date_does_not_cost_the_email(self):
+        sent = self.send([dict(self.orders()[0], created_at="not-a-date")])
+        self.assertIn("Premium Bundle", sent["text"])
