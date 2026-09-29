@@ -101,3 +101,99 @@ class ConcurrencyGuardTests(unittest.TestCase):
     def test_abandoned_jobs_are_swept_on_a_schedule(self):
         self.assertIn("internal_reap", self._block())
         self.assertIn("Type: Schedule", self._block())
+
+
+class AtomicConsumptionTests(unittest.TestCase):
+    """`consume_if_available` — the check and the increment as ONE write.
+
+    `consume()` returning the new total was not enough, and the handler that used it proved why: it read
+    `used`, decided on that read, then incremented, so two requests at `used=2` of an allowance of 3 both
+    passed and both incremented. The fake in test_ai_generate cannot catch that class of bug, because a fake
+    has no concurrency and no ConditionExpression — which is exactly why these tests drive the REAL
+    repository against a table that enforces the condition.
+    """
+
+    def _repo(self, stored=None):
+        from stripe_link.repositories.documents import AiUsageRepository
+
+        class ConditionalCheckFailedException(Exception):
+            pass
+
+        class FakeTable:
+            """A DynamoDB stand-in that actually honours the ConditionExpression we send it."""
+
+            def __init__(self, rows):
+                self.rows = rows
+                self.writes = 0
+
+            def get_item(self, Key):  # noqa: N803 - boto3's casing
+                row = self.rows.get((Key["tenant_id"], Key["period"]))
+                return {"Item": dict(row)} if row else {}
+
+            def update_item(self, **kwargs):
+                key = (kwargs["Key"]["tenant_id"], kwargs["Key"]["period"])
+                values = kwargs["ExpressionAttributeValues"]
+                row = self.rows.get(key)
+                condition = kwargs.get("ConditionExpression", "")
+                if condition:
+                    exists = row is not None
+                    ceiling = values[":ceiling"]
+                    if not (not exists or row["used"] <= ceiling):
+                        raise ConditionalCheckFailedException("the condition failed")
+                self.writes += 1
+                new_used = (row or {}).get("used", 0) + values[":by"]
+                self.rows[key] = {"used": new_used, "updated_at": values[":at"]}
+                return {"Attributes": {"used": new_used}}
+
+        table = FakeTable(dict(stored or {}))
+        return AiUsageRepository("jb-probe-dev", table=table), table
+
+    def test_the_first_generation_of_a_period_is_allowed(self):
+        repo, table = self._repo()
+        result = repo.consume_if_available("t1", "trial", allowance=3, at=1)
+        self.assertEqual(result, {"allowed": True, "used": 1})
+        self.assertEqual(table.writes, 1)
+
+    def test_the_last_slot_is_allowed_and_the_next_is_not(self):
+        repo, table = self._repo({("t1", "trial"): {"used": 2}})
+        self.assertTrue(repo.consume_if_available("t1", "trial", allowance=3, at=1)["allowed"])
+        refused = repo.consume_if_available("t1", "trial", allowance=3, at=2)
+        self.assertFalse(refused["allowed"])
+        self.assertEqual(refused["used"], 3, "the refusal reports what is already spent")
+        self.assertEqual(table.writes, 1, "a refused slot must not be written and then handed back")
+
+    def test_a_refusal_does_not_increment(self):
+        # The whole point of a conditional update: a failed condition applies NOTHING. Taking the slot and
+        # refunding it would leave a window where the count is wrong, and would corrupt a lifetime counter
+        # permanently if the refund were ever lost.
+        repo, table = self._repo({("t1", "trial"): {"used": 3}})
+        repo.consume_if_available("t1", "trial", allowance=3, at=1)
+        self.assertEqual(table.rows[("t1", "trial")]["used"], 3)
+
+    def test_an_allowance_of_zero_refuses_without_writing(self):
+        # The absent-row branch of the condition would otherwise let a FRESH row through on a zero
+        # allowance -- which is exactly the free tier once ai_builder becomes a capability.
+        repo, table = self._repo()
+        result = repo.consume_if_available("t1", "2026-09", allowance=0, at=1)
+        self.assertEqual(result, {"allowed": False, "used": 0})
+        self.assertEqual(table.writes, 0)
+
+    def test_unlimited_is_not_fed_to_the_comparison(self):
+        # `exempt` tenants carry allowance -1. Comparing against it (used < -1) is false for every row, so a
+        # naive implementation refuses an exempt tenant on their very first generation.
+        repo, table = self._repo()
+        for expected in (1, 2, 3, 4):
+            result = repo.consume_if_available("t1", "2026-09", allowance=-1, at=1)
+            self.assertEqual(result, {"allowed": True, "used": expected})
+        self.assertEqual(table.writes, 4)
+
+    def test_two_racing_requests_cannot_both_take_the_last_slot(self):
+        # The original bug, reproduced at the repository level: both callers read the same `used` first.
+        repo, table = self._repo({("t1", "trial"): {"used": 2}})
+        seen_by_both = repo.used("t1", "trial")
+        self.assertEqual(seen_by_both, 2, "both requests observe room for one more")
+        first = repo.consume_if_available("t1", "trial", allowance=3, at=1)
+        second = repo.consume_if_available("t1", "trial", allowance=3, at=1)
+        self.assertTrue(first["allowed"])
+        self.assertFalse(second["allowed"], "the loser is refused by the write, not by Python")
+        self.assertEqual(table.rows[("t1", "trial")]["used"], 3, "never more than the allowance")

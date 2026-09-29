@@ -639,6 +639,56 @@ class AiUsageRepository:
         )
         return int((response.get("Attributes") or {}).get("used") or 0)
 
+    def consume_if_available(self, tenant_id: str, period: str, *, allowance: int, at: int,
+                             expires_at: int = 0, by: int = 1) -> dict[str, Any]:
+        """Take a slot ONLY if the allowance still has room. The check and the increment are ONE write.
+
+        `consume()` returning the new total is not enough on its own, and the handler that used it proved
+        why: it read `used`, decided on that read, then incremented. Two requests at `used=2` of an
+        allowance of 3 both passed the decision and both incremented, producing four generations from a
+        three-generation allowance -- under a comment asserting that could not happen. Any check that is a
+        separate round trip from the increment has that window; the only fix is to put the condition in the
+        write, which is what DynamoDB's ConditionExpression is for.
+
+        Returns `{"allowed": bool, "used": int}`. On refusal `used` is the count that was already there,
+        and NOTHING was written -- the slot is not taken and then handed back, because a failed conditional
+        update does not apply.
+
+        A negative allowance means UNLIMITED (the `exempt` tenants), which is why it cannot simply be fed
+        to the comparison: `used < -1` is false for every row, so an exempt tenant would be refused on their
+        first generation.
+        """
+        ceiling = int(allowance)
+        step = int(by)
+        if ceiling == 0 or (0 < ceiling < step):
+            # No allowance at all, or a step bigger than the whole allowance. Refuse without writing, and
+            # WITHOUT the condition below, whose attribute_not_exists branch would otherwise let a fresh
+            # row through on an allowance of zero.
+            return {"allowed": False, "used": self.used(tenant_id, period)}
+
+        values: dict[str, Any] = {":by": step, ":at": int(at),
+                                  ":exp": int(expires_at or (int(at) + 90 * 24 * 3600))}
+        kwargs: dict[str, Any] = {
+            "Key": {"tenant_id": str(tenant_id), "period": str(period)},
+            "UpdateExpression": "ADD #used :by SET updated_at = :at, expires_at = :exp",
+            "ExpressionAttributeNames": {"#used": "used"},
+            "ReturnValues": "UPDATED_NEW",
+        }
+        if ceiling > 0:
+            # Post-increment must land within the allowance, so pre-increment must be at or below
+            # allowance - by. The absent-row branch is the first generation of a period.
+            values[":ceiling"] = ceiling - step
+            kwargs["ConditionExpression"] = "attribute_not_exists(#used) OR #used <= :ceiling"
+        kwargs["ExpressionAttributeValues"] = values
+
+        try:
+            response = self.table.update_item(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - a refusal is expected traffic, not a fault
+            if type(exc).__name__ == "ConditionalCheckFailedException" or "ConditionalCheckFailed" in str(exc):
+                return {"allowed": False, "used": self.used(tenant_id, period)}
+            raise
+        return {"allowed": True, "used": int((response.get("Attributes") or {}).get("used") or 0)}
+
     def release(self, tenant_id: str, period: str, *, at: int) -> int:
         """Give a generation back when it never happened.
 

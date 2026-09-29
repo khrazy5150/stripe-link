@@ -136,19 +136,21 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     period = period_key(now)
     plan_key, exempt = _plan(tenant_id, tenant_repo)
     allowance = allowance_for(plan_key=plan_key, provider=str(config.get("provider")), exempt=exempt)
+    # The WRITE decides, not a read before it. Checking `used` and then incrementing is two round trips with
+    # a window between them: two requests at `used=2` of an allowance of 3 both passed the check and both
+    # incremented, producing four generations -- under a comment asserting that could not happen. The
+    # condition now lives inside the update, so the loser is refused by DynamoDB rather than by Python.
     try:
-        used = usage_repo.used(tenant_id, period)
-    except Exception:  # noqa: BLE001 - an unreadable counter must fail CLOSED, not hand out a free run
+        taken = usage_repo.consume_if_available(tenant_id, period, allowance=allowance, at=now)
+    except Exception:  # noqa: BLE001 - an unusable counter must fail CLOSED, not hand out a free run
         return error_response("Could not check your AI allowance. Try again shortly.", code="quota_unavailable")
-    allowed, why_not = may_generate(used, allowance)
-    if not allowed:
-        return error_response(why_not, status_code=429, code="quota_exhausted")
-
-    # Spend the slot before the work, so two concurrent requests cannot both pass the check above.
-    try:
-        usage_repo.consume(tenant_id, period, at=now)
-    except Exception:  # noqa: BLE001
-        return error_response("Could not reserve an AI generation. Try again shortly.", code="quota_unavailable")
+    if not taken["allowed"]:
+        # `may_generate` still writes the refusal, because the message a tenant reads is its job: it
+        # distinguishes "not included on your plan" from "you have used this month's".
+        _, why_not = may_generate(taken["used"], allowance)
+        return error_response(
+            why_not or "You have used your AI generations.", status_code=429, code="quota_exhausted")
+    used = taken["used"] - 1  # what was already spent BEFORE this one, for the job record below
 
     job = {
         "schema_version": "2026-09-27", "document_type": "ai_generation_job",

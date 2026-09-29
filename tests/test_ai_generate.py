@@ -51,6 +51,16 @@ class FakeUsage:
     def consume(self, tenant_id, period, *, at, **kw):
         self.consumed += 1
         return self._used + self.consumed
+    def consume_if_available(self, tenant_id, period, *, allowance, at, **kw):
+        # Mirrors the real repository's contract: the WRITE decides. A fake that always says yes would
+        # let the handler's refusal path rot untested, which is how the read-then-write race survived.
+        if self.fail_read:
+            raise RuntimeError("dynamo is having a day")
+        total = self._used + self.consumed + 1
+        if int(allowance) >= 0 and total > int(allowance):
+            return {"allowed": False, "used": self._used + self.consumed}
+        self.consumed += 1
+        return {"allowed": True, "used": total}
     def release(self, tenant_id, period, *, at):
         self.released += 1
 
@@ -284,17 +294,46 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(self.usage.released, 0)
 
     def test_the_slot_is_taken_before_the_work(self):
-        # Two concurrent requests must not both pass the allowance check.
+        # The count is spent before the model runs, so our outage is what refunds it -- never the tenant's
+        # taste. The ordering is the contract; `release` is the only way back.
         order = []
         def slow(**kwargs):
             order.append("generate")
             return ok_generator(**kwargs)
         class Watching(FakeUsage):
-            def consume(self, *a, **k):
+            def consume_if_available(self, *a, **k):
                 order.append("consume")
-                return super().consume(*a, **k)
+                return super().consume_if_available(*a, **k)
         self.call(generator=slow, usage=Watching())
         self.assertEqual(order, ["consume", "generate"])
+
+    def test_the_allowance_is_decided_by_the_write_not_a_read(self):
+        # The race this replaced: the handler read `used`, decided on it, then incremented. A repository
+        # that refuses must be believed even when a prior read said there was room -- otherwise the
+        # decision is still being made in Python and the window is still open.
+        class AlwaysFull(FakeUsage):
+            def used(self, tenant_id, period):
+                return 0          # a read that says "plenty left"
+            def consume_if_available(self, tenant_id, period, *, allowance, at, **kw):
+                return {"allowed": False, "used": 99}   # ...and a write that disagrees
+        ran = []
+        def watched(**kwargs):
+            ran.append(1)
+            return ok_generator(**kwargs)
+        response = self.call(generator=watched, usage=AlwaysFull())
+        self.assertEqual(response["statusCode"], 429)
+        self.assertEqual(json.loads(response["body"])["error"], "quota_exhausted")
+        self.assertEqual(ran, [], "no generation may run on a refused slot")
+
+    def test_a_refused_slot_is_never_released(self):
+        # Nothing was taken, so there is nothing to give back. Releasing here would CREDIT a tenant who
+        # never spent, and on a lifetime trial counter that is a free generation every time they retry.
+        class AlwaysFull(FakeUsage):
+            def consume_if_available(self, *a, **k):
+                return {"allowed": False, "used": 99}
+        usage = AlwaysFull()
+        self.call(usage=usage)
+        self.assertEqual(usage.released, 0)
 
     def test_a_provider_failure_gives_the_slot_back(self):
         def failing(**kwargs):
