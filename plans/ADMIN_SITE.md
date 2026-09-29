@@ -123,6 +123,25 @@ expensive part. Building automation for it would be paying for a tool to do a jo
 without a stack deploy, and closing the dual-secret gap. Those stay useful afterwards; a swap button does
 not.
 
+## 6. Plan/tier management — the Admin Site's other job (requested 2026-09-29)
+
+The author's future tiers: **agency mode** (agencies operating the software for their clients), a **business**
+tier (AI managing Google Business Profiles, regular blogs, trend checks), and **business intelligence** (AI
+spotting trends and recommending offers). None priced yet; the requirement is that adding them later must not
+mean a deploy.
+
+**Mostly already true.** A tier is a `PLAN#` row in `PlatformPlansTable` — label, price, Stripe price id,
+entitlements, AI allowance, sort order — and `plan_key` (stable) is already separate from `label` (display),
+so renaming is a display edit. `docs/PLATFORM_PLANS.md` now carries the full "adding a new tier" audit,
+including the three places a new tier still touches code. The one worth fixing before a fourth tier exists is
+`PREMIUM_TIERS` in `domain/platform_signature.py`: a new paid tier would keep the free-tier email branding
+until someone remembers that list.
+
+So the Admin Site screen is a CRUD over plan rows plus the CONFIG row, and the interesting parts are the
+guards rather than the form: a price change cannot edit a Stripe Price in place (create a new one and migrate),
+entitlement changes apply on the tenant's next subscription webhook rather than immediately, and editing
+another tenant's tier is the kind of action §3's audit question exists for.
+
 ## 5. Cost visibility — who is spending the platform's money (requested 2026-09-29)
 
 **The author's ask:** record AWS spend in near-real time, show it in the Admin Site, and be able to spot the

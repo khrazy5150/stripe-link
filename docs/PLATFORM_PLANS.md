@@ -60,6 +60,38 @@ On subscribe, the billing webhook writes this value onto the tenant as `tier_id`
 On cancellation (`customer.subscription.deleted`, fired at period end), `tier_id` reverts to `basic`
 automatically — the tenant keeps premium fees until their paid-through date.
 
+### Adding a NEW tier — what is data and what is still code
+
+Recorded 2026-09-29 after the author flagged future tiers (agency mode, a business tier managing GBP/blogs/
+trends, a business-intelligence tier). **Names are display-only and already safe**: `plan_key` is the stable
+id stamped on the Stripe subscription, `label` is what the Billing screen shows, and they are separate fields.
+Renaming a plan is a display edit. The AI allowance is keyed on **neither** — it rides on the tenant as a
+number — so a new tier costs no code at all on that path.
+
+**Pure data, no deploy:** a new `PLAN#<key>` row with its own `label`, `monthly_amount`, `price_id`,
+`entitlements`, `ai_generations`, `sort_order`. It appears on the Billing screen on the next cache TTL.
+`normalize_tier_id` passes any `fee_tier` string through — it is not a whitelist.
+
+**Three places a new tier still touches code**, in the order they will bite:
+
+1. **`PREMIUM_TIERS = ("pro",)`** (`domain/platform_signature.py`) — which fee tiers have paid to remove the
+   "Powered by Junior Bay" sign-off from tenant email. A new paid tier with its own `fee_tier` (say `agency`)
+   would **keep carrying the free-tier branding** until added here: a paying customer silently getting the
+   free experience. Note that file's docstring claims the tier vocabulary "is NOT restated here" — it is, and
+   this list is the restatement. The durable fix is to invert it: the FREE tier carries branding, everything
+   else does not.
+2. **`platform_fee_rate`'s fallback** (`domain/fees.py`) — a tier present in the S3 billing config but missing
+   a fee class silently falls back to **basic**, i.e. free-tier rates (5/6/7%). A partially-defined agency
+   tier would undercharge without any error. Define every fee class when adding a tier.
+3. **`SUPPORTED_PLATFORM_FEE_TIERS`** (`domain/documents.py`) — requires `basic`/`standard`/`pro` to EXIST in
+   the billing config but does not forbid others, so a new tier is permitted and simply **unvalidated**. Its
+   percentages get no range check.
+
+**Capabilities are a separate axis and are correctly code-side.** `CAPABILITIES` in `domain/entitlements.py`
+is the registry of features that exist; `plan.entitlements` decides which a tier grants. Agency mode, GBP
+management and business intelligence each need a registry entry when the feature is built — that is a feature
+needing code, not a tier needing code, and it is the right split.
+
 ### `ai_generations` — the AI allowance this plan grants
 
 Platform-paid AI generations per calendar month. Denormalized onto the tenant as `ai_generations` by the
