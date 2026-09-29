@@ -689,6 +689,30 @@ class AiUsageRepository:
             raise
         return {"allowed": True, "used": int((response.get("Attributes") or {}).get("used") or 0)}
 
+    def add_cost(self, tenant_id: str, period: str, *, micros: int, at: int, expires_at: int = 0) -> int:
+        """Accumulate spend on a usage row. Returns the running total in micro-dollars.
+
+        Integer micros, never a float: DynamoDB `ADD` on floats accumulates rounding error, and
+        Decimal-from-DynamoDB has already cost this repo a production bug. Separate from `consume` because
+        cost is only known AFTER the call returns, while the slot is spent before it.
+        """
+        response = self.table.update_item(
+            Key={"tenant_id": str(tenant_id), "period": str(period)},
+            UpdateExpression="ADD cost_micros :c SET updated_at = :at, expires_at = :exp",
+            ExpressionAttributeValues={":c": int(micros), ":at": int(at),
+                                       ":exp": int(expires_at or (int(at) + 400 * 24 * 3600))},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int((response.get("Attributes") or {}).get("cost_micros") or 0)
+
+    def cost(self, tenant_id: str, period: str) -> int:
+        item = (self.table.get_item(Key={"tenant_id": str(tenant_id), "period": str(period)})
+                or {}).get("Item") or {}
+        try:
+            return int(item.get("cost_micros") or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def release(self, tenant_id: str, period: str, *, at: int) -> int:
         """Give a generation back when it never happened.
 

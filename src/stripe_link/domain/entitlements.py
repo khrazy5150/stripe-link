@@ -21,6 +21,11 @@ CAPABILITIES: dict[str, dict[str, str]] = {
     # on the Payments screen), so they have NO menu `view` — locking the whole screen over a sub-feature would strand
     # a walled tenant away from Stripe-connect / settings. Still backend-gated at their own actions.
     "custom_domains": {"label": "Custom Domains", "view": ""},
+    # Gate 1 of three (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8): may this tenant use AI Builder AT ALL,
+    # which is a different question from how many generations they are entitled to. No menu `view` -- it is
+    # a fork off the product wizard, not a screen, so gating a whole screen over it would strand a tenant
+    # away from their own catalogue.
+    "ai_builder": {"label": "AI Builder", "view": ""},
     "bnpl": {"label": "Buy Now, Pay Later", "view": ""},
 }
 
@@ -68,6 +73,31 @@ def tenant_entitlement_set(tenant: dict[str, Any] | None, now: int | None = None
     if status == "trial" and not tenant.get("stripe_subscription_id"):
         return set(FREE_TIER_CAPABILITIES) if is_trial_expired(tenant, now) else set(CAPABILITIES)
     return denormalized | FREE_TIER_CAPABILITIES
+
+
+AI_BUILDER = "ai_builder"
+
+
+def can_use_ai_builder(tenant: dict[str, Any] | None, *, provider_config: dict[str, Any] | None = None,
+                       now: int | None = None) -> bool:
+    """Gate 1: may this tenant use AI Builder at all?
+
+    Two independent grants, and the second is the point. The capability comes with a paid plan or a live
+    trial. But a tenant on their OWN key is spending their own money through their own provider account, and
+    refusing that would be withholding a feature the platform does not pay for -- so a verified BYOK
+    configuration qualifies regardless of plan. That is the honest version of "bring your own key", and it
+    keeps the acquisition story alive now that the free tier carries no platform-paid generations.
+
+    "Verified" is deliberately strict: `verified_at` is set by a real generation, not by a catalogue lookup,
+    because a key that exists in the database and cannot actually call a model is worse than none -- it
+    admits a tenant to a feature that then fails.
+    """
+    if is_entitled(tenant, AI_BUILDER, now):
+        return True
+    from stripe_link.domain.ai_provider import is_verified, pays_platform
+
+    config = provider_config or {}
+    return bool(is_verified(config) and not pays_platform(str(config.get("provider") or "")))
 
 
 def is_entitled(tenant: dict[str, Any] | None, capability: str, now: int | None = None) -> bool:

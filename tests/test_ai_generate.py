@@ -44,6 +44,7 @@ class FakeUsage:
     def __init__(self, used=0, fail_read=False):
         self._used, self.fail_read = used, fail_read
         self.consumed, self.released = 0, 0
+        self.costs = {}
     def used(self, tenant_id, period):
         if self.fail_read:
             raise RuntimeError("dynamo is having a day")
@@ -63,6 +64,11 @@ class FakeUsage:
         return {"allowed": True, "used": total}
     def release(self, tenant_id, period, *, at):
         self.released += 1
+    def cost(self, tenant_id, period):
+        return self.costs.get((tenant_id, period), 0)
+    def add_cost(self, tenant_id, period, *, micros, at, **kw):
+        self.costs[(tenant_id, period)] = self.costs.get((tenant_id, period), 0) + int(micros)
+        return self.costs[(tenant_id, period)]
 
 
 class FakeEvents:
@@ -91,7 +97,10 @@ def subscriber(allowance=20, **extra):
     """A paying tenant. The allowance rides on the PROFILE, denormalized off the plan row by the billing
     webhook -- it is not derived from tier_id, which is the transaction-fee tier every paid plan shares."""
     return FakeProfiles(billing_status="active", stripe_subscription_id="sub_1",
-                        billing_plan_key="premium", ai_generations=allowance, **extra)
+                        billing_plan_key="premium", ai_generations=allowance,
+                        # Gate 1. Denormalized off the plan row by the billing webhook -- a subscriber whose
+                        # PLAN does not grant ai_builder does not get it, however large their allowance.
+                        entitlements=["ai_builder"], **extra)
 
 
 def ok_generator(**kwargs):
@@ -713,3 +722,104 @@ class GenerationLedgerTests(GenerateTests):
         # their generation AND give them nothing.
         response = self.call(events=FakeEvents(fail=True))
         self.assertIn(response["statusCode"], (200, 201))
+
+
+class AiBuilderCapabilityTests(GenerateTests):
+    """Gate 1: may this tenant use AI Builder at all — a different question from how many generations."""
+
+    def test_a_free_tenant_is_refused_before_the_quota_is_touched(self):
+        # The refusal has to be "not on your plan", not "you have used 0 of 0". They are different problems
+        # with different answers, and only one of them is fixed by waiting for the 1st.
+        response = self.call(profiles=FakeProfiles(billing_status="active", entitlements=[]))
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(json.loads(response["body"])["error"], "ai_builder_not_entitled")
+        self.assertEqual(self.usage.consumed, 0, "gate 1 must not spend a slot")
+
+    def test_a_subscriber_whose_PLAN_lacks_it_is_refused(self):
+        # The live premium plan granted 10 capabilities when ai_builder was added as an 11th. A paying tenant
+        # whose plan row was never updated does NOT get the feature — which is why the plan rows have to be
+        # edited in the same change as the code.
+        paying = FakeProfiles(billing_status="active", stripe_subscription_id="sub_1",
+                              billing_plan_key="premium", ai_generations=20, entitlements=["landing_pages"])
+        self.assertEqual(self.call(profiles=paying)["statusCode"], 403)
+
+    def test_a_live_trial_passes_gate_one(self):
+        trial = FakeProfiles(billing_status="trial", trial_ends_at=1790600000)
+        self.assertEqual(self.call(profiles=trial)["statusCode"], 201)
+
+    def test_a_free_tenant_with_a_VERIFIED_own_key_may_build(self):
+        # Their key, their bill. Refusing here would withhold a feature the platform does not pay for, and
+        # it is the whole acquisition story now that the free tier carries no platform-paid generations.
+        byok = FakeKeyed({"provider": "anthropic", "model": "claude", "verified_at": 1790000000})
+        response = self.call(profiles=FakeProfiles(billing_status="active", entitlements=[]), config=byok)
+        self.assertEqual(response["statusCode"], 201)
+
+    def test_an_UNVERIFIED_own_key_does_not_open_the_gate(self):
+        # A key that exists in the database and cannot actually call a model is worse than none: it admits a
+        # tenant to a feature that then fails. `verified_at` is set by a real generation, not a lookup.
+        unverified = FakeKeyed({"provider": "anthropic", "model": "claude"})
+        response = self.call(profiles=FakeProfiles(billing_status="active", entitlements=[]), config=unverified)
+        self.assertEqual(response["statusCode"], 403)
+
+    def test_a_bedrock_key_is_not_a_byok_carve_out(self):
+        # Bedrock is PLATFORM-paid. A verified bedrock config must not let a free tenant spend our money.
+        platform = FakeKeyed({"provider": "bedrock", "model": "sonnet-4.6", "verified_at": 1790000000})
+        response = self.call(profiles=FakeProfiles(billing_status="active", entitlements=[]), config=platform)
+        self.assertEqual(response["statusCode"], 403)
+
+
+class PlatformBudgetTests(GenerateTests):
+    """Gate 3: will we spend another platform dollar this month?
+
+    The only gate that is identity-independent, which is why it carries real weight while gate 1 is advisory
+    (tenant_id still comes from the request). Per-tenant caps cannot see the abuse that matters here — serial
+    trial signups, each one perfectly within its own allowance.
+    """
+
+    def test_platform_spend_accumulates_on_a_reserved_row(self):
+        from stripe_link.domain.ai_quota import PLATFORM_TENANT
+
+        self.call()
+        spent = self.usage.cost(PLATFORM_TENANT, "2026-09")
+        self.assertGreater(spent, 0, "a completed generation must reach the platform counter")
+
+    def test_a_byok_generation_never_touches_the_platform_counter(self):
+        # Their key, their bill. Counting it would pause everyone else over money we never spent.
+        from stripe_link.domain.ai_quota import PLATFORM_TENANT
+
+        byok = FakeKeyed({"provider": "anthropic", "model": "claude", "verified_at": 1790000000})
+        self.call(config=byok)
+        self.assertEqual(self.usage.cost(PLATFORM_TENANT, "2026-09"), 0)
+
+    def test_an_exhausted_budget_refuses_before_spending_a_slot(self):
+        from unittest.mock import patch
+
+        from stripe_link.domain.ai_quota import PLATFORM_TENANT
+
+        self.usage.costs[(PLATFORM_TENANT, "2026-09")] = 50_000_000     # $50 spent
+        with patch("handlers.ai_generate._platform_budget", return_value=10):   # $10 ceiling
+            response = self.call()
+        self.assertEqual(response["statusCode"], 429)
+        self.assertEqual(json.loads(response["body"])["error"], "platform_budget_exhausted")
+        self.assertEqual(self.usage.consumed, 0, "the tenant must not be charged for our ceiling")
+
+    def test_an_exhausted_budget_still_lets_BYOK_through(self):
+        from unittest.mock import patch
+
+        from stripe_link.domain.ai_quota import PLATFORM_TENANT
+
+        self.usage.costs[(PLATFORM_TENANT, "2026-09")] = 50_000_000
+        byok = FakeKeyed({"provider": "anthropic", "model": "claude", "verified_at": 1790000000})
+        with patch("handlers.ai_generate._platform_budget", return_value=10):
+            response = self.call(config=byok)
+        self.assertEqual(response["statusCode"], 201, "our ceiling must not ration their own key")
+
+    def test_no_budget_configured_means_no_ceiling(self):
+        # 0 means unset, NOT "spend nothing". A settings row nobody filled in must not stop the platform.
+        from unittest.mock import patch
+
+        from stripe_link.domain.ai_quota import PLATFORM_TENANT
+
+        self.usage.costs[(PLATFORM_TENANT, "2026-09")] = 999_000_000
+        with patch("handlers.ai_generate._platform_budget", return_value=0):
+            self.assertEqual(self.call()["statusCode"], 201)

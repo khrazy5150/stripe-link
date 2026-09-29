@@ -90,6 +90,20 @@ def free_ai_generations(mode: str, repository: Any | None = None) -> int:
     return _as_int(config.get("ai_free_generations"), DEFAULT_FREE_AI_GENERATIONS)
 
 
+def ai_monthly_budget_usd(mode: str, repository: Any | None = None) -> float:
+    """The platform's own monthly AI spend ceiling, in USD. 0 (the default) means no ceiling.
+
+    Editable on the CONFIG row like every other number here. Default 0 on purpose: a ceiling that arrives by
+    surprise and stops every tenant generating is worse than no ceiling, so it has to be switched on
+    deliberately once there is real spend to size it against.
+    """
+    config = cached_platform_billing(mode, repository)["config"]
+    try:
+        return float(config.get("ai_monthly_budget_usd") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def platform_promo(mode: str, promo_code: str, repository: Any | None = None) -> dict[str, Any] | None:
     """A special-link promotion (a trial override and/or a Stripe discount). Read FRESH (not cached) so expiry and
     redemption limits are current; subscribe is low-frequency. See plans/SAAS_BILLING_PAYWALL.md."""

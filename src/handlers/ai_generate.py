@@ -50,7 +50,9 @@ from stripe_link.domain.ai_provision import (needs_service_handoff, new_id, offe
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
-from stripe_link.domain.ai_quota import entitlement_for, may_generate
+from stripe_link.domain.ai_quota import (PLATFORM_TENANT, entitlement_for, may_generate,
+                                          period_key, within_platform_budget)
+from stripe_link.domain.entitlements import can_use_ai_builder
 from stripe_link.domain.ai_resolvers import resolve_preset, resolve_sections, resolution_log
 from stripe_link.domain.ai_schema import describe_vocabulary, page_sections_schema
 from stripe_link.domain.documents import (DocumentValidationError, validate_offer_document,
@@ -139,9 +141,26 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     # derived, because a trial's counter is a LIFETIME one and reaching for period_key() out of habit would
     # hand a trial tenant a fresh three every calendar month (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8).
     profile = _profile(tenant_id, tenant_repo)
+    # GATE 1 -- may they use AI Builder at all? Separate from "how many", and asked first so the refusal says
+    # "not on your plan" rather than "you have used 0 of 0" (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8). A
+    # verified own-key configuration passes regardless of plan: the platform is not paying for those.
+    if not can_use_ai_builder(profile, provider_config=config, now=now):
+        return error_response(
+            "AI Builder is not included on your plan. Upgrade, or connect your own AI provider key.",
+            status_code=403, code="ai_builder_not_entitled")
+
+    # GATE 2 -- how many, and out of which counter.
     entitlement = entitlement_for(profile, provider=str(config.get("provider")), now=now,
                                   **_configured_allowances())
     allowance, period = entitlement["allowance"], entitlement["period"]
+
+    # GATE 3 -- will we spend another platform dollar this month? Identity-independent, and therefore the
+    # only control that sees abuse per-tenant caps cannot: serial trial signups, each one perfectly within
+    # its own allowance. Skipped entirely for BYOK, whose spend is not ours.
+    if entitlement["source"] != "byok":
+        ok, why_not = within_platform_budget(_platform_spend(usage_repo, now), _platform_budget())
+        if not ok:
+            return error_response(why_not, status_code=429, code="platform_budget_exhausted")
     plan_key = str(profile.get("billing_plan_key") or "")
     exempt = bool(profile.get("billing_exempt"))
     # The WRITE decides, not a read before it. Checking `used` and then incrementing is two round trips with
@@ -180,6 +199,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         # The correlation id, carried on all three records so one identifier follows a generation from the
         # slot it spent, through the work, to what it cost.
         "generation_id": generation_id, "event_key": event_row["event_key"],
+        "source": entitlement["source"],
         "created_at": now, "updated_at": now,
         # A finished job is of no interest a week later, and an abandoned one even less.
         "expires_at": now + 7 * 24 * 3600,
@@ -205,6 +225,38 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
                               status_code=502, code="enqueue_failed")
     # 202, not 201: nothing exists yet. The dashboard polls /ai/jobs/{job_id}.
     return json_response({"job": _public(job)}, status_code=202)
+
+
+def _add_platform_spend(usage_repo, micros, now):
+    """Accumulate platform spend on the reserved `__platform__` row. Never raises: the budget is a safety
+    ceiling, and failing a finished generation over its bookkeeping would be the wrong trade."""
+    if int(micros or 0) <= 0:
+        return
+    try:
+        (usage_repo or ai_usage_repository()).add_cost(
+            PLATFORM_TENANT, period_key(now), micros=int(micros), at=now)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        print(f"[ai] platform spend not recorded ({micros} micros): {type(exc).__name__}: {exc}")
+
+
+def _platform_budget():
+    """The platform's monthly AI ceiling, from the CONFIG row. Unreadable means NO ceiling, deliberately: a
+    settings row that failed to load must not stop every tenant on the platform from generating."""
+    try:
+        from stripe_link.domain.platform_billing import ai_monthly_budget_usd, platform_billing_mode
+
+        return ai_monthly_budget_usd(platform_billing_mode())
+    except Exception:  # noqa: BLE001 - see docstring
+        return 0
+
+
+def _platform_spend(usage_repo, now):
+    """This month's platform-paid spend so far, in micro-dollars. Unreadable counts as zero, for the same
+    reason the budget does: failing closed here takes the whole platform down over a counter read."""
+    try:
+        return (usage_repo or ai_usage_repository()).cost(PLATFORM_TENANT, period_key(now))
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _configured_allowances():
@@ -491,6 +543,10 @@ def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_
         status=events.STATUS_SUCCEEDED, at=now,
         input_tokens=int(tokens.get("input") or 0), output_tokens=int(tokens.get("output") or 0),
         estimated_usd=priced["usd"], rate_confidence=priced["confidence"]))
+    # Feed gate 3. Only platform-paid spend counts: a BYOK generation costs the platform nothing, and
+    # counting it would pause everyone else over money we never spent.
+    if str(job.get("source") or "") != "byok":
+        _add_platform_spend(usage_repo, events.to_micros(priced["usd"]), now)
     return {"ok": True}
 
 

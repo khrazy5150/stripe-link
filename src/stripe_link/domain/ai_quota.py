@@ -47,6 +47,35 @@ BYOK_CEILING = 200
 
 UNLIMITED = -1
 
+# Gate 3 lives on a RESERVED row in the same counter table -- PK `__platform__`, same period keys. No new
+# table (the stack is at 441/500 CloudFormation resources), and it reuses the atomic ADD that already exists.
+# Leading underscores make it unmatchable by a real tenant id, which are `uuid`-shaped.
+PLATFORM_TENANT = "__platform__"
+# 0 means NO ceiling rather than "spend nothing" -- an unset budget must not silently stop every generation
+# on the platform. The ceiling is opt-in and lives on the CONFIG row as `ai_monthly_budget_usd`.
+NO_BUDGET = 0
+
+
+def within_platform_budget(spent_micros: int, budget_usd: float | int | None) -> tuple[bool, str]:
+    """Gate 3: will we spend another platform dollar this month?
+
+    Identity-independent, which is exactly why it matters: gate 1 is advisory until the API authorizer ships,
+    and per-tenant caps cannot see the abuse that matters here -- serial trial signups, each perfectly within
+    their own allowance. This is the only control that counts the whole platform's spend.
+
+    Checked ONLY for platform-paid inference. A BYOK generation spends the tenant's money through their own
+    provider account, and refusing it to protect a budget we are not drawing on would be nonsense.
+    """
+    budget = float(budget_usd or 0)
+    if budget <= NO_BUDGET:
+        return True, ""
+    if int(spent_micros or 0) >= int(round(budget * 1_000_000)):
+        # Deliberately not "try again shortly": this does not clear until the month does, and a retry
+        # message that is false trains people to retry forever.
+        return False, ("AI generation is paused for this month while we review platform capacity. Connect "
+                       "your own AI provider key to keep generating.")
+    return True, ""
+
 
 def period_key(at: int | None = None) -> str:
     """The calendar month a generation counts against, as `YYYY-MM`.

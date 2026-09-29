@@ -87,6 +87,11 @@ number — so a new tier costs no code at all on that path.
    the billing config but does not forbid others, so a new tier is permitted and simply **unvalidated**. Its
    percentages get no range check.
 
+> ⚠️ **`ai_builder` was added to `CAPABILITIES` on 2026-09-29 as an 11th key. Existing plan rows grant 10.**
+> A plan whose `entitlements` map lacks `ai_builder` does NOT grant AI Builder, however large its
+> `ai_generations`. The live and test `PLAN#premium` rows must be updated in the same change as the deploy,
+> or paying subscribers lose the feature. Live trials are unaffected — they receive the full capability set.
+
 **Capabilities are a separate axis and are correctly code-side.** `CAPABILITIES` in `domain/entitlements.py`
 is the registry of features that exist; `plan.entitlements` decides which a tier grants. Agency mode, GBP
 management and business intelligence each need a registry entry when the feature is built — that is a feature
@@ -122,6 +127,14 @@ A trial is not a plan, so its allowance lives on the `CONFIG` item rather than a
 |---|---|---|
 | `ai_trial_generations` | **lifetime** allowance for a live 14-day trial | 3 |
 | `ai_free_generations` | allowance for the free tier / an expired trial | 0 |
+| `ai_monthly_budget_usd` | the PLATFORM's own monthly AI ceiling, all tenants combined | 0 = no ceiling |
+
+`ai_monthly_budget_usd` is gate 3, and it is the only one that is identity-independent — per-tenant caps
+cannot see serial trial signups, each perfectly within its own allowance. Spend accumulates on a reserved
+`__platform__` row in the usage table (no new table). It is checked for platform-paid inference only: a BYOK
+generation spends the tenant's own money, so our ceiling must not ration it. Default 0 means **no ceiling**
+rather than "spend nothing" — a ceiling arriving by surprise and stopping every tenant is worse than none, so
+switch it on deliberately once the ledger shows what real spend looks like.
 
 **Lifetime, not monthly.** The quota counter's period is the calendar month, and a trial starting 25 September
 spans two of them — a monthly trial allowance would be handed out twice. Trial usage is counted under the
