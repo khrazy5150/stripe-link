@@ -269,8 +269,10 @@ def _send_link(minted, tenant_id, mailer_send):
     if not email:
         return
     tenant_id_str = tenant_id
-    business = _business_name(tenant_id_str) or "the seller"
     identity = tenant_email_identity(tenant_id_str)
+    # The identity is the same source the email HEADER uses. Reading a different one here is how the
+    # header said "Poliaxis Nutrition" while the body said "the seller" in the same message.
+    business = (identity.get("business_name") or _business_name(tenant_id_str) or "").strip()
     several = len(minted) > 1
 
     def line(order, token):
@@ -281,37 +283,41 @@ def _send_link(minted, tenant_id, mailer_send):
         # needs to know which charge is the one that keeps coming back.
         kind = "subscription" if is_recurring(order) else "one-time"
         when = _when(order)
-        return label, amount, kind, when, url
+        # An unnamed subscription falls back to the label "Subscription", and "Subscription — USD
+        # 197.92 subscription" says it twice. The kind is only worth stating when the name has not
+        # already said it.
+        shown = "" if label.lower() == kind else kind
+        return label, amount, shown, when, url
 
     rows = [line(order, token) for order, token in minted]
 
+    whose = f" from {business}" if business else ""
     if several:
-        intro = (f"You have {len(rows)} purchases from {business}. Pick the one you want to manage — "
-                 f"each link opens just that purchase, where you can stop future payments or ask for "
-                 f"a refund.")
+        intro = (f"You have {len(rows)} purchases{whose}. Pick the one you want to manage — each link "
+                 f"opens just that purchase, where you can stop future payments or ask for a refund.")
     else:
         intro = ("Here is the link to your purchase. From there you can stop future payments or ask "
                  "for a refund.")
 
     text = [f"{intro}\n"]
     for label, amount, kind, when, url in rows:
-        text.append(f"- {label} — {amount} {kind}{when}\n  {url}")
+        text.append("- " + " ".join(p for p in (f"{label} — {amount}", kind) if p) + when + f"\n  {url}")
     text.append("\nThe links work for seven days. If you did not ask for this, you can ignore this "
                 "email — nothing has changed.")
 
     body = paragraph(intro)
     for label, amount, kind, when, url in rows:
-        body += paragraph(f"<strong>{escape(label)}</strong> — {escape(amount)} "
-                          f"{escape(kind)}{escape(when)}")
+        # PLAIN TEXT. `paragraph` escapes what it is given -- rightly, since email bodies carry
+        # tenant-supplied product names -- so HTML passed to it arrives as visible <strong> tags.
+        # The button underneath already anchors each row visually.
+        body += paragraph(" ".join(p for p in (f"{label} — {amount}", kind) if p) + when)
         body += button(f"Manage this {kind}" if several else "Manage this purchase", url)
     body += paragraph("The links work for seven days. If you did not ask for this, you can ignore "
                       "this email — nothing has changed.", muted=True)
 
-    subject = (f"Your {len(rows)} purchases from {business}" if several
-               else f"Your purchase from {business}")
+    subject = (f"Your {len(rows)} purchases{whose}" if several else f"Your purchase{whose}")
     html = render_email(
-        business_name=identity.get("business_name") or (business if business != "the seller" else ""),
-        title=subject, body=body,
+        business_name=business, title=subject, body=body,
         preheader=("Pick which purchase to manage." if several
                    else "Your secure link to manage this purchase."),
         reply_to=identity.get("reply_to", ""),

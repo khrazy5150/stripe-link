@@ -532,6 +532,37 @@ class MultiplePurchaseTests(unittest.TestCase):
         from stripe_link.domain.purchase_lookup import order_label
         self.assertEqual(order_label({"order_id": "x"}), "Your purchase")
 
+    def test_a_price_is_never_used_as_a_product_name(self):
+        # "1 x $197.92 (at $197.92 / day)" strips to a bare price, and "$197.92 — USD 197.92" tells a
+        # buyer nothing about WHICH purchase it is.
+        from stripe_link.domain.purchase_lookup import order_label
+        priced = {"order_id": "p", "subscription_id": "sub_p",
+                  "line_items": [{"name": "1 × $197.92 (at $197.92 / day)"}]}
+        self.assertEqual(order_label(priced), "Subscription")
+
+    def test_renewals_of_one_subscription_appear_once(self):
+        """A renewal writes an order each cycle, so four daily subscriptions produced eight rows --
+        the same subscription listed twice, once per charge. A buyer cancelling the first would see
+        the second still listed and conclude it had not worked."""
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        renewals = [
+            {"order_id": "r2", "customer": {"email": self.CONTACT}, "created_at": 300,
+             "subscription_id": "sub_a", "product": {"name": "Gummies"}},
+            {"order_id": "r1", "customer": {"email": self.CONTACT}, "created_at": 200,
+             "subscription_id": "sub_a", "product": {"name": "Gummies"}},
+        ]
+        found = select_orders(renewals, contact_key(self.CONTACT))
+        self.assertEqual([o["order_id"] for o in found], ["r2"])   # the latest charge
+
+    def test_two_separate_one_off_purchases_both_appear(self):
+        # Buying the same thing twice IS two purchases, and each has its own refund window.
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        twice = [{"order_id": "a", "customer": {"email": self.CONTACT}, "created_at": 200,
+                  "product": {"name": "Shaker"}},
+                 {"order_id": "b", "customer": {"email": self.CONTACT}, "created_at": 100,
+                  "product": {"name": "Shaker"}}]
+        self.assertEqual(len(select_orders(twice, contact_key(self.CONTACT))), 2)
+
     def test_recurring_and_one_off_are_distinguishable(self):
         # "Cancel" means nothing on a one-off, and a buyer scanning a list needs to know which charge
         # is the one that keeps coming back.
@@ -566,6 +597,36 @@ class MultiplePurchaseTests(unittest.TestCase):
         self.assertIn("197.92", sent["text"])
         self.assertIn("Creatine Gummies", sent["text"])
 
+    def test_no_html_tags_reach_the_reader(self):
+        # paragraph() escapes what it is given -- rightly, since these carry tenant-supplied product
+        # names -- so HTML passed to it arrives as visible <strong> tags. Reported from a real inbox.
+        sent = self.send(self.orders()[:3])
+        for leak in ("&lt;strong&gt;", "&lt;p&gt;", "&lt;a "):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, sent["html"])
+        self.assertNotIn("<strong>", sent["text"])
+
+    def test_the_seller_is_named_the_same_way_the_header_names_them(self):
+        # The header read "Poliaxis Nutrition" while the body said "the seller", in one message,
+        # because they read different sources.
+        import handlers.purchase_manage as pm
+        original = pm.tenant_email_identity
+        pm.tenant_email_identity = lambda t: {"business_name": "Poliaxis Nutrition", "reply_to": ""}
+        try:
+            sent = self.send(self.orders()[:3])
+            self.assertIn("Poliaxis Nutrition", sent["subject"])
+            self.assertIn("Poliaxis Nutrition", sent["text"])
+            self.assertNotIn("the seller", sent["text"])
+        finally:
+            pm.tenant_email_identity = original
+
+    def test_an_unnamed_subscription_does_not_say_subscription_twice(self):
+        unnamed = [{"order_id": "u", "customer": {"email": self.CONTACT}, "created_at": 100,
+                    "amount_total": 19792, "currency": "usd", "subscription_id": "sub_u",
+                    "line_items": [{"name": "1 × $197.92 (at $197.92 / day)"}]}]
+        sent = self.send(unnamed)
+        self.assertNotIn("subscription subscription", sent["text"].lower())
+
     def test_the_email_marks_which_ones_recur(self):
         sent = self.send(self.orders()[:3])
         self.assertIn("subscription", sent["text"])
@@ -582,7 +643,14 @@ class MultiplePurchaseTests(unittest.TestCase):
         # The common case must not become a list of one with a "pick one" instruction.
         sent = self.send(self.orders()[:1])
         self.assertNotIn("Pick the one", sent["text"])
-        self.assertIn("Your purchase from", sent["subject"])
+        self.assertTrue(sent["subject"].startswith("Your purchase"))
+
+    def test_an_unnamed_seller_is_omitted_rather_than_called_the_seller(self):
+        # "Your purchase from the seller" reads worse than "Your purchase", and the header would have
+        # been blank anyway.
+        sent = self.send(self.orders()[:1])
+        self.assertNotIn("from ", sent["subject"])
+        self.assertNotIn("the seller", sent["text"])
 
     def test_several_purchases_say_how_many(self):
         sent = self.send(self.orders()[:3])

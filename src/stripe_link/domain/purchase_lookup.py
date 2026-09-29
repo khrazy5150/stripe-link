@@ -115,7 +115,27 @@ def select_orders(
         matches.sort(key=lambda order: abs(order_epoch(order) - int(approximate_date)))
     else:
         matches.sort(key=order_epoch, reverse=True)
-    return matches[:max(1, int(limit))]
+    return _one_per_subscription(matches)[:max(1, int(limit))]
+
+
+def _one_per_subscription(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per subscription; every one-off stands alone.
+
+    A renewal writes an ORDER each cycle, so four daily subscriptions produced eight rows and the same
+    subscription appeared twice -- once per charge. A buyer cancelling the first would then see the
+    second still listed and conclude it had not worked, which is the doubt this whole flow exists to
+    remove. Order is preserved, so whichever charge the caller ranked first is the one shown.
+    """
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for order in orders:
+        sub = subscription_id(order)
+        if sub:
+            if sub in seen:
+                continue
+            seen.add(sub)
+        out.append(order)
+    return out
 
 
 def order_label(order: dict[str, Any]) -> str:
@@ -134,9 +154,12 @@ def order_label(order: dict[str, Any]) -> str:
         # price are shown beside it, so the leading count and trailing price are noise here.
         name = re.sub(r"^\s*\d+\s*[x\u00d7]\s*", "", name)
         name = re.sub(r"\s*\(at .*\)\s*$", "", name).strip()
-        if name:
+        # A line reading "1 x $197.92 (at $197.92 / day)" strips to a bare price, and "$197.92 —
+        # USD 197.92 subscription" tells a buyer nothing about WHICH purchase it is. Better to say
+        # "Subscription" than to name it after its own amount.
+        if name and not re.fullmatch(r"[^A-Za-z]*", name):
             return name
-    return "Your purchase"
+    return "Subscription" if subscription_id(order) else "Your purchase"
 
 
 def is_recurring(order: dict[str, Any]) -> bool:
