@@ -42,7 +42,11 @@ class FakeProfiles:
     def __init__(self, **profile):
         self.profile = profile
 
-    def get(self, tenant_id):
+    def get(self, tenant_id, document_id=None):
+        # Two args, like DynamoDocumentRepository. A one-arg fake accepted a one-arg call that raises
+        # TypeError against the real repository -- which is exactly how the AI handlers shipped reading
+        # every tenant profile as absent.
+        assert document_id is not None, "call it the way the real repository is called: get(tenant_id, id)"
         return dict(self.profile) if self.profile else None
 
 

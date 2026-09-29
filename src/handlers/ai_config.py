@@ -81,7 +81,12 @@ def _configured_allowances():
 def _profile(tenant_id: str, tenant_repo) -> dict:
     """The tenant's plan and exemption. Unreadable profile means the FREE tier, never an open tap."""
     try:
-        return (tenant_repo or tenant_profiles_repository()).get(tenant_id) or {}
+        # TWO arguments. DynamoDocumentRepository.get is (tenant_id, document_id) and a tenant profile is
+        # keyed by its own id -- every other handler calls it `get(tenant_id, tenant_id)`. Called with one,
+        # it raises TypeError, the except below swallows it, and every tenant looks like they have no
+        # profile. That was survivable while a missing profile fell back to a small allowance; once the
+        # free tier means ZERO it silently refuses AI to everyone.
+        return (tenant_repo or tenant_profiles_repository()).get(tenant_id, tenant_id) or {}
     except Exception:  # noqa: BLE001 - a missing profile must not hand out platform-paid inference
         return {}
 

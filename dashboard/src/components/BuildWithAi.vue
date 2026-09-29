@@ -43,18 +43,23 @@
           autocomplete="off"
           placeholder="e.g. Lifters who hate mixing powder"
         />
-        <span class="field-note">Every benefit sentence is written for someone. Without this the copy addresses nobody.</span>
+        <span class="field-note">
+          Who the page talks to. Every benefit is written for somebody &mdash; without this the copy
+          addresses nobody in particular.
+        </span>
       </label>
 
       <label>
-        What should people know? <span class="required">*</span>
+        Facts about it <span class="required">*</span>
         <textarea
           v-model="factsText"
           rows="4"
-          placeholder="One per line — 5g creatine per serving&#10;30 gummies per tub&#10;Made in Australia"
+          placeholder="One per line — 5g creatine per serving&#10;30 gummies per tub&#10;Made in Australia&#10;No artificial sweeteners"
         ></textarea>
         <span class="field-note">
-          One per line. This is the substance of the page: we won't write a claim you haven't given us.
+          Plain, checkable statements &mdash; what's in it, how much, what it's made of, what's included.
+          Not features or benefits: we write those <em>from</em> these. Any number that appears on the page
+          has to appear here first, so list the specifics.
         </span>
       </label>
 

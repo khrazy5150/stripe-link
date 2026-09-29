@@ -160,6 +160,27 @@ have its page generated — and is **blocked from Stripe sync and from publishin
 the same "here is what is missing" surface the shipping work already uses. The honest form of the
 button is not "no price" but **"not ready to sell yet, and here is why."**
 
+### The control: "Delay Pricing" on the wizard's Pricing step (author, 2026-09-29)
+
+The affordance is a **"Delay Pricing" action on the Pricing step of the product wizard**, sitting with
+the step rather than buried in settings — that step is the exact moment a tenant is being asked to guess,
+so it is the only place the escape hatch is useful.
+
+Choosing it advances the wizard with no price, sets `pricing_readiness` to unmet, and the product is
+created. What it must NOT do is imply the product is finished: the catalogue row, the product detail
+screen and the publish action all have to say the same thing, in the same words, about what is missing.
+One control that sets a flag three other surfaces silently ignore is worse than demanding a price.
+
+**It does not exist yet, in any form.** Noted because it was mistaken for a shipped feature: a red "Delay
+Pricing" label appeared on the Pricing step during sandbox testing on 2026-09-29 and turned out to be
+injected by a browser extension — the string appears nowhere in `dashboard/src` or in the built bundle.
+Worth knowing that the words read as native to the screen, which is a point in favour of the label.
+
+**It is the pair to the calculator, not a standalone.** Delaying is only reasonable because §2–§4 can
+work the price out afterwards from cost lines and a target margin. Shipping the button without the
+engine would leave tenants with unpriced products and no way forward, which is worse than the guess it
+was meant to spare them.
+
 ---
 
 ## 8. What AI has to do with it
@@ -182,7 +203,9 @@ than a fabricated policy claim because the tenant acts on it. It belongs on the 
 1. **`cost_profile` on the Price** + a pure `domain/smart_pricing.py` that resolves lines into `C`,
    `F` and `r` and calls `calculate_price`. No UI. Fully testable, including the worked example above
    as a regression test.
-2. **`pricing_readiness`**, alongside the other two gates, and the wizard's "price this later" path.
+2. **`pricing_readiness`**, alongside the other two gates, and the wizard's **"Delay Pricing"** control
+   (§7) — plus the matching "what is missing" wording on the catalogue row, the product detail screen
+   and the publish action, so one flag is not set by a control three surfaces ignore.
 3. **The pricing panel** — the tenant enters lines, sees the price, the total cost, the profit and
    the basis named.
 4. **Staleness notice.**

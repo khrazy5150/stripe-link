@@ -279,3 +279,43 @@ class GenerationSourceTests(unittest.TestCase):
         from stripe_link.domain.ai_generation_events import SOURCE_EXEMPT, source_for
 
         self.assertEqual(source_for(provider="bedrock", exempt=True), SOURCE_EXEMPT)
+
+
+class RepositoryCallSignatureTests(unittest.TestCase):
+    """Handlers must call repositories the way the REAL repository is defined.
+
+    `DynamoDocumentRepository.get` is `(tenant_id, document_id)`, and a tenant profile is keyed by its own
+    id — every other handler calls `get(tenant_id, tenant_id)`. The AI handlers called it with one argument.
+    Against the real class that raises TypeError, the handler's `except` swallowed it, and every tenant read
+    as having no profile at all.
+
+    It survived because the failure was benign: a missing profile fell back to a small allowance. The moment
+    the free tier became ZERO, the same silent failure started refusing AI to everybody — found by the author
+    on sandbox, not by any test, because the test fakes accepted a one-argument call the real class does not.
+    """
+
+    def test_the_ai_handlers_pass_both_key_parts(self):
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+        for name in ("ai_generate.py", "ai_config.py"):
+            with self.subTest(handler=name):
+                source = (root / name).read_text(encoding="utf-8")
+                one_arg = re.findall(r"tenant_profiles_repository\(\)\)\.get\(\s*tenant_id\s*\)", source)
+                self.assertEqual(one_arg, [], "a tenant profile read needs (tenant_id, tenant_id)")
+
+    def test_the_real_repository_refuses_a_one_argument_get(self):
+        # The assertion the fakes were missing: prove the real signature, so a fake that is looser than it
+        # cannot quietly license a call production rejects.
+        import inspect
+
+        from stripe_link.repositories.documents import DynamoDocumentRepository
+
+        parameters = list(inspect.signature(DynamoDocumentRepository.get).parameters)
+        self.assertEqual(parameters[:3], ["self", "tenant_id", "document_id"])
+        self.assertIs(
+            inspect.signature(DynamoDocumentRepository.get).parameters["document_id"].default,
+            inspect.Parameter.empty,
+            "document_id is required — a one-arg call raises TypeError",
+        )

@@ -2543,6 +2543,14 @@ A tenant states what a thing costs them and what they want to earn; the platform
 charge. Raised while testing the AI wizard, which forces a price up front and so makes tenants guess
 before they have thought about cost.
 
+**The control has a name (author, 2026-09-29): "Delay Pricing", on the Pricing step of the product
+wizard** — the exact moment the tenant is being asked to guess, which is the only place an escape hatch
+helps. Plan §7. It is the PAIR to the calculator, not a standalone: delaying is only reasonable because
+§2–§4 can work the price out afterwards, and shipping the button without the engine would leave tenants
+holding unpriced products with no way forward. Nothing of it exists yet — the red "Delay Pricing" label
+seen on sandbox 2026-09-29 was injected by a browser extension, not by us; the string appears nowhere in
+`dashboard/src` or the built bundle.
+
 **Most of it already exists.** `fees.py`'s net_guaranteed gross-up IS the solve — some costs are fixed
 per unit and others are a percentage of the sale, so a higher price raises the fees that raised it,
 and you solve rather than multiply. The tip jar already ships the reverse engine in miniature
