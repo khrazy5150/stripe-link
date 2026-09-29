@@ -100,6 +100,9 @@ def select_orders(
 ) -> list[dict[str, Any]]:
     """EVERY order this contact could mean, newest first.
 
+    Subscriptions already stopped are left out entirely: a cancelled subscription cannot be cancelled
+    again, and listing one has a customer wonder whether their first attempt took.
+
     `select_order` answers "which one did they mean" and is right when there is one. It is wrong the
     moment a buyer has two: it silently returned the newest, so a customer with four subscriptions
     could cancel exactly one and had no route to the rest -- which sends them to their bank instead,
@@ -111,11 +114,45 @@ def select_orders(
     if not key:
         return []
     matches = [order for order in orders if key in order_contact_keys(order)]
+    # A subscription already stopped is not a choice -- offering "cancel" on it invites a customer to
+    # do something that cannot happen, and then to doubt whether the first cancellation worked.
+    stopped = cancelled_subscriptions(matches)
+    if stopped:
+        remaining = [o for o in matches if subscription_id(o) not in stopped]
+        # Unless that is everything they have. A customer whose only subscription is already cancelled
+        # would otherwise get no email at all -- and their reason for looking is usually the refund,
+        # which is still open to them. `available_actions` drops `cancel` for these, so the page
+        # offers the refund without pretending they can cancel twice.
+        matches = remaining or matches
     if approximate_date:
         matches.sort(key=lambda order: abs(order_epoch(order) - int(approximate_date)))
     else:
         matches.sort(key=order_epoch, reverse=True)
     return _one_per_subscription(matches)[:max(1, int(limit))]
+
+
+# Stamped on an order when its subscription is stopped, so the lookup can tell WITHOUT asking Stripe.
+# Asking would mean one API call per subscription inside an unauthenticated endpoint whose own comment
+# warns it "amplifies one HTTP request into a full read of a tenant's order list plus an outbound
+# email" -- the amplification this flow is throttled to contain.
+CANCELLED_FIELD = "subscription_cancelled_at"
+
+
+def is_cancelled(order: dict[str, Any]) -> bool:
+    try:
+        return int((order or {}).get(CANCELLED_FIELD) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def cancelled_subscriptions(orders: list[dict[str, Any]] | None) -> set[str]:
+    """Subscription ids known to be stopped, from any order that carries the stamp.
+
+    Collected across ALL of the contact's orders because the stamp lands on the one order the link
+    pointed at, while a subscription has an order per renewal. Matching by subscription id is what
+    makes one cancellation cover every charge it produced.
+    """
+    return {subscription_id(o) for o in (orders or []) if is_cancelled(o) and subscription_id(o)}
 
 
 def _one_per_subscription(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -189,7 +226,9 @@ def available_actions(order: dict[str, Any]) -> list[str]:
     decision someone else makes.
     """
     actions = []
-    if subscription_id(order):
+    # Not for one already stopped. Offering it invites a customer to do something that cannot happen,
+    # and a second "cancelled" screen has them wondering whether the first one took.
+    if subscription_id(order) and not is_cancelled(order):
         actions.append("cancel")
     if is_refundable(order):
         actions.append("refund")

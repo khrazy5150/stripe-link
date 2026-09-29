@@ -773,3 +773,123 @@ class CancellationEmailTests(unittest.TestCase):
         response = self.cancel(orders_repo=NoEmail())
         self.assertEqual(self.sent, [])
         self.assertIn("Payments stopped", response["body"])
+
+
+class AlreadyCancelledTests(unittest.TestCase):
+    """A stopped subscription is not a choice.
+
+    Offering "cancel" on something already cancelled invites a customer to do something that cannot
+    happen -- and a second confirmation has them wondering whether the first one took, which is the
+    doubt this flow exists to remove.
+    """
+
+    CONTACT = "buyer@example.com"
+
+    def order(self, oid, sub=None, *, at=100, cancelled=None, name="Gummies"):
+        from stripe_link.domain.purchase_lookup import CANCELLED_FIELD
+        row = {"order_id": oid, "customer": {"email": self.CONTACT}, "created_at": at,
+               "amount_total": 3291, "currency": "usd", "payment_status": "paid",
+               "product": {"name": name}}
+        if sub:
+            row["subscription_id"] = sub
+        if cancelled:
+            row[CANCELLED_FIELD] = cancelled
+        return row
+
+    def offered(self, orders):
+        from stripe_link.domain.purchase_lookup import contact_key, select_orders
+        return [o["order_id"] for o in select_orders(orders, contact_key(self.CONTACT))]
+
+    def test_a_cancelled_subscription_is_not_offered(self):
+        self.assertEqual(
+            self.offered([self.order("a", "sub_A", at=200, cancelled=1790700000),
+                          self.order("b", "sub_B", at=300)]),
+            ["b"])
+
+    def test_the_whole_subscription_goes_even_when_the_stamp_is_on_an_older_renewal(self):
+        # The stamp lands on the one order the link pointed at; a subscription has an order per cycle.
+        # Matching by subscription id is what makes one cancellation cover every charge it produced.
+        self.assertEqual(
+            self.offered([self.order("new", "sub_A", at=300),
+                          self.order("old", "sub_A", at=200, cancelled=1790700000),
+                          self.order("other", "sub_B", at=250)]),
+            ["other"])
+
+    def test_a_one_off_purchase_is_never_swept_up(self):
+        # It has no subscription, so it cannot be cancelled and was never at risk -- but its refund
+        # window is still open and it must stay reachable.
+        self.assertEqual(
+            self.offered([self.order("sub", "sub_A", at=200, cancelled=1790700000),
+                          self.order("once", None, at=100, name="Shaker")]),
+            ["once"])
+
+    def test_a_cancelled_subscription_still_appears_when_it_is_all_they_have(self):
+        """Otherwise the customer gets no email at all -- and the reason they are looking is usually
+        the refund, which is still open to them."""
+        self.assertEqual(self.offered([self.order("only", "sub_A", cancelled=1790700000)]), ["only"])
+
+    def test_but_it_never_offers_cancel_again(self):
+        from stripe_link.domain.purchase_lookup import available_actions
+        self.assertEqual(available_actions(self.order("x", "sub_A", cancelled=1790700000)), ["refund"])
+        self.assertEqual(available_actions(self.order("y", "sub_B")), ["cancel", "refund"])
+
+    def test_a_malformed_stamp_is_treated_as_not_cancelled(self):
+        # Failing the other way would hide a live subscription from the only screen that can stop it.
+        from stripe_link.domain.purchase_lookup import is_cancelled
+        for value in (None, "", 0, "yesterday", -1, {}):
+            with self.subTest(value=value):
+                self.assertFalse(is_cancelled({"subscription_cancelled_at": value}))
+
+
+class CancelRecordsItLocallyTests(unittest.TestCase):
+    """Cancelling stamps the order, so a later lookup knows without asking Stripe.
+
+    Asking would mean one API call per subscription inside an unauthenticated endpoint that is
+    throttled precisely because it "amplifies one HTTP request into a full read of a tenant's order
+    list plus an outbound email".
+    """
+
+    def setUp(self):
+        self._stripe, self._creds, self._business, self._identity = (
+            pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity)
+        pm.stripe_request = lambda method, path, **kwargs: {
+            "id": "sub_1", "items": {"data": [{"current_period_end": 1790714125}]}}
+        pm.checkout_credentials = lambda *a, **k: ("sk_test", "acct_1")
+        pm._business_name = lambda t: "Poliaxis"
+        pm.tenant_email_identity = lambda t: {"business_name": "Poliaxis", "reply_to": ""}
+        self.tokens = FakeTokens()
+        self.tokens.put(purchase_token_doc("t1", "good", order_id="o1", email="s@x.com", now=0))
+        self.saved = []
+
+    def tearDown(self):
+        pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity = (
+            self._stripe, self._creds, self._business, self._identity)
+
+    class Keys:
+        def get(self, tenant_id, mode="test"):
+            return {"connect_account_id": "acct_1"}
+
+    def cancel(self, orders_repo):
+        return pm.handler({"httpMethod": "POST", "body": "action=cancel&t=good"}, None,
+                          tokens_repo=self.tokens, orders_repo=orders_repo, stripe_repo=self.Keys(),
+                          mailer_send=lambda **kw: None, now_fn=lambda: 1790710000)
+
+    def test_the_order_is_stamped_with_when_it_was_cancelled(self):
+        saved = []
+        class Repo(FakeOrders):
+            def put(self, document):
+                saved.append(document)
+                return document
+        self.cancel(Repo())
+        self.assertTrue(saved)
+        self.assertEqual(saved[0]["subscription_cancelled_at"], 1790710000)
+        self.assertEqual(saved[0]["subscription_ends_at"], 1790714125)
+
+    def test_a_failed_stamp_never_reports_the_cancellation_as_failed(self):
+        # It ALREADY happened at Stripe. Saying otherwise has them cancel twice or call their bank.
+        class Broken(FakeOrders):
+            def put(self, document):
+                raise RuntimeError("dynamo is having a day")
+        response = self.cancel(Broken())
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("Payments stopped", response["body"])

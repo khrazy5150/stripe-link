@@ -30,6 +30,7 @@ from stripe_link.common import error_response, query_params
 from stripe_link.domain.receipts import cancellation_content, format_money
 from stripe_link.domain.leads import HONEYPOT_FIELD, is_spam
 from stripe_link.domain.purchase_lookup import (
+    CANCELLED_FIELD,
     contact_key,
     is_recurring,
     order_epoch,
@@ -389,7 +390,7 @@ def _act(action, body, *, tokens_repo, orders_repo, refunds_repo, notifications_
     if action == "cancel":
         return _cancel(order, tenant_id, mode, business, token=str(body.get("t") or "").strip(),
                        stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener,
-                       mailer_send=mailer_send)
+                       mailer_send=mailer_send, orders_repo=orders_repo, now_fn=now_fn)
     return _request_refund(order, tenant_id, business, str(body.get("reason") or ""), mode=mode,
                            refunds_repo=refunds_repo, notifications_repo=notifications_repo, now_fn=now_fn)
 
@@ -412,7 +413,7 @@ def _period_end(subscription: dict) -> int:
 
 
 def _cancel(order, tenant_id, mode, business, *, token="", stripe_repo, secret_cipher, opener,
-            mailer_send=None):
+            mailer_send=None, orders_repo=None, now_fn=None):
     """Self-serve, immediately: stopping future charges costs the seller nothing, and refusing it only
     sends the customer to their bank instead — which costs the seller a dispute fee and their ratio."""
     subscription = subscription_id(order)
@@ -438,6 +439,16 @@ def _cancel(order, tenant_id, mode, business, *, token="", stripe_repo, secret_c
         return _html(_UNAVAILABLE_HTML, 503)
 
     ends_at = _period_end(updated)
+    # Record it locally so a later lookup does not offer this subscription again. Best-effort: the
+    # cancellation has ALREADY happened at Stripe, and failing to write a note about it must not be
+    # reported to the customer as a failure to cancel.
+    try:
+        repo = orders_repo or orders_repository(mode=mode)
+        repo.put({**order, CANCELLED_FIELD: int((now_fn or time.time)()),
+                  "subscription_ends_at": ends_at})
+    except Exception:  # noqa: BLE001
+        pass
+
     email = str((order.get("customer") or {}).get("email") or "").strip()
     # The confirmation is the point of this change. Cancelling used to render a page and send nothing,
     # so the only record was a tab the customer could close -- and someone unsure whether they
