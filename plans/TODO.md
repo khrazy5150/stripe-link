@@ -813,6 +813,12 @@ path is therefore a hard Phase 2 prerequisite, not Phase 3 polish:** one `POST /
 `REFRESH_TOKEN_AUTH`, plus a client that retries once on 401. Read `would_allow = 1,340` as "carried a
 token-shaped thing", not "would have been admitted".
 
+**Refresh BUILT 2026-09-28 (undeployed).** `POST /auth/refresh` + proactive client renewal two minutes before
+expiry, single-flight, one retry on 401, and a `jb:session-ended` event so the store returns to the login form
+instead of leaving a rendered dashboard whose every screen fails. Pool verified to allow
+`ALLOW_REFRESH_TOKEN_AUTH` (30-day refresh, 60-minute access). No new IAM: `initiate_auth` is an
+unauthenticated Cognito API. **What remains for Phase 2 is the authorizer itself.**
+
 **Phase 1 built 2026-09-25** — `plans/API_AUTHENTICATION.md`. The boundary is written down as data in
 `stripe_link/api_auth.py`: 58 public routes of 202, classified per METHOD (`POST /leads` is a stranger
 filling in a form, `GET /leads` returns those strangers' addresses), failing CLOSED so an unclassified

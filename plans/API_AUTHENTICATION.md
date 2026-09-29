@@ -147,10 +147,45 @@ wherever the session is stored.
 token-less-tab bug, and its direct consequence is that sessions now survive long enough to reach expiry
 rather than dying with the tab. The two fixes are a pair.
 
-**So a refresh path is a hard prerequisite for Phase 2, not a Phase 3 nicety.** The backend already stores
-what it needs: one `POST /auth/refresh` calling Cognito `REFRESH_TOKEN_AUTH`, plus a client that retries once
-on 401. Until that exists, `would_allow = 1,340` should be read as "1,340 requests carried a token-shaped
-thing", which is a weaker claim than it looks.
+**So a refresh path is a hard prerequisite for Phase 2, not a Phase 3 nicety.** Until it exists,
+`would_allow = 1,340` should be read as "1,340 requests carried a token-shaped thing", which is a weaker claim
+than it looks.
+
+**BUILT 2026-09-28 (undeployed).** Verified against the live pool first: the app client already allows
+`ALLOW_REFRESH_TOKEN_AUTH`, refresh tokens last 30 days, and `AccessTokenValidity` is unset — confirming the
+60-minute default the problem rests on.
+
+- `POST /auth/refresh` (`handlers/auth.refresh_session`) exchanges the refresh token via `REFRESH_TOKEN_AUTH`.
+  Public by necessity and listed as such in `api_auth.py`: the refresh token IS the credential, and an expired
+  access token cannot renew itself. No new IAM — `initiate_auth` is one of Cognito's unauthenticated APIs,
+  which is why login already works with only the `Admin*` grants.
+- The response carries **only tokens**. The caller does not get to say who it is and no user is looked up on
+  its word; identity comes from the minted token, which is the thing an authorizer verifies.
+- A refresh Cognito refuses answers **401**, not the generic 400, because the client's only correct reaction is
+  to drop the session and show login. A 200 carrying a challenge instead of a token is also a re-login — a
+  silent refresh cannot satisfy MFA enrolment.
+- The refresh token is **echoed back when Cognito omits it**. It only returns a new one when rotation is
+  enabled on the app client, and passing the absent value through would blank the caller's only means of ever
+  refreshing again — a session that dies an hour later for no visible reason.
+
+Client side (`dashboard/src/api/client.js`):
+
+- `setAuthSession` stamps an absolute `expires_at`. The backend sends `expires_in`, a DURATION, which is
+  useless to a page reloaded hours later — that is precisely why nothing could tell a fresh token from a dead
+  one.
+- Renewal is **proactive**, two minutes before expiry, because the reactive path cannot fire yet: nothing
+  answers 401 today. A single-flight guard means a screen firing six requests mints one token, not six — which
+  also matters if rotation is ever enabled, since the later refreshes would race against a spent token.
+- A 401 still triggers **exactly one** retry, for a token rejected while our clock says it is fine (revoked
+  session, skewed clock, pool-side signing change). A second 401 after a fresh token is a real refusal, and
+  looping would hammer the API with an unusable credential.
+- Ending a session now **notifies the app** (`jb:session-ended` → `auth.sessionEnded()`). Clearing storage
+  alone was not enough: the store keeps its own copy of the session, which is what `App.vue` gates on, so a
+  silent wipe left the dashboard rendered and authenticated-looking while every screen failed.
+
+**What remains for Phase 2 is now only the authorizer itself** — the Cognito authorizer with
+`DefaultAuthorizer`, `Auth: Authorizer: NONE` on the public routes, and `tenant_id_from_event` reading
+`requestContext.authorizer.claims` for private ones.
 
 ### Phase 2 — enforce, once the logs are quiet
 
