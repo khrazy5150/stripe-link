@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from urllib.parse import urlencode
@@ -90,6 +91,22 @@ def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None
         if slug:
             path = "" if slug == "/" else slug.lstrip("/")
             return f"{base}/{path}"
+        # The Site is served, but this page has no route on it. Funnel attachment is best-effort by design --
+        # "a failure here must never block publishing the artifact itself" -- so a real buyer can reach here
+        # mid-funnel, and the old answer was the raw artifact URL, which stops existing the moment the artifact
+        # route closes (plans/ARTIFACT_ACCESS_BOUNDARY.md P0). Send them to the Site root instead: a host we
+        # govern, which always works, rather than a 404 after payment. This is the same trade the dangling
+        # thank-you page already makes above -- a working page in place of the exact intended one.
+        return base
+    # LAST artifact-URL producer on a buyer-facing path, and the one thing still standing between here and
+    # closing the route (plans/ARTIFACT_ACCESS_BOUNDARY.md P1). Reached only when the page belongs to no
+    # served Site at all -- no verified custom domain AND no platform hostname -- which post-payment should be
+    # unreachable, since checkout requires a published page. Logged rather than assumed: P1 must not deny
+    # until this line has been observed to be dead in real traffic, and a silent fallback proves nothing.
+    print(json.dumps({"artifact_fallback": {
+        "phase": "P0", "path": "post_checkout", "tenant": tenant_id, "page_id": next_page_id,
+        "stripe_mode": mode, "has_site": bool(site), "served": bool(_site_allowed_origins(site)),
+    }}))
     return public_url(pages_domain, artifact_paths(tenant_id, next_page_id, mode=mode)["published"])
 
 

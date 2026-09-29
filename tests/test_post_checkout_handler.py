@@ -1,4 +1,7 @@
+import io
+import json
 import os
+from contextlib import redirect_stdout
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -559,3 +562,65 @@ class RedirectBaseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NextPageUrlArtifactFallbackTests(unittest.TestCase):
+    """Where a paying buyer is sent when the next page has no route on the Site.
+
+    The artifact URL was the universal escape hatch here, and it stops existing the moment the artifact route
+    closes (plans/ARTIFACT_ACCESS_BOUNDARY.md P0). The TODO expected the exposure to be "the newest tenants
+    who have not set up a domain yet"; it was in fact anyone whose funnel page never got a slug, because
+    funnel attachment is deliberately best-effort -- "a failure here must never block publishing the artifact
+    itself". Failing to route them is not a 404 on a marketing page, it is a 404 after payment.
+    """
+
+    PLATFORM = "bean-co.jbay.uk"
+
+    def setUp(self):
+        self._flag = os.environ.get("PLATFORM_SERVING_ENABLED")
+        os.environ["PLATFORM_SERVING_ENABLED"] = "true"
+
+    def tearDown(self):
+        if self._flag is None:
+            os.environ.pop("PLATFORM_SERVING_ENABLED", None)
+        else:
+            os.environ["PLATFORM_SERVING_ENABLED"] = self._flag
+
+    def _site(self, pages):
+        return {"hosting": {"platform_hostname": self.PLATFORM}, "pages": pages}
+
+    def _url(self, site, page_id):
+        return post_checkout._next_page_url(site, "tenant_demo", page_id, "d1234.cloudfront.net", mode="live")
+
+    def test_an_attached_page_uses_its_own_slug(self):
+        site = self._site({"/upsell-1": {"page_id": "page_next"}})
+        self.assertEqual(self._url(site, "page_next"), f"https://{self.PLATFORM}/upsell-1")
+
+    def test_an_unslugged_page_falls_back_to_the_site_root_not_the_artifact(self):
+        # The case this change exists for: the Site is served, the page simply has no route on it.
+        site = self._site({"/": {"page_id": "page_home"}})
+        url = self._url(site, "page_orphan")
+        self.assertEqual(url, f"https://{self.PLATFORM}")
+        self.assertNotIn("cloudfront", url)
+
+    def test_the_root_page_still_resolves_to_the_root(self):
+        site = self._site({"/": {"page_id": "page_home"}})
+        self.assertEqual(self._url(site, "page_home"), f"https://{self.PLATFORM}/")
+
+    def test_no_served_site_still_falls_through_and_says_so(self):
+        # The LAST artifact producer on a buyer path. Kept deliberately -- a 404 after payment is worse than a
+        # raw URL -- but it must be loud, because P1 may only deny once this is observed to be dead.
+        out = io.StringIO()
+        with redirect_stdout(out):
+            url = self._url({"hosting": {}, "pages": {}}, "page_orphan")
+        self.assertIn("cloudfront", url)
+        record = json.loads(out.getvalue())["artifact_fallback"]
+        self.assertEqual(record["page_id"], "page_orphan")
+        self.assertEqual(record["path"], "post_checkout")
+        self.assertFalse(record["served"])
+
+    def test_a_served_site_never_logs_the_fallback(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self._url(self._site({"/": {"page_id": "page_home"}}), "page_orphan")
+        self.assertEqual(out.getvalue(), "")
