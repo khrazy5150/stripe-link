@@ -211,8 +211,15 @@ export function setAuthSession(session) {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     return;
   }
-  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  if (session.tenant_id || session.client_id) setTenantId(session.tenant_id || session.client_id);
+  // Stamp an absolute deadline. The backend sends expires_in (a DURATION) plus the moment it was issued, and a
+  // duration is useless to a page that may be reloaded hours later -- the whole reason nothing could tell a
+  // fresh token from an expired one.
+  const stored = { ...session };
+  const issuedAt = Number(stored.refreshed_at || stored.created_at || Math.floor(Date.now() / 1000));
+  const ttl = Number(stored.expires_in || 0);
+  if (issuedAt && ttl) stored.expires_at = issuedAt + ttl;
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stored));
+  if (stored.tenant_id || stored.client_id) setTenantId(stored.tenant_id || stored.client_id);
 }
 
 export function clearAuthSession() {
@@ -228,6 +235,80 @@ export class UnauthenticatedError extends Error {
   }
 }
 
+export const SESSION_ENDED_EVENT = "jb:session-ended";
+
+/**
+ * Drop the session AND tell the app.
+ *
+ * Clearing storage is not enough on its own: the auth store keeps its own copy of the session in state, so a
+ * silent wipe leaves the dashboard rendered and authenticated-looking while every request fails. The event is
+ * how the API layer reaches the Vue layer without importing it.
+ */
+function endSession() {
+  clearAuthSession();
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(SESSION_ENDED_EVENT));
+}
+
+// Renew a little BEFORE the token dies, so a request already in flight cannot cross the boundary.
+const EXPIRY_SKEW_SECONDS = 120;
+
+// One refresh at a time. A dashboard screen fires several requests at once, and without this each would mint
+// its own token -- N round trips where one will do, and with rotation enabled the later ones would be
+// refreshing against an already-spent token.
+let refreshInFlight = null;
+
+function sessionExpiresAt(session) {
+  if (!session) return 0;
+  if (session.expires_at) return Number(session.expires_at);
+  const issuedAt = Number(session.refreshed_at || session.created_at || 0);
+  const ttl = Number(session.expires_in || 0);
+  return issuedAt && ttl ? issuedAt + ttl : 0;
+}
+
+function sessionIsFresh(session) {
+  const expiresAt = sessionExpiresAt(session);
+  // No deadline recorded (a session stored before this shipped) means we cannot judge -- treat it as fresh
+  // rather than forcing a login on missing data. A 401 still triggers the reactive path below.
+  if (!expiresAt) return true;
+  return expiresAt - EXPIRY_SKEW_SECONDS > Math.floor(Date.now() / 1000);
+}
+
+/**
+ * Exchange the refresh token for a new access token.
+ *
+ * Cognito access tokens last an hour and refresh tokens 30 days, and until this existed nothing used the
+ * second fact: the session carried a refresh_token that no code read (plans/API_AUTHENTICATION.md). Failure is
+ * deliberately terminal -- clear the session and surface UnauthenticatedError, because a refresh token Cognito
+ * has rejected will not start working on a retry.
+ */
+export async function refreshSession() {
+  const current = getAuthSession();
+  if (!current?.refresh_token) {
+    endSession();
+    throw new UnauthenticatedError();
+  }
+  if (!refreshInFlight) {
+    refreshInFlight = apiRequest("/auth/refresh", {
+      method: "POST",
+      body: { refresh_token: current.refresh_token },
+      anonymous: true,
+    })
+      .then((payload) => {
+        const merged = { ...current, ...(payload.session || {}) };
+        setAuthSession(merged);
+        return getAuthSession();
+      })
+      .catch(() => {
+        endSession();
+        throw new UnauthenticatedError();
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 export async function apiRequest(path, { method = "GET", body, params = {}, mode, raw = false, anonymous = false } = {}) {
   // Backend base is hostname-derived (release channel). `mode` (test/live) is a DATA filter sent as ?mode=;
   // pass an explicit `mode` to target the OTHER Stripe mode on the same backend (cross-mode copy).
@@ -237,7 +318,7 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
   Object.entries({ tenant_id: getTenantId(), client_id: getClientId(), mode: stripeMode, ...params }).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
-  const session = getAuthSession();
+  let session = getAuthSession();
 
   // Fail CLOSED, the same way the server's route table does (stripe_link/api_auth.py): a caller that cannot
   // name itself does not get to send a tenant-scoped request. Without this the client did something worse
@@ -245,20 +326,35 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
   // "tenant_demo", so a token-less dashboard CLAIMED a specific tenant id. `anonymous` is the explicit opt-in
   // for the handful of calls that legitimately precede a session (the /auth/* family), rather than the client
   // keeping its own copy of the public-route list and letting it drift from the server's.
-  if (!anonymous && !session?.access_token) {
-    clearAuthSession();
-    throw new UnauthenticatedError();
+  if (!anonymous) {
+    if (!session?.access_token) {
+      endSession();
+      throw new UnauthenticatedError();
+    }
+    // Renew BEFORE sending rather than after being refused. The reactive path below cannot fire yet -- no
+    // authorizer answers 401 today -- so proactive renewal is the half that actually works now, and the half
+    // that keeps working if an authorizer's 401 ever arrives without a WWW-Authenticate we recognise.
+    if (!sessionIsFresh(session)) session = await refreshSession();
   }
 
-  const response = await fetch(url, {
+  const send = (active) => fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
       "X-Stripe-Mode": stripeMode,
-      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      ...(active?.access_token ? { Authorization: `Bearer ${active.access_token}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  let response = await send(session);
+  // Belt to the proactive braces: a token can be rejected while our clock says it is fine (a revoked session, a
+  // skewed clock, a pool-side signing change). Retry exactly ONCE -- a second 401 after a fresh token is a real
+  // refusal, and looping on it would hammer the API with an unusable credential.
+  if (response.status === 401 && !anonymous) {
+    session = await refreshSession();
+    response = await send(session);
+  }
 
   const text = await response.text();
   // `raw` is for endpoints that answer with a file rather than JSON (the coupon-codes CSV). The error

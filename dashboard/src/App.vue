@@ -502,6 +502,9 @@ onMounted(() => {
     .then(maybeNudgeStripeSetup)
     .catch(() => {});
   platformBilling.load().catch(() => {});
+  // Return to the login form when the API layer ends the session (no token, or a refresh Cognito refused).
+  // Wiring, not logic: the store holds the copy App.vue gates on, and only it can reset that.
+  auth.bindSessionEnd();
   // The pill shows the store avatar when there is one. Failure is silent: the initials are a perfectly
   // good fallback, and a missing avatar must never be an error the tenant has to read.
   profileStore.ensureLoaded().catch(() => {});

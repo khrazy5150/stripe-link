@@ -1,11 +1,12 @@
 import { defineStore } from "pinia";
-import { apiRequest, clearAuthSession, getAuthSession, setAuthSession } from "../api/client";
+import { SESSION_ENDED_EVENT, apiRequest, clearAuthSession, getAuthSession, setAuthSession } from "../api/client";
 
 export const useAuthStore = defineStore("auth", {
   state: () => ({
     session: getAuthSession(),
     activeTab: "login",
     loading: false,
+    _sessionEndBound: false,
     message: "",
     error: "",
     loginForm: {
@@ -135,7 +136,29 @@ export const useAuthStore = defineStore("auth", {
 
     setSession(session) {
       setAuthSession(session);
-      this.session = session;
+      // Read back rather than storing the argument: setAuthSession stamps expires_at, and the store holding a
+      // copy WITHOUT it would report a session that never looks due for renewal.
+      this.session = getAuthSession();
+    },
+
+    /**
+     * The API layer ended the session -- no token, or a refresh Cognito refused.
+     *
+     * Storage is already cleared by the time this runs; what is left is the store's own copy, which is what
+     * App.vue gates on. Without this the dashboard stays rendered and every screen fails instead of returning
+     * to the login form.
+     */
+    sessionEnded() {
+      this.session = null;
+      this.error = "";
+      this.message = "Your session has ended. Please sign in again.";
+      this.activeTab = "login";
+    },
+
+    bindSessionEnd() {
+      if (this._sessionEndBound) return;
+      this._sessionEndBound = true;
+      window.addEventListener(SESSION_ENDED_EVENT, () => this.sessionEnded());
     },
 
     async run(callback) {
