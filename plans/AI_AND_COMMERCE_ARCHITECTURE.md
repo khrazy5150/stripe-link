@@ -345,6 +345,132 @@ which is where it stops being.
 
 ---
 
+### A.8 Three gates, and what each one costs — DECIDED 2026-09-29
+
+Access, entitlement and consumption are **three separate decisions**, and collapsing them into one number is
+what forces a quota redesign every time pricing changes.
+
+```
+can this tenant use AI Builder at all?     -> CAPABILITY
+how many generations are they entitled to? -> QUOTA (trial: lifetime · paid: monthly · BYOK: safety ceiling)
+will we spend another Bedrock dollar now?  -> PLATFORM BUDGET
+```
+
+#### Gate 1 — capability
+
+Add `ai_builder` to `CAPABILITIES`. Leave it OUT of `FREE_TIER_CAPABILITIES`, which is
+`{landing_pages, sites, collections}` — booking is premium and must not be added here.
+
+| Tenant state | AI Builder |
+| --- | :-: |
+| Free | ❌ |
+| Live 14-day trial | ✅ (already gets the full set from `entitlements.py`) |
+| Premium / Pro | ✅ |
+| **Free + verified BYOK** | ✅ — their key, their bill; withholding it prevents someone spending their own money |
+
+```
+can_use_ai_builder(tenant) = has_capability(tenant, "ai_builder") or has_verified_byok(tenant)
+```
+
+"Verified" means `ai_provider.is_verified()` — `verified_at` set by a **real generation**, not a catalogue
+lookup. Measured 2026-09-27: `get-foundation-model-availability` reported four green flags for models that
+still returned AccessDenied, so only an invocation proves anything.
+
+**This gate is ADVISORY until the authorizer lands.** `tenant_id_from_event` reads the tenant from the request
+body, query string or headers, and nothing verifies the caller (plans/API_AUTHENTICATION.md, Phase 2 open). A
+free tenant can send a trial tenant's id and the server cannot tell. Until then the only identity-independent
+protection is gate 3, which is a reason to build gate 3 properly rather than a reason to delay gate 1.
+
+#### Gate 2 — quota
+
+| Source | Allowance | Counter |
+| --- | --- | --- |
+| Trial | **3 generations, LIFETIME** | period `"trial"` |
+| Premium / Pro | 50 / calendar month | period `YYYY-MM` |
+| BYOK | `BYOK_CEILING` safety ceiling | never consumes trial or platform allowance |
+| `exempt` | UNLIMITED | test accounts; must survive this change |
+
+**3, not 2, and called "3 AI generations" — never "2 pages."** One generation to discover, one to refine, one
+to experience the value; two ends the demo at "still not quite." And the counter counts generations, which is
+already the decided unit (§6 of AI_PAGE_BRIEF: a disliked generation still counts).
+
+**One Build-with-AI click = one generation**, however many model calls it makes internally.
+
+**Lifetime, because the calendar counter does not do what the name suggests.** `period_key()` is the calendar
+month, so a trial starting 25 September spans September and October and hands out the allowance twice. The fix
+is the period key `"trial"`: it never resets because there is no next trial period.
+
+**One table, not two.** The semantics are the point, not the table — a row keyed `"trial"` reads as trial in
+the data, reuses the single atomic increment path, and costs no new infrastructure. A second table is not free:
+the stack is at **441 of 500 CloudFormation resources** on dev, and a table plus its IAM eats into that.
+
+**The fallback inverts.** `FALLBACK_PLAN = "basic"` deliberately grants 5 on an unreadable plan, because zero
+"is a lie to a tenant whose profile read merely blipped" and the exposure was nine cents. Under capability
+gating that reasoning breaks: an unreadable plan must not silently grant AI, and must not wrongly deny a
+paying customer either. It needs a **third state** — a retryable "we could not check your plan" — rather than
+either a grant or a denial. And `PLATFORM_PAID_ALLOWANCE["basic"]` should be **deleted**, not set to 0: an
+unreachable allowance that still looks authoritative is what a later reader mistakes for policy.
+
+**Enforce on the write, not the read.** `ai_generate.py:140-150` reads `used`, decides, then consumes and
+discards the returned total — so two concurrent requests both pass at `used=2, allowance=3` and produce four
+generations. The comment above it claims the opposite. `AiUsageRepository.consume()` already returns the new
+total precisely so the caller can enforce on it; the fix is consume → enforce on what came back → `release()`
+if over. Consume-before-generate and the compensating release on provider failure already exist and are right.
+
+#### Gate 3 — platform budget
+
+Identity-independent, which is what makes it the real protection while gate 1 is advisory. A monthly Junior Bay
+AI spend ceiling plus an emergency global disable, checked before invocation and **skipped for BYOK**, since
+the platform is not paying for those. Per-tenant caps protect tenants from each other; only this protects the
+platform from aggregate abuse — including serial trial signups, which no per-tenant cap can see.
+
+Pair it with a short rate limit and one concurrent generation per tenant. The async job model already makes the
+concurrency half nearly free: refuse to queue a second job while one is running.
+
+---
+
+### A.9 Cost accounting — what is real-time, and what cannot be (DECIDED 2026-09-29)
+
+Requested by the author: record AWS spend in near-real time, surfaced in the Admin Site, with the ability to
+spot big spenders per tenant. The honest design has **three tiers**, because they differ in both latency and
+truthfulness, and presenting them as one number would be the fee-table mistake again.
+
+| Tier | What | Latency | Per tenant? | Truth |
+| --- | --- | --- | :-: | --- |
+| 1 | **AI inference** | real time | ✅ exact | we are in the call path |
+| 2 | Attributable infrastructure (requests, stored bytes, egress) | near real time | ⚠️ allocated | a model, not a measurement |
+| 3 | **AWS Cost Explorer / CUR** | up to ~24h | ❌ account only | the actual bill |
+
+**Tier 1 is the one that matters and the only one that is exact.** Bedrock's `converse` returns
+`usage.inputTokens` / `outputTokens`, and `ai_models.estimate_cost()` already turns those into USD *with a
+confidence attached*. Record it on the **same `ai_usage` row** as a second atomic `ADD` after the call — tokens
+and cost accumulate alongside `used`, so the "big spender" question is answered by a row that already exists.
+No new table.
+
+**Store money as integer `cost_micros`, never a float.** DynamoDB `ADD` on floats accumulates rounding error,
+and Decimal-from-DynamoDB is already a known footgun in this repo.
+
+**Tier 2 is an allocation model and must be labelled as one.** One Lambda serves every tenant; AWS has no
+tenant dimension. Counting attributable events and multiplying by unit rates produces an estimate, and calling
+it "cost" invites exactly the confusion the estimate/actual split exists to prevent.
+
+**Tier 3 cannot be real-time and cannot be per tenant.** Cost Explorer lags up to a day and CUR delivers a few
+times daily. Its job is **reconciliation**, not display — the same estimate-then-true-up discipline this repo
+already runs for Stripe fees against balance transactions. Show tier 1 as the live number, reconcile against
+tier 3 monthly, and show the drift rather than hiding it.
+
+**Two traps this design has to carry:**
+
+- **The rate table is hand-maintained.** All 1052 `us-west-2` Bedrock price records carry zero current-
+  generation models, so `ai_models.json` holds `rate_in`/`rate_out`/`rate_confidence` by hand. Costs therefore
+  drift silently when AWS reprices. Needs a `rates_verified_at` stamp displayed next to any cost figure — the
+  `global_billing_config.json` lesson, which is that deployed config outranks code and stale config outranks
+  both.
+- **The TTL deletes the history.** `consume()` sets `expires_at = at + 90 days` so spent periods expire rather
+  than accumulate. That is right for a quota counter and wrong for cost trends: a year-over-year view would
+  find nothing. Either extend the TTL on rows carrying cost, or roll up to a durable monthly summary **before**
+  expiry. Decide before the first row expires, because after that the data is simply gone.
+
 ## Part B — Composition system (the "one theme" refactor)
 
 "Theme" conflated three jobs; split them:

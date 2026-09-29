@@ -123,6 +123,37 @@ expensive part. Building automation for it would be paying for a tool to do a jo
 without a stack deploy, and closing the dual-secret gap. Those stay useful afterwards; a swap button does
 not.
 
+## 5. Cost visibility — who is spending the platform's money (requested 2026-09-29)
+
+**The author's ask:** record AWS spend in near-real time, show it in the Admin Site, and be able to spot the
+big spenders per tenant.
+
+Design lives in `plans/AI_AND_COMMERCE_ARCHITECTURE.md` §A.9. What matters for this document is what the screen
+can honestly display, because two of the three cost tiers cannot say what people assume they say:
+
+- **AI inference is exact and live.** We are in the call path, Bedrock returns token counts, and
+  `ai_models.estimate_cost()` converts them with a confidence attached. It accumulates on the existing
+  `ai_usage` row, so per-tenant spend needs no new storage. **This is the number the screen should lead with**,
+  because it is also the only per-tenant cost that can run away.
+- **Infrastructure cost per tenant is an allocation, not a measurement.** One Lambda serves every tenant and
+  AWS has no tenant dimension. Anything shown here is a model and must be labelled "estimated".
+- **The actual bill lags by up to a day and is account-level only.** Cost Explorer and CUR cannot be
+  attributed per tenant. Their job is monthly reconciliation against tier 1 — show the drift, do not hide it.
+
+**Two things the screen must show alongside any figure**, or it will be quietly wrong:
+
+- `rates_verified_at` — the Bedrock rate table is hand-maintained, because AWS publishes no machine-readable
+  rates for current-generation models. A cost figure with no idea how old its rates are is the
+  `global_billing_config.json` trap wearing a different hat.
+- Which tier a number came from. "Exact", "estimated" and "billed" must never render identically.
+
+**Finding the big spenders:** `ai_usage` is PK `tenant_id` / SK `period`, so "all tenants for this period"
+means a scan or a GSI on `period`. At current scale a scan is fine and nearly free — take the GSI when it
+hurts, not before, since the stack is at **441 of 500 CloudFormation resources**.
+
+**Blocked on the same thing as everything else here** (§3): a screen listing every tenant's spend is precisely
+what must not be reachable by guessing a `tenant_id`.
+
 ## 3. Open questions, before any of it is built
 
 - **Who is an admin, and how is that proven?** stripe-cart had `checkPlatformAdminStatus`. This repo has no

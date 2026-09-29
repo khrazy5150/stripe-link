@@ -547,6 +547,13 @@ was meant to keep.
 subscription renewal test has been confirmed (see the HIGH QA item). Do not wipe before that data has
 served its purpose.
 
+**Do the TABLE census in the same pass (author, 2026-09-29).** There are **90 `jb-` tables** holding **0.89 MiB
+between them**, and some are inherited from the old app and no longer read by anything. Deleting a dead table
+is not just tidiness: every table carries CloudFormation resources and IAM, and the stack is at **441 of 500**
+on dev — a ceiling this repo has already hit once (see the FIXED entry at the top of this file). Freeing
+resources here is what makes room for the ones real features need, and it is far cheaper to establish which
+tables are dead now, while every row is debris, than after real data lands in some of them.
+
 **Not required:** a separate Stripe platform account per deployment. That buys perfect silos -- separate
 tenants, separate connected accounts -- which is not what is wanted: real tenants live in production and
 their test mode belongs in the production silo. What is wanted is DATA isolation, and that needs a
@@ -2607,6 +2614,32 @@ bill, plan-gated). Bedrock reverses who pays, so **the bundled allowance must be
 per-tenant cap ships in the first commit** — no usage metering exists anywhere in this repo today, and
 it is the same counter as A.6's abuse cap. At ~$0.046/generation (Sonnet 4.6, tripled for a full page),
 **50 generations/month is ~12% of a $19 subscription**; 200/month is 49%.
+
+**ENTITLEMENT + COST MODEL DECIDED 2026-09-29** (plan §A.8/§A.9, with the author). Three gates, deliberately
+not one number: **capability** (`ai_builder`, absent from the free tier, present on trial/paid, plus a carve-out
+for verified BYOK because withholding it would stop someone spending their own money), **quota** (trial = **3
+generations LIFETIME** under period key `"trial"`; paid = 50/calendar month; BYOK = safety ceiling only), and a
+**platform budget** ceiling that is identity-independent and skipped for BYOK.
+
+Three findings that shaped it. The calendar counter does not do what a "hard limit" implies — a trial starting
+25 September spans two periods and hands out the allowance twice. The free tier's `basic: 5` must be **deleted**
+rather than zeroed, and the `FALLBACK_PLAN` grant-on-unreadable-plan has to become a retryable third state.
+And **there is a live race**: `ai_generate.py:140-150` reads `used`, decides, then consumes and throws away the
+returned total, so two concurrent requests both pass at `used=2, allowance=3` — while the comment above it
+claims they cannot. `consume()` already returns the new total for exactly this reason. **Fix that first; it is
+small and independent of everything else here.**
+
+**Gate 1 is advisory until the authorizer ships** — `tenant_id` still comes from the request, so a free tenant
+can claim to be a trial tenant. That makes the platform budget the only real protection today, and it is
+another reason the API-auth Phase 2 above matters.
+
+**Cost accounting (§A.9):** AI inference is exact and real-time and accumulates on the existing `ai_usage` row
+as integer `cost_micros` — no new table. Infrastructure per tenant is an *allocation*, not a measurement. The
+real AWS bill lags a day and is account-level only, so it is a reconciliation anchor rather than a display,
+the same estimate-then-true-up shape already used for Stripe fees. Two traps carried: the rate table is
+hand-maintained (needs a `rates_verified_at` shown next to every figure), and the 90-day TTL on usage rows
+**deletes cost history** — roll up to a durable summary before the first row expires, because afterwards it is
+simply gone. Admin surface: `plans/ADMIN_SITE.md` §5.
 
 **FLOW REWORKED 2026-09-29 (design only, nothing built).** `AiPageWizard.vue` shipped as a standalone
 nine-step wizard and the author's verdict was that it **duplicates the product wizard** — measured, it re-asks
