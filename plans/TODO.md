@@ -2608,6 +2608,25 @@ per-tenant cap ships in the first commit** — no usage metering exists anywhere
 it is the same counter as A.6's abuse cap. At ~$0.046/generation (Sonnet 4.6, tripled for a full page),
 **50 generations/month is ~12% of a $19 subscription**; 200/month is 49%.
 
+**FLOW REWORKED 2026-09-29 (design only, nothing built).** `AiPageWizard.vue` shipped as a standalone
+nine-step wizard and the author's verdict was that it **duplicates the product wizard** — measured, it re-asks
+kind, name, description, category and price, and asks for guarantee/terms that `ai_floor.py` already says must
+come from the tenant's `refund_policy`. `plans/AI_PAGE_BRIEF.md` is now **v2**: the wizard becomes a FORK off
+the product wizard, offered both at the end of it and as an action on any existing product. Three decisions
+taken with the author:
+
+- **The AI flow never creates a Product** — it always starts from one. `domain/ai_provision.py`'s product half
+  becomes unreachable and should be deleted rather than left as a second way to create catalogue rows; its
+  Offer half stays, since the product wizard does not create Offers.
+- **The brief is PROJECTED at generate time** from Product + config + one step, and **snapshotted onto the
+  job**. Projection so a fixed refund policy propagates on the next generation; the snapshot so there is an
+  immutable record of what the AI was licensed to assert, which is what the floor was checked against.
+- **One step, two required fields** (`audience`, `facts[]`) with evidence/certifications/tone/must_say/
+  must_not_say optional and labelled with what each unlocks.
+
+Also clarified: v1's "create everything as draft" meant **landing pages**, not the catalogue — and that is the
+only reading the schemas permit, since `Product.status` is `["active","archived"]` with no draft.
+
 **Deferred with the research done** (plan §A.1): **Anthropic Workload Identity Federation** as a third,
 platform-paid provider — no stored secret, short-lived IAM-anchored tokens, and it bypasses Bedrock
 entitlement entirely. Parked because it is a PLATFORM credential and cannot serve BYOK. Parked with it:

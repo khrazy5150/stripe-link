@@ -1,7 +1,9 @@
 # The Page Brief — design note for review
 
-**Status:** REVIEWED — all five questions answered 2026-09-27; nothing built yet · **Scope:** AI_AND_COMMERCE Part A, §A.3 step 1
-· **Written:** 2026-09-27
+**Status: v2 — REVISED 2026-09-29.** v1 specified a standalone nine-step AI wizard. The author's verdict on
+seeing it built (`AiPageWizard.vue`, 370 lines) was that **it duplicates the product wizard**. v2 replaces the
+wizard with a FORK off the existing one. §4 and §5 are rewritten; everything else in this note survived.
+· **Scope:** AI_AND_COMMERCE Part A, §A.3 steps 1–2 · **Written:** 2026-09-27
 
 This settles the *contract* before any of the pipeline is built, because four things meet at it: the
 wizard writes it, the §A.7 floor grounds against it, the Product and Offer are derived from it, and
@@ -10,7 +12,7 @@ wrong and every piece has to be reworked.
 
 ---
 
-## 1. The thing that decides how long the wizard is
+## 1. The thing that decides how much the AI may say
 
 Slice 2 changed the arithmetic here, and it is the one idea worth reading twice:
 
@@ -27,7 +29,9 @@ alternative is not a cleverer model; it is a model permitted to invent, which is
 to prevent.
 
 **Consequence for the UI:** few REQUIRED questions, many OPTIONAL ones, and show what each unlocks.
-Not "fill in 12 fields", but "add your guarantee → we can write about your guarantee."
+Not "fill in 12 fields", but "add your guarantee → we can write about your guarantee." v2 sharpens this:
+anything already known — from the Product or from tenant config — is *read*, so the only things asked are the
+ones nothing else can supply (§4).
 
 ---
 
@@ -138,82 +142,92 @@ a commitment, and default to empty.
 
 ---
 
-## 4. The questions
+## 4. The fork, not a wizard
 
-**Two entry points**, because the smartest step is the one already answered:
+**v1 was wrong about the shape.** It specified nine steps and shipped as `AiPageWizard.vue`, and the author's
+objection is the correct one: almost every question it asks, the product wizard has already asked. Measured
+against `Products.vue`:
 
-- **From an existing product** — `kind`, `name`, `price` and often `facts` are already known. The
-  wizard opens on the first genuine gap and shows the rest as already-answered. A tenant with a
-  catalogue should never retype it.
-- **From scratch** — the full flow below, which also creates the Product and Offer (§5).
+| Product wizard step | What the v1 brief asked AGAIN |
+| --- | --- |
+| purpose (intent) | `kind` |
+| details (name, description, category) | `name`, `what_it_is`, `category` |
+| pricing | `price` |
+| identifiers | — |
+| image | — |
 
-**The step list is derived, not fixed** — one `steps(kind)` computed, the `ServiceWizard.vue` idiom,
-so the rail, the labels and the bounds all read the same source. (`LandingPages.vue`'s rail is the
-scar that says what happens when three calculations each decide how long a conditional wizard is.)
+And two more the brief asked that should be **read, not asked**: `guarantee`/`terms` come from the tenant's
+`refund_policy`, and shipping from `ShippingConfig`. `domain/ai_floor.py` already said so — it lists
+`refund_policy` as a governed class because *"a refund window is a contract term; it comes from the tenant's
+policy"*. The floor and the v1 brief contradicted each other, and the floor was right.
 
-| # | Step | physical | digital | service | Required |
-| --- | --- | :-: | :-: | :-: | --- |
-| 1 | What are you selling — `kind`, `name`, `what_it_is` | ● | ● | ● | ✅ |
-| 2 | Price | ● | ● | ● | ✅ |
-| 3 | Who is it for | ● | ● | ● | ✅ |
-| 4 | What should people know — `facts[]` | ● | ● | ● | ✅ (≥1) |
-| 5a | Shipping & use — `shipping`, `usage`, `materials`, `dimensions` | ● | — | — | skip |
-| 5b | What they receive — `format`, `access` | — | ● | — | skip |
-| 5c | The session — `duration_minutes`, `location_mode`, `performed_by`, `booking`, `what_happens` | — | — | ● | **✅ duration + location** |
-| 6 | Promises — `guarantee`, `terms`, `certifications`, `evidence` | ● | ● | ● | skip |
-| 7 | Voice — `tone`, `category` | ● | ● | ● | skip (defaults) |
-| 8 | Anything exact — `must_say`, `must_not_say` | ● | ● | ● | skip |
-| 9 | Review | ● | ● | ● | — |
+**What is left once duplicates and derivable answers are removed is one step.**
 
-**Correction (2026-09-27, while implementing):** an earlier draft of this note claimed "a download
-is 7 steps". It is not — the table above gives every kind the same nine-step frame. The count was
-wrong and the claim is withdrawn.
+### Where it forks from — DECIDED 2026-09-29
 
-What actually differs is the *content and the weight* of the kind step, which is the part that
-matters. A **download never sees a shipping or dosage question**, and its whole kind step is optional
-— skippable in one click. A **service's kind step has two required fields**, because a service page
-that cannot say how long it takes or whether it is remote is not worth generating. That is the
-author's rule — ask the fulfilment question only when it is not obvious — applied by making `kind`
-carry it, and it shows up as what is asked rather than as a shorter rail.
+**Both:** offered as the next action when the product wizard finishes, and as an action on any existing
+product. One fork component, two call sites. The second call site is not a nicety — every product that exists
+today got there without ever seeing this flow, and a tenant with a catalogue must never retype it.
 
-**What is never asked because it is derivable:**
-- `digital.delivery` — a digital product is delivered by download; only asked if they say otherwise.
-- `physical.requires_shipping` — implied by `kind`.
-- `service.booking` — defaults to `scheduled`; the `no_booking` case is a checkbox on 5c, not a step.
-- `brand` — resolved from the business profile (`resolve_brand`), asked only if there is none.
+**Consequence: the AI flow never creates a Product.** Every generation starts from one that already exists.
+`domain/ai_provision.py` currently builds Product *and* Offer; its product half becomes unreachable and should
+be removed rather than left as a second way to create catalogue rows. The Offer half stays — the product wizard
+does not create Offers, so the fork still does.
 
-Step 9 earns its place by showing **what we will not be able to say**: "we will not mention
-cancellation because you did not tell us your terms." Shown *before* generating, it is the difference
-between a tenant who understands a thin page and one who thinks the AI is bad. Same list as §3's
-right-hand column, filtered to what is empty.
+### The one step — DECIDED 2026-09-29
 
-**The 30-second path:** steps 1-4 (plus 5c for a service), then Generate. That is the "AI does
-everything" experience, and it honestly produces a decent, factual, slightly plain page.
+**Two required, the rest optional and collapsed**, each labelled with what it unlocks:
 
-## 5. Brief → Product → Offer, deterministically
+| Field | Required | Unlocks |
+| --- | :-: | --- |
+| `audience` — who it is for | ✅ | Every benefit sentence; without it the copy addresses nobody |
+| `facts[]` — what people should know | ✅ (≥1) | The substance of the page; the floor licenses nothing else |
+| `evidence` | — | Any efficacy claim at all |
+| `certifications` | — | Trust badges and compliance statements |
+| `tone` | — | Voice; defaults to the category's |
+| `must_say` | — | Exact phrasing the tenant needs present |
+| `must_not_say` | — | Phrasing the tenant needs absent |
 
-§A.3 step 2, and the rule is that **the platform owns every id**. The AI assists copy; it never
-invents a reference that has to resolve.
+This keeps §1's principle intact — *every question we do not ask is a fact the AI is not allowed to assert* —
+while honouring the author's rule that the fork must not feel like a second form. The 30-second path is now
+genuinely two fields.
+
+**Review still happens, and still earns its place** by showing what the page will NOT be able to say: "we will
+not mention your refund window because your policy is not set." That list now draws on config as well as the
+step, which makes it actionable in a way v1's could not be — the fix is a settings link, not a retype.
+
+## 5. Product → Brief → Offer + Page
+
+v1 had this backwards because it assumed the AI flow created the catalogue. It does not. The Product is an
+input; the Offer and the Page are the outputs.
+
+### The brief is PROJECTED, and snapshotted — DECIDED 2026-09-29
+
+Built fresh at generate time from Product + tenant config + the one step, then **stored on the generation
+job**. Both halves matter and for different reasons:
+
+- **Projected** so current policy always wins. A tenant who fixes their refund policy and regenerates gets a
+  page that reflects it. A stored, tenant-edited brief would snapshot the terms and silently stop propagating —
+  the same failure mode as the stale `global_billing_config.json` fee table.
+- **Snapshotted onto the job** so there is an immutable record of what the AI was licensed to assert for any
+  given page. That is what answers "why did it say that?" months later, and it is exactly what the floor was
+  checked against. Without it the grounding decision is unreproducible.
+
+### What is derived from where
 
 | Created | From | Never from the AI |
 | --- | --- | --- |
-| `Product.name` | `brief.name` | — |
-| `Product.description` | `brief.what_it_is` | — |
-| `Product.product_category` | `brief.category` | — |
-| `Product.product_type` | derived from fulfilment answer (physical/digital/service) | — |
-| `Product.prices[0]` | `brief.price` | the amount, ever |
-| `product_id` / `price_id` / `stripe_product_id` | platform + Stripe sync | **all ids** |
-| `Offer.name` / `slug` | `brief.name` via the existing slug generator | — |
+| *(Product)* | **already exists — the fork's input** | — |
+| `brief.name` / `what_it_is` / `category` / `price` / `kind` | the Product | — |
+| `brief.guarantee` / `terms` | tenant `refund_policy` | — |
+| `brief.shipping` | `ShippingConfig` | — |
+| `brief.audience` / `facts[]` / `evidence` / `tone` / `must_*` | the one step | — |
+| `Offer.name` / `slug` | Product name via the existing slug generator | — |
 | `Offer.offer_type` | `single` | — |
 | `Page.theme.preset` | `resolve_preset(category=…)` shortlist | an open hex value |
 | `Page.sections[]` | `generate_structured` against the §A.7-floored schema | policy, legal, price, proof |
 
-Everything in that left column already exists — this is wiring, not new machinery. The one genuinely
-new decision is **what happens on partial failure**: if the Product saves and Stripe sync fails, the
-tenant must not be left with a half-made thing they cannot see. Proposal: create everything as
-`status: draft`, and make the job's failure path leave a draft Product the tenant can finish by hand.
-
----
+Everything in the left column already exists. This is wiring.
 
 ## 6. Open questions for the author
 
@@ -234,10 +248,22 @@ tenant must not be left with a half-made thing they cannot see. Proposal: create
 
 ### Still open (implementation, not design)
 
-- **Partial failure.** If the Product saves and Stripe sync fails, the tenant must not be left with a
-  half-made thing they cannot see. Proposal: create everything `status: draft`, and let a failed job
-  leave a draft Product they can finish by hand.
+- **Partial failure — CLARIFIED 2026-09-29.** v1's "create everything as draft" was poorly phrased and read
+  as applying to the catalogue; the author's intent was **landing pages are created as drafts**. That is also
+  the only reading the schemas allow: `Page.status` has `draft`, `Product.status` is `["active","archived"]`
+  and has none. Under the fork model the question largely dissolves — the AI flow no longer creates Products,
+  so there is no half-made catalogue row to strand. **What remains:** the Offer and Page it *does* create, and
+  a Stripe sync that fails on the pre-existing Product is the product wizard's problem, not this flow's.
 - **Does a service brief create a `Service` document or a `Product` with `product_type: service`?**
   Settled elsewhere — plans/SERVICE_WIZARD.md §3 chose the Service document with
   `fulfillment_mode`, and `Products.vue` already hands off to `ServiceWizard` on that basis. The AI
   wizard must hand off the same way rather than inventing a third path.
+
+- **Correction capture — NOT YET DESIGNED (author's idea, recorded 2026-09-29).** When a tenant edits a
+  generated element in the builder, that edit is the highest-quality training signal the platform will ever
+  get: a before/after pair on a real page, with the brief that licensed it. Nothing records it today. Cheap
+  while the builder is already being touched for this feature and expensive to reconstruct afterwards — the
+  same shape as the audit-trail argument in TODO's backup entry. Needs its own design: what is stored, for how
+  long, whether it is tenant-private, and what it is actually used for (few-shot examples, policy tuning, or
+  just a quality metric). **Do not build it blind into this phase**; decide the purpose first, because that
+  decides the schema.
