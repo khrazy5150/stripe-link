@@ -60,8 +60,12 @@ SECTION_SHAPES: dict[str, dict[str, Any]] = {
     "page_ribbon": {"text": _TEXT},
     "bragging_points": {"heading": _TEXT,
                         "items": {"type": "array", "items": _obj({"label": _TEXT, "value": _TEXT})}},
+    # STRINGS, not {label, value} objects. `render_numbered_list` is the authority and it renders one
+    # authored LINE per item -- `str(item or "").strip()` into a single <p>. The object shape here made the
+    # model emit objects the renderer could not use; the builder then coerced them on load with String(i),
+    # which is where the literal "[object Object]" on a real generated page came from (author, 2026-09-29).
     "numbered_list": {"heading": _TEXT,
-                      "items": {"type": "array", "items": _obj({"label": _TEXT, "value": _TEXT})}},
+                      "items": {"type": "array", "items": _TEXT}},
     "faq": {"heading": _TEXT,
             "items": {"type": "array", "items": _obj({"question": _TEXT, "answer": _TEXT})}},
 }

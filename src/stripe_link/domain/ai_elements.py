@@ -73,6 +73,19 @@ def _items(section: dict[str, Any]) -> list[dict[str, Any]]:
     return [i for i in (section.get("items") or []) if isinstance(i, dict)]
 
 
+# A policy term is a COMMITMENT the tenant makes, not evidence about the product -- so it is never a
+# bragging point however numeric it looks, and the page already carries a `refund_policy` element that says
+# it properly. Found on a real generated page: "30 days / Refund window" as a stat card, beside the refund
+# policy section saying the same thing (author, 2026-09-29). The floor did not catch it because the claim was
+# perfectly GROUNDED; being true was never the question, being evidence was.
+POLICY_TERMS = ("refund", "return", "warrant", "guarantee", "money back", "money-back", "exchange")
+
+
+def _is_policy_term(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return any(term in lowered for term in POLICY_TERMS)
+
+
 def violations(sections) -> list[dict[str, str]]:
     """Contract breaches a machine can settle. Raised into the repair loop, not silently stripped."""
     found: list[dict[str, str]] = []
@@ -88,6 +101,16 @@ def violations(sections) -> list[dict[str, str]]:
         spec = contract(element)
         if not spec:
             continue
+
+        if element == "bragging_points":
+            for item in _items(section):
+                if not isinstance(item, dict):
+                    continue
+                if _is_policy_term(item.get("label")) or _is_policy_term(item.get("value")):
+                    fail(section, "bragging_points must not carry a policy term "
+                                  f"({item.get('label') or item.get('value')!r}). A refund window, warranty "
+                                  "or returns period is a promise, not evidence -- the refund_policy element "
+                                  "says it, and repeating it here says it twice.")
 
         count = spec.get("count") or {}
         items = _items(section)

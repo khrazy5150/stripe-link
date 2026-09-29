@@ -220,3 +220,78 @@ class PromptTests(unittest.TestCase):
 
     def test_an_unknown_element_contributes_nothing(self):
         self.assertEqual(for_prompt(["not_an_element"]), "")
+
+
+class NumberedListShapeTests(unittest.TestCase):
+    """`numbered_list` items are plain STRINGS, and three places have to agree about that.
+
+    The renderer is the authority: `render_numbered_list` does `str(item or "").strip()` into one <p> per
+    item. The generation schema said {label, value} objects, so the model dutifully emitted objects, and the
+    builder's loader coerced them with String(i) — which is how a real generated page ended up showing
+    "[object Object]" three times (author, 2026-09-29).
+    """
+
+    def test_the_schema_asks_for_strings(self):
+        from stripe_link.domain.ai_schema import SECTION_SHAPES
+
+        self.assertEqual(SECTION_SHAPES["numbered_list"]["items"]["items"]["type"], "string")
+
+    def test_the_contract_shows_string_examples(self):
+        from stripe_link.domain.ai_elements import contract
+
+        for example in contract("numbered_list")["good"]:
+            with self.subTest(example=example):
+                self.assertIsInstance(example, str, "an object example teaches the model the wrong shape")
+
+    def test_the_contract_names_the_object_mistake_explicitly(self):
+        from stripe_link.domain.ai_elements import contract
+
+        bad = json.dumps(contract("numbered_list")["bad"])
+        self.assertIn("object Object", bad, "the failure it caused should be the lesson")
+
+    def test_the_renderer_still_only_understands_strings(self):
+        # The assertion that keeps the other three honest: if the renderer ever learns objects, this fails
+        # and whoever changed it has to update the schema and the builder in the same breath.
+        from stripe_link.runtime.html import render_numbered_list
+
+        html = render_numbered_list({"id": "n1", "items": [{"label": "Steel", "value": "Double-walled."}]})
+        # It does not reject the object, it STRINGIFIES it — which is the whole problem. The raw dict keys
+        # leak onto the page, so the failure is visible to a buyer rather than caught anywhere.
+        self.assertIn("label", html, "an object leaks its keys onto the page")
+        self.assertIn("&#x27;", html, "and its quoting — this is a Python repr, not content")
+
+
+class PolicyTermTests(unittest.TestCase):
+    """A policy term is never a bragging point, however numeric it looks.
+
+    The field floor did not catch "30 days / Refund window" because the claim was perfectly GROUNDED — the
+    brief carried a 30-day policy. Being true was never the question; being EVIDENCE was. This is an element
+    contract violation, not a grounding one, which is exactly why both layers exist.
+    """
+
+    def _violations(self, items):
+        from stripe_link.domain.ai_elements import violations
+
+        return violations([{"id": "b1", "type": "bragging_points", "items": items}])
+
+    def test_a_refund_window_is_refused(self):
+        found = self._violations([{"value": "30 days", "label": "Refund window"}])
+        self.assertTrue(found)
+        self.assertIn("policy term", found[0]["reason"])
+
+    def test_every_policy_flavour_is_caught(self):
+        for label in ("Refund window", "Return period", "Warranty length", "Money-back guarantee",
+                      "Exchange window"):
+            with self.subTest(label=label):
+                self.assertTrue(self._violations([{"value": "30 days", "label": label}]))
+
+    def test_a_real_measurement_is_still_allowed(self):
+        # The check must not swallow genuine stats. "30g of protein" is evidence; "30 days to return" is not.
+        self.assertEqual(self._violations([{"value": "30g", "label": "of protein per scoop"},
+                                           {"value": "4.9/5", "label": "Average customer rating"}]), [])
+
+    def test_it_reaches_the_repair_loop_rather_than_being_stripped(self):
+        # violations() feeds the repair round, so the model gets told and rewrites it — a silently dropped
+        # card would leave the tenant wondering why they asked for four stats and got three.
+        found = self._violations([{"value": "30 days", "label": "Refund window"}])
+        self.assertEqual(found[0]["element"], "bragging_points")

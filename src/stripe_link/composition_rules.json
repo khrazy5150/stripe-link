@@ -893,7 +893,7 @@
     "bragging_points": {
       "purpose": "Objective evidence that raises perceived value. Numbers a buyer would repeat to a friend.",
       "use_when": "A fact is quantified and checkable: units sold, ratings, years in business, a measured quantity, a percentage.",
-      "do_not_use_when": "The fact is a feature, a benefit, an opinion, a flavour list, or any claim without a number behind it. A thing being GOOD is not a bragging point; a thing being MEASURED is.",
+      "do_not_use_when": "The fact is a feature, a benefit, an opinion, a flavour list, or any claim without a number behind it. A thing being GOOD is not a bragging point; a thing being MEASURED is. And a POLICY TERM is never one, however numeric it looks -- a refund window, a warranty length, a returns period or a delivery promise is a commitment the tenant is making, not evidence about the product. Those have their own element (refund_policy), which the page already carries.",
       "fields": {
         "value": "The stat alone. Short and scannable -- under ~24 characters, and it must carry a figure.",
         "label": "What the figure counts, in sentence case.",
@@ -942,6 +942,11 @@
           "value": "Strawberry, Blueberry, and Vanilla",
           "label": "Flavors Available",
           "why": "A spec sheet entry, not proof of anything."
+        },
+        {
+          "value": "30 days",
+          "label": "Refund window",
+          "why": "A policy term, not evidence. It is a promise the seller makes, and it belongs in refund_policy -- which is already on the page, so this also says it twice."
         }
       ],
       "confusable_with": {
@@ -964,9 +969,8 @@
       "use_when": "Several facts of the same kind: materials, specifications, included items, or the steps of a process.",
       "do_not_use_when": "The fact is quantified proof (bragging_points), a single idea developed at length (content_block), or a question (faq).",
       "fields": {
-        "label": "The feature or step, named.",
-        "value": "One line saying what it is or what happens.",
-        "heading": "Optional section heading."
+        "items": "ONE LINE each, as a plain string -- not an object. Name the feature or step, then say what it is or what happens, in the same sentence.",
+        "heading": "Optional section heading. It is what separates a feature list from a how-it-works list, so it carries real meaning."
       },
       "count": {
         "min": 2,
@@ -974,25 +978,25 @@
         "ideal": 4
       },
       "good": [
-        {
-          "label": "Stainless steel",
-          "value": "Double-walled, so it holds temperature."
-        },
-        {
-          "label": "Third-party tested",
-          "value": "Every batch, by an independent lab."
-        }
+        "Stainless steel construction \u2014 double-walled, so it holds temperature for hours.",
+        "Third-party tested \u2014 every batch, by an independent lab.",
+        "Connects over USB-C \u2014 one cable for power and picture."
       ],
       "bad": [
         {
-          "label": "10M+",
-          "value": "Units sold",
-          "why": "Quantified proof. That is bragging_points."
+          "item": "10M+ units sold",
+          "why": "Quantified proof belongs in bragging_points."
         },
         {
-          "label": "You will feel great",
-          "value": "Every day",
-          "why": "A claim, not a feature."
+          "item": "Premium",
+          "why": "An adjective on its own says nothing a buyer can picture."
+        },
+        {
+          "item": {
+            "label": "Stainless steel",
+            "value": "Double-walled."
+          },
+          "why": "An OBJECT. Items are plain strings; the renderer prints one line per item, and an object reaches the page as [object Object]."
         }
       ],
       "confusable_with": {
