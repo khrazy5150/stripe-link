@@ -621,6 +621,53 @@ def require_document_fields(document: dict[str, Any], document_type: str, id_fie
         raise DocumentValidationError(f"{document_type.replace('_', ' ').title()} document_type must be '{document_type}'.")
 
 
+# How much the AI may be told about one product. Bounded because every entry is a sentence a generated page
+# is then LICENSED to write, and an unbounded list is both a prompt-size problem and an unreviewable one.
+AI_CONTEXT_LIST_FIELDS = {"facts": 25, "certifications": 15, "must_say": 15, "must_not_say": 15}
+AI_CONTEXT_TEXT_FIELDS = {"audience": 500, "evidence": 1000, "tone": 40}
+AI_CONTEXT_FIELDS = set(AI_CONTEXT_LIST_FIELDS) | set(AI_CONTEXT_TEXT_FIELDS) | {"updated_at"}
+
+
+def validate_product_ai_context(document: dict[str, Any]) -> None:
+    """What the AI is licensed to say about this product (plans/AI_PAGE_BRIEF.md v2 §4).
+
+    Entirely optional: a product with none simply produces a thinner, more cautious page, because the field
+    floor refuses any claim the brief does not license. Validated strictly all the same -- these strings end
+    up inside a model prompt and then, if they survive the floor, on a public page.
+    """
+    context = document.get("ai_context")
+    if context is None:
+        return
+    if not isinstance(context, dict):
+        raise DocumentValidationError("Product ai_context must be an object.")
+    unknown = sorted(set(context) - AI_CONTEXT_FIELDS)
+    if unknown:
+        raise DocumentValidationError(f"Product ai_context has unsupported fields: {', '.join(unknown)}.")
+    for field, limit in AI_CONTEXT_TEXT_FIELDS.items():
+        value = context.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise DocumentValidationError(f"Product ai_context.{field} must be a string.")
+        if len(value) > limit:
+            raise DocumentValidationError(
+                f"Product ai_context.{field} must be {limit} characters or fewer.")
+    for field, max_items in AI_CONTEXT_LIST_FIELDS.items():
+        value = context.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise DocumentValidationError(f"Product ai_context.{field} must be an array.")
+        if len(value) > max_items:
+            raise DocumentValidationError(
+                f"Product ai_context.{field} may hold at most {max_items} entries.")
+        for entry in value:
+            if not isinstance(entry, str) or not entry.strip():
+                raise DocumentValidationError(
+                    f"Each Product ai_context.{field} entry must be a non-empty string.")
+    optional_non_negative_int(context, "updated_at", "Product ai_context.updated_at")
+
+
 def validate_product_lead_capture(document: dict[str, Any]) -> None:
     lead_capture = document.get("lead_capture")
     if document.get("product_intent") == "lead_gen" and not isinstance(lead_capture, dict):
@@ -773,6 +820,7 @@ def validate_product_document(document: dict[str, Any]) -> None:
     optional_image_dims(document, "Product image_dims")
     optional_image_alts(document, "Product image_alts")
     validate_product_lead_capture(document)
+    validate_product_ai_context(document)
     if "tags" not in document:
         raise DocumentValidationError("Product tags must be provided.")
     optional_string_list(document, "tags")

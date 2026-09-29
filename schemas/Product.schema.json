@@ -566,6 +566,69 @@
         "type": "string"
       },
       "default": []
+    },
+    "ai_context": {
+      "type": "object",
+      "description": "What the AI is LICENSED to say about this product (plans/AI_PAGE_BRIEF.md v2 \u00a74). Optional and additive: every field here is a fact the field floor will permit a generated page to assert, and anything absent is a sentence the AI may not write. Lives on the PRODUCT rather than the page because these describe the thing being sold, so a second page for it -- an A/B variant, a seasonal landing page -- inherits them instead of asking again.",
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Who it is for. Required by the fork step: without it the copy addresses nobody."
+        },
+        "facts": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": "What people should know. The substance the floor grounds every claim against."
+        },
+        "evidence": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "What backs an efficacy claim. The ONLY licence for one -- absent means the AI may not make any."
+        },
+        "certifications": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "tone": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Voice. Absent falls back to the category's default rather than to the model's taste."
+        },
+        "must_say": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "must_not_say": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "updated_at": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

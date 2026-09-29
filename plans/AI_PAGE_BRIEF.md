@@ -221,13 +221,28 @@ job**. Both halves matter and for different reasons:
 | `brief.name` / `what_it_is` / `category` / `price` / `kind` | the Product | — |
 | `brief.guarantee` / `terms` | tenant `refund_policy` | — |
 | `brief.shipping` | `ShippingConfig` | — |
-| `brief.audience` / `facts[]` / `evidence` / `tone` / `must_*` | the one step | — |
+| `brief.audience` / `facts[]` / `evidence` / `tone` / `must_*` | **`Product.ai_context`**, edited by the one step | — |
 | `Offer.name` / `slug` | Product name via the existing slug generator | — |
 | `Offer.offer_type` | `single` | — |
 | `Page.theme.preset` | `resolve_preset(category=…)` shortlist | an open hex value |
 | `Page.sections[]` | `generate_structured` against the §A.7-floored schema | policy, legal, price, proof |
 
-Everything in the left column already exists. This is wiring.
+Everything in the left column already exists **except `Product.ai_context`, added 2026-09-29.** The gap: those
+six answers lived only in the transient brief, so a tenant regenerating would have retyped every one of them.
+They belong to the PRODUCT rather than the page, because they describe the thing being sold — a second page
+for it, an A/B variant or a seasonal landing page, inherits them instead of asking again. It also makes §1's
+principle durable: a product accumulates the facts the AI is licensed to assert, and the page is just what was
+built from them at one moment.
+
+Optional in full: a product with no `ai_context` produces a thinner, more cautious page rather than an error.
+Bounded in every field, because each entry is a sentence a generated page is then licensed to write, and an
+unbounded list is both a prompt-size problem and an unreviewable one.
+
+**v1 is PRODUCTS ONLY** (decided 2026-09-29). Services are a separate document with their own wizard and a
+booking CTA; the brief already models a service `kind`, so the groundwork is there, but the fork proves itself
+on the simpler case first rather than debugging two page shapes at once.
+
+The rest is wiring.
 
 ## 6. Open questions for the author
 
