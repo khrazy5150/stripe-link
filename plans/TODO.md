@@ -2990,6 +2990,51 @@ choice.
 
 ## Production setup
 
+### LOW — no backups and no log retention; neither is a cost problem (noted 2026-09-29)
+
+**Measured 2026-09-29:** point-in-time recovery is **disabled on all 90 `jb-` DynamoDB tables**, prod orders,
+customers, refunds and ledger included. All **140 Lambda log groups never expire**.
+
+**The cost objection does not apply here, which is the point of writing the numbers down.** The 90 tables hold
+**0.89 MiB between them** — PITR at roughly $0.20/GB-month is about **$0.0002/month**. Log retention *reduces*
+the bill: 80 MiB today at ~$0.03/GB-month is trivial, but it grows without bound forever. One of these two
+costs a fraction of a cent and the other saves money. Deferred on priority, not on price.
+
+**Why it is LOW today and what makes it not-LOW.** PITR only protects forward from the moment it is enabled —
+turning it on after a bad migration recovers nothing. Right now every row in both silos is debris awaiting the
+table wipe, so there is genuinely nothing to protect. **The trigger is the first real customer data, not a
+date.** The natural moment is the table wipe itself: enable PITR as part of it and the new baseline is covered
+from its first write.
+
+**Decision needed for the log side:** a retention period per environment. Suggested 90 days dev / 365 prod —
+long enough to investigate an incident, short enough not to hoard customer data indefinitely. Those logs carry
+tenant ids, page ids and customer email addresses, so "we keep everything forever with no stated period" is a
+weak answer to a privacy question as well as a growing bill.
+
+**Both are small template changes:** `PointInTimeRecoverySpecification` on the table definitions, and explicit
+`AWS::Logs::LogGroup` resources with `RetentionInDays` (watch the resource ceiling — the stack is at 441/500 on
+dev, and 140 explicit log groups would blow it; prefer setting retention out-of-band or only on the noisy ones).
+
+**Where this came from, and what was deliberately NOT adopted.** A social ad aimed at SaaS founders asked about
+ISO 27001 / SOC 2 / Essential Eight. Conclusion: **do not pursue certification** — it is demand-led, nobody has
+asked, and the paperwork half (policies, risk register, access reviews) is genuinely fast to produce when a
+customer does ask. That is exactly what the compliance-automation vendors sell and it is the cheap part. Only
+two categories cannot be bought later: **evidence that must accrue over time** (a SOC 2 Type II audits a 3–12
+month window; the past cannot be backfilled) and **architecture that is expensive to retrofit** (tenant
+isolation, the auth boundary, audit trails, per-tenant deletion). Backups and log retention are the first kind.
+Revisit frameworks only when a real buyer names one — they will say which, and that is the only reliable way to
+know which matters. Note for anyone asked about Essential Eight specifically: it targets Windows enterprise
+endpoints, and several of the eight (application control, Office macros, user application hardening) do not map
+to a serverless backend at all; the honest answer is a scoped one.
+
+**Two related gaps, same category, also not urgent yet:**
+- **No admin audit trail.** `document_events` records document changes, but nothing records who did what in the
+  dashboard. Cheap to add now, impossible to reconstruct later, and the first thing any of the three frameworks
+  asks for.
+- **Long-lived IAM keys.** Deploys run as the `jbay` IAM user with static access keys. A short-lived role and
+  MFA on root is the finding every framework raises first, and independently the likeliest way an account is
+  actually compromised. Worth checking root MFA regardless of any of this.
+
 ### ⭐ Public marketing homepage — `juniorbay.com` (apex) — SHIPPED PROD 2026-08-24 (open: "always free" reword)
 - **What:** a public, SEO-facing **sales page** at `https://juniorbay.com` whose only job is **Start free trial** /
   **Sign in** → `app.juniorbay.com`. **Plain static HTML/CSS/JS** (no framework, no build — SEO + speed), hosted in
