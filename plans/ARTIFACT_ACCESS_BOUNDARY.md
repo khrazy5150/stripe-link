@@ -1,6 +1,6 @@
 # The artifact access boundary: CloudFront is an origin, not an address
 
-**Status: planned, nothing built. Agreed 2026-09-21.**
+**Status: P0 COMPLETE 2026-09-28 (deployed dev+prod). P1 not built.**
 
 ## The invariant
 
@@ -82,7 +82,21 @@ one-line change on that side.
 
 ## Phases
 
-- **P0 — prerequisite: re-point the buyer-facing fallback.** `post_checkout._next_page_url` falls through to
+- **P0 — prerequisite: re-point the buyer-facing fallback. DONE 2026-09-28** (142e9f0 + 99d0dcb). It took two
+  commits because the first closed only one of the two cases. `_redirect_base` now walks `_site_allowed_origins`
+  instead of demanding a verified custom domain — measured that day: NO site in either silo has a custom domain
+  and none is verified, while ten have a working platform hostname, so that branch had never once been taken and
+  **every** post-purchase redirect on the platform was landing on the artifact. Not "the newest tenants without a
+  domain": everyone. Separately, a served Site with no route for the next page now sends the buyer to the Site
+  root rather than the artifact — the same trade the handler already makes for a dangling thank-you page.
+
+  **One producer remains, and it is the gate on P1:** a page belonging to no served Site at all. Unreachable
+  post-payment in principle (checkout requires a published page), so it is LOGGED —
+  `{"artifact_fallback": {...}}` — rather than assumed dead. **P1 may only deny once that line is observed
+  never to fire in real traffic.** A silent fallback would prove nothing, which is the same discipline
+  COMMERCE_ELIGIBILITY P1 runs under.
+
+- **P0 (original text) — re-point the buyer-facing fallback.** `post_checkout._next_page_url` falls through to
   the raw artifact URL in two cases: no legitimate redirect base (no verified custom domain, no allowed
   origin), and *a base exists but the next page has no slug* — and funnel attachment is best-effort by
   design ("a failure here must never block publishing the artifact itself"). Closing the route before this

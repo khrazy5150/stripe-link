@@ -669,7 +669,16 @@ fix.
 page for every tenant — so P1 logs-and-allows before it denies, and the Worker's secret header must deploy
 BEFORE the CloudFront Function enforces it. Reversed, every published page 404s.
 
-### ⭐⭐ HIGH (P0 prerequisite) — post-checkout redirects a paying buyer to the raw artifact URL
+### ✅ DONE 2026-09-28 (P0 prerequisite) — post-checkout redirected a paying buyer to the raw artifact URL
+
+Took two commits: 142e9f0 fixed the no-base case, 99d0dcb the has-base-but-no-slug case, which is reachable for
+anyone because funnel attachment is deliberately best-effort. A served Site with no route for the page now gets
+the Site root. The ONE remaining producer — a page on no served Site — is logged as `artifact_fallback` and is
+the gate on closing the route: P1 may only deny once that line is observed never to fire.
+
+Original entry follows.
+
+### ⭐⭐ (superseded by the line above) — post-checkout redirects a paying buyer to the raw artifact URL
 
 `post_checkout._next_page_url` (`src/handlers/post_checkout.py:81`) falls through to
 `public_url(pages_domain, …)` in two cases: no legitimate redirect base (no verified custom domain, no
