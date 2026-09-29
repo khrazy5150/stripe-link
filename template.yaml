@@ -48,6 +48,20 @@ Parameters:
       - "true"
       - "false"
     Description: Whether Sites are served on their free platform host (<name>.<PlatformHostingDomain>). Gates storefront chrome, relative-link home_url, and funnel slug-attach on the platform host. Keep "false" until the *.<PlatformHostingDomain> Cloudflare Worker route is live, then flip per environment. See plans/PLATFORM_HOSTNAME_SERVING.md.
+  EligibilityEnforcement:
+    Type: String
+    Default: observe
+    AllowedValues:
+      - "off"
+      - observe
+      - enforce
+    Description: >-
+      Whether a page detached from every Site may still take money (plans/COMMERCE_ELIGIBILITY.md). "observe"
+      (the default) computes the verdict and logs the cases that WOULD be refused, refusing nothing -- Phase 1
+      exists because nobody has measured what real traffic on these paths looks like, and refusing a legitimate
+      checkout is worse than the hole. "enforce" refuses a definite verdict only; an unreadable Sites table
+      never refuses in any mode. "off" skips the lookup entirely -- the kill switch for the extra read on the
+      money path.
   StripeClientId:
     Type: String
     Default: ""
@@ -279,6 +293,7 @@ Globals:
         # Master switch for serving Sites on their free platform host. Off until the *.<PlatformHostingDomain>
         # Cloudflare Worker route is live; then flip per environment. See plans/PLATFORM_HOSTNAME_SERVING.md.
         PLATFORM_SERVING_ENABLED: !Ref PlatformServingEnabled
+        ELIGIBILITY_ENFORCEMENT: !Ref EligibilityEnforcement
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
         PAGE_VIEWS_TABLE: !Ref PageViewsTable
@@ -1596,6 +1611,14 @@ Resources:
             TableName: !Ref CouponsTable
         - DynamoDBReadPolicy:
             TableName: !Ref CouponGrantsTable
+        # Commerce eligibility asks whether the page behind a checkout still stands for a public identity —
+        # itself, or the control it is an A/B variant of (plans/COMMERCE_ELIGIBILITY.md). Read-only, and the
+        # grant matters as much as the code: without it the Sites read raises, which the rule records as
+        # "could not tell" rather than "not attached", so the measurement would be silently empty.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ExperimentsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Statement:
@@ -1642,6 +1665,14 @@ Resources:
             TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        # Commerce eligibility asks whether the page behind a checkout still stands for a public identity —
+        # itself, or the control it is an A/B variant of (plans/COMMERCE_ELIGIBILITY.md). Read-only, and the
+        # grant matters as much as the code: without it the Sites read raises, which the rule records as
+        # "could not tell" rather than "not attached", so the measurement would be silently empty.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ExperimentsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Statement:

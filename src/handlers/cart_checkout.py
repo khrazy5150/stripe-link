@@ -5,6 +5,7 @@ cart line. It reuses the single-offer checkout's payload + session builders (han
 one Stripe integration, and re-resolves every line's price server-side (domain.cart) — the client never
 sets amounts. Returns the Stripe URL as JSON; the browser redirects to it.
 """
+import os
 from urllib.request import urlopen
 
 from handlers.checkout import (
@@ -15,6 +16,7 @@ from handlers.checkout import (
 )
 from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.cart import CartError, resolved_items_for_checkout
 from stripe_link.domain.fees import build_fee_context
@@ -23,10 +25,12 @@ from stripe_link.domain.pricing import PricingError, load_offer_products, load_o
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     carts_repository,
+    experiments_repository,
     offers_repository,
     pages_repository,
     products_repository,
     services_repository,
+    sites_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
 )
@@ -44,6 +48,8 @@ def handler(
     stripe_repo=None,
     tenant_repo=None,
     pages_repo=None,
+    sites_repo=None,
+    experiments_repo=None,
     coupons_repo=None,
     grants_repo=None,
     secret_cipher=None,
@@ -101,6 +107,21 @@ def handler(
                 return error_response(
                     "This page is not published. Transactions are only available on published pages.",
                     status_code=403, code="page_not_published",
+                )
+
+            # Published is not authorized — same rule and same Phase 1 as the single-offer checkout
+            # (plans/COMMERCE_ELIGIBILITY.md). Measures only; the cart still checks out.
+            eligibility = commerce_eligibility.guard(
+                path="cart_checkout", tenant_id=tenant_id, page_id=page_id, stripe_mode=mode,
+                sites_repo=sites_repo if sites_repo is not None else (
+                    sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None),
+                experiments_repo=experiments_repo if experiments_repo is not None else (
+                    experiments_repository(mode=mode) if os.environ.get("EXPERIMENTS_TABLE") else None),
+            )
+            if eligibility["refuse"]:
+                return error_response(
+                    "This page is not authorized to take payments.",
+                    status_code=403, code="page_not_eligible",
                 )
 
         cart = carts_repo.get(tenant_id, cart_id)

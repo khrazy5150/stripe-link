@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 from stripe_link.common import error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.fees import build_fee_context, cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
@@ -37,9 +38,11 @@ from stripe_link.repositories.documents import (
     coupon_grants_repository,
     coupons_repository,
     offers_repository,
+    experiments_repository,
     pages_repository,
     products_repository,
     services_repository,
+    sites_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
 )
@@ -216,6 +219,8 @@ def handler(
     coupons_repo=None,
     grants_repo=None,
     pages_repo=None,
+    sites_repo=None,
+    experiments_repo=None,
     secret_cipher=None,
     opener=None,
     billing_config_loader=None,
@@ -292,6 +297,33 @@ def handler(
                 return error_response(
                     "This page is not published. Transactions are only available on published pages.",
                     status_code=403, code="page_not_published",
+                )
+
+            # Published is not the same as authorized. A page detached from its Site is gone from every
+            # hostname the platform governs, yet its artifact still serves and its baked CTA still reaches
+            # here (plans/COMMERCE_ELIGIBILITY.md). Phase 1 only measures: the verdict is recorded and the
+            # checkout proceeds, because refusing a legitimate sale is worse than the hole it closes.
+            eligibility = commerce_eligibility.guard(
+                path="checkout", tenant_id=tenant_id, page_id=page_id, stripe_mode=mode,
+                sites_repo=sites_repo if sites_repo is not None else (
+                    sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None),
+                experiments_repo=experiments_repo if experiments_repo is not None else (
+                    experiments_repository(mode=mode) if os.environ.get("EXPERIMENTS_TABLE") else None),
+            )
+            if eligibility["refuse"]:
+                if method == "GET":
+                    return {
+                        "statusCode": 403,
+                        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"},
+                        "body": render_error_page(
+                            403, "This page isn't set up to take payments. Attach it to a site in the "
+                            "dashboard, then try again.",
+                            title="Not available", badge="Unavailable",
+                        ),
+                    }
+                return error_response(
+                    "This page is not authorized to take payments.",
+                    status_code=403, code="page_not_eligible",
                 )
 
         offer = offers_repo.get(tenant_id, offer_id)
