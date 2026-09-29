@@ -140,134 +140,106 @@ class HonestyTests(unittest.TestCase):
         self.assertIn("not refundable", SCREEN)
 
 
-WIZARD = (ROOT / "dashboard" / "src" / "components" / "AiPageWizard.vue").read_text(encoding="utf-8")
+FORK = (ROOT / "dashboard" / "src" / "components" / "BuildWithAi.vue").read_text(encoding="utf-8")
+PRODUCTS = (ROOT / "dashboard" / "src" / "components" / "Products.vue").read_text(encoding="utf-8")
 PAGE_STORE = (ROOT / "dashboard" / "src" / "stores" / "aiPage.js").read_text(encoding="utf-8")
+MENU_SRC = (ROOT / "dashboard" / "src" / "config" / "menu.js").read_text(encoding="utf-8")
 
 
-class WizardTests(unittest.TestCase):
-    """The AI page wizard (plans/AI_PAGE_BRIEF.md)."""
+class ForkTests(unittest.TestCase):
+    """Build with AI as a FORK off the product wizard (plans/AI_PAGE_BRIEF.md v2).
+
+    The standalone nine-step wizard is gone. It duplicated the product wizard -- measured against
+    Products.vue it re-asked kind, name, description, category and price -- so what remains asks only the
+    two things nothing else can answer.
+    """
 
     def test_it_uses_classes_the_stylesheet_defines(self):
+        # The scar: a page was once built on invented classes (.screen, .card, .field-hint) and rendered
+        # completely unstyled. Every class here has to exist.
         css = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
         used = set()
-        for attr in re.findall(r'\sclass="([^"]+)"', WIZARD):
+        for attr in re.findall(r'\sclass="([^"]+)"', FORK):
             used.update(c for c in attr.split() if c and "{" not in c)
         for name in sorted(used):
             with self.subTest(name=name):
                 self.assertRegex(css, rf"\.{re.escape(name)}\b")
 
-    def test_the_step_list_is_derived_from_the_kind(self):
-        # The author's rule: smart steps, not fewer. One derived list feeds the rail, the labels and
-        # the bounds -- LandingPages.vue's rail is the scar that says what happens otherwise.
-        self.assertIn("export function stepsFor", PAGE_STORE)
-        self.assertIn("KIND_STEP", PAGE_STORE)
+    def test_it_does_not_re_ask_what_the_product_already_knows(self):
+        # The whole reason v1 was replaced. These are product-wizard questions and must not reappear here.
+        for asked_elsewhere in ("Product Name", "Price", "Description", "Category"):
+            with self.subTest(field=asked_elsewhere):
+                self.assertNotIn(f">{asked_elsewhere}<", FORK)
+        self.assertNotIn("unit_amount", FORK, "the browser never restates the price")
 
-    def test_a_download_is_never_asked_about_shipping(self):
-        block = WIZARD.split("key === 'delivery'", 1)[1].split("</template>", 1)[0]
-        self.assertNotIn("shipping", block.lower())
+    def test_it_never_asks_for_the_refund_policy(self):
+        # ai_floor already declared refund_policy a governed class -- it comes from the tenant's policy --
+        # so asking for it here would contradict the floor and the floor was right.
+        lowered = FORK.lower()
+        for term in ("refund window", "guarantee\n", "cancellation policy"):
+            with self.subTest(term=term):
+                self.assertNotIn(term, lowered)
 
-    def test_the_wizard_step_list_matches_the_server(self):
-        # The server validates what the wizard collects; a step here with no field there is a dead
-        # question, and a required field there with no step here is an unreachable wizard.
-        from stripe_link.domain.page_brief import steps_for
-        for kind in ("physical", "digital", "service"):
-            with self.subTest(kind=kind):
-                server = steps_for(kind)
-                declared = re.search(r"const KIND_STEP = \{([^}]*)\}", PAGE_STORE).group(1)
-                self.assertIn(f"{kind}:", declared)
-                for step in server:
-                    self.assertIn(f"{step}:", PAGE_STORE, f"{step} has no label in the store")
+    def test_it_sends_a_product_id_and_never_a_brief(self):
+        # The brief is PROJECTED server-side. A browser assembling one would be deciding what the AI is
+        # licensed to assert.
+        self.assertIn("product_id", PAGE_STORE)
+        self.assertNotIn("brief:", FORK)
 
-    def test_the_review_step_says_what_will_be_withheld_before_generating(self):
-        review = WIZARD.split("key === 'review'", 1)[1].split("</template>", 1)[0]
-        self.assertIn("What we won't be able to say", review)
-        self.assertIn("store.withheld", review)
+    def test_only_two_fields_are_required(self):
+        self.assertEqual(FORK.count('<span class="required">*</span>'), 2)
 
-    def test_the_session_step_is_not_skippable(self):
-        # A service page that cannot say how long it takes or whether it is remote is not worth
-        # generating, so this is the one kind block that blocks.
-        skippable = PAGE_STORE.split("export const SKIPPABLE", 1)[1].split("\n", 1)[0]
-        self.assertNotIn("session", skippable)
-        self.assertIn("delivery", skippable)
+    def test_every_optional_field_says_what_it_UNLOCKS(self):
+        # "Add your guarantee and we can write about your guarantee" is a different sentence from "fill in
+        # 12 fields" -- and the field floor makes it literally true.
+        optional = FORK.split("Add more (optional)", 1)[1]
+        for unlock in ("evidence", "trust badges", "category", "exactly as you write it"):
+            with self.subTest(unlock=unlock):
+                self.assertIn(unlock, optional.lower())
 
-    def test_the_category_field_reuses_the_shared_component(self):
-        # A free-text box beside a real taxonomy is a second source of truth, and the tenant cannot
-        # see what categories exist. ProductCategoryField already does curated + promoted + their own.
-        self.assertIn("ProductCategoryField", WIZARD)
-        self.assertNotIn('placeholder="supplement"', WIZARD)
+    def test_it_prefills_from_what_the_product_already_carries(self):
+        # So a second page for the same product is not a retype. The point of Product.ai_context.
+        self.assertIn("ai_context", FORK)
+        self.assertIn("context.facts", FORK)
 
-    def test_parcel_measurements_are_separate_numbers(self):
-        # These ARE the packer's inputs -- fulfillment.dimensions and weight_lb, which label_readiness
-        # gates on. One free-text "size or weight" box could only be parsed by guessing.
-        block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
-        for field in ("length_in", "width_in", "height_in", "weight_lb"):
-            with self.subTest(field=field):
-                self.assertIn(f"b.physical.{field}", block)
-                self.assertIn('type="number"', block)
+    def test_a_blank_answer_is_not_sent(self):
+        # Blank means "unchanged", never "erase". The server applies the same rule; they have to agree or a
+        # page is generated from different facts than the ones that get kept.
+        generate = FORK.split("function generate()", 1)[1]
+        self.assertIn("if (answers.value.audience.trim())", generate)
 
-    def test_the_shipping_question_does_not_presume_free(self):
-        block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
-        self.assertIn("flat", block)             # a non-free example is offered
-        self.assertIn("in your words", block)
+    def test_it_shows_what_the_page_could_NOT_say(self):
+        # A tenant who understands a thin page is a different person from one who thinks the AI is bad.
+        self.assertIn("withheld", FORK)
+        self.assertIn("What we couldn't say", FORK)
 
-    def test_measurements_are_marked_as_not_appearing_on_the_page(self):
-        # They license no claim, and a tenant should not expect to see them in the copy.
-        block = WIZARD.split("key === 'shipping_use'", 1)[1].split("</template>", 1)[0]
-        self.assertIn("not written on the page", block)
+    def test_it_is_reachable_from_a_new_product_AND_an_existing_one(self):
+        # Both call sites, decided with the author: every product that exists today got there without ever
+        # seeing this flow, so an existing-product entry point is not a nicety.
+        self.assertIn("aiForProduct.value = saved", PRODUCTS)
+        self.assertIn('@click="aiForProduct = product"', PRODUCTS)
 
-    def test_an_unanswered_kind_does_not_read_as_the_last_step(self):
-        # Reported from the deployed wizard: with no kind chosen it said "Step 1 of 1" and offered
-        # "Generate the page" on an empty brief, because the placeholder step list has one item.
-        self.assertIn("!!this.brief.kind && this.step", PAGE_STORE)
-        self.assertIn("totalSteps", PAGE_STORE)
-        self.assertIn("store.totalSteps", WIZARD)
+    def test_services_and_lead_magnets_are_not_offered_it(self):
+        # A service is its own document with a booking CTA; a lead magnet and a tip jar have no page of
+        # this shape. v1 is products only.
+        guard = PRODUCTS.split("function canBuildWithAi", 1)[1].split("\n}", 1)[0]
+        for excluded in ("service", "lead_gen", "tip_jar"):
+            with self.subTest(excluded=excluded):
+                self.assertIn(excluded, guard)
 
-    def test_the_step_total_is_honest_before_a_kind_is_picked(self):
-        # Every kind is nine steps -- only the CONTENT of the kind step differs -- so the count can be
-        # promised up front.
-        from stripe_link.domain.page_brief import steps_for
-        lengths = {len(steps_for(k)) for k in ("physical", "digital", "service")}
-        self.assertEqual(len(lengths), 1, "kinds differ in length; totalSteps can no longer promise one")
+    def test_the_standalone_wizard_is_gone_entirely(self):
+        # Retired, not merely unlinked: a second way to create the same thing is the duplication this
+        # rework exists to remove.
+        self.assertFalse((ROOT / "dashboard" / "src" / "components" / "AiPageWizard.vue").exists())
+        self.assertNotIn("AiPageWizard", APP)
+        self.assertNotIn('"aiPage"', MENU_SRC)
 
-    def test_the_brief_survives_a_regenerate_and_an_edit(self):
-        # The brief is the expensive part -- the answers took minutes, the words took seconds. Only
-        # "Start fresh" throws it away.
-        self.assertIn("store.regenerate()", WIZARD)
-        self.assertIn("store.editAnswers()", WIZARD)
-        reset_fn = PAGE_STORE.split("reset()", 1)[1].split("\n", 1)[0]
-        self.assertIn("emptyBrief()", reset_fn)
-        edit_fn = PAGE_STORE.split("editAnswers()", 1)[1].split("},", 1)[0]
-        self.assertNotIn("emptyBrief", edit_fn)
 
-    def test_the_wizard_polls_rather_than_waiting_on_the_request(self):
-        # Generation outlives API Gateway's 29-second ceiling: a measured 35.3s run succeeded while
-        # the browser reported "Failed to fetch".
-        self.assertIn("awaitJob", PAGE_STORE)
-        self.assertIn("/ai/jobs/", PAGE_STORE)
-        self.assertIn("job.status === \"complete\"", PAGE_STORE)
-        self.assertIn("job.status === \"failed\"", PAGE_STORE)
+class PollingTests(unittest.TestCase):
+    """Queue-and-poll, which is not optional: a measured 35s generation against API Gateway's hard 29s
+    ceiling meant the work succeeded while the browser reported "Failed to fetch"."""
 
-    def test_the_poller_gives_up_rather_than_spinning_forever(self):
-        self.assertIn("took longer than expected", PAGE_STORE)
-
-    def test_list_items_do_not_carry_the_tucking_margin(self):
-        # .field-note has margin-top:-1rem to sit under a field; on consecutive <li> it stacked them
-        # on top of each other.
-        for line in WIZARD.splitlines():
-            if "<li" in line:
-                with self.subTest(line=line.strip()[:60]):
-                    self.assertNotIn("field-note", line)
-
-    def test_regenerating_says_what_it_leaves_alone(self):
-        self.assertIn("Your product, price and offer stay as they", WIZARD)
-        self.assertIn("uses one generation", WIZARD)
-
-    def test_the_result_never_claims_anything_is_live(self):
-        done = WIZARD.split("Your draft page is ready", 1)[1]
-        self.assertIn("draft", done.lower())
-        self.assertIn("Nothing is live", done)
-
-    def test_it_is_reachable_from_the_menu_and_the_app(self):
-        self.assertIn('view: "aiPage"', MENU)
-        self.assertIn("activeView === 'aiPage'", APP)
-        self.assertIn("AiPageWizard", APP)
+    def test_the_fork_polls_the_job_rather_than_awaiting_the_response(self):
+        self.assertIn("generateForProduct", PAGE_STORE)
+        fork_action = PAGE_STORE.split("async generateForProduct", 1)[1]
+        self.assertIn("awaitJob", fork_action)

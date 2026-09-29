@@ -81,6 +81,8 @@
                     @click="editService(product)">Edit in Services →</button>
             <template v-else>
               <button type="button" class="secondary-action" @click="openEditModal(product)">Edit</button>
+              <button v-if="canBuildWithAi(product)" type="button" class="secondary-action"
+                      @click="aiForProduct = product">Build with AI</button>
               <button type="button" class="secondary-action" @click="selectedProduct = product">Details</button>
               <button type="button" class="secondary-action" :disabled="store.savingStatus" @click="confirmStatusChange(product)">
                 {{ lifecycleStatus(product) === "archived" ? "Restore" : "Archive" }}
@@ -174,6 +176,28 @@
     >
       {{ pendingStatus === "archived" ? "Archive" : "Restore" }} "{{ pendingStatusProduct?.name || "this product" }}"?
     </ConfirmDialog>
+
+    <!-- Build with AI: the fork off this wizard, reached either when a product is first created or from
+         its row later. It asks the two things nothing else can answer; everything about the product is read
+         server-side (plans/AI_PAGE_BRIEF.md v2). -->
+    <div v-if="aiForProduct" class="modal-backdrop" @click.self="closeAiPanel">
+      <section class="modal-card product-create-modal" role="dialog" aria-modal="true"
+               aria-labelledby="buildWithAiTitle">
+        <header class="modal-card-header">
+          <h2 id="buildWithAiTitle">Build a page with AI</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="closeAiPanel">×</button>
+        </header>
+        <div class="modal-card-body">
+          <BuildWithAi
+            :product="aiForProduct"
+            :mode="currentStripeMode"
+            @open="openGeneratedPage"
+            @done="closeAiPanel"
+            @cancel="closeAiPanel"
+          />
+        </div>
+      </section>
+    </div>
 
     <div v-if="showCreateModal" class="modal-backdrop" @click.self="closeCreateModal">
       <section class="modal-card product-create-modal" role="dialog" aria-modal="true" aria-labelledby="createProductTitle">
@@ -539,11 +563,12 @@
 
 <script setup>
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
-import { apiRequest, toAssetCdnUrl } from "../api/client";
+import { apiRequest, getStripeMode, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
+import BuildWithAi from "./BuildWithAi.vue";
 import PhoneInput from "./PhoneInput.vue";
 import TipAmountsField from "./shared/TipAmountsField.vue";
 import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
@@ -1127,11 +1152,42 @@ async function saveProduct() {
   formError.value = validateProductForm();
   if (formError.value) return;
   try {
-    await store.createProduct(form.value);
+    const saved = await store.createProduct(form.value);
+    const wasNew = !editingProduct.value;
     closeCreateModal();
+    // The fork: the product exists, so the only thing left to ask is what the AI may say about it. Offered
+    // rather than forced, and only for something that is actually SOLD — a lead magnet or a tip jar has no
+    // landing page of this shape (plans/AI_PAGE_BRIEF.md v2 §4).
+    if (wasNew && canBuildWithAi(saved)) aiForProduct.value = saved;
   } catch (error) {
     formError.value = error.message;
   }
+}
+
+const aiForProduct = ref(null);
+// The tenant's active Stripe mode, so a page generated in sandbox lands in the sandbox partition rather
+// than beside live data.
+const currentStripeMode = computed(() => getStripeMode());
+
+function closeAiPanel() {
+  aiForProduct.value = null;
+}
+
+function openGeneratedPage(page) {
+  // The generated page is a DRAFT, so the useful next stop is the builder rather than a preview. Reload
+  // first: the product now carries the ai_context the step just saved, and a stale row would prefill the
+  // panel with the old answers next time.
+  aiForProduct.value = null;
+  loadAll(true);
+  if (page?.page_id && navigateTo) navigateTo("landingPages", { pageId: page.page_id });
+}
+
+// A page is generated around a price and a thing being sold. Services are their own document with their own
+// wizard and a booking CTA, so v1 of the fork is products only.
+function canBuildWithAi(product) {
+  if (!product || product.__service) return false;
+  if (product.product_type === "service") return false;
+  return product.product_intent !== "lead_gen" && product.product_intent !== "tip_jar";
 }
 
 function ensureProductId() {

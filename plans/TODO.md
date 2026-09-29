@@ -2649,6 +2649,14 @@ hand-maintained (needs a `rates_verified_at` shown next to every figure), and th
 **deletes cost history** — roll up to a durable summary before the first row expires, because afterwards it is
 simply gone. Admin surface: `plans/ADMIN_SITE.md` §5.
 
+**FORK BUILT 2026-09-29 (dev+prod undeployed).** Backend: `POST /ai/generate` takes a `product_id` and the
+brief is PROJECTED from the product + tenant config + `Product.ai_context` (`domain/product_brief.py`).
+Frontend: `BuildWithAi.vue` asks two required fields with five optional ones, reachable at the end of the
+product wizard and from any product row; the standalone `AiPageWizard.vue` and its menu entry are GONE.
+**Remaining cleanup:** `ai_provision.product_document` is unreachable from the UI but still reachable via a
+brief-only API call — deleting it needs `product_id` made mandatory plus ~8 test rewrites, sequenced after the
+Oct 1 deadline rather than rushed.
+
 **FLOW REWORKED 2026-09-29 (design only, nothing built).** `AiPageWizard.vue` shipped as a standalone
 nine-step wizard and the author's verdict was that it **duplicates the product wizard** — measured, it re-asks
 kind, name, description, category and price, and asks for guarantee/terms that `ai_floor.py` already says must

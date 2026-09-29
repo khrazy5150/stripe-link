@@ -3,7 +3,7 @@ export const menuSchema = {
   document_type: "menu",
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
-    { key: "catalog", label: "CATALOG", items: ["aiPage", "products", "coupons", "offers", "landingPages", "sites", "collections", "services", "reviews", "abTesting"] },
+    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "collections", "services", "reviews", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "leads", "notifications", "invoices", "refunds", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["billing", "stripeConnect", "ai", "registration", "configuration", "profile", "preferences"] },
   ],
@@ -21,14 +21,6 @@ export const menuSchema = {
       label: "Payments",
       icon: "creditCard",
       view: "stripeKeys",
-      enabled: true,
-      environments: ["test", "live"],
-    },
-    aiPage: {
-      key: "aiPage",
-      label: "Build with AI",
-      icon: "sparkles",
-      view: "aiPage",
       enabled: true,
       environments: ["test", "live"],
     },

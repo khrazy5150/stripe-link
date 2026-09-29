@@ -170,9 +170,18 @@ product. One fork component, two call sites. The second call site is not a nicet
 today got there without ever seeing this flow, and a tenant with a catalogue must never retype it.
 
 **Consequence: the AI flow never creates a Product.** Every generation starts from one that already exists.
-`domain/ai_provision.py` currently builds Product *and* Offer; its product half becomes unreachable and should
-be removed rather than left as a second way to create catalogue rows. The Offer half stays — the product wizard
-does not create Offers, so the fork still does.
+
+**BUILT 2026-09-29.** `_persist` takes `existing_product_id` and, under the fork, creates only the Offer and
+the Page, pointed at the product's DEFAULT price — not the first in its list, since a product with a sale
+price and a full price carries both and generating copy around whichever came first puts the wrong number on
+the page.
+
+**Still to remove:** `ai_provision.product_document`. It has exactly one caller left — the branch that runs
+when no `product_id` is supplied — and no UI reaches it now that the standalone wizard is gone. Deleting it
+means requiring `product_id` and rewriting the ~8 tests that exercise brief→Product (fulfilment mapping,
+price, id ownership). A pure refactor with no user-visible change, deliberately sequenced after the deadline
+rather than done at speed. Until it goes, a second way to create catalogue rows technically exists via the
+API, which is the duplication this rework set out to remove.
 
 ### The one step — DECIDED 2026-09-29
 

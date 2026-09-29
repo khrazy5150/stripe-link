@@ -208,6 +208,36 @@ export const useAiPageStore = defineStore("aiPage", {
       }
     },
 
+    /**
+     * Build a page for a product the tenant ALREADY has — the fork off the product wizard.
+     *
+     * The brief is projected server-side from the product, the tenant's refund/shipping policy and
+     * `Product.ai_context`, so nothing the product wizard already asked is asked again
+     * (plans/AI_PAGE_BRIEF.md v2). All this sends is the product and the one step's answers; sending a
+     * brief from here would mean the browser deciding what the AI is licensed to assert.
+     *
+     * Queue-and-poll, same as `generate`: a generation runs past API Gateway's 29-second ceiling, and the
+     * one time it did not, the work succeeded and the browser reported "Failed to fetch".
+     */
+    async generateForProduct(productId, aiContext = {}, mode = "test") {
+      this.generating = true;
+      this.error = "";
+      this.progress = "Starting…";
+      this.result = null;
+      try {
+        const queued = await apiRequest("/ai/generate", {
+          method: "POST",
+          body: { product_id: productId, ai_context: aiContext, mode },
+        });
+        return await this.awaitJob(queued.job.job_id);
+      } catch (error) {
+        this.error = error.message || "The page could not be generated.";
+        this.generating = false;
+        this.progress = "";
+        return false;
+      }
+    },
+
     regenerate(mode = "test") {
       return this.generate(mode, this.result?.page?.page_id || "");
     },
