@@ -5,6 +5,9 @@ slot is taken before the work and returned only when WE failed -- never because 
 the result (author, 2026-09-27). Everything else here is about not leaving half-made rows behind.
 """
 
+from decimal import Decimal
+
+from stripe_link.common import JsonEncoder
 import json
 import unittest
 
@@ -33,11 +36,25 @@ class FakeKeyed:
 
 
 class FakeDocs:
+    """Write-log plus a readable store.
+
+    `saved` stayed a bare list for a long time because nothing read these back. The fork does -- it starts
+    FROM a product -- and a repository fake without `get` is how the fork path passed every test while
+    never running.
+    """
+
     def __init__(self):
         self.saved = []
+        self.rows = {}
     def put(self, document):
         self.saved.append(document)
+        key = next((document.get(f) for f in ("product_id", "offer_id", "page_id") if document.get(f)), None)
+        if key:
+            self.rows[(document.get("tenant_id"), key)] = dict(document)
         return document
+    def get(self, tenant_id, document_id):
+        found = self.rows.get((tenant_id, document_id))
+        return dict(found) if found else None
 
 
 class FakeUsage:
@@ -199,8 +216,11 @@ def run_to_completion(event, jobs, kwargs):
     if job.get("status") == "failed":
         return {"statusCode": 400,
                 "body": json.dumps({"error": job["error"]["code"], "message": job["error"]["message"]})}
+    # JsonEncoder, not bare json.dumps: production serialises through `json_response`, which is
+    # Decimal-aware. A harness that is not will fail on any document read back from DynamoDB -- where every
+    # number is a Decimal -- and report it as a handler bug.
     return {"statusCode": 201, "body": json.dumps({**job["result"], "usage": job["usage"],
-                                                   "withheld": job["withheld"]})}
+                                                   "withheld": job["withheld"]}, cls=JsonEncoder)}
 
 
 class FakeJobs:
@@ -823,3 +843,109 @@ class PlatformBudgetTests(GenerateTests):
         self.usage.costs[(PLATFORM_TENANT, "2026-09")] = 999_000_000
         with patch("handlers.ai_generate._platform_budget", return_value=0):
             self.assertEqual(self.call()["statusCode"], 201)
+
+
+PRODUCT = {
+    "tenant_id": "t1", "product_id": "local_existing", "name": "Creatine Gummies",
+    "description": "Chewable creatine for people who hate powder.",
+    "product_category": "supplements", "product_type": "physical",
+    "default_price_id": "price_existing",
+    # Decimal is what DynamoDB actually returns. Fixtures using int() hide the one bug that matters here.
+    "prices": [{"price_id": "price_existing", "unit_amount": Decimal("3900"), "currency": "usd",
+                "pricing_model": "one_time"}],
+    "refund_policy": {"full_policy": "Refunds within 30 days, unused."},
+    "fulfillment": {"requires_shipping": True, "weight_lb": Decimal("0.5")},
+    "status": "active",
+}
+
+
+class ForkFromProductTests(GenerateTests):
+    """Build with AI as a FORK off the product wizard, not a second wizard.
+
+    v1 asked nine questions and, measured against Products.vue, had already been told almost all of them.
+    The brief is now PROJECTED from the product plus tenant config plus one step, so nothing the product
+    wizard collected is collected twice (plans/AI_PAGE_BRIEF.md v2).
+    """
+
+    DEFAULT_STEP = {"audience": "Lifters who hate powder", "facts": ["5g creatine per serving"]}
+
+    def fork(self, *, product=None, context=None, **kwargs):
+        # `context or DEFAULT` would swap an intentional {} for the default, which quietly turned the
+        # "nothing supplied" test into the happy path.
+        self.products.rows[("t1", "local_existing")] = dict(product or PRODUCT)
+        step = self.DEFAULT_STEP if context is None else context
+        body = {"product_id": "local_existing", "ai_context": step}
+        event = {"httpMethod": "POST", "resource": "/ai/generate",
+                 "queryStringParameters": {"tenant_id": "t1"}, "body": json.dumps(body)}
+        repos = dict(products_repo=self.products, offers_repo=self.offers, pages_repo=self.pages,
+                     config_repo=self.config, usage_repo=self.usage, tenant_repo=self.profiles,
+                     jobs_repo=self.jobs, generator=ok_generator, events_repo=self.events,
+                     now_fn=lambda: 1790500000, randomiser=lambda a: a[0])
+        repos.update(kwargs)
+        return run_to_completion(event, self.jobs, repos)
+
+    def test_the_fork_generates_without_re_asking_what_the_product_knows(self):
+        response = self.fork()
+        self.assertEqual(response["statusCode"], 201)
+
+    def test_it_does_NOT_create_a_second_product(self):
+        # The duplicate-catalogue-row bug this whole rework exists to prevent: a second product for the same
+        # thing would split its orders across two ids.
+        self.fork()
+        created = [row for key, row in self.products.rows.items() if key[1] != "local_existing"]
+        self.assertEqual(created, [], "the fork starts from a product; it must never mint another")
+
+    def test_the_offer_points_at_the_EXISTING_product_and_price(self):
+        self.fork()
+        offer = list(self.offers.rows.values())[-1]
+        item = (offer.get("items") or [{}])[0]
+        self.assertEqual(item.get("product_id"), "local_existing")
+        self.assertEqual(item.get("price_id"), "price_existing")
+
+    def test_a_stored_Decimal_price_survives_the_projection(self):
+        # DynamoDB returns 3900 as Decimal, and the brief validator requires a real int. This exact mismatch
+        # has 404'd published pages in this repo before: fixtures pass, stored documents do not.
+        self.assertEqual(self.fork()["statusCode"], 201)
+
+    def test_the_refund_policy_is_READ_rather_than_re_asked(self):
+        # ai_floor already declared refund_policy a governed class -- "a refund window is a contract term; it
+        # comes from the tenant's policy" -- so the v1 brief asking for it contradicted the floor.
+        self.fork()
+        brief = list(self.jobs.rows.values())[-1]["brief"]
+        self.assertIn("30 days", brief.get("guarantee", ""))
+
+    def test_the_step_answers_are_saved_onto_the_product(self):
+        # So a regeneration does not ask again. The whole point of putting ai_context on the Product.
+        self.fork()
+        saved = self.products.rows[("t1", "local_existing")]
+        self.assertEqual(saved["ai_context"]["audience"], "Lifters who hate powder")
+        self.assertTrue(saved["ai_context"]["updated_at"])
+
+    def test_stored_context_is_reused_when_the_step_sends_nothing(self):
+        product = {**PRODUCT, "ai_context": {"audience": "Remembered", "facts": ["remembered fact"]}}
+        self.assertEqual(self.fork(product=product, context={})["statusCode"], 201)
+
+    def test_a_blank_answer_does_not_erase_what_was_saved(self):
+        # The step shows a partial form; a blank field means "unchanged", not "delete what I said last time".
+        product = {**PRODUCT, "ai_context": {"audience": "Kept", "facts": ["kept fact"]}}
+        self.fork(product=product, context={"audience": "", "evidence": "Lab assay"})
+        saved = self.products.rows[("t1", "local_existing")]["ai_context"]
+        self.assertEqual(saved["audience"], "Kept")
+        self.assertEqual(saved["evidence"], "Lab assay")
+
+    def test_a_missing_product_is_refused_before_a_slot_is_spent(self):
+        event = {"httpMethod": "POST", "resource": "/ai/generate",
+                 "queryStringParameters": {"tenant_id": "t1"},
+                 "body": json.dumps({"product_id": "local_gone", "ai_context": {
+                     "audience": "x", "facts": ["y"]}})}
+        response = handler(event, None, products_repo=self.products, offers_repo=self.offers,
+                           pages_repo=self.pages, config_repo=self.config, usage_repo=self.usage,
+                           tenant_repo=self.profiles, jobs_repo=self.jobs, events_repo=self.events,
+                           now_fn=lambda: 1790500000, randomiser=lambda a: a[0])
+        self.assertEqual(response["statusCode"], 404)
+        self.assertEqual(self.usage.consumed, 0)
+
+    def test_a_product_with_no_audience_or_facts_is_refused_with_a_usable_message(self):
+        response = self.fork(context={})
+        self.assertEqual(json.loads(response["body"])["error"], "invalid_brief")
+        self.assertEqual(self.usage.consumed, 0)

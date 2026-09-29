@@ -1961,6 +1961,10 @@ Resources:
         # returns. Crud rather than Write because the outcome is merged onto the row the request created.
         - DynamoDBCrudPolicy:
             TableName: !Ref AiGenerationEventsTable
+        # The tenant's shipping policy, READ so the brief can carry a shipping sentence instead of asking
+        # for one the tenant already wrote (plans/AI_PAGE_BRIEF.md v2 §4).
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
         # Invoke ITSELF asynchronously: the request path queues, the event path generates. Same code,
         # same deploy, no second function to keep in step.
         - Statement:

@@ -59,6 +59,8 @@ from stripe_link.domain.ai_schema import describe_vocabulary, page_sections_sche
 from stripe_link.domain.documents import (DocumentValidationError, validate_offer_document,
                                           validate_page_document, validate_product_document)
 from handlers.pages import assign_short_code
+from stripe_link.domain.documents import validate_product_ai_context
+from stripe_link.domain.product_brief import brief_from_product
 from stripe_link.domain.page_brief import BriefError, grounding_text, validate as validate_brief
 from stripe_link.domain.page_brief import withheld
 from stripe_link.repositories.documents import (RepositoryError, ai_jobs_repository,
@@ -108,7 +110,28 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
 
-    brief = body.get("brief") if isinstance(body.get("brief"), dict) else body
+    # TWO SOURCES, ONE CONTRACT. `product_id` is the fork off the product wizard: the brief is PROJECTED from
+    # a product the tenant already has, plus tenant config, plus the fork's one step -- so nothing the product
+    # wizard already asked is asked again (plans/AI_PAGE_BRIEF.md v2). A posted `brief` remains valid because
+    # the brief IS the contract and the document names its sources: wizard, url, api, existing_product. These
+    # converge on the next line; there is no second pipeline.
+    fork_product_id = str(body.get("product_id") or "").strip()
+    if fork_product_id:
+        try:
+            products_repo = products_repo or products_repository(mode=_mode_of(body))
+        except RepositoryError as exc:
+            return error_response(str(exc), code="repository_error")
+        source_product = products_repo.get(tenant_id, fork_product_id)
+        if not source_product:
+            return error_response("That product was not found.", status_code=404, code="not_found")
+        brief = brief_from_product(
+            source_product,
+            tenant_profile=_profile(tenant_id, tenant_repo),
+            shipping_config=_shipping_config(tenant_id),
+            overrides=body.get("ai_context") if isinstance(body.get("ai_context"), dict) else None)
+    else:
+        source_product = None
+        brief = body.get("brief") if isinstance(body.get("brief"), dict) else body
     try:
         validate_brief(brief)
     except BriefError as exc:
@@ -206,6 +229,9 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         # slot it spent, through the work, to what it cost.
         "generation_id": generation_id, "event_key": event_row["event_key"],
         "source": entitlement["source"],
+        # The fork's input. Present means the catalogue row already exists and the worker must build the
+        # Offer and Page around it rather than minting a second product for the same thing.
+        "product_id": fork_product_id,
         "created_at": now, "updated_at": now,
         # A finished job is of no interest a week later, and an abandoned one even less.
         "expires_at": now + 7 * 24 * 3600,
@@ -220,6 +246,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     # generation the tenant has already spent a slot on. A missing row is visible in the data (the counter
     # will not reconcile) which is a better failure than a 500 after the money went.
     _record_event(events_repo, {**event_row, "job_id": job["job_id"]})
+    _save_ai_context(products_repo, source_product, body.get("ai_context"), now)
 
     try:
         _enqueue(job, invoker)
@@ -263,6 +290,41 @@ def _platform_spend(usage_repo, now):
         return (usage_repo or ai_usage_repository()).cost(PLATFORM_TENANT, period_key(now))
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _save_ai_context(products_repo, product, context, now):
+    """Keep the fork step's answers on the PRODUCT, so the next generation does not ask again.
+
+    Best-effort: the generation is already under way and its brief carried these values directly, so a failed
+    write costs a retype later rather than this page. Merged onto whatever is already there, because the step
+    shows a partial form and a blank field means "unchanged", not "delete what I said last time".
+    """
+    if not product or not isinstance(context, dict) or not context:
+        return
+    try:
+        existing = product.get("ai_context") if isinstance(product.get("ai_context"), dict) else {}
+        merged = {**existing, **{k: v for k, v in context.items() if v not in (None, "", [])},
+                  "updated_at": int(now)}
+        validate_product_ai_context({"ai_context": merged})
+        products_repo.put({**product, "ai_context": merged, "updated_at": int(now)})
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        print(f"[ai] ai_context not saved for {product.get('product_id')}: {type(exc).__name__}: {exc}")
+
+
+def _mode_of(body):
+    mode = str((body or {}).get("mode") or "test").strip().lower()
+    return "live" if mode == "live" else "test"
+
+
+def _shipping_config(tenant_id):
+    """The tenant's shipping policy, READ rather than re-asked. Absent is fine: it means the page simply
+    will not make a shipping claim, which is the field floor working as designed."""
+    try:
+        from stripe_link.repositories.documents import shipping_config_repository
+
+        return shipping_config_repository().get(tenant_id) or {}
+    except Exception:  # noqa: BLE001 - a missing policy is a quieter page, never a failed generation
+        return {}
 
 
 def _configured_allowances():
@@ -384,14 +446,33 @@ def _prompt(brief, grounding):
     return "\n".join(lines)
 
 
-def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers_repo, pages_repo):
+def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers_repo, pages_repo,
+             existing_product_id=""):
+    """Turn a generation into documents.
+
+    Two entry shapes, and the difference is one question: does the catalogue row already exist? Under the
+    FORK it always does -- the flow starts from a product the tenant made in the product wizard -- so this
+    creates only the Offer and the Page. Minting a second product for the same thing would give the tenant a
+    duplicate catalogue row and split its orders across two ids.
+    """
     provenance = provenance_block(str(brief.get("brief_id") or ""), now)
-    product_id, price_id = new_id("local", pick), new_id("price", pick)
     offer_id, page_id = new_id("offer", pick), new_id("page", pick)
     slug = slugify(brief.get("name"))
 
-    product = product_document(brief, tenant_id=tenant_id, product_id=product_id, price_id=price_id,
-                               mode=mode, now=now, provenance=provenance)
+    product = None
+    if existing_product_id:
+        product = products_repo.get(tenant_id, existing_product_id)
+        if not product:
+            raise ValueError("The product this page was being generated for no longer exists.")
+        product_id = str(product.get("product_id"))
+        price_id = str(product.get("default_price_id") or "")
+        if not price_id:
+            prices = product.get("prices") if isinstance(product.get("prices"), list) else []
+            price_id = str((prices[0] or {}).get("price_id") or "") if prices else ""
+    else:
+        product_id, price_id = new_id("local", pick), new_id("price", pick)
+        product = product_document(brief, tenant_id=tenant_id, product_id=product_id, price_id=price_id,
+                                   mode=mode, now=now, provenance=provenance)
     offer = offer_document(brief, tenant_id=tenant_id, offer_id=offer_id, product_id=product_id,
                            price_id=price_id, slug=slug, mode=mode, now=now, provenance=provenance)
     page = page_document(brief, tenant_id=tenant_id, page_id=page_id, offer_id=offer_id, slug=slug,
@@ -404,10 +485,14 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
     assign_short_code(None, page)
     # Validate ALL THREE before writing any: a product saved beside a rejected page is the half-made
     # thing the tenant cannot finish, and validation is free next to a partial write.
-    validate_product_document(product)
+    # Validate BOTH before writing either: an offer saved beside a rejected page is the half-made thing the
+    # tenant cannot finish, and validation is free next to a partial write.
+    if not existing_product_id:
+        validate_product_document(product)
     validate_offer_document(offer)
     validate_page_document(page)
-    products_repo.put(product)
+    if not existing_product_id:
+        products_repo.put(product)
     offers_repo.put(offer)
     pages_repo.put(page)
     return {"product": product, "offer": offer, "page": page,
@@ -515,7 +600,8 @@ def _run_job(event, *, jobs_repo, products_repo, offers_repo, pages_repo, usage_
                              pages_repo=pages_repo, offers_repo=offers_repo)
         else:
             saved = _persist(brief, result, tenant_id=tenant_id, mode=mode, now=now, pick=pick,
-                             products_repo=products_repo, offers_repo=offers_repo, pages_repo=pages_repo)
+                             products_repo=products_repo, offers_repo=offers_repo, pages_repo=pages_repo,
+                             existing_product_id=str(job.get("product_id") or ""))
     except AiError as exc:
         _release(usage_repo, tenant_id, str(job.get("period") or ""), now)
         jobs_repo.put({**job, "status": "failed", "updated_at": now,
