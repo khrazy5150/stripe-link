@@ -55,7 +55,66 @@ Three ways out, and they are genuinely different products:
 | **B. Flat/table rates in the element** | no destination needed | "$8.42" becomes a fixed price, not a quote |
 | **C. No element — let Stripe present the options** | what shipped today | buyer chooses inside Checkout |
 
-**The author's design requires A.** A carrier-computed figure on the page is not reachable any other way.
+**The author's design requires A — with one large exception, which is the next section.** For most small
+parcels a flat-rate service prices without a destination at all, and that exception covers enough of real
+commerce to change the build order.
+
+### Flat-rate services are the real answer for most parcels (author, 2026-09-30)
+
+> *"That must be why merchants choose UPS flat rate for parcels that meet a certain criteria. The flat rate
+> applies to anywhere in the United States. But that doesn't help with items that don't fit the flat rate
+> criteria."*
+
+Exactly right, and it changes the recommendation below from "the answer" to "the fallback". **A flat-rate
+service is destination-independent domestically** — USPS Priority Mail Flat Rate, UPS Simple Rate — so the price
+is a function of the BOX and the weight tier, not of where it is going. Which means a **real, honest carrier
+price can be shown on a landing page with no destination at all**, for any parcel that fits.
+
+**The plumbing for this already exists and was written with it in mind.** `ShippingConfig.$defs.box` carries:
+
+    "template": "A carrier's own packaging identifier (USPS flat-rate envelopes and the like), passed
+                 straight through to the provider. Flat-rate packaging is frequently the cheapest option
+                 for a soft pack, and omitting it means those rates are never quoted at all."
+
+and the `boxes` description says carrier packaging is *"fetched from the provider as parcel templates... The
+packer works against the union of the two."* So `shipping_packing.pack()` is already designed to pack into
+carrier flat-rate boxes.
+
+**What is missing is the PRICE.** A box carries `template` but no amount, and asking the carrier for the amount
+is a rates call, which wants a `to_address` even when the answer would not vary by it. Two ways round that, and
+neither needs a destination from the buyer:
+
+- **The tenant stores the published price** per flat-rate template. It is a public, stable number that changes
+  about once a year. Simplest, no API call, no cache, no abuse surface.
+- **Quote once against a canonical domestic address and cache** per `(template, weight band)`. More accurate at
+  renewal time, and valid precisely BECAUSE the rate is destination-independent — but it inherits a carrier
+  dependency for a number the tenant could type.
+
+Recommended: the stored price first. It makes the element work with **zero** carrier integration, which matters
+because no tenant has a carrier connected yet.
+
+### One caveat the author's framing invites, and it is a real one
+
+*"Anywhere in the United States"* — and `handlers/checkout.py` allows **US and CA**. Domestic flat rate is not
+Canadian flat rate, so destination-independence holds only within one country. The element therefore still needs
+**the country**, which is one field and already constrained to two values — not the postcode. That is a far
+lighter ask than a full destination form, and it is the difference between a dropdown and a form.
+
+### So the strategy is tiered, and the buyer is asked for as little as possible
+
+| tier | asked of the buyer | works when | carrier API |
+| --- | --- | --- | --- |
+| **1. Tenant flat table** (shipped) | nothing | always — it is the tenant's own number | none |
+| **2. Carrier flat-rate box** | country | the packed parcel fits a flat-rate template | none, if the price is stored |
+| **3. Live carrier quote** | country + postcode | anything, incl. oversize and multi-parcel | per quote, paid |
+
+Tier 2 is the one the author's observation unlocks, and it is where most small-parcel commerce lives. **Tier 3
+is the only one that needs the destination form, the public endpoint, the cache and the throttle** — so the
+Shipping Element can ship for the common case long before any of that exists.
+
+And the author's caveat is the honest boundary: **an item that fits no flat-rate box has no destination-free
+price.** For those, either the tenant sets a flat amount they are willing to eat the variance on (tier 1), or
+the buyer gives a postcode (tier 3). There is no third option, and a plan claiming otherwise would be wrong.
 
 ### The recommended resolution: a MINIMAL destination
 
@@ -193,11 +252,16 @@ Nothing built so far has to be unpicked.
 2. **Tenant default → offer override resolution** in `shipping_charges`. Removes the forty-times problem.
 3. **Offer B end to end** — server picks the default service, no element, no address form. The common case, and
    it needs nothing public.
-4. **`POST /shipping/quote`**, public, cached, throttled, single-parcel only. Returns services and prices; never
-   accepts an amount.
-5. **Multi-parcel quoting** — the blocker for bundles.
-6. **The Shipping Element** (offer C/D): the page component, the minimal destination form, and the
-   omit-Stripe's-address-collection change. Last, because it is the only part that alters the buyer's flow.
+4. **Flat-rate box pricing (tier 2)** — a stored price per carrier template, priced off the packer's chosen box
+   and the weight tier. Needs the country and nothing else, and no carrier integration, so it is the cheapest
+   real carrier price the platform can offer.
+5. **The Shipping Element for tiers 1–2** (offer C/D): the page component, a country selector, and the
+   omit-Stripe's-address-collection change. This is the buyer-visible feature, reachable without a public rate
+   endpoint.
+6. **`POST /shipping/quote` (tier 3)**, public, cached, throttled, single-parcel only. Returns services and
+   prices; never accepts an amount. Only needed for parcels no flat-rate box fits.
+7. **Multi-parcel quoting** — the blocker for bundles, and tier 3 only: a multi-box order cannot be flat-rated
+   as one parcel.
 
 ## Open
 

@@ -2727,9 +2727,16 @@ not invent a field for, and an actionable notice for a tenant who is probably re
 defines capability and enabled services, offer defines physical contents and eligibility, a page element
 defines how the customer interacts. Rates are computed at runtime and **never stored in the Page**.
 
-The backend primitive shipped (below); nothing can configure it. Two things that plan flags as blockers rather
-than follow-ups: **real carrier rates need a destination the landing page does not have** (resolved by
-collecting country + postcode and then omitting Stripe's own address collection, so a quote cannot drift), and
+The backend primitive shipped (below); nothing can configure it.
+
+**Pricing is tiered, so the buyer is asked for as little as possible** (author's flat-rate insight,
+2026-09-30): a tenant flat table needs nothing; a **carrier flat-rate box needs only the country**, because
+USPS/UPS flat rate is destination-independent domestically and `ShippingConfig.$defs.box.template` already
+exists for it; a live carrier quote needs country + postcode and is the only tier requiring the public
+endpoint, cache and throttle. So the element ships for the common case long before any of that.
+
+Two things that plan flags as blockers rather than follow-ups: **an item fitting no flat-rate box has no
+destination-free price** (tier 3 or a tenant-absorbed flat amount — there is no third option), and
 **multi-parcel quoting is refused today** (`handlers/shipping.py:289`) — which the author's own 3-bottle →
 6-bottle example triggers, six bottles being exactly when a second box appears.
 
