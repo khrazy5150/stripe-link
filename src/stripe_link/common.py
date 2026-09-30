@@ -224,11 +224,19 @@ def resolve_stripe_mode(event: dict[str, Any], body: dict[str, Any] | None = Non
     return normalize_stripe_mode(raw or default)
 
 
-def error_response(message: str, status_code: int = 400, *, code: str = "bad_request") -> dict[str, Any]:
-    return json_response({
-        "error": code,
-        "message": message,
-    }, status_code=status_code)
+def error_response(message: str, status_code: int = 400, *, code: str = "bad_request",
+                   extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A failure, optionally carrying usable data alongside the message.
+
+    `extra` exists because some failures still have a real answer to part of the question: a 404 from /config
+    means the tenant has saved no config document, and yet the refund vocabulary and the PLATFORM's default
+    terms are perfectly well defined and are what the caller needs. `error` and `message` always win, so an
+    `extra` cannot disguise a failure as a success.
+    """
+    body = dict(extra or {})
+    body["error"] = code
+    body["message"] = message
+    return json_response(body, status_code=status_code)
 
 
 def runtime_manifest() -> dict[str, Any]:

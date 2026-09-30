@@ -42,9 +42,19 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
         this.resolved = body.refund_policies || {};
         this.loaded = true;
       } catch (err) {
-        // A tenant with no saved config gets a 404 from /config, and the vocabulary comes back with it. That
-        // is not an error worth showing -- but it does leave the pickers empty, which the screens check for.
-        this.error = /not found/i.test(err.message || "") ? "" : (err.message || "Failed to load refund options.");
+        // A tenant who has saved no config document gets a 404 -- and the vocabulary and the platform's
+        // default terms ride along on it, because neither depends on that document existing. The config table
+        // starts empty, so this is the NORMAL path for a tenant opening the screen for the first time, and
+        // treating it as a failure left every picker blank.
+        const payload = err.payload || {};
+        if (payload.refund_policy_options || payload.refund_policies) {
+          this.options = payload.refund_policy_options || {};
+          this.resolved = payload.refund_policies || {};
+          this.loaded = true;
+          this.error = "";
+        } else {
+          this.error = err.message || "Failed to load refund options.";
+        }
       } finally {
         this.loading = false;
       }

@@ -28,21 +28,21 @@ def handler(event, context, repository=None):
         if not tenant_id:
             return error_response("tenant_id is required.", code="missing_tenant")
         config = repository.get(tenant_id)
+        extras = _refund_payload(config or {}, event)
         if not config:
-            return error_response("Tenant config not found.", status_code=404, code="not_found")
+            # The document is genuinely absent, so the 404 stands -- but the refund vocabulary and the
+            # PLATFORM's default terms do not depend on it existing, and a tenant with no config row is
+            # exactly the one who needs the pickers populated. Withholding them here left the settings screen
+            # with empty dropdowns for every tenant, since the config table starts empty.
+            return error_response("Tenant config not found.", status_code=404, code="not_found",
+                                  extra=extras)
         payload = {
             "config": config,
             # Resolved, so a caller can see what each class promises TODAY and a platform fallback is
             # labelled as what it is rather than dressed up as the tenant's own setting. Three small
             # objects, so every caller gets them.
-            "refund_policies": tenant_policies(config),
         }
-        # The vocabulary carries a generated sentence for all 126 class/window/condition combinations,
-        # because the server must stay the only thing that can author a commercial promise -- a JavaScript
-        # copy of that template is exactly how the literal in stores/products.js came to be published. It is
-        # 20KB, so the screen that renders the pickers asks for it and no other caller of /config pays.
-        if str(query_params(event).get("refund_options") or "").strip() in {"1", "true", "yes"}:
-            payload["refund_policy_options"] = refund_policy_vocabulary()
+        payload.update(extras)
         return json_response(payload)
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
@@ -57,6 +57,25 @@ def save_config(event, repository):
                              status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_config")
+
+
+def _refund_payload(config, event):
+    """The refund half of a /config answer: resolved defaults, and optionally the pickers' vocabulary.
+
+    Separated so the NOT-FOUND path can return it too. Three small objects for every caller; the 20KB of
+    generated previews only when asked, so no other screen reading /config pays for the pickers.
+    """
+    payload = {
+        # Resolved, so a caller sees what each class promises TODAY and a platform fallback is labelled as
+        # what it is rather than dressed up as the tenant's own setting.
+        "refund_policies": tenant_policies(config),
+    }
+    # The vocabulary carries a generated sentence for all 126 class/window/condition combinations, because the
+    # server must stay the only thing that can author a commercial promise -- a JavaScript copy of that
+    # template is exactly how the literal in stores/products.js came to be published.
+    if str(query_params(event).get("refund_options") or "").strip() in {"1", "true", "yes"}:
+        payload["refund_policy_options"] = refund_policy_vocabulary()
+    return payload
 
 
 def _generate_refund_copy(document):

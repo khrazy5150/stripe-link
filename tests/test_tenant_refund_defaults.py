@@ -209,6 +209,27 @@ class WhatTheScreenReceives(unittest.TestCase):
                     self.assertIn(key, options["previews"])
                     self.assertTrue(options["previews"][key]["short_label"])
 
+    def test_a_tenant_with_no_config_still_gets_the_pickers(self):
+        """The config table starts EMPTY, so this is the normal path for a tenant opening the screen for the
+        first time. The 404 is true of the document; the vocabulary and the platform's default terms are not
+        part of it, and withholding them left every dropdown blank."""
+        repository = FakeRepository(stored=None)
+        response = config_handler(event("GET", params={"refund_options": "1"}), None,
+                                  repository=repository)
+        self.assertEqual(response["statusCode"], 404)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "not_found")
+        self.assertIn("refund_policy_options", body)
+        self.assertEqual(body["refund_policies"][PHYSICAL]["source"], SOURCE_PLATFORM_DEFAULT)
+        self.assertTrue(body["refund_policy_options"]["windows"])
+
+    def test_the_404_still_reads_as_a_failure(self):
+        """An `extra` must never disguise a failure as a success."""
+        body = json.loads(config_handler(event("GET"), None,
+                                         repository=FakeRepository(stored=None))["body"])
+        self.assertEqual(body["error"], "not_found")
+        self.assertIn("message", body)
+
     def test_window_days_are_published_for_the_ui(self):
         by_value = {w["value"]: w for w in vocabulary()["windows"]}
         self.assertEqual(by_value["72_hours"]["days"], 3)

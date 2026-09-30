@@ -362,7 +362,13 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
   if (raw && response.ok) return text;
   const payload = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    throw new Error(payload.message || payload.error || `Request failed with ${response.status}`);
+    const error = new Error(payload.message || payload.error || `Request failed with ${response.status}`);
+    // Keep the body and the status on the error. A failure response often carries usable data -- a 404 from
+    // /config still returns the refund vocabulary and the platform's default terms, because neither depends
+    // on the tenant having saved a config document -- and throwing that away forced callers to guess.
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
   return payload;
 }
