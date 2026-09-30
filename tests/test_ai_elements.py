@@ -180,9 +180,14 @@ class OtherElementTests(unittest.TestCase):
         self.assertEqual(violations([{"id": "q", "type": "quote",
                                       "text": "The hardest part is remembering to take it."}]), [])
 
-    def test_an_overlong_seo_title_is_rejected(self):
-        found = violations([{"id": "t", "type": "seo_title", "text": "x" * 80}])
-        self.assertIn("about 60", found[0]["reason"])
+    def test_a_retired_element_is_simply_ignored(self):
+        # seo_title, headline and subheadline are no longer generatable: the first renders a paragraph the
+        # builder has no editor for, and the other two are legacy types the hero absorbed. A page still
+        # carrying one (written before this) must not blow up the checker -- it has no contract, so there is
+        # nothing to check.
+        for retired in ("seo_title", "headline", "subheadline"):
+            with self.subTest(element=retired):
+                self.assertEqual(violations([{"id": "t", "type": retired, "text": "x" * 80}]), [])
 
     def test_elements_without_a_contract_are_left_alone(self):
         self.assertEqual(violations([{"id": "x", "type": "not_an_element", "text": "hi"}]), [])

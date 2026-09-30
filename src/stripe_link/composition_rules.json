@@ -1084,66 +1084,6 @@
         "policy_question"
       ]
     },
-    "headline": {
-      "purpose": "The page's single claim. The one thing a buyer should remember.",
-      "use_when": "Always. Every page has exactly one.",
-      "do_not_use_when": "Never omitted; never repeated.",
-      "fields": {
-        "text": "One line. Wrap two or three words in ** ** to mark them."
-      },
-      "count": {
-        "min": 1,
-        "max": 1,
-        "ideal": 1
-      },
-      "good": [
-        {
-          "text": "**30g of protein.** No shaker, no mess."
-        }
-      ],
-      "bad": [
-        {
-          "text": "Welcome to our store",
-          "why": "Says nothing about the product."
-        }
-      ],
-      "confusable_with": {
-        "subheadline": "The headline claims. The subheadline qualifies."
-      },
-      "routes": [
-        "core_claim"
-      ]
-    },
-    "subheadline": {
-      "purpose": "Qualify the headline with the facts that make it credible.",
-      "use_when": "The headline needs supporting specifics to be believed.",
-      "do_not_use_when": "It would repeat the headline in other words.",
-      "fields": {
-        "text": "One or two sentences of the concrete facts behind the claim."
-      },
-      "count": {
-        "min": 1,
-        "max": 1,
-        "ideal": 1
-      },
-      "good": [
-        {
-          "text": "60 gummies per tub, third-party lab tested, made in the USA."
-        }
-      ],
-      "bad": [
-        {
-          "text": "The best protein you can buy.",
-          "why": "A second claim, unsupported."
-        }
-      ],
-      "confusable_with": {
-        "headline": "One claims, one supports."
-      },
-      "routes": [
-        "supporting_detail"
-      ]
-    },
     "quote": {
       "purpose": "One line of the page's own argument, set large to slow the reader down.",
       "use_when": "A single sentence carries the whole pitch and deserves emphasis.",
@@ -1205,40 +1145,10 @@
         "reassurance"
       ]
     },
-    "seo_title": {
-      "purpose": "What a search result shows. Written for someone who has not seen the page.",
-      "use_when": "Always.",
-      "do_not_use_when": "Never omitted.",
-      "fields": {
-        "label": "Under 60 characters. Product, then its most searchable attribute."
-      },
-      "count": {
-        "min": 1,
-        "max": 1,
-        "ideal": 1
-      },
-      "good": [
-        {
-          "text": "Creatine Gummies - 5g per serving, 60 per tub"
-        }
-      ],
-      "bad": [
-        {
-          "text": "Home",
-          "why": "Tells a searcher nothing."
-        }
-      ],
-      "confusable_with": {
-        "headline": "The title is for search. The headline is for the page."
-      },
-      "routes": [
-        "search_intent"
-      ]
-    },
     "hero": {
-      "purpose": "The line under the product's name at the top of the page.",
+      "purpose": "The page's main claim and the line under it. This is where the CORE CLAIM lives -- Junior Bay has no separate headline element any more; the hero family absorbed it.",
       "use_when": "Always.",
-      "do_not_use_when": "Never omitted.",
+      "do_not_use_when": "The idea is a developed argument (content_block), quantified proof (bragging_points), or a question (faq).",
       "fields": {
         "headline": "A short phrase. Not a sentence.",
         "subheadline": "The line under the headline. Falls back to the product description when absent."
@@ -1259,11 +1169,10 @@
           "why": "A paragraph in a phrase's place."
         }
       ],
-      "confusable_with": {
-        "headline": "The hero introduces. The headline claims."
-      },
       "routes": [
-        "positioning_line"
+        "positioning_line",
+        "core_claim",
+        "supporting_detail"
       ]
     },
     "author_bio": {

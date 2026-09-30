@@ -50,12 +50,15 @@ def _obj(props: dict[str, Any], required=None) -> dict[str, Any]:
 # What the renderer reads, per section type. Anything absent here cannot be generated even if the
 # catalog knows it -- an un-modelled section would reach the page as an empty shell.
 SECTION_SHAPES: dict[str, dict[str, Any]] = {
-    "headline": {"text": _TEXT},
-    "subheadline": {"text": _TEXT},
+    # headline/subheadline are LEGACY: the hero family absorbed them, the builder no longer loads them, and a
+    # generated page carrying them lost its main copy the moment the tenant opened the builder and saved.
+    # The hero takes this copy now (see its shape above), which also ends the duplicated title block.
     # `label`, because render_seo_title reads that -- with "text" the model's title was silently
     # discarded and the section fell back to the product name, which is what put a duplicate product name
     # at the top of every generated page (author, 2026-09-30).
-    "seo_title": {"label": _TEXT},
+    # seo_title renders a visible <p> the BUILDER cannot edit -- it is not in the element loader, so it was
+    # dropped on the first save. An uneditable section is a trap; the page title comes from the SEO
+    # settings regardless, and the composer never asks for this section (author, 2026-09-30).
     # `headline`/`subheadline`, which is what `hero_copy` reads before falling back to the offer and then the
     # product. The schema asked for a `tagline` nothing reads, so the model's hero copy was discarded and the
     # hero fell back to the product name and description -- the duplicated title block on every generated

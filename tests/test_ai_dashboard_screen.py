@@ -243,3 +243,56 @@ class PollingTests(unittest.TestCase):
         self.assertIn("generateForProduct", PAGE_STORE)
         fork_action = PAGE_STORE.split("async generateForProduct", 1)[1]
         self.assertIn("awaitJob", fork_action)
+
+
+BUILDER = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+
+class BuilderRoundTripTests(unittest.TestCase):
+    """Every section a generated page can contain must survive being opened and saved in the builder.
+
+    The builder maps page sections to editable elements on load and writes back only what it mapped. A
+    section type it does not know is dropped on load and GONE on the next save — so editing a generated page
+    silently deleted its copy. Found by the author: "when I click edit, all those things disappear"
+    (2026-09-30).
+
+    `headline`, `subheadline` and `seo_title` were the casualties. The first two are legacy — the hero family
+    absorbed them — and the third renders a visible paragraph the builder has no editor for. None of them
+    should ever have been generatable, and this test is what says so from now on.
+    """
+
+    def _builder_loads(self):
+        return set(re.findall(r'section\.type === "(\w+)"', BUILDER))
+
+    def _mandatory(self):
+        block = re.search(r"MANDATORY_SECTION_KEYS = new Set\(\[(.*?)\]\)", BUILDER, re.S)
+        return set(re.findall(r'"(\w+)"', block.group(1))) if block else set()
+
+    def test_every_generatable_section_survives_a_round_trip(self):
+        from stripe_link.domain.ai_schema import SECTION_SHAPES
+
+        loadable = self._builder_loads() | self._mandatory()
+        for name in sorted(SECTION_SHAPES):
+            with self.subTest(section=name):
+                self.assertIn(name, loadable,
+                              f"the AI can emit {name} but the builder cannot load it — "
+                              "editing the page would delete it")
+
+    def test_every_structural_section_the_composer_adds_survives_too(self):
+        # The composer puts these on every generated page. One the builder cannot load would vanish on the
+        # tenant's first save just as surely as an authored one.
+        from stripe_link.domain.composition import baseline_order, default_visible, excluded_sections
+
+        loadable = self._builder_loads() | self._mandatory()
+        excluded = excluded_sections("single")
+        for name in baseline_order(""):
+            if name in excluded or not default_visible("single", name, ""):
+                continue
+            with self.subTest(section=name):
+                self.assertIn(name, loadable, f"the composer adds {name} but the builder cannot load it")
+
+    def test_the_parse_found_a_real_loader(self):
+        """A regex that matched nothing would make both checks vacuously pass."""
+        loads = self._builder_loads()
+        self.assertGreater(len(loads), 10)
+        self.assertIn("faq", loads)
