@@ -321,8 +321,32 @@ class GenerateTests(unittest.TestCase):
         self.assertIn("shipping", classes)
 
     def test_the_model_only_writes_copy(self):
-        body = json.loads(self.call()["body"])
-        self.assertEqual([s["type"] for s in body["page"]["sections"]], ["headline", "subheadline"])
+        # The model's output is COPY. The structural sections around it -- hero media, the price card, the
+        # buy button, the footer -- come from the composer, which is the same source the builder obeys.
+        types = [s["type"] for s in json.loads(self.call()["body"])["page"]["sections"]]
+        self.assertEqual([t for t in types if t in {"headline", "subheadline"}],
+                         ["headline", "subheadline"], "the authored copy survives")
+        for structural in ("hero_media", "offer_price_selector", "checkout_cta", "legal_footer"):
+            with self.subTest(section=structural):
+                self.assertIn(structural, types, "a generated page has the same anatomy as a built one")
+
+    def test_the_page_is_ordered_the_way_the_composer_says(self):
+        # Not authored-first-then-appended: a page whose buy button sits above its hero is not a page.
+        from stripe_link.domain.composition import baseline_order
+
+        order = baseline_order("")
+        types = [s["type"] for s in json.loads(self.call()["body"])["page"]["sections"]]
+        positions = [order.index(t) for t in types if t in order]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_trust_badges_are_seeded_EMPTY(self):
+        # The builder's defaults assert "Ships from USA" and "Satisfaction Guarantee" on the tenant's
+        # behalf. The floor already forbids the AI from authoring badges; seeding them here would assert
+        # through the back door what the floor stops at the front.
+        sections = json.loads(self.call()["body"])["page"]["sections"]
+        badges = next((s for s in sections if s["type"] == "trust_badges"), None)
+        if badges is not None:
+            self.assertEqual(badges.get("badges"), [])
 
     def test_the_brief_is_what_the_model_is_grounded_on(self):
         self.call()
@@ -1004,5 +1028,5 @@ class HeroImageSeedTests(ForkFromProductTests):
 
         source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
                   / "ai_generate.py").read_text(encoding="utf-8")
-        self.assertIn('seed_hero_images(result["sections"], product)', source,
+        self.assertIn("seed_hero_images(composed, product)", source,
                       "the page must be built from seeded sections, and seeded from the fork's own product")

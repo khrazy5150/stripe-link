@@ -45,8 +45,8 @@ from stripe_link.common import error_response, json_response, parse_json_body, t
 from stripe_link.domain.ai_elements import assert_contracts, violations as contract_violations
 from stripe_link.domain.ai_floor import assert_within_floor, claim_violations
 from stripe_link.domain.ai_models import default_model
-from stripe_link.domain.ai_provision import (needs_service_handoff, new_id, offer_document,
-                                             seed_hero_images,
+from stripe_link.domain.ai_provision import (compose_sections, needs_service_handoff, new_id,
+                                             offer_document, seed_hero_images,
                                              page_document, product_document, provenance_block,
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
@@ -484,8 +484,13 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
                                    mode=mode, now=now, provenance=provenance)
     offer = offer_document(brief, tenant_id=tenant_id, offer_id=offer_id, product_id=product_id,
                            price_id=price_id, slug=slug, mode=mode, now=now, provenance=provenance)
+    # Compose BEFORE seeding: seed_hero_images fills a hero_media section, and until the composer adds one
+    # there is nothing to fill -- which is why the image fix alone changed nothing.
+    composed = compose_sections(result["sections"], offer_id=offer_id,
+                                cta_label=str(((offer.get("presentation") or {}).get("cta") or {})
+                                              .get("label") or ""))
     page = page_document(brief, tenant_id=tenant_id, page_id=page_id, offer_id=offer_id, slug=slug,
-                         sections=seed_hero_images(result["sections"], product),
+                         sections=seed_hero_images(composed, product),
                          preset=result["preset"], mode=mode, now=now, provenance=provenance)
     # The SHARED assigner, not a local one. Writing the page straight to the repository skipped
     # `create_page` and therefore this, and a page without a short_code is not merely missing a field:

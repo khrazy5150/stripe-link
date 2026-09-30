@@ -206,6 +206,66 @@ def offer_document(brief: dict[str, Any], *, tenant_id: str, offer_id: str, prod
     }
 
 
+# What a structural section needs to exist as a real, editable row. The AI authors COPY; these are the parts
+# of a page that are not copy at all, and until now nothing added them: a generated page carried only the
+# model's sections, so it had no hero media, no price card, no buy button and no footer until the tenant
+# opened the builder, which materialises them on save. That is what made a fresh page look broken and an
+# edited one look fixed (author, 2026-09-30).
+def _structural_defaults(section_type: str, *, offer_id: str, cta_label: str) -> dict[str, Any]:
+    if section_type == "brand_label":
+        return {"enabled": True}
+    if section_type == "hero_media":
+        return {"images": [], "autoplay": False, "avatar_placement": "overlay",
+                "brand_overlay": False, "brand_position": "top-right"}
+    if section_type == "offer_price_selector":
+        return {"offer_id": offer_id}
+    if section_type == "checkout_cta":
+        return {"label": cta_label or "Buy Now", "show_destination": False}
+    if section_type == "refund_policy":
+        return {"enabled": True, "heading": "Refund Policy"}
+    if section_type == "legal_footer":
+        return {"copyright": "\u00a9 {{current_year}} All rights reserved."}
+    if section_type == "trust_badges":
+        # Deliberately NO badges. The builder's defaults assert "Ships from USA" and "Satisfaction
+        # Guarantee" on the tenant's behalf -- a checkable claim about provenance and a policy they may not
+        # offer (see plans/TODO.md). The AI is already forbidden from authoring badges by the field floor;
+        # seeding them here would assert through the back door what the floor stops at the front.
+        return {"enabled": True, "badges": []}
+    return {"enabled": True}
+
+
+def compose_sections(ai_sections: list[dict[str, Any]] | None, *, offer_id: str, offer_type: str = "single",
+                     goal: str = "", cta_label: str = "") -> list[dict[str, Any]]:
+    """The AI's sections PLUS the structural ones a page of this kind always has, in the composer's order.
+
+    The composer already owns "which sections exist on this kind of page" and both renderers obey it
+    (plans/PAGE_COMPOSER.md). This asks it the same question rather than keeping a second list: a generated
+    page and a hand-built one should differ in their words, not in their anatomy.
+    """
+    from stripe_link.domain.composition import baseline_order, default_visible, excluded_sections
+
+    # EVERY authored section passes through, including a malformed one. Filtering here would turn a broken
+    # generation into a page that validates and saves with the copy silently missing -- the validator is
+    # what refuses it, and the slot is refunded because the failure was ours.
+    authored = [s for s in (ai_sections or []) if isinstance(s, dict)]
+    present = {str(s.get("type")) for s in authored if s.get("type")}
+    excluded = excluded_sections(offer_type)
+    order = baseline_order(goal) or baseline_order("")
+
+    composed = list(authored)
+    for section_type in order:
+        if section_type in present or section_type in excluded:
+            continue
+        if not default_visible(offer_type, section_type, goal):
+            continue
+        composed.append({"id": section_type.replace("_", "-"), "type": section_type,
+                         **_structural_defaults(section_type, offer_id=offer_id, cta_label=cta_label)})
+
+    position = {name: index for index, name in enumerate(order)}
+    # Anything the composer has no opinion about keeps its authored order, after everything it does.
+    return sorted(composed, key=lambda s: position.get(str(s.get("type")), len(order)))
+
+
 def seed_hero_images(sections: list[dict[str, Any]] | None,
                      product: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Write the product's image onto `hero_media` rather than leaving it to be inferred later.
