@@ -488,7 +488,30 @@ override the default — and holds **no zone editor, no carrier config, no secon
      behalf is the implicit promise this plan family exists to stop.
    - A catch-all placed early does not shadow a real zone. The schema requires it last, but a hand-written
      document still resolves sensibly rather than making every later zone dead.
-2. **Tenant default → offer override resolution** in `shipping_charges`. Removes the forty-times problem.
+2. **Tenant default → offer override resolution** — ✅ **SHIPPED 2026-09-30** (19 tests).
+   `shipping_charges.resolve_options(offer, tenant_config, country=…, box=…)` returns
+   `{options, mode, source, needs}`. Removes the forty-times problem: the tenant says it once in their zones
+   and an offer only departs from it. Schema gains `offer.shipping.eligibility` and `override`.
+
+   - **`source` names which layer answered** — `offer_options` / `offer_override` / `zone` / `unserved` /
+     `none`. A tenant asking why a buyer saw a price needs to know which of three layers decided, exactly as
+     `refund_policy.resolve` reports its source.
+   - **`needs` says what is missing**: `carrier` for a live zone, `box_price` for a by-box zone whose packed
+     box has no price for that country, `zone` for a destination nothing claims. **Empty options WITH a
+     `needs` is "not answerable yet", never "free"** — a caller rendering it as free ships for nothing.
+   - **`mode` is `""` when no shipping is offered at all** (the offer does not ship, or nothing serves the
+     destination). Empty rather than `free`, because a caller switching on `mode` alone would read free as
+     "charge nothing and ship it" — which for an unserved country means posting a parcel somewhere the tenant
+     never agreed to send one. `""` matches no branch and forces the caller to look.
+   - **An override replaces the zone's RULE but never its services.** Which speeds a tenant can ship is a
+     capability; an offer can change the price, not what the carrier will carry.
+   - **An explicit `offer.shipping.options[]` still wins.** It is what `stripe_shipping_options` already reads,
+     it is deployed, and a tenant who hand-built one meant it.
+
+   **Checkout is deliberately NOT switched over yet.** `resolve_options` needs a destination and Checkout has
+   none at session-creation time, so wiring it there would mean assuming a country — showing a Canadian buyer
+   the US zone's prices. The no-element path stays on the explicit table until the element can supply a
+   country (phase 5). Zones resolve for the element's benefit first.
 3. **Offer B end to end** — server picks the default service, no element, no address form. The common case, and
    it needs nothing public.
 4. **Flat-rate box pricing (tier 2)** — a stored price per carrier template, priced off the packer's chosen box

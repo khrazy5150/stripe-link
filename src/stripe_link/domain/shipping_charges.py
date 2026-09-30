@@ -288,3 +288,145 @@ def buyer_paid_shipping(source: dict[str, Any] | None) -> dict[str, Any]:
         if rate.get("display_name"):
             out["shipping_service"] = str(rate["display_name"])
     return out
+
+
+# ---------------------------------------------------------------------------------------------------
+# TENANT ZONES -> OFFER OVERRIDE -> the options a buyer sees.
+#
+# plans/SHIPPING_ELEMENT.md phase 2. Before this, `offer.shipping.options[]` was the only place buyer-facing
+# shipping lived, so a tenant with forty offers configured it forty times. Now the tenant says it once in their
+# zones and an offer only DEPARTS from that -- the same default-then-override shape `domain/refund_policy.py`
+# uses, and for the same reason: two places holding the same fact is how they come to disagree.
+
+ELIGIBILITY_NONE = "none"
+OVERRIDE_NONE, OVERRIDE_FREE, OVERRIDE_FLAT, OVERRIDE_CALCULATED = "none", "free", "flat", "calculated"
+
+
+def ships_at_all(offer: dict[str, Any] | None) -> bool:
+    """Whether this offer offers shipping. An explicit `none` wins over anything the tenant's zones say."""
+    shipping = (offer or {}).get("shipping")
+    shipping = shipping if isinstance(shipping, dict) else {}
+    return _text(shipping.get("eligibility")).lower() != ELIGIBILITY_NONE
+
+
+def offer_override(offer: dict[str, Any] | None) -> dict[str, Any]:
+    """The offer's departure from the tenant's zones, or `{}` when it defers to them."""
+    shipping = (offer or {}).get("shipping")
+    shipping = shipping if isinstance(shipping, dict) else {}
+    override = shipping.get("override")
+    if not isinstance(override, dict):
+        return {}
+    kind = _text(override.get("type")).lower()
+    if kind in (OVERRIDE_FREE, OVERRIDE_FLAT, OVERRIDE_CALCULATED):
+        return dict(override, type=kind)
+    return {}
+
+
+def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] | None, *,
+                    country: Any, merchandise_amount: Any = 0, item_count: int = 1,
+                    box: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What this buyer, at this destination, may choose from — and whether we can price it yet.
+
+    Returns `{options, mode, source, needs}`:
+
+    - `options` — priced and ready to present, cheapest first.
+    - `mode` — `free` or `charged`, derived from the options as always, or **`""` when no shipping is being
+      offered at all** (the offer does not ship, or no zone serves this destination). Empty rather than `free`
+      on purpose: a caller switching on `mode` alone would read "free" as "charge nothing and ship it", which
+      for an unserved country means posting a parcel somewhere the tenant never agreed to send one. `""`
+      matches no branch and forces the caller to look.
+    - `source` — which layer decided: `offer_options`, `offer_override`, `zone`, or `unserved`. A tenant asking
+      why a buyer saw a price needs to know WHICH of the three layers answered, exactly as
+      `refund_policy.resolve` reports its source.
+    - `needs` — what is missing before a price exists: `carrier` (a live zone with no rate yet) or `box_price`
+      (a by-box zone whose packed box has no price for this country). **Empty options with a `needs` is not
+      "free shipping"** — it is "not answerable yet", and a caller that renders it as free ships for nothing.
+
+    Precedence, strongest first:
+
+        offer.shipping.options[]   an explicit per-offer table (the shipped shape; still honoured)
+        offer.shipping.override    free / flat / calculated, for every destination
+        tenant zone for `country`  the normal path
+    """
+    if not ships_at_all(offer):
+        # Not free shipping -- NO shipping. See `mode` in the docstring.
+        return {"options": [], "mode": "", "source": ELIGIBILITY_NONE, "needs": ""}
+
+    # 1. An explicit table on the offer still wins. It is what `stripe_shipping_options` already reads, it is
+    #    deployed, and a tenant who hand-built one meant it.
+    explicit = options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count)
+    if explicit:
+        return {"options": explicit, "mode": mode_for(offer, merchandise_amount=merchandise_amount,
+                                                      item_count=item_count),
+                "source": "offer_options", "needs": ""}
+
+    from stripe_link.domain.shipping_zones import (
+        FLAT as ZONE_FLAT,
+        FLAT_RATE_BOX,
+        FREE as ZONE_FREE,
+        LIVE,
+        flat_rate_for_box,
+        rule_for,
+        services_for,
+    )
+
+    override = offer_override(offer)
+    rule = rule_for(tenant_config, country)
+    services = services_for(tenant_config, country)
+
+    # 2. The offer's override replaces the zone's RULE but never its services: which speeds a tenant can
+    #    actually ship is a capability, and an offer cannot grant one the tenant does not have.
+    if override:
+        if override["type"] == OVERRIDE_FREE:
+            rule = {"type": ZONE_FREE}
+        elif override["type"] == OVERRIDE_FLAT:
+            rule = {"type": ZONE_FLAT, "amount": _whole(override.get("amount"))}
+        else:  # calculated: force rating even where the zone says a flat price
+            rule = {"type": FLAT_RATE_BOX if box else LIVE}
+        source = "offer_override"
+    else:
+        source = "zone" if rule else "unserved"
+
+    if not rule:
+        # No zone claims this country and the tenant set no catch-all. Not served, and NOT free.
+        return {"options": [], "mode": "", "source": "unserved", "needs": "zone"}
+
+    kind = rule.get("type")
+    amount: int | None
+    needs = ""
+    if kind == ZONE_FREE:
+        amount = 0
+    elif kind == ZONE_FLAT:
+        amount = _whole(rule.get("amount"))
+    elif kind == FLAT_RATE_BOX:
+        amount = flat_rate_for_box(box, country) if box else None
+        if amount is None:
+            needs = "box_price"
+    else:  # live
+        amount = None
+        needs = "carrier"
+
+    if amount is None:
+        # Deliberately no options rather than a zero-priced one. The caller must ask a carrier, or say it
+        # cannot quote -- never present "free" for a price nobody has worked out.
+        return {"options": [], "mode": CHARGED, "source": source, "needs": needs}
+
+    # One option per service the tenant offers here, all at the zone's price. Differential pricing per speed
+    # is what `live` and `flat_rate_box` are for; a flat zone charges the same whatever the buyer picks.
+    options = [normalize_option({
+        "label": _text(service.get("label")) or _text(service.get("service_token")),
+        "amount": amount,
+        "service_token": _text(service.get("service_token")),
+        "carrier": _text(service.get("carrier")),
+        "transit_days_min": service.get("transit_days_min"),
+        "transit_days_max": service.get("transit_days_max"),
+    }) for service in services]
+    options = [opt for opt in options if opt]
+    if not options:
+        # A priced zone with no services still charges: the buyer is simply not offered a choice of speed.
+        options = [normalize_option({"label": "Shipping", "amount": amount})]
+        options = [opt for opt in options if opt]
+
+    return {"options": options[:MAX_OPTIONS],
+            "mode": CHARGED if amount > 0 else FREE,
+            "source": source, "needs": ""}

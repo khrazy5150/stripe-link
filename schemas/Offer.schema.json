@@ -687,7 +687,27 @@
             }
           }
         },
-        "free_above_amount": {
+          "eligibility": {
+          "type": "string",
+          "enum": ["physical", "none"],
+          "default": "physical",
+          "description": "Does this offer ship at all? `none` means no shipping is offered or charged whatever the tenant's zones say -- a digital add-on sold beside physical goods, or goods collected in person. Absent means physical when any item requires shipping (plans/SHIPPING_ELEMENT.md)."
+        },
+        "override": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "An OPTIONAL departure from the tenant's zones for this one offer. The Offer answers only 'does this offer ship, and does it override the default' -- it holds no zone editor and no carrier config, because a second copy of the shipping system is how a tenant ends up asking why an offer says $9 when the Shipping screen says $7 (author, 2026-09-30).",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["none", "free", "flat", "calculated"],
+              "description": "`none` uses the tenant's zone rules. `free` and `flat` replace them for every destination. `calculated` forces live/box rating even where a zone says flat."
+            },
+            "amount": { "type": "integer", "minimum": 0, "description": "Required when type is 'flat'. Cents the buyer pays, for every destination this offer ships to." }
+          }
+        },
+      "free_above_amount": {
           "type": "integer",
           "minimum": 0,
           "description": "Order value (cents) at or above which the BASELINE option becomes free. Mirrors ShippingConfig.rate_options.free_shipping_threshold, which nothing reads today. Priced upgrades are unaffected -- a threshold that made overnight free would give away the premium the buyer was willing to pay for."
