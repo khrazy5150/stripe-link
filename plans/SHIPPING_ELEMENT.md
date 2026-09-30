@@ -100,21 +100,90 @@ Canadian flat rate, so destination-independence holds only within one country. T
 **the country**, which is one field and already constrained to two values — not the postcode. That is a far
 lighter ask than a full destination form, and it is the difference between a dropdown and a form.
 
+### The tiers are not alternatives — they are ZONES, and tier 3 is not optional
+
+The author, 2026-09-30:
+
+> *"Ultimately, the shipping element must be able to generate a real-time rate once the customer enters an
+> address. So even IF tenants offer 'free shipping within the United States' that should not stop a customer
+> from Canada from ordering and is willing to pay shipping charges to her country."*
+
+This is the correction that makes the tiering coherent rather than a menu. *"Free shipping within the United
+States"* is not an offer-wide mode — it is a rule **scoped to a destination**, and the same offer needs a
+different rule for everywhere else:
+
+    Offer: 3-Bottle Bundle
+      United States   -> free
+      Canada          -> live carrier rate
+      elsewhere       -> not offered
+
+**That is shipping zones, and this plan had no concept of them.** Every real cart has the shape (zone × rate),
+and without it a tenant advertising domestic free shipping silently becomes a domestic-only business — turning
+away a Canadian buyer who was willing to pay, which is a lost sale caused by a modelling gap rather than a
+decision.
+
+So **tier 3 is a completeness requirement, not the expensive tier nobody reaches.** It is what any zone that
+cannot be flat-rated falls back to, and every tenant who sells beyond their own country has such a zone.
+
+### Which makes the buyer's form PROGRESSIVE
+
+The tiers stop competing and start composing, because the zone decides which tier applies — and the zone is
+known from the country alone:
+
+    "Where should we ship?"   [ Country ▾ ]
+              │
+              ├── US   -> zone rule is free/flat      -> price immediately, ask nothing more
+              └── CA   -> zone rule is live rate      -> "Postal code?" [ ______ ] -> quote
+
+A buyer in the tenant's home country gives **one dropdown** and sees a price. A buyer abroad is asked for a
+postcode, because their destination genuinely requires one. **Nobody is asked for more than their own
+destination needs**, which is a better answer than either "always ask for a postcode" or "never ask".
+
+It also means the element's first render needs no destination at all when every configured zone is flat — the
+common single-country tenant sees a price with no interaction whatsoever.
+
+### Consequence: `allowed_countries` must DERIVE from the zones
+
+`handlers/checkout.py` hardcodes `US` and `CA`. Once a tenant can configure zones, that list must come FROM
+them — otherwise a tenant who adds a UK zone still cannot receive a UK order, because Checkout will not let the
+buyer enter a UK address. A zone nobody can order from is a rule the tenant wrote and the platform ignored.
+
+### Consequence: the page may not assert unqualified "FREE SHIPPING"
+
+If free is scoped to a zone, then so is the claim. **"FREE SHIPPING" on a page is a promise the tenant cannot
+keep for a Canadian buyer**, and the qualifier has to come from the zones rather than from whatever the tenant
+typed: *"Free shipping within the United States"*.
+
+This is the same rule the refund work established — *customer-facing commercial promises should never be
+implicit* (`plans/REFUND_POLICY.md`) — applied to the other promise on the same page. Offer D ("advertised FREE
+SHIPPING") therefore renders a zone-qualified claim, not a bare badge, and the AI field floor should treat an
+unqualified free-shipping claim the way it treats an ungrounded guarantee.
+
+**There is already an unqualified one shipping today.** `runtime/upsell_pages.py:329` puts
+`{"icon": "📦", "title": "Free Shipping", "desc": "Your order will arrive within 5-7 business days."}` on the
+DEFAULT thank-you page, mirrored in `Configuration.vue:361` and `LandingPages.vue:2591`. Two promises, neither
+verified: that shipping was free, and that it arrives in 5-7 days. Shown after purchase to every tenant who
+does not edit it — including, now, a buyer who just paid for shipping. Logged in TODO.
+
 ### So the strategy is tiered, and the buyer is asked for as little as possible
 
 | tier | asked of the buyer | works when | carrier API |
 | --- | --- | --- | --- |
 | **1. Tenant flat table** (shipped) | nothing | always — it is the tenant's own number | none |
 | **2. Carrier flat-rate box** | country | the packed parcel fits a flat-rate template | none, if the price is stored |
-| **3. Live carrier quote** | country + postcode | anything, incl. oversize and multi-parcel | per quote, paid |
+| **3. Live carrier quote** | country + postcode | anything, incl. oversize, multi-parcel, and **every zone that cannot be flat-rated** | per quote, paid |
 
-Tier 2 is the one the author's observation unlocks, and it is where most small-parcel commerce lives. **Tier 3
-is the only one that needs the destination form, the public endpoint, the cache and the throttle** — so the
-Shipping Element can ship for the common case long before any of that exists.
+Tier 2 is where most small-parcel DOMESTIC commerce lives, so the element can ship for that case before the
+public endpoint exists. **But tier 3 is a completeness requirement, not an optional upgrade**: every zone
+outside the tenant's flat-rate reach falls back to it, and any tenant selling beyond their own country has such
+a zone. Shipping the element without tier 3 means shipping a domestic-only business.
 
-And the author's caveat is the honest boundary: **an item that fits no flat-rate box has no destination-free
-price.** For those, either the tenant sets a flat amount they are willing to eat the variance on (tier 1), or
-the buyer gives a postcode (tier 3). There is no third option, and a plan claiming otherwise would be wrong.
+Two honest boundaries, and a plan claiming otherwise would be wrong:
+
+- **An item that fits no flat-rate box has no destination-free price.** Either the tenant sets a flat amount
+  they will eat the variance on (tier 1), or the buyer gives a postcode (tier 3).
+- **A destination outside the flat-rate zone has no destination-free price either**, however small the parcel.
+  Flat rate is domestic by definition.
 
 ### The recommended resolution: a MINIMAL destination
 

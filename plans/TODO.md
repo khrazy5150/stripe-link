@@ -2633,6 +2633,32 @@ the larger half and it needs the decision above applied — empty by default, wi
 tenant's own `refund_policy` for a guarantee one. Both are facts the platform already holds, which is the
 difference between a derived badge and an invented one.
 
+### ⭐⭐ HIGH — the default thank-you page promises FREE SHIPPING and a delivery window, unverified (found 2026-09-30)
+
+`runtime/upsell_pages.py:329` puts this card on the DEFAULT thank-you page:
+
+    {"icon": "📦", "title": "Free Shipping", "desc": "Your order will arrive within 5–7 business days."}
+
+Mirrored in `dashboard/src/components/Configuration.vue:361` and `LandingPages.vue:2591`.
+
+**Two buyer-facing promises, neither verified by anything:** that shipping was free, and that it arrives in 5–7
+business days. Shown AFTER purchase to every tenant who does not edit the default — including, once shipping
+charges exist, a buyer who just paid for shipping and is being told it was free. The delivery window is invented
+outright: nothing in the system knows a transit time, and `transit_days_min/max` on a shipping option is the
+only place one could come from.
+
+**Third instance of the same fault in one day** — the refund-policy literal, the dead shipping inputs, and this.
+A platform default that makes a commercial promise on the tenant's behalf, where the tenant never chose it and
+the system cannot keep it. *Customer-facing commercial promises should never be implicit*
+(`plans/REFUND_POLICY.md`).
+
+Made worse by zones (`plans/SHIPPING_ELEMENT.md`): "free shipping" is scoped to a destination, so even a tenant
+for whom it is true domestically is asserting it to a Canadian buyer who paid.
+
+**Fix:** derive the card from what the order actually says — `order.shipping_amount` for free-or-not and the
+chosen option's `transit_days_*` for the window — or drop the card from the default. A thank-you page has the
+order in hand, so there is no excuse for guessing.
+
 ### ⭐⭐ HIGH — the Shipping screen collects two values nothing reads (found 2026-09-30)
 
 `dashboard/src/components/Shipping.vue:249-255` renders two inputs under "Rate & Label Options":
