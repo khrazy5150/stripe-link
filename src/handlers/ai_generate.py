@@ -45,7 +45,8 @@ from stripe_link.common import error_response, json_response, parse_json_body, t
 from stripe_link.domain.ai_elements import assert_contracts, violations as contract_violations
 from stripe_link.domain.ai_floor import assert_within_floor, claim_violations
 from stripe_link.domain.ai_models import default_model
-from stripe_link.domain.ai_provision import (compose_sections, needs_service_handoff, new_id,
+from stripe_link.domain.ai_provision import (chosen_badges, compose_sections, needs_service_handoff,
+                                             new_id,
                                              offer_document, seed_hero_images,
                                              page_document, product_document, provenance_block,
                                              slugify)
@@ -486,9 +487,14 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
                            price_id=price_id, slug=slug, mode=mode, now=now, provenance=provenance)
     # Compose BEFORE seeding: seed_hero_images fills a hero_media section, and until the composer adds one
     # there is nothing to fill -- which is why the image fix alone changed nothing.
+    # Badges the tenant CHOSE, grounded where they make a claim: the money-back label comes from their own
+    # refund policy rather than a platform default (plans/TODO.md, trust badges).
+    context = (product or {}).get("ai_context") if isinstance((product or {}).get("ai_context"), dict) else {}
     composed = compose_sections(result["sections"], offer_id=offer_id,
                                 cta_label=str(((offer.get("presentation") or {}).get("cta") or {})
-                                              .get("label") or ""))
+                                              .get("label") or ""),
+                                badges=chosen_badges(context, refund_policy=(product or {}).get(
+                                    "refund_policy")))
     page = page_document(brief, tenant_id=tenant_id, page_id=page_id, offer_id=offer_id, slug=slug,
                          sections=seed_hero_images(composed, product),
                          preset=result["preset"], mode=mode, now=now, provenance=provenance)

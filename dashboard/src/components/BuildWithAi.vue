@@ -93,6 +93,28 @@
           <span class="field-note">How it should sound. Left alone, we follow the category.</span>
         </label>
 
+        <!-- Trust badges, as CHOICES. They used to be defaulted on for everyone -- "Ships from USA" and
+             "Satisfaction Guarantee" on a tenant who may do neither. A badge is a claim, so it gets asked
+             (author, 2026-09-30). -->
+        <label class="builder-toggle">
+          <input v-model="answers.ships_from_us" type="checkbox" />
+          <span>Does this ship from the United States?</span>
+        </label>
+        <span class="field-note">Adds a "Ships from USA" badge. Left unticked, no origin is claimed.</span>
+
+        <template v-if="hasRefundPolicy">
+          <label class="builder-toggle">
+            <input v-model="answers.money_back_badge" type="checkbox" />
+            <span>Show a money-back badge?</span>
+          </label>
+          <span class="field-note">
+            Uses your own refund policy &mdash; we never invent a window you haven't committed to.
+          </span>
+        </template>
+        <p v-else class="field-note">
+          A money-back badge needs a refund policy on this product. Add one and it becomes an option here.
+        </p>
+
         <label>
           Must say
           <textarea v-model="mustSayText" rows="2" placeholder="One per line"></textarea>
@@ -150,7 +172,7 @@ const store = useAiPageStore();
 const TONES = ["direct", "warm", "playful", "technical", "premium"];
 
 const showMore = ref(false);
-const answers = ref({ audience: "", evidence: "", tone: "" });
+const answers = ref({ audience: "", evidence: "", tone: "", ships_from_us: false, money_back_badge: false });
 const factsText = ref("");
 const certificationsText = ref("");
 const mustSayText = ref("");
@@ -165,6 +187,8 @@ watch(
       audience: context.audience || "",
       evidence: context.evidence || "",
       tone: context.tone || "",
+      ships_from_us: Boolean(context.ships_from_us),
+      money_back_badge: Boolean(context.money_back_badge),
     };
     factsText.value = (context.facts || []).join("\n");
     certificationsText.value = (context.certifications || []).join("\n");
@@ -188,6 +212,13 @@ const lede = computed(() =>
     ? `Two questions, and we'll write a draft page for ${props.product.name}.`
     : "Two questions, and we'll write a draft page.",
 );
+
+// A money-back badge is only offerable when there is a policy to label it from. Offering it otherwise would
+// have the tenant assert a guarantee they never wrote, which is the defaulting this replaced.
+const hasRefundPolicy = computed(() => {
+  const policy = props.product?.refund_policy;
+  return Boolean(policy && (policy.full_policy || policy.short_label));
+});
 
 const canGenerate = computed(
   () => Boolean(answers.value.audience.trim()) && lines(factsText.value).length > 0,
@@ -213,6 +244,10 @@ function generate() {
   if (mustSay.length) context.must_say = mustSay;
   const mustNotSay = lines(mustNotSayText.value);
   if (mustNotSay.length) context.must_not_say = mustNotSay;
+  // Booleans are sent whatever their value: unlike the text fields, FALSE is a real answer here ("no, it
+  // does not ship from the US") and dropping it would make unticking a box impossible.
+  context.ships_from_us = Boolean(answers.value.ships_from_us);
+  context.money_back_badge = Boolean(hasRefundPolicy.value && answers.value.money_back_badge);
   return store.generateForProduct(props.product?.product_id, context, props.mode);
 }
 </script>

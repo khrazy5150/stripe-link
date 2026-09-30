@@ -211,7 +211,8 @@ def offer_document(brief: dict[str, Any], *, tenant_id: str, offer_id: str, prod
 # model's sections, so it had no hero media, no price card, no buy button and no footer until the tenant
 # opened the builder, which materialises them on save. That is what made a fresh page look broken and an
 # edited one look fixed (author, 2026-09-30).
-def _structural_defaults(section_type: str, *, offer_id: str, cta_label: str) -> dict[str, Any]:
+def _structural_defaults(section_type: str, *, offer_id: str, cta_label: str,
+                         badges: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if section_type == "brand_label":
         return {"enabled": True}
     if section_type == "hero_media":
@@ -226,16 +227,36 @@ def _structural_defaults(section_type: str, *, offer_id: str, cta_label: str) ->
     if section_type == "legal_footer":
         return {"copyright": "\u00a9 {{current_year}} All rights reserved."}
     if section_type == "trust_badges":
-        # Deliberately NO badges. The builder's defaults assert "Ships from USA" and "Satisfaction
-        # Guarantee" on the tenant's behalf -- a checkable claim about provenance and a policy they may not
-        # offer (see plans/TODO.md). The AI is already forbidden from authoring badges by the field floor;
-        # seeding them here would assert through the back door what the floor stops at the front.
-        return {"enabled": True, "badges": []}
+        # Only what the tenant CHOSE. Empty is the default and stays the default: the builder's three
+        # ("Ships from USA", "Satisfaction Guarantee") assert provenance and a policy on the tenant's
+        # behalf, and the field floor already forbids the AI from authoring badges -- seeding them here
+        # would assert through the back door what the floor stops at the front.
+        return {"enabled": True, "badges": list(badges or [])}
     return {"enabled": True}
 
 
+def chosen_badges(context: dict[str, Any] | None, *, refund_policy: Any = None) -> list[dict[str, Any]]:
+    """Trust badges the tenant actually opted into, and nothing else.
+
+    The money-back badge is labelled from the tenant's OWN refund policy when it carries a short label, and
+    otherwise says only "Money-back guarantee" -- no invented window. `guarantee` is a numeric-grounded claim
+    class in the field floor, so a badge asserting "30 days" that the policy does not say would be a
+    fabricated number on a public page (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.7).
+    """
+    context = context or {}
+    badges: list[dict[str, Any]] = []
+    if context.get("ships_from_us"):
+        badges.append({"enabled": True, "emoji": "\U0001F1FA\U0001F1F8", "label": "Ships from USA"})
+    if context.get("money_back_badge"):
+        policy = refund_policy if isinstance(refund_policy, dict) else {}
+        label = str(policy.get("short_label") or "").strip() or "Money-back guarantee"
+        badges.append({"enabled": True, "emoji": "\u2705", "label": label})
+    return badges
+
+
 def compose_sections(ai_sections: list[dict[str, Any]] | None, *, offer_id: str, offer_type: str = "single",
-                     goal: str = "", cta_label: str = "") -> list[dict[str, Any]]:
+                     goal: str = "", cta_label: str = "",
+                     badges: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """The AI's sections PLUS the structural ones a page of this kind always has, in the composer's order.
 
     The composer already owns "which sections exist on this kind of page" and both renderers obey it
@@ -259,7 +280,8 @@ def compose_sections(ai_sections: list[dict[str, Any]] | None, *, offer_id: str,
         if not default_visible(offer_type, section_type, goal):
             continue
         composed.append({"id": section_type.replace("_", "-"), "type": section_type,
-                         **_structural_defaults(section_type, offer_id=offer_id, cta_label=cta_label)})
+                         **_structural_defaults(section_type, offer_id=offer_id, cta_label=cta_label,
+                                               badges=badges)})
 
     position = {name: index for index, name in enumerate(order)}
     # Anything the composer has no opinion about keeps its authored order, after everything it does.

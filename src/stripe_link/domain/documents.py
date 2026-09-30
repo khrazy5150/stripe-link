@@ -625,7 +625,12 @@ def require_document_fields(document: dict[str, Any], document_type: str, id_fie
 # is then LICENSED to write, and an unbounded list is both a prompt-size problem and an unreviewable one.
 AI_CONTEXT_LIST_FIELDS = {"facts": 25, "certifications": 15, "must_say": 15, "must_not_say": 15}
 AI_CONTEXT_TEXT_FIELDS = {"audience": 500, "evidence": 1000, "tone": 40}
-AI_CONTEXT_FIELDS = set(AI_CONTEXT_LIST_FIELDS) | set(AI_CONTEXT_TEXT_FIELDS) | {"updated_at"}
+# Y/N answers that turn a DEFAULTED claim into a chosen one. Trust badges used to be seeded by the builder
+# with "Ships from USA" and "Satisfaction Guarantee" for everybody; a badge is a claim, and a claim nobody
+# chose is one nobody stands behind (author, 2026-09-30). Asking makes it the tenant's.
+AI_CONTEXT_BOOL_FIELDS = {"ships_from_us", "money_back_badge"}
+AI_CONTEXT_FIELDS = (set(AI_CONTEXT_LIST_FIELDS) | set(AI_CONTEXT_TEXT_FIELDS)
+                     | AI_CONTEXT_BOOL_FIELDS | {"updated_at"})
 
 
 def validate_product_ai_context(document: dict[str, Any]) -> None:
@@ -665,6 +670,8 @@ def validate_product_ai_context(document: dict[str, Any]) -> None:
             if not isinstance(entry, str) or not entry.strip():
                 raise DocumentValidationError(
                     f"Each Product ai_context.{field} entry must be a non-empty string.")
+    for field in sorted(AI_CONTEXT_BOOL_FIELDS):
+        optional_bool(context, field, f"Product ai_context.{field}")
     optional_non_negative_int(context, "updated_at", "Product ai_context.updated_at")
 
 

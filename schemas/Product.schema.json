@@ -627,6 +627,14 @@
         "updated_at": {
           "type": "integer",
           "minimum": 0
+        },
+        "ships_from_us": {
+          "type": "boolean",
+          "description": "The tenant confirming this product ships from the United States. Drives a trust badge; asked rather than assumed, because origin is a checkable claim."
+        },
+        "money_back_badge": {
+          "type": "boolean",
+          "description": "The tenant opting into a money-back trust badge. Only meaningful when a refund policy exists -- the badge is labelled from THAT, never from a platform default."
         }
       }
     }
