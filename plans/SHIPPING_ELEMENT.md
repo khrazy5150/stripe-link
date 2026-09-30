@@ -629,8 +629,27 @@ override the default — and holds **no zone editor, no carrier config, no secon
    `needs` is never a zero price: `country` (nothing chosen, or one the tenant does not serve), `carrier`,
    `box_price` (with a `box_reason` naming which of the three packing refusals it was). A page rendering an
    unknown as "Free shipping" would make a promise the tenant did not.
-7. **Multi-parcel quoting** — the blocker for bundles, and tier 3 only: a multi-box order cannot be flat-rated
-   as one parcel.
+7. **Multi-parcel** — ✅ **PACKING SHIPPED 2026-09-30** (13 tests). `shipping_packing` gains a **multi-box**
+   strategy between "one shared box" and "per item": first-fit-decreasing over the catalog, so a cart that
+   outgrows one box becomes several NAMED parcels instead of per-item parcels with no box.
+
+   **This is what unblocks bundles**, and not only for tier 3 as this plan said. The per-item fallback assigns
+   no box, so a flat-rate-box price had nothing to look up — a 6-bottle bundle could not be quoted at all. Now
+   two Mediums cost two flat rates, which is how carriers bill.
+
+   It reuses an extracted `_best_box` rather than testing fit a second way, because this module's docstring
+   warns that two implementations of *"what parcel is this"* would disagree and the one that priced the order
+   would not be the one that bought the label.
+
+   Boundaries kept deliberately: an item fitting NO box still falls through to per-item, because splitting the
+   rest into boxes and leaving one homeless would report a parcel count nobody can post; a single group is
+   never reported as multi-box, since strategy 2 already tried one box; weight limits apply per parcel; and
+   items with no dimensions still produce NO parcels rather than an invented one.
+
+   **STILL OPEN: buying multi-parcel LABELS.** `handlers/shipping.py:289` still refuses, and that is a
+   fulfilment change (N labels, N tracking numbers, per-parcel shipment records) which belongs with
+   `plans/SHIPPING_PROVIDERS.md`. Pricing a bundle and posting one are now different questions with different
+   answers, and that is worth knowing before a tenant sells one.
 
 ## Open
 

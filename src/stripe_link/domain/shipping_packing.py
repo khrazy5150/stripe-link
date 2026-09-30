@@ -11,7 +11,11 @@ So this approximates, in the order the plan decided (plans/SHIPPING_PROVIDERS.md
    are not second-guessed.
 2. **Packed** -- volume fit: sum the item volumes, add void fill, choose the smallest catalog box that
    clears it AND can physically hold the largest item.
-3. **Per item** -- one parcel each. Used when anything does not fit, or when there is no catalog, or when
+3. **Multi-box** -- several catalog boxes, first-fit-decreasing, when nothing holds the whole order but the
+   catalog holds it in pieces. What a warehouse actually does, and the gap a BUNDLE lives in: without it a
+   cart that outgrows one box fell to per-item parcels with no box, so a flat-rate-box price had nothing to
+   look up and a bundle could not be quoted at all (plans/SHIPPING_ELEMENT.md phase 7).
+4. **Per item** -- one parcel each. Used when anything fits no box at all, when there is no catalog, or when
    items have no dimensions of their own. Over-estimates, which is the safe direction.
 
 Shared by the label buyer, the price estimator and the carrier calculator, so it is built once: three
@@ -159,6 +163,96 @@ def _per_item(units, *, distance_unit, mass_unit) -> list[dict[str, Any]]:
     return parcels
 
 
+def _best_box(units: list[dict[str, Any]], catalog: list[dict[str, Any]], *,
+              void_fill: float = DEFAULT_VOID_FILL):
+    """The smallest catalog box that holds ALL of `units`, or None. `(box, dims, weight)` when it does.
+
+    Extracted from the volume-fit strategy so multi-box packing reuses the identical test rather than
+    implementing fit a second way -- this module's docstring warns that two implementations of "what parcel
+    is this" would disagree, and the one that priced the order would not be the one that bought the label.
+    """
+    item_dims = [_dims(unit) for unit in units]
+    if not units or not all(item_dims):
+        return None
+    total_volume = sum(length * width * height for length, width, height in item_dims) * float(void_fill)
+    # BARE weights: the shared box's own weight is added once, at the end.
+    total_weight = sum(_item_weight(unit) for unit in units)
+    candidates = []
+    for box in catalog:
+        box_dims = _dims(box)
+        # A box has a weight limit as well as a size. USPS flat rate caps at 70 lb, and a carrier refuses an
+        # over-weight parcel at the counter -- after the label is bought and paid for.
+        limit = box.get("max_weight")
+        if limit and total_weight + float(box.get("empty_weight") or 0) > float(limit):
+            continue
+        # Necessary, not sufficient: every item must physically fit this box, and the volumes must clear. Two
+        # items that each fit can still fail to fit TOGETHER (two long rods in a flat box), which is the
+        # approximation's known limit -- see Calibration in the plan.
+        kind = str(box.get("kind") or BOX)
+        if not all(
+            fits_inside(dimension, box_dims, box_kind=kind, compressible=bool(unit.get("compressible")))
+            for dimension, unit in zip(item_dims, units)
+        ):
+            continue
+        # A soft pack's capacity is not its nominal volume. If thickness is treated as capacity for the FIT,
+        # it has to be for the volume too, or a mailer is judged able to hold a pouch it cannot be said to
+        # have room for. Only when every item squashes: one rigid thing stops it bulging for anything.
+        length, width, height = box_dims
+        if kind == SOFT_PACK and all(unit.get("compressible") for unit in units):
+            # Declare what it will MEASURE when stuffed, not the flat figure. Under-declaring thickness is
+            # how a carrier re-bills dimensional weight after the label is bought.
+            needed = total_volume / (length * width) if length and width else height
+            height = min(max(height, needed), height * SOFT_PACK_THICKNESS_TOLERANCE)
+            box_dims = (length, width, height)
+        box_volume = length * width * height
+        if box_volume + 1e-9 >= total_volume:
+            candidates.append((box_volume, box, box_dims))
+    if not candidates:
+        return None
+    _, box, box_dims = min(candidates, key=lambda entry: entry[0])
+    # A box is not weightless and the carrier bills the whole parcel.
+    return box, box_dims, total_weight + float(box.get("empty_weight") or 0)
+
+
+def _multi_box_groups(units: list[dict[str, Any]], catalog: list[dict[str, Any]], *,
+                      void_fill: float = DEFAULT_VOID_FILL):
+    """Partition an order into several catalog boxes. `[(group, box, dims, weight), ...]` or `[]`.
+
+    First-fit-decreasing: biggest item first, into the first open parcel that still holds it, else a new
+    parcel. Classic bin packing, approximated for the same reason everything here is -- 3D bin packing is
+    NP-hard and not worth solving properly for a seller shipping a handful of orders a day.
+
+    Returns `[]` when any single item fits no box at all: something oversized belongs in the per-item
+    fallback, which is honest about having no box for it, rather than in a parcel list that implies one.
+    """
+    if not units or not catalog:
+        return []
+    ordered = sorted(units, key=lambda unit: -(lambda d: d[0] * d[1] * d[2])(_dims(unit) or (0, 0, 0)))
+    groups: list[list[dict[str, Any]]] = []
+    for unit in ordered:
+        if not _best_box([unit], catalog, void_fill=void_fill):
+            # One thing the catalog cannot hold. Splitting the rest into boxes and leaving this one homeless
+            # would report a parcel count nobody can actually post.
+            return []
+        for group in groups:
+            if _best_box(group + [unit], catalog, void_fill=void_fill):
+                group.append(unit)
+                break
+        else:
+            groups.append([unit])
+
+    packed = []
+    for group in groups:
+        chosen = _best_box(group, catalog, void_fill=void_fill)
+        if not chosen:  # pragma: no cover - a group is only built from fits that already passed
+            return []
+        box, box_dims, weight = chosen
+        packed.append((group, box, box_dims, weight))
+    # One group is not multi-box: strategy 2 already tried that and failed, so re-reporting it here would
+    # claim a different answer to the same question.
+    return packed if len(packed) > 1 else []
+
+
 def pack(
     items: list[dict[str, Any]],
     boxes: list[dict[str, Any]] | None = None,
@@ -218,49 +312,31 @@ def pack(
     item_dims = [_dims(unit) for unit in units]
     # 2. Volume fit -- only when every thing has a size of its own AND there are boxes to put them in.
     if catalog and all(item_dims):
-        total_volume = sum(length * width * height for length, width, height in item_dims) * float(void_fill)
-        # BARE weights: the shared box's own weight is added once, below.
-        total_weight = sum(_item_weight(unit) for unit in units)
-        candidates = []
-        for box in catalog:
-            box_dims = _dims(box)
-            # A box has a weight limit as well as a size. USPS flat rate caps at 70 lb, and a carrier
-            # refuses an over-weight parcel at the counter -- after the label is bought and paid for.
-            limit = box.get("max_weight")
-            if limit and total_weight + float(box.get("empty_weight") or 0) > float(limit):
-                continue
-            # Necessary, not sufficient: every item must physically fit this box, and the volumes must
-            # clear. Two items that each fit can still fail to fit TOGETHER (two long rods in a flat box),
-            # which is the approximation's known limit -- see Calibration in the plan.
-            kind = str(box.get("kind") or BOX)
-            if not all(
-                fits_inside(dimension, box_dims, box_kind=kind,
-                            compressible=bool(unit.get("compressible")))
-                for dimension, unit in zip(item_dims, units)
-            ):
-                continue
-            # A soft pack's capacity is not its nominal volume. If thickness is treated as capacity for
-            # the FIT, it has to be for the volume too, or a mailer is judged able to hold a pouch it
-            # cannot be said to have room for. Only when every item squashes: one rigid thing in the
-            # envelope stops it bulging for anything.
-            length, width, height = box_dims
-            if kind == SOFT_PACK and all(unit.get("compressible") for unit in units):
-                # Declare what it will MEASURE when stuffed, not the flat figure. Under-declaring
-                # thickness is how a carrier re-bills dimensional weight after the label is bought.
-                needed = total_volume / (length * width) if length and width else height
-                height = min(max(height, needed), height * SOFT_PACK_THICKNESS_TOLERANCE)
-                box_dims = (length, width, height)
-            box_volume = length * width * height
-            if box_volume + 1e-9 >= total_volume:
-                candidates.append((box_volume, box, box_dims))
-        if candidates:
-            _, box, box_dims = min(candidates, key=lambda entry: entry[0])
-            # A box is not weightless and the carrier bills the whole parcel.
-            weight = total_weight + float(box.get("empty_weight") or 0)
+        chosen = _best_box(units, catalog, void_fill=void_fill)
+        if chosen:
+            box, box_dims, weight = chosen
             return parcels + [
                 _parcel(box_dims, weight, distance_unit=distance_unit, mass_unit=mass_unit,
                         box=str(box.get("name") or ""), template=str(box.get("template") or ""),
                         packed_from=[unit.get("product_id", "") for unit in units], strategy="packed")]
+
+        # 2b. MULTI-BOX. Nothing holds the whole order, but the catalog may hold it in several parcels --
+        #     which is what a warehouse actually does, and what the per-item fallback below cannot express:
+        #     it returns parcels with NO box, so a flat-rate-box price has nothing to look up and a bundle
+        #     cannot be quoted at all (plans/SHIPPING_ELEMENT.md phase 7).
+        #
+        #     First-fit-decreasing: biggest item first, into the first open parcel that still holds it, else
+        #     a new parcel. An approximation like everything else here -- the same volume-plus-fit test as
+        #     strategy 2, so the same known limit applies (two long rods in a flat box). It reuses
+        #     `_best_box` rather than testing fit a second way, because this module's own docstring warns
+        #     that two implementations of "what parcel is this" would disagree.
+        groups = _multi_box_groups(units, catalog, void_fill=void_fill)
+        if groups:
+            return parcels + [
+                _parcel(box_dims, weight, distance_unit=distance_unit, mass_unit=mass_unit,
+                        box=str(box.get("name") or ""), template=str(box.get("template") or ""),
+                        packed_from=[unit.get("product_id", "") for unit in group], strategy="multi_box")
+                for group, box, box_dims, weight in groups]
 
     # 3. Nothing fit, no catalog, or no item dimensions.
     return parcels + _per_item(units, distance_unit=distance_unit, mass_unit=mass_unit)

@@ -5,10 +5,10 @@ parcels that meet a certain criteria. The flat rate applies to anywhere in the U
 service is destination-independent domestically, so its price is a function of the BOX and the weight tier
 rather than of where it is going — which makes a real price showable from a dropdown instead of a form.
 
-**The reach of this tier is carts that fit ONE listed box.** The packer either puts everything in one shared
-box or falls back to one parcel per item with no box at all, so anything larger cannot be flat-rated. I
-assumed multi-parcel would price by summing and it does not — that is how carriers bill, not how this packer
-allocates.
+**Multi-parcel prices by summing, as of phase 7.** Two boxes is two flat rates, which is how carriers bill —
+but that only became true here once the packer learned to allocate more than one box. Before that it fell back
+to one parcel per item with no box at all, so there was nothing to sum. An item fitting no box at all still
+cannot be priced this way.
 """
 import unittest
 
@@ -91,13 +91,17 @@ class WhatItCannotPriceAndWhy(unittest.TestCase):
             self.assertNotEqual(case["amount"], 0)
 
 
-class OneBoxIsTheCeiling(unittest.TestCase):
-    """The reach of this tier, stated as a test because I got it wrong first.
+class MultiBoxSumsOnceThePackerCanAllocate(unittest.TestCase):
+    """The arc of this, recorded because it went round twice.
 
-    I expected multi-parcel to price by summing -- two boxes, two flat rates, which is how carriers bill. But
-    `shipping_packing` has only two strategies: everything in one shared box, or *"one parcel per thing...
-    the honest fallback"* when anything does not fit. The per-item fallback assigns NO box, so there is no
-    rate to sum. A cart bigger than one listed box needs tier 3 or a tenant-set flat amount.
+    I first claimed multi-parcel would price by summing -- two boxes, two flat rates, which is how carriers
+    bill. Then a failing test showed the packer had no multi-box strategy at all: it either fitted everything
+    in one shared box or fell back to one parcel per item with NO box, so there was nothing to sum, and I
+    corrected the claim to "one box is the ceiling". Phase 7 then gave the packer first-fit-decreasing
+    allocation, which lifts that ceiling and makes the original instinct right after all.
+
+    The lesson kept rather than the conclusion: the claim was about how CARRIERS bill, and whether it held
+    depended entirely on what this codebase could do.
     """
 
     BIG = {"product_id": "big", "product_type": "physical",
@@ -109,18 +113,38 @@ class OneBoxIsTheCeiling(unittest.TestCase):
         return packed_box_price([{"product_id": "big", "quantity": quantity}], {"big": self.BIG},
                                 CONFIG, "US")
 
-    def test_one_of_them_fits_the_medium_and_prices(self):
+    def test_one_fits_the_medium(self):
         result = self.price(1)
         self.assertEqual(result["boxes"], ["Medium"])
         self.assertEqual(result["amount"], 899)
 
-    def test_two_of_them_fit_no_single_box_and_cannot_be_priced(self):
+    def test_two_become_two_mediums_and_the_price_SUMS(self):
         result = self.price(2)
+        self.assertEqual(result["boxes"], ["Medium", "Medium"])
+        self.assertEqual(result["amount"], 899 * 2)
+
+    def test_three_become_three(self):
+        self.assertEqual(self.price(3)["amount"], 899 * 3)
+
+    def test_smaller_items_tuck_into_the_boxes_already_open(self):
+        """First-fit-decreasing: the big items claim boxes, then the small ones fill the gaps rather than
+        opening parcels of their own."""
+        small = {"product_id": "sm", "product_type": "physical",
+                 "fulfillment": {"requires_shipping": True, "weight_lb": 0.5,
+                                 "item_dimensions": {"length_in": 3, "width_in": 2, "height_in": 2,
+                                                     "weight_lb": 0.4}}}
+        result = packed_box_price([{"product_id": "big", "quantity": 2},
+                                  {"product_id": "sm", "quantity": 2}],
+                                 {"big": self.BIG, "sm": small}, CONFIG, "US")
+        self.assertEqual(result["boxes"], ["Medium", "Medium"])
+        self.assertEqual(result["amount"], 899 * 2)
+
+    def test_something_fitting_NO_box_still_cannot_be_priced(self):
+        """Multi-box does not rescue an oversized item. Splitting the rest into boxes and leaving that one
+        homeless would report a parcel count nobody can actually post."""
+        result = packed_box_price([{"product_id": "p3", "quantity": 1}], PRODUCTS, CONFIG, "US")
         self.assertIsNone(result["amount"])
         self.assertEqual(result["reason"], "no_box")
-
-    def test_and_that_is_reported_as_unpriceable_not_as_free(self):
-        self.assertNotEqual(self.price(2)["amount"], 0)
 
 
 class ThroughTheResolver(unittest.TestCase):
