@@ -3281,6 +3281,50 @@ choice.
   the [Tax Settings API](https://docs.stripe.com/tax/settings-api) to read/enable status (BNPL-toggle pattern).
 - **Own plan when prioritized.** Not built.
 
+#### Answering the author's two questions, 2026-09-30
+
+**"Is there a mechanism to notify tenants after a certain amount of gross sales to consider enabling Stripe
+Tax?"** No. Every piece needed exists — a NotificationsTable with live emitters (`handlers/booking.py`,
+`handlers/leads.py`), scheduled sweeps on 5- and 15-minute rates that a check could ride, and per-tenant gross
+in the ledger — but nothing joins them up.
+
+**Recommendation: do NOT build a nexus tracker.** A flat "you crossed $X gross" nudge is the wrong shape and a
+real one is the wrong project:
+
+- **US economic nexus is PER STATE**, not per total — commonly $100k or 200 transactions, with the figure, the
+  measurement period and whether it counts gross or taxable sales all varying by state. A global threshold
+  would fire for a tenant with $120k spread thinly across forty states (nexus nowhere) and stay silent for one
+  with $99k in a single $75k-threshold state (nexus for months).
+- **We could approximate per-state**: orders carry `shipping_address` (`stripe_webhook.py:2108`), so
+  destination gross is computable for physical goods. But digital and service sales have no shipping address,
+  and their nexus turns on the buyer's location, which we do not reliably hold. A tracker that silently covers
+  only part of a tenant's revenue is worse than none, because it reads as coverage.
+- **Stripe already does this, free, and keeps the rules current.** Threshold monitoring is a free Connect
+  embedded component. Maintaining fifty states' thresholds ourselves would be a permanent correctness
+  liability for something a tenant can have accurately for nothing.
+
+**What is worth building** is the small honest version: surface Stripe's own monitoring (the component above,
+or a deep link), plus ONE actionable notice that defers the determination rather than making it —
+*"You've taken $X in Y states. Stripe can tell you for free where you may need to register."* Per the repo's
+`feedback_notices_only_when_actionable` rule, the action is "look at Stripe's monitoring", not "register in
+Ohio", because only Stripe (and the tenant's accountant) can say the latter.
+
+**"Does the app have the ability to enable Stripe Tax now (a toggle in preferences)?"** No, and a toggle would
+be the wrong control even if the API allowed it.
+
+Enabling Stripe Tax is not one switch. It requires the tenant to declare tax **registrations** per
+jurisdiction, and a registration is a **legal declaration that they have nexus there and will remit**. The
+platform must not make that declaration on a tenant's behalf under any circumstances — a toggle labelled
+"Enable Stripe Tax" would imply the platform can, and a tenant clicking it would reasonably believe they were
+now compliant. (Whether Standard OAuth even permits platform-side registration writes is the VERIFY item
+above; the answer does not change the recommendation.)
+
+**The honest UI is a status row, not a toggle:** read the tenant's tax status (Tax Settings API), show it
+plainly — *"Stripe Tax: not enabled. No sales tax is being collected."* — and link out to their own Stripe Tax
+settings. Same pattern the BNPL work already uses, where a toggle records display INTENT and Stripe remains
+the authority on what is actually active (`plans/BNPL_PAYMENT_METHODS.md`). Here even the intent belongs to the
+tenant, so there is nothing for us to toggle.
+
 ## Production setup
 
 ### LOW — no backups and no log retention; neither is a cost problem (noted 2026-09-29)
