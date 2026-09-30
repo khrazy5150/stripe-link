@@ -322,18 +322,32 @@ class TonePresetTests(unittest.TestCase):
         # The old behaviour has to survive: a brief without a tone is valid, tone being optional.
         self.assertTrue(self._preset(category="electronics")["value"])
 
-    def test_the_CATEGORY_keeps_its_say(self):
-        # A playful supplement brand is still a supplement brand. Tone REORDERS the category's shortlist
-        # rather than replacing it, so the palette never chases the adjective out of its own sector.
+    def test_the_VOICE_leads_whatever_the_category(self):
+        # Revised 2026-09-29. Tone is something the tenant SAID; category is inferred from a taxonomy
+        # field, and an inference must not overrule a statement. It matters more since the leads became
+        # social palettes: none appear in any category shortlist, so a category-wins rule would have meant
+        # the chosen voice applied to uncategorised products only.
+        from stripe_link.domain.ai_resolvers import TONE_PRESETS
+
+        for category in ("electronics", "supplement", "luxury", ""):
+            with self.subTest(category=category):
+                self.assertEqual(self._preset(category=category, tone="playful")["value"],
+                                 TONE_PRESETS["playful"][0])
+
+    def test_the_category_is_demoted_not_discarded(self):
+        # Its palettes still fill the shortlist, so the sector's options stay available to the model or to
+        # a tenant changing it by hand.
         from stripe_link.domain.ai_resolvers import CATEGORY_PRESETS
 
-        decision = self._preset(category="supplement", tone="playful")
-        self.assertIn(decision["value"], CATEGORY_PRESETS["supplement"])
+        shortlist = self._preset(category="supplement", tone="playful")["shortlist"]
+        for preset in CATEGORY_PRESETS["supplement"]:
+            with self.subTest(preset=preset):
+                self.assertIn(preset, shortlist)
 
-    def test_the_options_are_unchanged_only_the_default_moves(self):
-        plain = set(self._preset(category="supplement")["shortlist"])
-        toned = set(self._preset(category="supplement", tone="premium")["shortlist"])
-        self.assertTrue(plain.issubset(toned), "a tone must not take options away")
+    def test_without_a_tone_the_category_still_decides(self):
+        from stripe_link.domain.ai_resolvers import CATEGORY_PRESETS
+
+        self.assertEqual(self._preset(category="supplement")["value"], CATEGORY_PRESETS["supplement"][0])
 
     def test_an_explicit_request_and_a_tenant_preset_still_win(self):
         # Precedence is the file's contract: explicit > tenant > rules > AI. Tone lives at the bottom.
@@ -347,6 +361,17 @@ class TonePresetTests(unittest.TestCase):
     def test_an_unsupported_preset_is_never_chosen(self):
         decision = self._preset(category="supplement", tone="premium", supported={"clean-slate"})
         self.assertEqual(decision["value"], "clean-slate")
+
+    def test_every_tone_lead_is_a_preset_the_server_accepts(self):
+        # A lead the validator rejects would be chosen and then refused at save. The builder's picker and
+        # SUPPORTED_THEME_PRESETS have to contain all of them.
+        from stripe_link.domain.documents import SUPPORTED_THEME_PRESETS
+        from stripe_link.domain.ai_resolvers import TONE_PRESETS
+
+        for tone, presets in TONE_PRESETS.items():
+            for preset in presets:
+                with self.subTest(tone=tone, preset=preset):
+                    self.assertIn(preset, SUPPORTED_THEME_PRESETS)
 
     def test_the_reason_names_the_voice(self):
         # "the AI chose it" is not a diagnosis — this file returns WHY for exactly that reason.
