@@ -11,6 +11,7 @@ import unittest
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_shipping
 from stripe_link.domain.shipping_charges import (
     CHARGED,
+    buyer_paid_shipping,
     FREE,
     MAX_OPTIONS,
     SHIPPING_TAX_CODE,
@@ -285,6 +286,64 @@ class TheStripePayload(unittest.TestCase):
     def test_never_more_than_stripe_accepts(self):
         many = [{"label": f"Option {i}", "amount": i * 100} for i in range(1, 9)]
         self.assertEqual(len(stripe_shipping_options(offer(options=many))), MAX_OPTIONS)
+
+
+class WhatTheBuyerActuallyPaid(unittest.TestCase):
+    """`options_for` decides what to OFFER; this records what was CHOSEN.
+
+    It is a read rather than a calculation because the amount cannot be known at session-creation time -- the
+    buyer picks the service level, so the figure only exists once Stripe reports it.
+    """
+
+    def test_it_reads_the_shipping_cost_block(self):
+        paid = buyer_paid_shipping({"shipping_cost": {"amount_total": 795, "amount_tax": 64,
+                                                     "shipping_rate": "shr_1"}})
+        self.assertEqual(paid["shipping_amount"], 795)
+        self.assertEqual(paid["shipping_tax"], 64)
+        self.assertEqual(paid["shipping_rate_id"], "shr_1")
+
+    def test_shipping_tax_is_kept_separate(self):
+        """The fee base excludes shipping while tax may include it -- two independent rules over the same
+        money, so they cannot share a field."""
+        paid = buyer_paid_shipping({"shipping_cost": {"amount_total": 795, "amount_tax": 64}})
+        self.assertNotEqual(paid["shipping_amount"], paid["shipping_tax"])
+
+    def test_a_digital_order_reports_NOTHING_not_zero(self):
+        """A stored `shipping_amount: 0` would claim shipping was offered and the buyer declined to pay."""
+        self.assertEqual(buyer_paid_shipping({"total_details": {"amount_discount": 0}}), {})
+        self.assertEqual(buyer_paid_shipping({}), {})
+        self.assertEqual(buyer_paid_shipping(None), {})
+
+    def test_free_shipping_DOES_report_zero(self):
+        """Stripe reported a shipping line of zero, which is a different fact from no shipping at all."""
+        self.assertEqual(buyer_paid_shipping({"shipping_cost": {"amount_total": 0}}),
+                         {"shipping_amount": 0})
+
+    def test_total_details_is_the_fallback(self):
+        """Same figure in a different place. The fallback, not the primary, because shipping_cost appears on
+        invoices as well as sessions."""
+        self.assertEqual(buyer_paid_shipping({"total_details": {"amount_shipping": 500}}),
+                         {"shipping_amount": 500})
+
+    def test_an_expanded_rate_yields_the_service_name(self):
+        """Which service the buyer bought matters operationally: one who paid for overnight must not be
+        posted second class."""
+        paid = buyer_paid_shipping({"shipping_cost": {"amount_total": 1200,
+                                                     "shipping_rate": {"id": "shr_2",
+                                                                       "display_name": "2-day"}}})
+        self.assertEqual(paid["shipping_service"], "2-day")
+        self.assertEqual(paid["shipping_rate_id"], "shr_2")
+
+    def test_the_carrier_cost_is_never_read_from_stripe(self):
+        """order.shipping_cost is what the CARRIER charged us. Nobody knows it until a label is bought, which
+        may be days later and may never happen -- so it is absent here, not zero."""
+        paid = buyer_paid_shipping({"shipping_cost": {"amount_total": 795}})
+        self.assertNotIn("shipping_cost", paid)
+
+    def test_decimals_survive(self):
+        from decimal import Decimal
+        self.assertEqual(buyer_paid_shipping({"shipping_cost": {"amount_total": Decimal("795")}}),
+                         {"shipping_amount": 795})
 
 
 if __name__ == "__main__":

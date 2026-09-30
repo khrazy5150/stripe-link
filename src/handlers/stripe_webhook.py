@@ -33,6 +33,7 @@ from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
 from stripe_link.domain.receipts import receipt_content, tip_renewal_content
+from stripe_link.domain.shipping_charges import buyer_paid_shipping
 from stripe_link.domain.shipping import (
     destination_address_from_invoice,
     destination_address_from_session,
@@ -2038,6 +2039,9 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         # invoice -- never from customer_address, which is BILLING and is frequently set when shipping is
         # not (see destination_address_from_invoice).
         **({"shipping_address": renewal_destination} if renewal_destination else {}),
+        # A subscription's shipping arrives on each INVOICE, not on a session -- same `shipping_cost` shape,
+        # so the same reader serves both paths.
+        **buyer_paid_shipping(invoice),
         # The SUBSCRIPTION's metadata, carried onto the order exactly as a checkout order carries the
         # session's. Without it a renewal lands unstamped: S1b puts `silo` on subscription_data.metadata
         # precisely so the renewals a subscription generates can be attributed to the silo that SOLD it,
@@ -2106,6 +2110,10 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         # and nothing knew one (plans/SHIPPING_PROVIDERS.md P0). Absent for digital orders, which is why
         # it is only written when there is one -- an empty address block on every download is noise.
         **({"shipping_address": shipping_address} if shipping_address else {}),
+        # What the buyer PAID for shipping. Not computed here: the buyer chose the service level, so the
+        # amount only exists once Stripe reports it (plans/SHIPPING_CHARGES.md). Absent for digital orders
+        # rather than zero -- a stored 0 would claim shipping was offered and declined.
+        **buyer_paid_shipping(session),
         "product": {
             "product_id": metadata.get("product_id", ""),
             "price_id": metadata.get("price_id", ""),

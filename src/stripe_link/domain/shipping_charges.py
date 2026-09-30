@@ -239,3 +239,52 @@ def stripe_shipping_options(offer: dict[str, Any] | None, *, currency: str = "us
             rate["delivery_estimate"] = estimate
         payload.append(entry)
     return payload
+
+
+def buyer_paid_shipping(source: dict[str, Any] | None) -> dict[str, Any]:
+    """What the buyer ACTUALLY paid for shipping, read off a Stripe Checkout Session or Invoice.
+
+    The other half of this module. `options_for` decides what to OFFER; this records what was CHOSEN -- and it
+    is a read rather than a calculation because **we cannot know the amount at session-creation time.** The
+    buyer picks the service level, so the figure only exists once Stripe reports it (plans/SHIPPING_CHARGES.md).
+
+    Both shapes carry the same `shipping_cost` object, which is why one function serves the checkout path and
+    the renewal path: a subscription's shipping arrives on each invoice, not on a session.
+
+    Returns only what is KNOWN. An absent key means "Stripe reported nothing", never zero -- a digital order
+    has no shipping and a stored `shipping_amount: 0` would claim the buyer was offered shipping and declined
+    to pay for it. `order.shipping_cost` (the carrier's charge) is deliberately NOT here: nobody knows it until
+    a label is bought, which may be days later and may never happen.
+    """
+    if not isinstance(source, dict):
+        return {}
+    block = source.get("shipping_cost")
+    block = block if isinstance(block, dict) else {}
+
+    amount = block.get("amount_total")
+    if amount is None:
+        # `total_details.amount_shipping` is the same figure in a different place. Read as a fallback rather
+        # than as the primary, because it is absent on invoices while `shipping_cost` appears on both.
+        totals = source.get("total_details")
+        if isinstance(totals, dict):
+            amount = totals.get("amount_shipping")
+    if amount is None:
+        return {}
+
+    out: dict[str, Any] = {"shipping_amount": _whole(amount)}
+    if block.get("amount_tax") is not None:
+        # Kept separate from the order's other tax because the fee base excludes shipping while tax may
+        # include it -- two independent rules over the same money (domain/fees.FEE_APPLIES_TO_SHIPPING).
+        out["shipping_tax"] = _whole(block.get("amount_tax"))
+    rate = block.get("shipping_rate")
+    if isinstance(rate, str) and rate.strip():
+        # WHICH service the buyer bought. Operationally this is the important one: a buyer who paid for
+        # overnight must not be posted second class. It is an id (`shr_...`) for an inline rate, so resolving
+        # it to a service level needs expansion at read time or a match against the offer's own options --
+        # noted rather than guessed at, because guessing the service level is how the wrong parcel ships.
+        out["shipping_rate_id"] = rate.strip()
+    elif isinstance(rate, dict) and rate.get("id"):
+        out["shipping_rate_id"] = str(rate["id"])
+        if rate.get("display_name"):
+            out["shipping_service"] = str(rate["display_name"])
+    return out

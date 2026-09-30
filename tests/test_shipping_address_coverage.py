@@ -1,4 +1,4 @@
-"""Does EVERY way of selling a physical thing record where to send it?
+"""Does EVERY way of selling a physical thing record where to send it -- and what shipping COST the buyer?
 
 Asked 2026-09-25 after three upsells were found with no destination. The answer was no, in two places, and
 the paths are not interchangeable -- each acquires its address differently, so each needs checking:
@@ -11,6 +11,11 @@ the paths are not interchangeable -- each acquires its address differently, so e
 The two that were broken: an upsell never recorded one, and a SUBSCRIPTION never even asked -- shipping
 address collection was restricted to `mode == "payment"`, so a monthly tub of creatine could not be
 shipped on any cycle, including the first.
+
+**The same question, asked of the AMOUNT (2026-09-30, plans/SHIPPING_CHARGES.md).** A destination with no
+record of what the buyer paid to reach it leaves the ledger unable to separate shipping revenue from product
+revenue, and a refund unable to know whether shipping comes back. `shipping_cost` rides the same two paths, so
+the same four cases apply.
 """
 import pathlib
 import unittest
@@ -80,6 +85,54 @@ CYCLE_INVOICE = {
     "customer_name": "Keith Harris", "customer_email": "k@example.com",
     "lines": {"data": []},
 }
+
+
+class WhatTheBuyerPaidForShipping(unittest.TestCase):
+    """The amount, on the same four paths as the address."""
+
+    def test_a_checkout_order_records_it(self):
+        session = {**SESSION, "shipping_cost": {"amount_total": 795, "amount_tax": 64,
+                                               "shipping_rate": "shr_ground"}}
+        record = order_record_from_session(session, "t1", 100, {})
+        self.assertEqual(record["shipping_amount"], 795)
+        self.assertEqual(record["shipping_tax"], 64)
+        self.assertEqual(record["shipping_rate_id"], "shr_ground")
+
+    def test_a_DIGITAL_order_records_no_amount_at_all(self):
+        """Absent, not zero. A stored 0 would claim shipping was offered and the buyer declined to pay."""
+        record = order_record_from_session(SESSION, "t1", 100, {})
+        self.assertNotIn("shipping_amount", record)
+
+    def test_FREE_shipping_records_a_zero(self):
+        """Stripe reported a shipping line of zero, which is a different fact from no shipping at all -- the
+        buyer WAS offered shipping and it cost them nothing."""
+        session = {**SESSION, "shipping_cost": {"amount_total": 0}}
+        self.assertEqual(order_record_from_session(session, "t1", 100, {})["shipping_amount"], 0)
+
+    def test_a_RENEWAL_records_it_from_the_invoice(self):
+        """A subscription has no session of its own, so a monthly box's postage arrives on each cycle's
+        invoice -- the same `shipping_cost` shape, which is why one reader serves both paths."""
+        invoice = {**CYCLE_INVOICE, "shipping_details": {"name": "Keith", "address": ADDRESS},
+                   "shipping_cost": {"amount_total": 500}}
+        self.assertEqual(order_record_from_invoice(invoice, "t1", 100, {})["shipping_amount"], 500)
+
+    def test_the_CARRIER_cost_is_never_taken_from_stripe(self):
+        """order.shipping_cost is what the carrier charged the tenant. Stripe does not know it, and nobody
+        does until a label is bought -- so it is absent rather than zero."""
+        session = {**SESSION, "shipping_cost": {"amount_total": 795}}
+        self.assertNotIn("shipping_cost", order_record_from_session(session, "t1", 100, {}))
+
+    def test_both_order_builders_use_the_SAME_reader(self):
+        """Two builders drifting apart is how the address bug happened in the first place.
+
+        Checks each function's OWN body rather than counting occurrences in the file, so adding a third order
+        path without the reader fails here instead of passing on a coincidental total.
+        """
+        source = (ROOT / "src" / "handlers" / "stripe_webhook.py").read_text(encoding="utf-8")
+        for builder in ("order_record_from_session", "order_record_from_invoice"):
+            start = source.index(f"def {builder}(")
+            body = source[start:source.index("\ndef ", start + 1)]
+            self.assertIn("buyer_paid_shipping(", body, f"{builder} does not record what shipping cost")
 
 
 class RenewalTests(unittest.TestCase):

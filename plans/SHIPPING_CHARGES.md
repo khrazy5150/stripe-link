@@ -343,9 +343,26 @@ The author's order, 2026-09-30, with Checkout deliberately LAST:
 2. **`domain/shipping_charges.py`** — ✅ **SHIPPED 2026-09-30** (35 tests). Pure: `options_for` (cheapest
    first, threshold applied to the baseline only, capped at 5), `mode_for`, `baseline_option`,
    `smart_pricing_conflict`, `stripe_shipping_options`. Weight bands when the box catalogue justifies them.
-3. **`order.shipping_amount`**, and `order.shipping_cost` alongside it — the author's *"(+ eventually
-   `shipping_cost`)"*. Both fields land now because adding the second one later means a migration and a
-   period where shipping margin cannot be computed for past orders; only its SOURCE is deferred.
+3. **`order.shipping_amount`** — ✅ **SHIPPED 2026-09-30**. `shipping_charges.buyer_paid_shipping()` reads it
+   off the Checkout Session or the cycle Invoice, wired into BOTH order builders in `stripe_webhook`. It is a
+   read, not a calculation: the buyer chooses the service level, so the figure only exists once Stripe reports
+   it.
+
+   Also captured: `shipping_tax` (kept separate, because the fee base excludes shipping while tax may include
+   it — two independent rules over the same money) and `shipping_rate_id` (WHICH service the buyer bought; a
+   buyer who paid for overnight must not be posted second class).
+
+   **Absent means absent.** A digital order records no `shipping_amount` at all, while genuinely free shipping
+   records `0` — Stripe reported a shipping line of zero, which is a different fact from no shipping. A stored
+   `0` on a download would claim shipping was offered and the buyer declined to pay for it.
+
+   **`order.shipping_cost` is deliberately NOT written here.** Stripe does not know what the carrier charged
+   the tenant, and nobody does until a label is bought — which may be days later and may never happen. It
+   arrives with SHIPPING_PROVIDERS. Nullable is honest; zero is a claim that postage was free.
+
+   `shipping_rate_id` is an opaque `shr_...` for an inline rate, so resolving it to a service level needs
+   expansion at read time or a match against the offer's own options. **Noted, not guessed** — guessing the
+   service level is how the wrong parcel ships.
 4. ✅ **The fee-base rule** (`fees.py`, 2026-09-30) and ✅ **the Smart Pricing invariant**
    (`shipping_charges.smart_pricing_conflict`, 2026-09-30). Still to wire: call the invariant from the offer
    save path once a cost profile exists to check against — SMART_PRICING is not built, so there is nothing to
