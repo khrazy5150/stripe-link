@@ -147,12 +147,49 @@ decision in two places, which is the same failure that produced this plan. **Two
     charged + no cost line   = the buyer pays it
     charged + cost line      = DOUBLE-COUNTED  <- forbidden
 
+### Why `charged` is structurally necessary, not just a tenant preference (author, 2026-09-30)
+
+> *"You need two (charged / free) because shipping could vary (ground, 2-day shipping, overnight) and those
+> costs can't be baked in."*
+
+This is a better argument than the one above and it settles the mode count on its own. **Shipping speed is a
+BUYER's choice**, and a price fixed before the buyer chooses cannot contain a cost that depends on what they
+pick. `baked` is not merely redundant with `free` — for a variable service level it is impossible.
+
+Four consequences, and they reshape the rest of this plan:
+
+1. **`charged` shipping is a LIST of priced options, not an amount.** Ground / 2-day / overnight is the
+   ordinary case. Stripe hosted Checkout accepts up to **5** `shipping_options`, which fits with room.
+
+2. **`order.shipping_amount` is not something we compute at session creation.** We OFFER options; the buyer
+   picks one; Stripe reports the choice on the completed session (`shipping_cost.amount_total`). So it is
+   captured in `handlers/stripe_webhook` alongside `shipping_address`, which is already read from the session
+   there (`stripe_webhook.py:2108`) — not calculated in `handlers/checkout`. Any design that has checkout
+   deciding the amount is wrong for the variable case.
+
+3. **Reuse the service vocabulary that already exists.** `domain/rate_policy.py` already models service levels
+   as `{carrier, service_token, label}` and has `common_services()`; `ShippingConfig.rate_options` already has
+   `default_service_level`. The buyer-facing option should carry the same `service_token`, so the option a
+   buyer chose can later be tied to the rate the tenant actually buys. Inventing "ground"/"overnight" strings
+   here would be a second vocabulary for the same thing.
+
+4. **`free` and `charged` can coexist on one offer, and the invariant must handle it.** "Free ground, paid
+   overnight" is a normal offer: the cheapest option is £0 and the upgrades are priced. So the invariant does
+   not apply to the mode as a whole — it applies to the **baseline (cheapest) option**:
+
+   > A tenant may carry the BASELINE option's cost in their Smart Pricing cost profile when that option is
+   > free to the buyer. The priced upgrades are buyer-paid and must NEVER appear as a cost line — that is the
+   > double-count. `mode` is then a summary of the options (all zero ⇒ `free`), not an independent field to
+   > keep in step.
+
 **The invariant, stated once** (resolving the SMART_PRICING interaction that was "Open" below):
 
-> A given offer may charge the buyer for outbound shipping **or** carry outbound shipping in its Smart
-> Pricing cost profile. Never both. `mode = charged` ⇒ Smart Pricing MUST NOT include buyer-paid outbound
-> shipping; `mode = free` ⇒ Smart Pricing MAY include it, and if it does not, the tenant is knowingly
-> absorbing the cost.
+> For any offer, the BASELINE (cheapest) shipping option may be carried in the Smart Pricing cost profile
+> **only when it is free to the buyer**. Every option the buyer pays for is buyer-paid revenue and must NEVER
+> appear as a cost line. Never both for the same option — that is the double-count.
+>
+> So: a £0 baseline ⇒ Smart Pricing MAY include that cost (and if it does not, the tenant is knowingly
+> absorbing it). A priced baseline ⇒ Smart Pricing MUST NOT include outbound shipping at all.
 
 This is a validator, not a comment — the forbidden row pays the tenant twice for the same postage and no
 tenant would notice from the numbers. `shipping_cost` stays truthful in every row: the carrier charges what
@@ -164,14 +201,20 @@ their margin at tax time.
 
 The author's order, 2026-09-30, with Checkout deliberately LAST:
 
-1. **`offer.shipping.mode`** (`charged` | `free`) — schema and validators first, so nothing downstream has to
-   guess.
-2. **`domain/shipping_charges.py`** — pure: given the config, the cart and the mode, return the amount. Flat
-   and threshold first; weight bands when the box catalogue justifies them.
+1. **`offer.shipping`** — ✅ **SHIPPED 2026-09-30**. `options[]` (max 5, Stripe's cap), each with a label, a
+   buyer-paid `amount`, and the `service_token` vocabulary `domain/rate_policy.py` already uses. `mode` is
+   accepted but DERIVED; a stored mode contradicting its own options is refused, because a stored summary of
+   other fields is a second place for the same fact to be wrong.
+2. **`domain/shipping_charges.py`** — ✅ **SHIPPED 2026-09-30** (35 tests). Pure: `options_for` (cheapest
+   first, threshold applied to the baseline only, capped at 5), `mode_for`, `baseline_option`,
+   `smart_pricing_conflict`, `stripe_shipping_options`. Weight bands when the box catalogue justifies them.
 3. **`order.shipping_amount`**, and `order.shipping_cost` alongside it — the author's *"(+ eventually
    `shipping_cost`)"*. Both fields land now because adding the second one later means a migration and a
    period where shipping margin cannot be computed for past orders; only its SOURCE is deferred.
-4. **The fee-base rule** and **the Smart Pricing invariant** (both above), in `fees.py` and as a validator.
+4. ✅ **The fee-base rule** (`fees.py`, 2026-09-30) and ✅ **the Smart Pricing invariant**
+   (`shipping_charges.smart_pricing_conflict`, 2026-09-30). Still to wire: call the invariant from the offer
+   save path once a cost profile exists to check against — SMART_PRICING is not built, so there is nothing to
+   conflict with yet and the check has no caller.
    *"Those two decisions determine the economics of the entire shipping primitive, so they're much cheaper to
    settle now than after Stripe, ledger, refunds, and pricing have all been built around an assumption."*
 5. **Fee, tax, refund and ledger** read `shipping_amount` rather than assuming zero; P&L and analytics read

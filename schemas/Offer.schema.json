@@ -655,6 +655,41 @@
         }
       }
     },
+    "shipping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What outbound shipping COSTS THE BUYER for this offer (plans/SHIPPING_CHARGES.md). Distinct from ShippingConfig, which is about the rate the tenant BUYS from a carrier, and from InventoryLot.inbound_shipping, which is the cost of acquiring stock. Absent means no shipping is charged and none is offered.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["charged", "free"],
+          "description": "A SUMMARY of the options: `free` when every option costs the buyer nothing, `charged` when any is priced. There is deliberately no `baked` -- shipping speed is a buyer's choice, and a price fixed before the buyer chooses cannot contain a cost that depends on what they pick."
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 5,
+          "description": "The service levels offered to the buyer, cheapest first. Capped at 5 because Stripe hosted Checkout accepts no more than 5 shipping_options. A single zero-amount option is ordinary free shipping; a zero-amount option beside priced ones is 'free ground, paid overnight'.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "amount"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What the buyer reads, e.g. 'Ground (5-7 days)'." },
+              "amount": { "type": "integer", "minimum": 0, "description": "Cents the BUYER pays. 0 is free to the buyer and says nothing about what it costs the tenant." },
+              "service_token": { "type": "string", "description": "The carrier service this option corresponds to, in the SAME vocabulary as domain/rate_policy.py ({carrier, service_token, label}) and ShippingConfig.rate_options.default_service_level -- so the option a buyer chose can be tied to the rate the tenant buys. A second vocabulary for the same thing is how drift starts." },
+              "carrier": { "type": "string" },
+              "transit_days_min": { "type": ["integer", "null"], "minimum": 0 },
+              "transit_days_max": { "type": ["integer", "null"], "minimum": 0 }
+            }
+          }
+        },
+        "free_above_amount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Order value (cents) at or above which the BASELINE option becomes free. Mirrors ShippingConfig.rate_options.free_shipping_threshold, which nothing reads today. Priced upgrades are unaffected -- a threshold that made overnight free would give away the premium the buyer was willing to pay for."
+        }
+      }
+    },
     "checkout": {
       "type": "object",
       "additionalProperties": false,

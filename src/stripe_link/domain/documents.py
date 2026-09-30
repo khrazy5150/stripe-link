@@ -1143,6 +1143,65 @@ def validate_purchase_opportunities(document: dict[str, Any], opportunities: lis
         _validate_offer_item(document, opp)
 
 
+def validate_offer_shipping(shipping: Any) -> None:
+    """What outbound shipping costs the BUYER (plans/SHIPPING_CHARGES.md).
+
+    `mode` is accepted but not required, because it is DERIVED from the options
+    (`domain/shipping_charges.mode_for`). A stored summary of other fields is a second place for the same fact
+    to be wrong, which is the failure this plan's sibling REFUND_POLICY.md exists to fix -- so a stored `mode`
+    that contradicts its own options is refused rather than quietly believed.
+    """
+    if shipping is None:
+        return
+    from stripe_link.domain.shipping_charges import CHARGED, FREE, MAX_OPTIONS, mode_for
+
+    if not isinstance(shipping, dict):
+        raise DocumentValidationError("Offer shipping must be an object.")
+    if shipping.get("mode") is not None:
+        require_enum(shipping, "mode", {CHARGED, FREE}, "Offer shipping.mode")
+    optional_non_negative_int(shipping, "free_above_amount", "Offer shipping.free_above_amount")
+
+    options = shipping.get("options")
+    if options is not None:
+        if not isinstance(options, list):
+            raise DocumentValidationError("Offer shipping.options must be an array.")
+        # Stripe rejects a session carrying more than 5 shipping_options, and a refused session is a lost
+        # sale. Caught here so a tenant is told at save time rather than a buyer at the pay button.
+        if len(options) > MAX_OPTIONS:
+            raise DocumentValidationError(
+                f"Offer shipping.options cannot exceed {MAX_OPTIONS}; Stripe Checkout accepts no more.")
+        labels = set()
+        for index, option in enumerate(options):
+            if not isinstance(option, dict):
+                raise DocumentValidationError(f"Offer shipping.options[{index}] must be an object.")
+            label = require_string(option, "label", f"Offer shipping.options[{index}].label")
+            if label in labels:
+                # Two identically named options are indistinguishable on the checkout page, so a buyer
+                # choosing between them is choosing at random.
+                raise DocumentValidationError(
+                    f"Offer shipping.options[{index}] repeats the label '{label}'.")
+            labels.add(label)
+            if option.get("amount") is None:
+                raise DocumentValidationError(f"Offer shipping.options[{index}].amount is required.")
+            optional_non_negative_int(option, "amount", f"Offer shipping.options[{index}].amount")
+            optional_string(option, "service_token", f"Offer shipping.options[{index}].service_token")
+            optional_string(option, "carrier", f"Offer shipping.options[{index}].carrier")
+            for field in ("transit_days_min", "transit_days_max"):
+                optional_non_negative_int(option, field, f"Offer shipping.options[{index}].{field}")
+            low, high = option.get("transit_days_min"), option.get("transit_days_max")
+            if low is not None and high is not None and int(high) < int(low):
+                raise DocumentValidationError(
+                    f"Offer shipping.options[{index}] has transit_days_max below transit_days_min.")
+
+    stored_mode = str(shipping.get("mode") or "")
+    if stored_mode:
+        derived = mode_for({"shipping": shipping})
+        if stored_mode != derived:
+            raise DocumentValidationError(
+                f"Offer shipping.mode says '{stored_mode}' but its options are '{derived}'. "
+                f"mode is a summary of the options, not an independent setting.")
+
+
 def validate_offer_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "offer", "offer_id")
     ui_only_fields = sorted(field for field in OFFER_UI_ONLY_FIELDS if field in document)
@@ -1152,6 +1211,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     if document.get("status") is not None:
         require_enum(document, "status", {"draft", "active", "archived"}, "Offer status")
     require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Offer product_intent")
+    validate_offer_shipping(document.get("shipping"))
     # Denormalised from the primary product so the composer can tell the four lead shapes apart --
     # compose_page() gets the offer, never its products (plans/LEAD_GEN_PAGES.md §7).
     if document.get("lead_capture_action") is not None:
