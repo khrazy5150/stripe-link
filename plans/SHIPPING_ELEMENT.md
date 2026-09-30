@@ -581,9 +581,34 @@ override the default — and holds **no zone editor, no carrier config, no secon
 
    That also means the multi-parcel blocker (phase 7) gates more than the plan said: not only bundles under
    live rating, but any by-box cart that outgrows one box.
-5. **The Shipping Element for tiers 1–2** (offer C/D): the page component, a country selector, and the
-   omit-Stripe's-address-collection change. This is the buyer-visible feature, reachable without a public rate
-   endpoint.
+5. **A declared destination** — ✅ **BACKEND SHIPPED 2026-09-30** (7 tests). `/checkout` accepts
+   `ship_to_country`, and declaring one lifts the unanimity restriction: there is only one zone to satisfy, so
+   zones that disagree stop forcing us to charge nothing.
+
+       no declaration   US $7.00 / CA $12.99  ->  charges nothing
+       ship_to_country=US                     ->  charges $7.00,  allowed_countries = [US]
+       ship_to_country=CA                     ->  charges $12.99, allowed_countries = [CA]
+
+   **The address is still collected — I had this wrong in the design above.** The plan said to "omit
+   `shipping_address_collection` entirely" so Stripe could not change the destination. But a parcel needs a
+   STREET, and the country alone is not an address; omitting collection would leave nothing to ship to. The
+   correct move is to **narrow `allowed_countries` to the declared country**: Stripe still collects the
+   address, and the only part of it that can move a tier 1 or tier 2 price — the country — is fixed. Within one
+   country those tiers are destination-independent by definition, so the rest of the address cannot change the
+   number.
+
+   A country the tenant does not ship to is ignored rather than honoured: a country typed into a URL is not a
+   zone.
+
+   **PAGE COMPONENT STILL TO BUILD**, and its scope is narrower than the mock in this plan. A published page
+   is a static S3 artifact and this plan forbids rates inside it, so the element can collect the country and
+   hand it to checkout, but it **cannot display prices until phase 6** gives it something to fetch. So:
+
+       phase 5 element   "Where should we ship?" [ Country ▾ ]   -> price appears AT Stripe Checkout
+       phase 6 element   the same, plus live prices on the page
+
+   That is a real intermediate step rather than the finished feature: it is what makes a multi-country tenant
+   chargeable at all, and it needs no public endpoint.
 6. **`POST /shipping/quote` (tier 3)**, public, cached, throttled, single-parcel only. Returns services and
    prices; never accepts an amount. Only needed for parcels no flat-rate box fits.
 7. **Multi-parcel quoting** — the blocker for bundles, and tier 3 only: a multi-box order cannot be flat-rated

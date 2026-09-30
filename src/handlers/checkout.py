@@ -394,6 +394,10 @@ def handler(
             discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
             shipping_config=_tenant_shipping_config(tenant_id) if collect_shipping_for(
                 offer, products_by_id) else None,
+            # Where the BUYER said they want it sent, if a shipping element on the page asked. Declaring a
+            # country lifts the unanimity restriction: we can price that one zone correctly instead of needing
+            # every allowed destination to agree (plans/SHIPPING_ELEMENT.md phase 5).
+            ship_to_country=str(params.get("ship_to_country") or "").strip().upper()[:2],
         )
         stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
@@ -664,6 +668,7 @@ def build_checkout_payload(
     grants_repo=None,
     discount_materializer=None,
     shipping_config=None,
+    ship_to_country="",
 ):
     checkout = offer.get("checkout") or {}
     # The session's mode follows the lines it actually carries, in BOTH directions.
@@ -838,6 +843,14 @@ def build_checkout_payload(
         # would take checkout down, and a silent behaviour change for tenants who configured nothing is not
         # an improvement.
         destinations = zone_allowed_countries(shipping_config or {}) or ["US", "CA"]
+        # A DECLARED destination narrows the list to itself. The address is still collected -- a parcel needs a
+        # street -- but the buyer cannot switch COUNTRY at the pay button, which is what would otherwise
+        # invalidate the price we quoted them. Within one country, tiers 1 and 2 are destination-independent,
+        # so the rest of the address cannot move the number.
+        #
+        # Ignored unless the tenant actually ships there: a country typed into a URL is not a zone.
+        if ship_to_country and ship_to_country in destinations:
+            destinations = [ship_to_country]
         for index, country in enumerate(destinations):
             payload[f"shipping_address_collection[allowed_countries][{index}]"] = country
 
@@ -870,6 +883,9 @@ def build_checkout_payload(
             # The cart itself, so a by-box zone can be priced from the boxes it actually packs into.
             items=resolved.get("items") or [],
             products_by_id=products_by_id,
+            # One destination when the buyer declared one, so zones that disagree no longer force us to
+            # charge nothing -- there is only one zone to satisfy.
+            countries=destinations,
         )
         if decision["reason"]:
             # Said out loud rather than silently shipping free: a tenant whose zones are not being charged

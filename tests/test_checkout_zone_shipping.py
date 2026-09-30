@@ -33,7 +33,7 @@ PRODUCTS = {"p1": {"product_id": "p1", "name": "Shirt", "product_type": "physica
                    "prices": [{"price_id": "pr1", "unit_amount": 2000, "currency": "usd"}]}}
 
 
-def payload(shipping_config=None, offer=None, product="p1"):
+def payload(shipping_config=None, offer=None, product="p1", ship_to_country=""):
     return build_checkout_payload(
         tenant_id="t1",
         offer=offer or {"offer_id": "o1", "stripe_mode": "test", "checkout": {"mode": "payment"}},
@@ -41,7 +41,8 @@ def payload(shipping_config=None, offer=None, product="p1"):
         resolved={"items": [{"product_id": product, "price_id": "pr1", "quantity": 1,
                              "unit_amount": 2000, "currency": "usd"}],
                   "subtotal": 2000, "currency": "usd"},
-        success_url="https://x/s", cancel_url="https://x/c", shipping_config=shipping_config)
+        success_url="https://x/s", cancel_url="https://x/c", shipping_config=shipping_config,
+        ship_to_country=ship_to_country)
 
 
 def countries(built):
@@ -118,6 +119,50 @@ class AllowedCountriesComeFromTheZones(unittest.TestCase):
         decision = checkout_shipping({}, {})
         self.assertEqual(decision["options"], [])
         self.assertIn("no shipping zones", decision["reason"])
+
+
+class ADeclaredDestinationLiftsTheUnanimityLimit(unittest.TestCase):
+    """plans/SHIPPING_ELEMENT.md phase 5. Once the buyer says WHERE, there is only one zone to satisfy — so
+    zones that disagree stop forcing us to charge nothing.
+
+    The address is still collected by Stripe (a parcel needs a street). What the declaration removes is the
+    buyer's ability to change COUNTRY at the pay button, which is the only part of the address that can move
+    a tier 1 or tier 2 price.
+    """
+
+    def test_without_a_declaration_disagreeing_zones_charge_nothing(self):
+        self.assertEqual(amounts(payload(MIXED)), [])
+
+    def test_declaring_US_charges_the_US_zone(self):
+        built = payload(MIXED, ship_to_country="US")
+        self.assertEqual(amounts(built), ["700"])
+        self.assertEqual(countries(built), ["US"])
+
+    def test_declaring_CA_charges_the_CA_zone(self):
+        built = payload(MIXED, ship_to_country="CA")
+        self.assertEqual(amounts(built), ["1299"])
+        self.assertEqual(countries(built), ["CA"])
+
+    def test_the_country_is_NARROWED_so_it_cannot_change_at_the_pay_button(self):
+        """A buyer quoted $12.99 for Canada must not be able to switch to the US and pay Canadian postage --
+        or the reverse, which costs the tenant."""
+        self.assertEqual(countries(payload(MIXED, ship_to_country="CA")), ["CA"])
+
+    def test_a_country_the_tenant_does_not_ship_to_is_IGNORED(self):
+        """A country typed into a URL is not a zone. It falls back to the undeclared behaviour rather than
+        inventing a destination."""
+        built = payload(MIXED, ship_to_country="GB")
+        self.assertEqual(countries(built), ["US", "CA"])
+        self.assertEqual(amounts(built), [])
+
+    def test_lowercase_and_overlong_input_is_normalised(self):
+        for given in ("us", " us ", "usa"):
+            self.assertEqual(countries(payload(MIXED, ship_to_country=given.strip().upper()[:2])), ["US"])
+
+    def test_a_declaration_does_not_override_an_offer_that_does_not_ship(self):
+        offer = {"offer_id": "o1", "stripe_mode": "test", "checkout": {"mode": "payment"},
+                 "shipping": {"eligibility": "none"}}
+        self.assertEqual(amounts(payload(MIXED, offer, ship_to_country="US")), [])
 
 
 class OnlyReadTheConfigWhenItCanMatter(unittest.TestCase):
