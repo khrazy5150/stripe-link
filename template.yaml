@@ -648,6 +648,10 @@ Resources:
         # Records category usage on save (recording a distinct tenant's use of a category).
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductCategoriesTable
+        # The tenant's refund-policy defaults live on TenantConfig, and a product's policy is resolved
+        # SERVER-SIDE on save (plans/REFUND_POLICY.md step 5). Read-only: this function never writes config.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
         - Statement:
             Effect: Allow
             Action: lambda:InvokeFunction
@@ -1990,6 +1994,10 @@ Resources:
         # Read the allowance and SPEND against it -- the counter is written on every generation.
         - DynamoDBCrudPolicy:
             TableName: !Ref AiUsageTable
+        # An AI-generated product gets its refund policy from the tenant's TenantConfig defaults, resolved
+        # by the same domain rule as the dashboard save path (plans/REFUND_POLICY.md step 5). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:

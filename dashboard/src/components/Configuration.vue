@@ -343,6 +343,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import { apiRequest, getApiBase, getStripeMode, getTenantId } from "../api/client";
+import { useRefundPolicyStore } from "../stores/refundPolicy";
 import PhoneInput from "./PhoneInput.vue";
 
 const loading = ref(false);
@@ -360,12 +361,13 @@ const CONFIG_THANK_YOU_CARDS = [
   { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
   { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
 ];
-// Vocabulary and generated sentences come from the SERVER (/config?refund_options=1). Composing the
-// sentence here in JavaScript is precisely the bug this screen exists to fix: a browser file became the
-// author of a commercial promise (plans/REFUND_POLICY.md).
-const refundOptions = ref({});
-const refundResolved = ref({});
-const refundClasses = computed(() => refundOptions.value.classes || ["physical", "digital", "subscription"]);
+// Vocabulary and generated sentences come from the SERVER via one shared store, because the product form
+// needs the same tables and the two must not disagree. Composing the sentence in JavaScript is precisely the
+// bug this screen exists to fix (plans/REFUND_POLICY.md).
+const refundStore = useRefundPolicyStore();
+const refundOptions = computed(() => refundStore.options);
+const refundResolved = computed(() => refundStore.resolved);
+const refundClasses = computed(() => refundStore.classes);
 
 function blankRefundPolicy() {
   return { enabled: false, refund_window: "", condition: "", return_method: "", full_policy: "", keep_it_below: "" };
@@ -374,24 +376,15 @@ function blankRefundPolicy() {
 function refundPreview(cls) {
   const entry = form.refund_policies[cls];
   if (!entry.enabled) {
-    const resolved = refundResolved.value[cls] || {};
-    return { short_label: resolved.short_label || "", full_policy: resolved.full_policy || "" };
+    const effective = refundStore.effective(cls);
+    return { short_label: effective.short_label || "", full_policy: effective.full_policy || "" };
   }
-  if (String(entry.full_policy || "").trim()) {
-    const key = `${cls}|${entry.refund_window}|${entry.condition}`;
-    const generated = (refundOptions.value.previews || {})[key] || {};
-    return { short_label: generated.short_label || "", full_policy: entry.full_policy.trim() };
-  }
-  const key = `${cls}|${entry.refund_window}|${entry.condition}`;
-  return (refundOptions.value.previews || {})[key] || { short_label: "", full_policy: "" };
+  return refundStore.preview(cls, entry);
 }
 
 function refundSourceNote(cls) {
   if (form.refund_policies[cls].enabled) return "Your default. Products can still override it individually.";
-  const source = (refundResolved.value[cls] || {}).source;
-  return source === "tenant_default"
-    ? "Saved as your default."
-    : "The platform's default — nobody chose this. Switch on “Set my own” to decide it yourself.";
+  return refundStore.sourceNote(cls);
 }
 
 const form = reactive(defaultForm());
@@ -557,23 +550,15 @@ async function load() {
   error.value = "";
   message.value = "";
   try {
-    const body = await apiRequest("/config", { params: { refund_options: "1" } });
+    const [body] = await Promise.all([
+      apiRequest("/config"),
+      refundStore.load({ force: true }),
+    ]);
     rawConfig.value = body.config || {};
-    refundOptions.value = body.refund_policy_options || {};
-    refundResolved.value = body.refund_policies || {};
     applyConfig(rawConfig.value);
   } catch (err) {
     if (/not found/i.test(err.message)) {
       rawConfig.value = {};
-      // A tenant with no saved config still needs the pickers populated, so the vocabulary is fetched on
-      // its own rather than lost with the 404.
-      try {
-        const options = await apiRequest("/config", { params: { refund_options: "1" }, method: "GET" });
-        refundOptions.value = options.refund_policy_options || {};
-        refundResolved.value = options.refund_policies || {};
-      } catch (ignored) {
-        refundOptions.value = {};
-      }
       applyConfig({});
       message.value = "No configuration saved yet. Fill in the fields and save.";
     } else {
@@ -723,6 +708,8 @@ async function save() {
     }
     const payload = buildPayload();
     const body = await apiRequest("/config", { method: "PUT", body: payload });
+    // The resolved defaults just changed, so the "platform's default" notes and previews are now stale.
+    await refundStore.load({ force: true });
     rawConfig.value = body.config || payload;
     applyConfig(rawConfig.value);
     message.value = "Configuration saved.";

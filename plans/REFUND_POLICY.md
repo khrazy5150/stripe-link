@@ -104,17 +104,48 @@ first two were the same thing anyway.
      to compose one. The 20KB payload is opt-in per request so no other caller of `/config` pays for it.
    - **The class labels name the mapping.** "Digital goods & services" makes it visible that services resolve
      under `digital`; a tenant selling services would otherwise hunt for a block that does not exist.
-4. **Product override UI** — render the inputs the wizard's picker already implies. They exist as form state
-   with no fields; that is why "Override for this product" does nothing today.
+4. **Product override UI** — ✅ **SHIPPED 2026-09-30**. The picker's three options became two: the old
+   "Use user preference default" and "Use tenant default" named the same thing, and the preference they
+   referred to was never read by anything. Choosing "Override for this product" now reveals the three
+   structured pickers (and a wording box for a custom window), with the server-generated sentence previewed
+   below. Switching to override seeds from what the product already promises rather than from blanks — a
+   tenant narrowing a window should see the current one first.
+
+   A legacy product whose policy is stamped `user_preference_default` shows as **"use my default"**, not as
+   an override. Showing it as an override would freeze the literal: that product would keep promising 30 days
+   whatever the tenant later set.
 5. **Server-side resolution on write.** The policy must be resolved by a HANDLER, not by the browser. Today
    the dashboard decides what a product promises, which is how a literal ended up on live pages.
 
-   **Partly done:** `/config` PUT already generates the tenant defaults' copy server-side
-   (`handlers/config._generate_refund_copy`), so the sentence a buyer reads is composed in one place from one
-   template. The PRODUCT path is untouched — `stores/products.js:550` still writes the literal on every new
-   product, so **the bug is not yet fixed end to end.** A tenant can now set a default; new products still do
-   not consult it. That is this step plus step 6.
-6. **Retire the JS literal and the UserPreferences slot.**
+   ✅ **SHIPPED 2026-09-30.** `domain/refund_policy.apply_to_product` is the rule — pure, no I/O — and both
+   write paths apply it:
+
+   - `handlers/products.resolve_refund_policy` reads TenantConfig and calls it before validation.
+   - `handlers/ai_generate` calls it for AI-created products. **This was a real hole:**
+     `ai_provision.product_document` set no policy at all, so an AI-generated product saved with none — its
+     page showed no refund section and `chosen_badges` had no guarantee to read. A second write path quietly
+     disagreeing with the first is how the original literal survived so long.
+
+   **Anything the client sends that is not a deliberate override is DISCARDED.** That is the property that
+   actually fixes the bug: an old cached dashboard bundle still posting the literal gets the tenant's real
+   default written instead. Fixing the browser is not enough, because a browser is not a place you can
+   enforce anything.
+
+   An unreadable TenantConfig falls back to the platform default rather than to no policy — an unreadable
+   settings table must not decide what a storefront promises, and must not block a save or fail a generation
+   either.
+6. **Retire the JS literal and the UserPreferences slot.** ✅ **SHIPPED 2026-09-30.**
+
+   `stores/products.js` no longer contains a policy: `refundPolicy(form)` returns the override intent or
+   `null`, and the field is omitted entirely when there is no override. The product form's defaults no longer
+   carry `"30_days"`, `"30-day money-back"` or the sentence.
+
+   `UserPreferences.authoring_defaults.refund_policies` is gone from the schema, the validator and the
+   fixture. **Both user-preferences tables were verified EMPTY — zero rows in dev AND prod.** So the
+   provenance stamped on 29 live products pointed at a table that has never held a single record. That is the
+   strongest form of the original finding: not merely "nothing read it", but "there was never anything there
+   to read". `authoring_defaults.return_address` and `refund_request_handling` stay — they belong to the
+   REQUEST flow, per Open below.
 
 ## What this does NOT change
 

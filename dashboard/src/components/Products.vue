@@ -462,11 +462,44 @@
             <h3>Refund Policy</h3>
             <label>Policy Source
               <select v-model="form.refund_source">
-                <option value="user_preference_default">Use user preference default</option>
-                <option value="tenant_default">Use tenant default</option>
+                <!-- Two options, not three. "user preference default" and "tenant default" named the same
+                     thing, and the preference they referred to was never read by anything
+                     (plans/REFUND_POLICY.md). -->
+                <option value="tenant_default">Use my default for {{ refundClassLabel }}</option>
                 <option value="product_override">Override for this product</option>
               </select>
             </label>
+
+            <template v-if="form.refund_source === 'product_override'">
+              <div class="refund-override-grid">
+                <label>Refund window
+                  <select v-model="form.refund_window">
+                    <option v-for="w in refundStore.windows" :key="w.value" :value="w.value">{{ w.label }}</option>
+                  </select>
+                </label>
+                <label>Condition required
+                  <select v-model="form.refund_condition">
+                    <option v-for="c in refundStore.conditions" :key="c.value" :value="c.value">{{ c.label }}</option>
+                  </select>
+                </label>
+                <label>Return handling
+                  <select v-model="form.refund_return_method">
+                    <option v-for="m in refundStore.returnMethods" :key="m.value" :value="m.value">{{ m.label }}</option>
+                  </select>
+                </label>
+              </div>
+              <label v-if="form.refund_window === 'custom'">Your policy wording <em>(required)</em>
+                <textarea v-model="form.refund_full_policy" rows="3"
+                          placeholder="Describe your refund terms in full. This is what buyers read."></textarea>
+              </label>
+            </template>
+
+            <div class="refund-preview">
+              <span class="refund-preview-badge">{{ refundPreview.short_label || "No policy" }}</span>
+              <p v-if="refundPreview.full_policy">{{ refundPreview.full_policy }}</p>
+              <p v-else class="field-note">Write your wording above — a custom window has nothing to show without it.</p>
+              <small class="field-note">{{ refundSourceNote }}</small>
+            </div>
           </section>
 
           <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
@@ -587,6 +620,7 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ProductCategoryField from "./products/ProductCategoryField.vue";
 import ServiceWizard from "./services/ServiceWizard.vue";
 import ProductIdentifiersField from "./products/ProductIdentifiersField.vue";
+import { useRefundPolicyStore } from "../stores/refundPolicy";
 import ProductImagesField from "./products/ProductImagesField.vue";
 import ProductTagsField from "./products/ProductTagsField.vue";
 import ProductVariantsField from "./products/ProductVariantsField.vue";
@@ -643,6 +677,9 @@ const navigateTo = inject("navigateTo", null);
 // to search through. Read once and cleared, so returning later does not reopen it.
 const takeViewIntent = inject("takeViewIntent", null);
 onMounted(async () => {
+  // The vocabulary and the tenant's resolved defaults, so the pickers and the preview have something to
+  // show. Not awaited with the rest: a failure here must not stop the product list from loading.
+  refundStore.load();
   const intent = takeViewIntent?.();
   if (!intent?.edit) return;
   if (!store.loaded) await store.load();
@@ -819,6 +856,62 @@ const leadActions = [
 const defaultLeadAction = { ...leadActions[0], target: "", platform: "other" };
 const draftLeadAction = ref({ ...defaultLeadAction });
 const form = ref(defaultProductForm());
+
+// Refund policy, declared AFTER `form` on purpose: `watch` evaluates its getter immediately to establish the
+// dependency, and a const referenced before its line throws a TDZ error -- the same hazard the thank-you
+// cards comment in Configuration.vue records.
+const refundStore = useRefundPolicyStore();
+
+function isRefundOverride(policy) {
+  return (policy || {}).source === "product_override";
+}
+
+/**
+ * Which of the three policy classes this form describes.
+ *
+ * Mirrors `domain/refund_policy.product_class`, and the server's answer is the authoritative one -- it
+ * regenerates the stored policy on save. This copy exists only to pick which default to SHOW and which
+ * sentence basis to preview, so a disagreement misleads the preview for a moment and never the stored data.
+ */
+const refundClass = computed(() => {
+  const prices = form.value.prices || [];
+  const recurring = prices.filter((price) => price.pricing_model === "recurring" || price.recurring_interval);
+  // Subscription only when it is the ONLY way to buy: a product sold both ways makes two different promises,
+  // and the one-time buyers are not renewing anything.
+  if (prices.length && recurring.length === prices.length) return "subscription";
+  return form.value.product_type === "physical" ? "physical" : "digital";
+});
+
+const refundClassLabel = computed(() => refundStore.classLabels[refundClass.value] || refundClass.value);
+
+const refundPreview = computed(() => {
+  if (form.value.refund_source !== "product_override") {
+    const effective = refundStore.effective(refundClass.value);
+    return { short_label: effective.short_label || "", full_policy: effective.full_policy || "" };
+  }
+  return refundStore.preview(refundClass.value, {
+    refund_window: form.value.refund_window,
+    condition: form.value.refund_condition,
+    full_policy: form.value.refund_full_policy,
+  });
+});
+
+const refundSourceNote = computed(() => {
+  if (form.value.refund_source === "product_override") {
+    return "Only this product. Your default still applies to everything else.";
+  }
+  return refundStore.sourceNote(refundClass.value);
+});
+
+// Switching to "Override" starts from what the product already promises, not from blanks -- a tenant
+// narrowing a window should see the current one first.
+watch(() => form.value.refund_source, (source) => {
+  if (source !== "product_override") return;
+  const effective = refundStore.effective(refundClass.value);
+  if (!form.value.refund_window) form.value.refund_window = effective.refund_window || "";
+  if (!form.value.refund_condition) form.value.refund_condition = effective.condition || "";
+  if (!form.value.refund_return_method) form.value.refund_return_method = effective.return_method || "";
+});
 const hydratingForm = ref(false);
 
 const statusMessage = computed(() => {
@@ -895,12 +988,15 @@ function defaultProductForm() {
     tags: [],
     prices: [defaultPriceForm()],
     default_price_index: 0,
-    refund_source: "user_preference_default",
-    refund_window: "30_days",
-    refund_condition: "unused",
-    refund_return_method: "no_return_customer_keeps",
-    refund_short_label: "30-day money-back",
-    refund_full_policy: "Refunds are available within 30 days of delivery in unused condition.",
+    // No policy literals here. These were "30_days"/"unused"/"30-day money-back" and the full sentence,
+    // which is how a browser file came to be the author of every product's refund promise
+    // (plans/REFUND_POLICY.md). Blank means "the tenant's default applies", resolved on the SERVER; the
+    // override pickers seed themselves from that default when the tenant switches to one.
+    refund_source: "tenant_default",
+    refund_window: "",
+    refund_condition: "",
+    refund_return_method: "",
+    refund_full_policy: "",
     images: "",
     uploaded_images: [],
     image_assets: {},
@@ -1013,12 +1109,14 @@ function productFormFromDocument(product) {
     tags: customTagsFromProduct(product),
     prices,
     default_price_index: defaultPriceIndex >= 0 ? defaultPriceIndex : 0,
-    refund_source: refundPolicy.source || base.refund_source,
-    refund_window: refundPolicy.refund_window || base.refund_window,
-    refund_condition: refundPolicy.condition || base.refund_condition,
-    refund_return_method: refundPolicy.return_method || base.refund_return_method,
-    refund_short_label: refundPolicy.short_label || base.refund_short_label,
-    refund_full_policy: refundPolicy.full_policy || base.refund_full_policy,
+    // Only a DELIBERATE override counts as one. 29 live products carry a policy stamped
+    // `user_preference_default` by the old literal, and showing those as overrides would freeze it: the
+    // product would keep promising 30 days whatever the tenant later set (plans/REFUND_POLICY.md).
+    refund_source: refundPolicy.source === "product_override" ? "product_override" : "tenant_default",
+    refund_window: isRefundOverride(refundPolicy) ? refundPolicy.refund_window || "" : "",
+    refund_condition: isRefundOverride(refundPolicy) ? refundPolicy.condition || "" : "",
+    refund_return_method: isRefundOverride(refundPolicy) ? refundPolicy.return_method || "" : "",
+    refund_full_policy: isRefundOverride(refundPolicy) ? refundPolicy.full_policy || "" : "",
     uploaded_images: images,
     images: "",
     image_dims: { ...(product.image_dims || {}) },

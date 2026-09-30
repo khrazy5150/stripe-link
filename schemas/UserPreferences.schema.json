@@ -57,17 +57,8 @@
     "authoring_defaults": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Per-user defaults applied while creating or editing documents. These do not mutate existing tenant/product/page documents until copied into those documents.",
+      "description": "Per-user defaults applied while creating or editing documents. These do not mutate existing tenant/product/page documents until copied into those documents. `refund_policies` was REMOVED 2026-09-30 (plans/REFUND_POLICY.md phase 6): nothing ever read it, both user-preferences tables were empty in dev and prod, and it was the slot every product's policy falsely claimed to come from. Refund defaults are tenant-level, on TenantConfig.legal_defaults.refund_policies.",
       "properties": {
-        "refund_policies": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "physical": { "$ref": "#/$defs/refund_policy" },
-            "digital": { "$ref": "#/$defs/refund_policy" },
-            "subscription": { "$ref": "#/$defs/refund_policy" }
-          }
-        },
         "return_address": {
           "type": "object",
           "additionalProperties": false,
@@ -113,27 +104,6 @@
           "enum": ["system", "sans-serif", "serif", "monospace"],
           "default": "system"
         }
-      }
-    },
-    "refund_policy": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["refund_window", "condition", "return_method", "short_label", "full_policy"],
-      "properties": {
-        "refund_window": {
-          "type": "string",
-          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
-        },
-        "condition": {
-          "type": "string",
-          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
-        },
-        "return_method": {
-          "type": "string",
-          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
-        },
-        "short_label": { "type": "string" },
-        "full_policy": { "type": "string" }
       }
     }
   }

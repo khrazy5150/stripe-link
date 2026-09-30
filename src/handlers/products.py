@@ -11,8 +11,10 @@ from stripe_link.domain.documents import (
     product_stripe_sync_gate,
     validate_product_document,
 )
+from stripe_link.domain.refund_policy import apply_to_product
 from stripe_link.repositories.documents import (
     RepositoryError,
+    platform_config_repository,
     product_categories_repository,
     products_repository,
 )
@@ -20,7 +22,7 @@ from stripe_link.repositories.documents import (
 logger = logging.getLogger(__name__)
 
 
-def handler(event, context, repository=None, sync_invoker=None):
+def handler(event, context, repository=None, sync_invoker=None, config_repository=None):
     repository = repository or products_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
@@ -30,7 +32,8 @@ def handler(event, context, repository=None, sync_invoker=None):
     if method == "PATCH" and product_id and resource.endswith("/status"):
         return update_product_status(event, repository, product_id)
     if method == "POST":
-        return create_product(event, repository, sync_invoker=sync_invoker)
+        return create_product(event, repository, sync_invoker=sync_invoker,
+                              config_repository=config_repository)
     if method == "GET":
         if product_id:
             return get_product(event, repository, product_id)
@@ -38,9 +41,10 @@ def handler(event, context, repository=None, sync_invoker=None):
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def create_product(event, repository, sync_invoker=None):
+def create_product(event, repository, sync_invoker=None, config_repository=None):
     try:
         document = parse_json_body(event)
+        resolve_refund_policy(document, config_repository=config_repository)
         validate_product_document(document)
         document = order_product_document(document)
         saved = repository.put(document)
@@ -57,6 +61,29 @@ def create_product(event, repository, sync_invoker=None):
         )
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_product")
+
+
+def resolve_refund_policy(document, *, config_repository=None) -> None:
+    """Read the tenant's config, then hand the decision to the domain.
+
+    The I/O half of plans/REFUND_POLICY.md step 5; `domain/refund_policy.apply_to_product` is the rule, and
+    lives there so the AI generation path applies the identical one.
+    """
+    if not isinstance(document, dict):
+        return
+    tenant_id = str(document.get("tenant_id") or "").strip()
+    config = {}
+    if tenant_id and str((document.get("refund_policy") or {}).get("source") or "") not in {
+            "product_override", "tip_jar_default"}:
+        try:
+            config = (config_repository or platform_config_repository()).get(tenant_id) or {}
+        except (RepositoryError, ValueError):
+            # Fall back to the platform default rather than to no policy: an unreadable config must not decide
+            # what a storefront promises, and it must not block the save either.
+            logger.warning("refund policy: tenant config unreadable, using platform default",
+                           extra={"tenant_id": tenant_id})
+            config = {}
+    apply_to_product(document, config)
 
 
 def _trigger_async_sync(product, sync_invoker=None):

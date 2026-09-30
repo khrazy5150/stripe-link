@@ -803,9 +803,12 @@ class AccountHandlerTests(unittest.TestCase):
 
         self.assertEqual(saved["statusCode"], 201)
         self.assertEqual(json.loads(fetched["body"])["preferences"]["default_stripe_mode"], "test")
-        self.assertEqual(
-            json.loads(fetched["body"])["preferences"]["authoring_defaults"]["refund_policies"]["physical"]["short_label"],
-            "30-day money-back",
+        # `authoring_defaults.refund_policies` was RETIRED 2026-09-30 (plans/REFUND_POLICY.md phase 6).
+        # Nothing ever read it, both user-preferences tables were empty in dev and prod, and it was the slot
+        # every product's policy falsely claimed to come from. Refund defaults are tenant-level now.
+        self.assertNotIn(
+            "refund_policies",
+            json.loads(fetched["body"])["preferences"].get("authoring_defaults", {}),
         )
 
     def test_preferences_rejects_too_many_custom_themes(self):

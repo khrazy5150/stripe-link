@@ -454,3 +454,63 @@ def vocabulary() -> dict[str, Any]:
         "class_defaults": {k: dict(v) for k, v in CLASS_DEFAULTS.items()},
         "previews": previews,
     }
+
+
+def apply_to_product(document: dict[str, Any], tenant_config: dict[str, Any] | None) -> dict[str, Any]:
+    """Stamp a product's refund policy for a WRITE, in place. Pure -- no I/O, so both write paths share it.
+
+    plans/REFUND_POLICY.md step 5, and the correction that actually stops the bug. The dashboard used to
+    decide what a product promised: a hardcoded literal in `stores/products.js` that reached live pages and
+    claimed a provenance nothing ever read. Now the client sends an override INTENT or nothing, and the
+    promise is composed here.
+
+    Four cases:
+
+    - **A deliberate override** — the three structured choices are honoured and the sentence generated from
+      them. Invalid vocabulary is left untouched so `validate_product_document` reports it as the input error
+      it is, rather than this quietly substituting something the tenant did not ask for.
+    - **`tip_jar_default`** — left alone. `handlers/tip_jar_provision.py` writes non-refundable because a tip
+      is not a purchase, and a tenant's physical-goods default must never make tips refundable.
+    - **Anything else the client sent, including the old literal — DISCARDED.** This is the point: an old
+      cached dashboard bundle still posting the literal gets the tenant's real default written instead. A
+      browser is not a place you can enforce anything.
+    - **No tenant default for the class** — the platform fallback, with `source` saying honestly that nobody
+      chose it.
+
+    Only touches a document being WRITTEN. Stored products keep their policy until the tenant next saves them
+    -- the author's rule: nothing alters old data, everything is organic.
+    """
+    if not isinstance(document, dict):
+        return document
+    stored = document.get("refund_policy")
+    stored = stored if isinstance(stored, dict) else {}
+    policy_class = product_class(document)
+    source = _text(stored.get("source"))
+
+    if source == SOURCE_PRODUCT_OVERRIDE:
+        try:
+            document["refund_policy"] = build(
+                policy_class,
+                refund_window=_text(stored.get("refund_window")),
+                condition=_text(stored.get("condition")),
+                return_method=_text(stored.get("return_method")),
+                full_policy=_text(stored.get("full_policy")),
+                return_note=_text(stored.get("return_note")),
+                keep_it_below=stored.get("keep_it_below"),
+                source=SOURCE_PRODUCT_OVERRIDE,
+            )
+        except RefundPolicyError:
+            pass
+        return document
+
+    if source == SOURCE_TIP_JAR:
+        return document
+
+    resolved = dict(tenant_policies(tenant_config)[policy_class])
+    # `keep_it_below` is a fact about THIS item's postage economics rather than a policy choice, so a
+    # per-product value survives even when the terms come from the tenant's default.
+    threshold = _whole(stored.get("keep_it_below"))
+    if threshold and threshold > 0:
+        resolved["keep_it_below"] = threshold
+    document["refund_policy"] = resolved
+    return document

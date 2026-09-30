@@ -455,7 +455,9 @@ export async function buildProductDocument(form) {
     ...(isPhysical && String(form.brand || "").trim() ? { brand: String(form.brand).trim() } : {}),
     ...(isPhysical && String(form.mpn || "").trim() ? { mpn: String(form.mpn).trim() } : {}),
     ...(isPhysical && String(form.gtin || "").trim() && isValidGtin(form.gtin) ? { gtin: String(form.gtin).trim() } : {}),
-    refund_policy: refundPolicy(productType, form),
+    // Omitted entirely when the tenant has not overridden it, so the server applies their default rather
+    // than the browser inventing one.
+    ...(refundPolicy(form) ? { refund_policy: refundPolicy(form) } : {}),
     variants: {
       size_enabled: isPhysical && !isLeadGen && Boolean(form.size_enabled),
       color_enabled: isPhysical && !isLeadGen && Boolean(form.color_enabled),
@@ -547,27 +549,33 @@ function defaultPriceForm() {
   };
 }
 
-function refundPolicy(productType, form) {
-  if (form.refund_source !== "product_override") {
-    return {
-      source: form.refund_source || "user_preference_default",
-      refund_window: productType === "digital" ? "non_refundable" : "30_days",
-      condition: productType === "digital" ? "any" : "unused",
-      return_method: productType === "digital" ? "digital_revoke_access" : "no_return_customer_keeps",
-      short_label: productType === "digital" ? "Non-refundable" : "30-day money-back",
-      full_policy: productType === "digital"
-        ? "All sales are final and as such, no item can be returned, replaced, or refunded in full or in part."
-        : "Refunds are available within 30 days of delivery in unused condition.\n\nThis item does not need to be returned. The customer may keep the item and dispose of it in a responsible way. The seller may still grant a refund.",
-    };
-  }
-  return {
+/**
+ * The product's refund policy INTENT -- or nothing at all.
+ *
+ * This function used to return a hardcoded policy literal: 30 days of delivery in unused condition for
+ * physical goods, non-refundable for digital, stamped `source: "user_preference_default"` on the way out. It
+ * was published on live pages, the preference it claimed to come from was never read by anything, and no
+ * screen could change it (plans/REFUND_POLICY.md). A browser file was the author of every product's refund
+ * promise.
+ *
+ * Now: when the tenant has not overridden anything this returns `null` and the field is OMITTED, so the
+ * server stamps the tenant's own default (handlers/products._resolve_refund_policy). When they have, only the
+ * three structured choices travel -- the sentence a buyer reads is composed server-side from one template.
+ *
+ * `productType` is no longer a parameter because the class is the server's decision: it looks at the prices
+ * too, and a product sold only by subscription is a subscription whatever its type says.
+ */
+function refundPolicy(form) {
+  if (form.refund_source !== "product_override") return null;
+  const policy = {
     source: "product_override",
-    refund_window: form.refund_window || "30_days",
-    condition: form.refund_condition || "unused",
-    return_method: form.refund_return_method || "no_return_customer_keeps",
-    short_label: form.refund_short_label || "30-day money-back",
-    full_policy: form.refund_full_policy || "Refunds are available within 30 days of delivery in unused condition.",
+    refund_window: form.refund_window || "",
+    condition: form.refund_condition || "",
+    return_method: form.refund_return_method || "",
   };
+  const wording = String(form.refund_full_policy || "").trim();
+  if (wording) policy.full_policy = wording;
+  return policy;
 }
 
 // What the FORM says to a visitor, per action. Deliberately separate from the picker's label and

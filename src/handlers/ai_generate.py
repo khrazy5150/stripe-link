@@ -36,6 +36,7 @@ then drops it silently, and a dropped job is indistinguishable from a slow one -
 difference, so something has to look.
 """
 import json
+import logging
 import os
 import random
 import time
@@ -68,8 +69,12 @@ from stripe_link.domain.page_brief import withheld
 from stripe_link.repositories.documents import (RepositoryError, ai_jobs_repository,
                                                 ai_provider_config_repository, ai_usage_repository,
                                                 offers_repository, pages_repository,
-                                                products_repository, tenant_profiles_repository)
+                                                platform_config_repository, products_repository,
+                                                tenant_profiles_repository)
+from stripe_link.domain.refund_policy import apply_to_product
 from stripe_link.domain.documents import SUPPORTED_THEME_PRESETS
+
+logger = logging.getLogger(__name__)
 
 SYSTEM = (
     "You compose landing pages for an e-commerce platform. You emit ONLY structured page sections "
@@ -318,6 +323,20 @@ def _mode_of(body):
     return "live" if mode == "live" else "test"
 
 
+def _tenant_refund_config(tenant_id):
+    """The tenant's config, for their refund defaults. Never fatal.
+
+    A generation that fails because a settings table blinked is a worse outcome than a page carrying the
+    platform's default refund terms, which is what an empty config resolves to.
+    """
+    try:
+        return platform_config_repository().get(tenant_id) or {}
+    except (RepositoryError, ValueError):
+        logger.warning("refund policy: tenant config unreadable, using platform default",
+                       extra={"tenant_id": tenant_id})
+        return {}
+
+
 def _shipping_config(tenant_id):
     """The tenant's shipping policy, READ rather than re-asked. Absent is fine: it means the page simply
     will not make a shipping claim, which is the field floor working as designed."""
@@ -508,6 +527,10 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
     # Validate BOTH before writing either: an offer saved beside a rejected page is the half-made thing the
     # tenant cannot finish, and validation is free next to a partial write.
     if not existing_product_id:
+        # The SAME rule the dashboard's save path applies (plans/REFUND_POLICY.md step 5). Without this an
+        # AI-generated product saved with no policy at all, so its page showed no refund section and
+        # `chosen_badges` had no guarantee to read -- a second write path quietly disagreeing with the first.
+        apply_to_product(product, _tenant_refund_config(tenant_id))
         validate_product_document(product)
     validate_offer_document(offer)
     validate_page_document(page)

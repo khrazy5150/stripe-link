@@ -2008,15 +2008,11 @@ def validate_user_preferences(document: dict[str, Any]) -> None:
     if authoring_defaults is not None:
         if not isinstance(authoring_defaults, dict):
             raise DocumentValidationError("User preferences authoring_defaults must be an object.")
-        refund_policies = authoring_defaults.get("refund_policies") or {}
-        if not isinstance(refund_policies, dict):
-            raise DocumentValidationError("User preferences refund_policies must be an object.")
-        for key, policy in refund_policies.items():
-            if key not in {"physical", "digital", "subscription"}:
-                raise DocumentValidationError(f"Unsupported refund policy class '{key}'.")
-            if not isinstance(policy, dict):
-                raise DocumentValidationError("Each refund policy must be an object.")
-            require_fields(policy, ["refund_window", "condition", "return_method", "short_label", "full_policy"])
+        # `authoring_defaults.refund_policies` is RETIRED (plans/REFUND_POLICY.md phase 6). It was the slot
+        # every product's policy claimed to come from -- `source: "user_preference_default"` -- and nothing
+        # ever read it. Both user-preferences tables were verified EMPTY in dev and prod on 2026-09-30: zero
+        # rows, so the provenance stamped on 29 live products pointed at a table that has never held a single
+        # record. Refund defaults are tenant-level and live on TenantConfig.legal_defaults.refund_policies.
 
 
 def validate_user_profile(document: dict[str, Any]) -> None:
