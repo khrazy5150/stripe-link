@@ -4,6 +4,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## 🚨 URGENT — every product's refund policy is a string literal in the dashboard's JavaScript (found 2026-09-30)
 
+**Plan: `plans/REFUND_POLICY.md`** (written 2026-09-30). Port stripe-cart's `src/refund_policy.py` — its
+vocabulary tables and `resolve_effective_refund_policy` — but change the storage shape: ONE nested
+`refund_policies.{physical,digital,subscription}` map on the TENANT profile, not three flat fields and not
+`UserPreferences.authoring_defaults`, which is retired as the wrong home. Two levels, not three.
+
 **The platform is committing tenants to a refund term they never chose, and it is already on live pages.**
 
 Traced end to end on real data. `dashboard/src/stores/products.js:550` `refundPolicy(productType, form)`
@@ -2627,6 +2632,25 @@ the larger half and it needs the decision above applied — empty by default, wi
 **Where derived badges could be honest, later:** `ShippingConfig.ship_from` for an origin claim, and the
 tenant's own `refund_policy` for a guarantee one. Both are facts the platform already holds, which is the
 difference between a derived badge and an invented one.
+
+### ⭐⭐ HIGH — there is no primitive for shipping CHARGES (found 2026-09-30)
+
+Plan: **`plans/SHIPPING_CHARGES.md`**. The author, 2026-09-30: *"I was so focused on 'free shipping' that
+there is no primitive for shipping charges."*
+
+**Checkout collects a shipping address and charges nothing.** The whole shipping surface at checkout is
+`handlers/checkout.py:763-765` — `shipping_address_collection[allowed_countries]`, and that is all.
+`ShippingConfig.rate_options` declares `markup_amount` and `free_shipping_threshold`, and `rate_policy.py`
+says in its own docstring that charging the buyer is a different question it is not answering.
+
+**Not a missing Stripe call — a missing representation.** `order.shipping_amount` does not exist, so the
+ledger cannot see shipping revenue, `fees.py` has no shipping fee class and therefore no answer to whether
+the platform charges a percentage on postage, tax cannot tax it where jurisdictions do, and a refund cannot
+know whether shipping comes back. Every downstream system already has a shipping-shaped hole.
+
+**Interacts with SMART_PRICING**, which models outbound shipping as a cost line — i.e. baked into the price.
+A tenant who bakes it AND charges for it is paid twice, so one rule is needed and the plan proposes it lives
+here: `baked` means Smart Pricing owns it, `charged` means this does.
 
 ### Smart Pricing — cost profiles, and a price the tenant does not have to guess (plan plans/SMART_PRICING.md, 2026-09-28)
 
