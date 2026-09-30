@@ -1153,7 +1153,9 @@ def validate_offer_shipping(shipping: Any) -> None:
     """
     if shipping is None:
         return
-    from stripe_link.domain.shipping_charges import CHARGED, FREE, MAX_OPTIONS, mode_for
+    from stripe_link.domain.shipping_charges import (
+        CHARGED, FREE, MAX_OPTIONS, PER_ITEM, PRICING_KINDS, TAX_BEHAVIOURS, mode_for,
+    )
 
     if not isinstance(shipping, dict):
         raise DocumentValidationError("Offer shipping must be an object.")
@@ -1186,6 +1188,20 @@ def validate_offer_shipping(shipping: Any) -> None:
             optional_non_negative_int(option, "amount", f"Offer shipping.options[{index}].amount")
             optional_string(option, "service_token", f"Offer shipping.options[{index}].service_token")
             optional_string(option, "carrier", f"Offer shipping.options[{index}].carrier")
+            optional_string(option, "tax_code", f"Offer shipping.options[{index}].tax_code")
+            if option.get("kind") is not None:
+                require_enum(option, "kind", set(PRICING_KINDS), f"Offer shipping.options[{index}].kind")
+            if option.get("tax_behavior") is not None:
+                require_enum(option, "tax_behavior", set(TAX_BEHAVIOURS),
+                             f"Offer shipping.options[{index}].tax_behavior")
+            optional_non_negative_int(option, "first_item_amount",
+                                      f"Offer shipping.options[{index}].first_item_amount")
+            if option.get("first_item_amount") is not None and str(option.get("kind") or "flat") != PER_ITEM:
+                # A first-item price on a flat rate is silently ignored by the calculator, which means the
+                # tenant typed a number that does nothing. Refused rather than dropped.
+                raise DocumentValidationError(
+                    f"Offer shipping.options[{index}].first_item_amount only applies when kind is "
+                    f"'{PER_ITEM}'.")
             for field in ("transit_days_min", "transit_days_max"):
                 optional_non_negative_int(option, field, f"Offer shipping.options[{index}].{field}")
             low, high = option.get("transit_days_min"), option.get("transit_days_max")

@@ -13,9 +13,11 @@ from stripe_link.domain.shipping_charges import (
     CHARGED,
     FREE,
     MAX_OPTIONS,
+    SHIPPING_TAX_CODE,
     baseline_option,
     mode_for,
     options_for,
+    resolve_amount,
     smart_pricing_conflict,
     stripe_shipping_options,
 )
@@ -45,9 +47,8 @@ class ServiceLevels(unittest.TestCase):
 
     def test_a_nameless_option_is_dropped(self):
         """An option with no label is a blank radio button on a checkout page."""
-        self.assertEqual(options_for(offer(options=[{"amount": 500}, GROUND])), [{"label": GROUND["label"],
-                                                                                 "amount": 0,
-                                                                                 "service_token": GROUND["service_token"]}])
+        result = options_for(offer(options=[{"amount": 500}, GROUND]))
+        self.assertEqual([o["label"] for o in result], [GROUND["label"]])
 
     def test_a_negative_amount_is_dropped(self):
         """It would pay the buyer to receive goods."""
@@ -147,6 +148,66 @@ class TheSmartPricingInvariant(unittest.TestCase):
         self.assertEqual(smart_pricing_conflict(offer(options=[OVERNIGHT]), profile), "")
 
 
+class PricingRules(unittest.TestCase):
+    """The author, 2026-09-30: shipping rules may be *"free, flat rate, per item, threshold-based,
+    weight-based, potentially carrier-derived"* -- and Stripe's own Shipping Rate is a FIXED amount, so the
+    rule has to be resolved to a number before Stripe sees it.
+    """
+
+    PER_UNIT = {"label": "Ground", "kind": "per_item", "amount": 200, "first_item_amount": 795}
+
+    def test_per_item_scales_with_the_cart(self):
+        self.assertEqual(resolve_amount(self.PER_UNIT, item_count=1), 795)
+        self.assertEqual(resolve_amount(self.PER_UNIT, item_count=3), 1195)
+
+    def test_per_item_without_a_first_item_price_is_simple_multiplication(self):
+        self.assertEqual(resolve_amount({"kind": "per_item", "amount": 200}, item_count=4), 800)
+
+    def test_flat_ignores_the_cart(self):
+        self.assertEqual(resolve_amount({"kind": "flat", "amount": 795}, item_count=9), 795)
+
+    def test_an_empty_cart_still_charges_for_one(self):
+        """A zero-item cart cannot reach checkout, and multiplying by zero would ship it free."""
+        self.assertEqual(resolve_amount(self.PER_UNIT, item_count=0), 795)
+
+    def test_rules_are_resolved_BEFORE_sorting(self):
+        """With per-item pricing the cheapest option depends on the cart, so sorting on the stored amount
+        would order them wrongly for a basket of six."""
+        cheap_flat = {"label": "Flat", "amount": 1000}
+        result = options_for(offer(options=[self.PER_UNIT, cheap_flat]), item_count=6)
+        self.assertEqual([o["label"] for o in result], ["Flat", "Ground"])
+        self.assertEqual(result[1]["amount"], 795 + 200 * 5)
+
+    def test_the_mode_follows_the_resolved_amount(self):
+        free_per_item = {"label": "Ground", "kind": "per_item", "amount": 0}
+        self.assertEqual(mode_for(offer(options=[free_per_item]), item_count=5), FREE)
+
+
+class TheTaxClassification(unittest.TestCase):
+    def test_the_shipping_tax_code_is_always_sent(self):
+        """Without it shipping reaches Stripe Tax as an unclassified amount rather than as shipping."""
+        rate = stripe_shipping_options(offer(options=[GROUND]))[0]["shipping_rate_data"]
+        self.assertEqual(rate["tax_code"], SHIPPING_TAX_CODE)
+
+    def test_a_tenants_own_tax_code_wins(self):
+        rate = stripe_shipping_options(offer(options=[dict(GROUND, tax_code="txcd_00000000")]))[0]["shipping_rate_data"]
+        self.assertEqual(rate["tax_code"], "txcd_00000000")
+
+    def test_tax_behavior_is_never_defaulted(self):
+        """Whether tax is added on top of the postage or taken out of it is the tenant's decision; guessing
+        would silently decide who bears it."""
+        rate = stripe_shipping_options(offer(options=[GROUND]))[0]["shipping_rate_data"]
+        self.assertNotIn("tax_behavior", rate)
+
+    def test_tax_behavior_is_passed_through_when_set(self):
+        rate = stripe_shipping_options(offer(options=[dict(OVERNIGHT, tax_behavior="exclusive")]))[0]["shipping_rate_data"]
+        self.assertEqual(rate["tax_behavior"], "exclusive")
+
+    def test_an_unknown_tax_behavior_is_refused_at_save(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_offer_shipping({"options": [dict(GROUND, tax_behavior="sometimes")]})
+
+
 class Validation(unittest.TestCase):
     def test_absent_is_fine(self):
         validate_offer_shipping(None)
@@ -185,6 +246,18 @@ class Validation(unittest.TestCase):
     def test_a_negative_amount_is_refused(self):
         with self.assertRaises(DocumentValidationError):
             validate_offer_shipping({"options": [{"label": "Ground", "amount": -1}]})
+
+    def test_an_unknown_pricing_kind_is_refused(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_offer_shipping({"options": [dict(GROUND, kind="weight_band")]})
+
+    def test_a_first_item_price_on_a_flat_rate_is_refused(self):
+        """The calculator ignores it, which means the tenant typed a number that does nothing."""
+        with self.assertRaises(DocumentValidationError):
+            validate_offer_shipping({"options": [{"label": "Ground", "amount": 500,
+                                                  "first_item_amount": 900}]})
+        validate_offer_shipping({"options": [{"label": "Ground", "amount": 500, "kind": "per_item",
+                                              "first_item_amount": 900}]})
 
     def test_an_unknown_mode_is_refused(self):
         """`baked` is deliberately not a mode: see the module docstring."""

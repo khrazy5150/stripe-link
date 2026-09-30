@@ -244,6 +244,59 @@ this plan. Flat options are not a shortcut here — they are what the chosen che
   shipping on each invoice, and one that ships once does not. Do not wire subscription shipping on an
   assumption — the fee-percent trap above came from exactly that kind of guess.
 
+## Stripe's Shipping Rate, and where the boundary sits
+
+The author, 2026-09-30: *"I wouldn't use Stripe's Shipping Rate as your JuniorBay shipping primitive... JuniorBay
+remains authoritative, while Stripe becomes the payment/Checkout representation."* Agreed, and that is how
+`domain/shipping_charges.py` is built:
+
+    JuniorBay (authoritative)              Stripe (payment representation)
+    ─────────────────────────              ──────────────────────────────
+    offer.shipping.options[]      ──►      shipping_options[]
+      rule: flat | per_item                  shipping_rate_data (fixed amount)
+      free_above_amount                      tax_code / tax_behavior
+    resolve_amount(cart)          ──►      the buyer picks one
+    order.shipping_amount         ◄──      shipping_cost.amount_total
+    order.shipping_cost                    (never sent to Stripe — our cost, not theirs)
+
+**Why the rule cannot live in Stripe: a Shipping Rate is a FIXED amount.** It cannot express "$2 a unit", so
+"$7.95 then $2 each after" has to be resolved to "$11.95" before the session is created. That is
+`resolve_amount`, and it is the reason this module is a calculator rather than a wrapper.
+
+### This corrected something already shipped
+
+The first version of `options[]` stored a flat `amount` per option, which covers `flat` and the threshold and
+**cannot express per-item or weight-based pricing at all** — exactly the rules the author listed. Fixed the
+same day: an option now carries `kind` (`flat` | `per_item`) plus an optional `first_item_amount`, and the rule
+is resolved against the cart. Two consequences worth keeping:
+
+- **Rules are resolved BEFORE sorting.** With per-item pricing the cheapest option depends on the cart, so
+  ordering on the stored amount puts the options in the wrong order for a basket of six.
+- **`mode` follows the RESOLVED amount**, not the stored one. A per-item option priced at 0 is free however
+  many units are in the cart.
+
+Weight bands are the next rule and are deliberately not declared yet — the schema does not offer a `kind` the
+calculator cannot honour.
+
+### Tax: classify the line, never guess who bears it
+
+Stripe's shipping tax code `txcd_92010001` is now always sent, because classifying the line is a **fact** about
+what it is — without it shipping reaches Stripe Tax as an unclassified amount rather than as shipping.
+
+`tax_behavior` (inclusive / exclusive) is **never defaulted**. Whether the buyer's tax is added on top of the
+postage or taken out of it is a tenant decision with a real cash consequence, and Stripe's own default is
+`unspecified`. A validator refuses an unknown value at save time.
+
+Both are carried in readiness rather than in use: **Stripe Tax is not enabled anywhere in this app**.
+
+### Inline rate, not a persisted Shipping Rate object
+
+Both are the same thing to Stripe and both accept `tax_code` and `tax_behavior`, so the tax participation is
+identical. But a resolved amount depends on the cart, and creating a durable Shipping Rate per cart would
+litter the tenant's Stripe account with thousands of near-identical objects nobody can read. A persisted rate
+is the right shape for a genuinely fixed price a tenant wants to manage in the Stripe Dashboard; it is the
+wrong shape for a computed one. Revisit if tenants ask to manage rates in Stripe directly.
+
 ## Phases
 
 The author's order, 2026-09-30, with Checkout deliberately LAST:

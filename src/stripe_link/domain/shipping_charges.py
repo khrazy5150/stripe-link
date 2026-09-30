@@ -22,6 +22,23 @@ from typing import Any
 
 CHARGED, FREE = "charged", "free"
 
+# How an option's price is WORKED OUT, not what it is. The author, 2026-09-30: shipping rules may be *"free,
+# flat rate, per item, threshold-based, weight-based, potentially carrier-derived"*, and **Stripe's own
+# Shipping Rate is a FIXED amount** -- so JuniorBay has to resolve the rule to a number before Stripe ever
+# sees it. A stored flat amount covers `flat` and the threshold; it cannot express "$2 per unit", because that
+# depends on the cart.
+FLAT, PER_ITEM = "flat", "per_item"
+PRICING_KINDS = (FLAT, PER_ITEM)
+
+# Stripe's tax code for shipping. Classifying the line is a FACT about what it is, not a pricing decision, so
+# it is defaulted -- it is what lets shipping participate properly in Stripe Tax instead of arriving as an
+# unclassified extra amount. `tax_behavior` (inclusive/exclusive) IS a tenant decision and is never defaulted
+# here: guessing it would silently decide whether the buyer's tax is added on top of the postage or taken out
+# of it. Stripe Tax is not enabled in this app yet (no `automatic_tax` anywhere in src/), so both fields are
+# carried through in readiness rather than in use.
+SHIPPING_TAX_CODE = "txcd_92010001"
+TAX_BEHAVIOURS = ("inclusive", "exclusive", "unspecified")
+
 # Stripe hosted Checkout accepts no more than 5 `shipping_options` on a session. Ground / 2-day / overnight
 # fits with room; a tenant who configures more must have them truncated rather than have the whole session
 # rejected, because a refused session is a lost sale and a missing sixth option is not.
@@ -62,8 +79,15 @@ def normalize_option(option: Any) -> dict[str, Any] | None:
     amount = _whole(option.get("amount"))
     if amount < 0:
         return None
-    out: dict[str, Any] = {"label": label, "amount": amount}
-    for field in ("service_token", "carrier"):
+    kind = _text(option.get("kind")).lower() or FLAT
+    if kind not in PRICING_KINDS:
+        kind = FLAT
+    out: dict[str, Any] = {"label": label, "amount": amount, "kind": kind}
+    if option.get("first_item_amount") is not None:
+        first = _whole(option.get("first_item_amount"))
+        if first >= 0:
+            out["first_item_amount"] = first
+    for field in ("service_token", "carrier", "tax_behavior", "tax_code"):
         if _text(option.get(field)):
             out[field] = _text(option.get(field))
     for field in ("transit_days_min", "transit_days_max"):
@@ -72,8 +96,26 @@ def normalize_option(option: Any) -> dict[str, Any] | None:
     return out
 
 
-def options_for(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0) -> list[dict[str, Any]]:
-    """The shipping options to present, cheapest first.
+def resolve_amount(option: dict[str, Any], *, item_count: int = 1) -> int:
+    """The rule worked out against this cart. What Stripe is eventually told.
+
+    `per_item` exists because Stripe's Shipping Rate cannot express it: a rate is a fixed amount, so "$2 a
+    unit" has to become "$6" here before the session is created. `first_item_amount` covers the common real
+    shape -- $7.95 for the first, $2 for each after -- which is neither flat nor purely per-unit.
+    """
+    amount = int(option.get("amount") or 0)
+    if _text(option.get("kind")) != PER_ITEM:
+        return amount
+    units = max(1, int(item_count or 1))
+    first = option.get("first_item_amount")
+    if first is None:
+        return amount * units
+    return int(first) + amount * (units - 1)
+
+
+def options_for(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0,
+                item_count: int = 1) -> list[dict[str, Any]]:
+    """The shipping options to present, cheapest first, with every rule resolved to a number.
 
     `free_above_amount` frees the BASELINE only. A threshold that also freed overnight would give away the
     premium the buyer was already willing to pay for, and no merchant means that by "free shipping over $50".
@@ -84,6 +126,10 @@ def options_for(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0) ->
     normalized = [opt for opt in (normalize_option(o) for o in shipping.get("options") or []) if opt]
     if not normalized:
         return []
+    # Resolve every rule BEFORE sorting: with per-item pricing the cheapest option depends on the cart, so a
+    # sort on the stored amount would put them in the wrong order for a basket of six.
+    for option in normalized:
+        option["amount"] = resolve_amount(option, item_count=item_count)
     normalized.sort(key=lambda opt: opt["amount"])
 
     threshold = _whole(shipping.get("free_above_amount"))
@@ -97,21 +143,22 @@ def options_for(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0) ->
     return normalized[:MAX_OPTIONS]
 
 
-def mode_for(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0) -> str:
+def mode_for(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0,
+             item_count: int = 1) -> str:
     """`free` when nothing on offer costs the buyer anything, else `charged`.
 
     DERIVED, never trusted from storage. `mode` is a summary of the options, and a stored summary is a second
     place for the same fact to be wrong -- which is the failure this plan's sibling (REFUND_POLICY.md) exists
     to fix. An offer with no options at all is `free`: nothing is being charged.
     """
-    options = options_for(offer, merchandise_amount=merchandise_amount)
+    options = options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count)
     return CHARGED if any(opt["amount"] > 0 for opt in options) else FREE
 
 
-def baseline_option(offer: dict[str, Any] | None, *,
-                    merchandise_amount: Any = 0) -> dict[str, Any] | None:
+def baseline_option(offer: dict[str, Any] | None, *, merchandise_amount: Any = 0,
+                    item_count: int = 1) -> dict[str, Any] | None:
     """The cheapest option -- the one the Smart Pricing invariant is about."""
-    options = options_for(offer, merchandise_amount=merchandise_amount)
+    options = options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count)
     return options[0] if options else None
 
 
@@ -153,21 +200,35 @@ def smart_pricing_conflict(offer: dict[str, Any] | None, cost_profile: dict[str,
 
 
 def stripe_shipping_options(offer: dict[str, Any] | None, *, currency: str = "usd",
-                            merchandise_amount: Any = 0) -> list[dict[str, Any]]:
+                            merchandise_amount: Any = 0,
+                            item_count: int = 1) -> list[dict[str, Any]]:
     """The options as Stripe's Checkout Session wants them.
 
-    Shape only -- `handlers/checkout` does the form encoding. Kept here so the 5-option cap and the ordering
-    are decided in the same place as everything else about shipping, rather than a second time at the wire.
+    **Inline `shipping_rate_data`, not a persisted Shipping Rate object.** Both are the same thing to Stripe
+    and both accept `tax_behavior` and `tax_code`, so the tax participation is identical -- but a resolved
+    amount depends on the cart (`per_item`, the free-above threshold), and creating a durable Shipping Rate per
+    cart would litter the tenant's Stripe account with thousands of near-identical objects nobody can read. A
+    persisted rate is the right shape for a genuinely fixed price a tenant wants to manage in the Stripe
+    Dashboard; it is the wrong shape for a computed one.
+
+    Shape only -- `handlers/checkout` does the form encoding. Kept here so the 5-option cap, the ordering and
+    the tax classification are decided in the same place as everything else about shipping.
     """
     payload: list[dict[str, Any]] = []
-    for option in options_for(offer, merchandise_amount=merchandise_amount):
-        entry: dict[str, Any] = {
-            "shipping_rate_data": {
-                "type": "fixed_amount",
-                "fixed_amount": {"amount": option["amount"], "currency": str(currency or "usd").lower()},
-                "display_name": option["label"],
-            }
+    for option in options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count):
+        rate: dict[str, Any] = {
+            "type": "fixed_amount",
+            "fixed_amount": {"amount": option["amount"], "currency": str(currency or "usd").lower()},
+            "display_name": option["label"],
+            # Classifying the line is a fact about what it is, so it is always sent. Without it shipping
+            # reaches Stripe Tax as an unclassified amount rather than as shipping.
+            "tax_code": _text(option.get("tax_code")) or SHIPPING_TAX_CODE,
         }
+        # Never defaulted: whether tax is added on top of the postage or taken out of it is the tenant's
+        # decision, and Stripe's own default is "unspecified".
+        if _text(option.get("tax_behavior")) in TAX_BEHAVIOURS:
+            rate["tax_behavior"] = _text(option.get("tax_behavior"))
+        entry: dict[str, Any] = {"shipping_rate_data": rate}
         minimum, maximum = option.get("transit_days_min"), option.get("transit_days_max")
         if minimum is not None or maximum is not None:
             estimate: dict[str, Any] = {}
@@ -175,6 +236,6 @@ def stripe_shipping_options(offer: dict[str, Any] | None, *, currency: str = "us
                 estimate["minimum"] = {"unit": "business_day", "value": int(minimum)}
             if maximum is not None:
                 estimate["maximum"] = {"unit": "business_day", "value": int(maximum)}
-            entry["shipping_rate_data"]["delivery_estimate"] = estimate
+            rate["delivery_estimate"] = estimate
         payload.append(entry)
     return payload

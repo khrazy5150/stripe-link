@@ -675,7 +675,11 @@
             "required": ["label", "amount"],
             "properties": {
               "label": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What the buyer reads, e.g. 'Ground (5-7 days)'." },
-              "amount": { "type": "integer", "minimum": 0, "description": "Cents the BUYER pays. 0 is free to the buyer and says nothing about what it costs the tenant." },
+              "amount": { "type": "integer", "minimum": 0, "description": "Cents the BUYER pays. For kind=flat this is the whole charge; for kind=per_item it is charged per unit. 0 is free to the buyer and says nothing about what it costs the tenant." },
+              "kind": { "type": "string", "enum": ["flat", "per_item"], "default": "flat", "description": "How the amount is worked out. Stripe's own Shipping Rate is a FIXED amount, so JuniorBay resolves the rule to a number before Stripe sees it (domain/shipping_charges.resolve_amount). Weight bands come when the box catalogue justifies them." },
+              "first_item_amount": { "type": "integer", "minimum": 0, "description": "kind=per_item only: a different price for the first unit, e.g. $7.95 then $2 each after. Neither flat nor purely per-unit, and the common real shape." },
+              "tax_behavior": { "type": "string", "enum": ["inclusive", "exclusive", "unspecified"], "description": "Whether the buyer's tax is added on top of the postage or taken out of it. Passed to Stripe on the shipping rate. Never defaulted -- it is a tenant decision, and guessing it would silently decide who bears the tax." },
+              "tax_code": { "type": "string", "description": "Stripe tax code for the shipping line. Defaults to txcd_92010001 (Stripe's shipping code) when sent to Stripe, so shipping participates in Stripe Tax as shipping rather than as an unclassified amount." },
               "service_token": { "type": "string", "description": "The carrier service this option corresponds to, in the SAME vocabulary as domain/rate_policy.py ({carrier, service_token, label}) and ShippingConfig.rate_options.default_service_level -- so the option a buyer chose can be tied to the rate the tenant buys. A second vocabulary for the same thing is how drift starts." },
               "carrier": { "type": "string" },
               "transit_days_min": { "type": ["integer", "null"], "minimum": 0 },
