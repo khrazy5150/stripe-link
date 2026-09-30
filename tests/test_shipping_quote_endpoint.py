@@ -66,6 +66,16 @@ class QuoteTests(unittest.TestCase):
         self.assertEqual(body["needs"], "country")
         self.assertEqual(body["options"], [])
 
+    def test_no_zones_at_all_says_zones_not_country(self):
+        """Caught by hitting the deployed endpoint against a real tenant: `needs: country` alongside
+        `countries: []` is advice nobody can act on, and an element would render an empty dropdown. The two
+        are different facts -- "choose one of these" versus "the tenant has configured nowhere to ship"."""
+        self.config = {"boxes": [], "enabled_services": []}
+        body = self.quote("US")
+        self.assertEqual(body["countries"], [])
+        self.assertEqual(body["needs"], "zones")
+        self.assertTrue(body["ships"])
+
     def test_a_by_box_zone_prices_from_the_packed_box(self):
         body = self.quote("US")
         self.assertEqual([(o["label"], o["amount"]) for o in body["options"]], [("Ground", 699)])

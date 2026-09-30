@@ -679,6 +679,13 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
     target = country if country in countries else ""
     payload = {"ships": True, "countries": countries, "country": target,
                "options": [], "needs": "", "mode": "", "source": ""}
+    if not countries:
+        # The offer ships, but the TENANT has configured no zones -- so there is nowhere to offer and nothing
+        # to price. Distinct from `country`, which means "choose one of these": asking a buyer to pick from an
+        # empty dropdown is not a question. Caught by hitting the live endpoint against a real tenant, where
+        # `needs: country` alongside `countries: []` was advice nobody could act on.
+        payload["needs"] = "zones"
+        return json_response(payload)
     if not target:
         # A country is required to price anything -- zones ARE destinations. Returning the list without a price
         # is the honest answer to "what are my choices", and the element asks again once one is picked.

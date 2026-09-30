@@ -626,9 +626,15 @@ override the default — and holds **no zone editor, no carrier config, no secon
    cache-and-throttle the plan calls for becomes a hard prerequisite when **tier 3** arrives and each quote
    spends money at a carrier. Stated so nobody reads its absence as an oversight.
 
-   `needs` is never a zero price: `country` (nothing chosen, or one the tenant does not serve), `carrier`,
-   `box_price` (with a `box_reason` naming which of the three packing refusals it was). A page rendering an
-   unknown as "Free shipping" would make a promise the tenant did not.
+   `needs` is never a zero price: `zones` (the tenant has configured nowhere to ship), `country` (nothing
+   chosen, or one the tenant does not serve), `carrier`, `box_price` (with a `box_reason` naming which of the
+   three packing refusals it was). A page rendering an unknown as "Free shipping" would make a promise the
+   tenant did not.
+
+   **`zones` exists because the deployed endpoint answered unactionably.** Called against the real dev tenant
+   it returned `needs: country` alongside `countries: []` — advice nobody can act on, and an element would have
+   rendered an empty dropdown. "Choose one of these" and "the tenant has configured nowhere to ship" are
+   different facts and now say so. Found by hitting the live route, not by a test.
 7. **Multi-parcel** — ✅ **PACKING SHIPPED 2026-09-30** (13 tests). `shipping_packing` gains a **multi-box**
    strategy between "one shared box" and "per item": first-fit-decreasing over the catalog, so a cart that
    outgrows one box becomes several NAMED parcels instead of per-item parcels with no box.
