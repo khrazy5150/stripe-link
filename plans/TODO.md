@@ -2670,6 +2670,10 @@ provenance is worse than a missing one.
 
 ### ⭐⭐ HIGH — Stripe Tax is per-tenant and nothing knows whether a tenant has it (found 2026-09-30)
 
+**Plan: `plans/TAX_STATUS_AND_THRESHOLDS.md`** (written 2026-09-30) — read the tenant's status, show it as a
+read-only row with a deep link (never a toggle), nudge in-app and by email toward Stripe's FREE threshold
+monitoring, and compute no nexus. Phase 2 (status row + link) carries most of the value and cannot fail.
+
 The author, 2026-09-30: *"each tenant must enable Stripe Tax on their own."* Stripe Tax lives on the
 CONNECTED account — the tenant registers jurisdictions and enables it in their own Dashboard. The platform
 cannot do it for them and must not assume it.
@@ -3279,7 +3283,9 @@ choice.
   setup). **VERIFY:** whether embedded components support our **Standard OAuth** connected accounts (platform-liable
   model fits Express/Custom better); if not, fall back to a deep-link to the tenant's own Stripe Tax settings or use
   the [Tax Settings API](https://docs.stripe.com/tax/settings-api) to read/enable status (BNPL-toggle pattern).
-- **Own plan when prioritized.** Not built.
+- **Own plan when prioritized.** ✅ Written: `plans/TAX_STATUS_AND_THRESHOLDS.md` (2026-09-30). The embedded
+  panel is its phase 5 and is explicitly conditional — if Standard OAuth does not support embedded components
+  that phase is DELETED rather than deferred, because the deep link in phase 2 already does the job.
 
 #### Answering the author's two questions, 2026-09-30
 
