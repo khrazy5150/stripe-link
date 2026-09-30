@@ -2,6 +2,67 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
+## 🚨 URGENT — every product's refund policy is a string literal in the dashboard's JavaScript (found 2026-09-30)
+
+**The platform is committing tenants to a refund term they never chose, and it is already on live pages.**
+
+Traced end to end on real data. `dashboard/src/stores/products.js:550` `refundPolicy(productType, form)`
+returns a HARDCODED constant at product-creation time, which is stored on `Product.refund_policy` and is what
+`html.py:4933` renders (`offer.refund_policy or product.refund_policy`; the offer's is null in practice):
+
+    physical -> 30 days / unused / customer keeps / "30-day money-back"
+    digital  -> non-refundable / "Non-refundable"
+
+Verified on `local_1IJdBqpYdnm`: `source: "user_preference_default"`, `full_policy: "Refunds are available
+within 30 days of delivery in unused condition..."`. Nobody typed that sentence. **It is a literal in a
+browser file.**
+
+**It claims a provenance it does not have.** The record says `source: "user_preference_default"` and NOTHING
+reads `UserPreferences.authoring_defaults.refund_policies` — not the dashboard, not any handler. The document
+asserts it came from a tenant preference that was never consulted and that no UI can write.
+
+**The author's words, 2026-09-30:** *"The reason I didn't notice it before is because the pages show a refund
+policy that I assumed was the tenant default policy."* That is exactly the failure mode — it looks configured.
+
+### Why this is URGENT rather than a gap
+
+- **It is a legal commitment.** A refund window on a public storefront is an offer to the buyer. The tenant
+  did not write it, cannot see where it came from, and cannot change it.
+- **It grounds the AI.** `guarantee` is a numeric claim class in the field floor
+  (`plans/AI_AND_COMMERCE_ARCHITECTURE.md` §A.7), so "30 days" is *licensed* by this literal. The AI is being
+  authorised to make a promise by a constant.
+- **It labels the money-back trust badge.** `ai_provision.chosen_badges` reads `refund_policy.short_label`,
+  so a tenant opting into that badge asserts a policy they never set. Same fault as the defaulted trust
+  badges, one layer down and legally meaningful rather than decorative.
+- **Digital products are silently NON-REFUNDABLE.** The harsher default is the one nobody was asked about.
+
+### What exists, and what does not
+
+| piece | state |
+| --- | --- |
+| `Product.refund_policy` (schema + validator) | ✅ exists |
+| `UserPreferences.authoring_defaults.refund_policies.{physical,digital,subscription}` | ✅ schema exists, **nothing reads or writes it** |
+| Product wizard "Policy Source" picker (3 options) | ⚠️ renders, but changes nothing |
+| Product override inputs (window/condition/return_method/label/full_policy) | ❌ form STATE only, no inputs rendered |
+| User-preference defaults UI | ❌ none — `Preferences.vue` only *preserves* `authoring_defaults` on save |
+| "Tenant default" | ❌ not a concept in any schema; the third picker option is fiction |
+
+### Open questions before building (raised with the author 2026-09-30)
+
+1. **Is "tenant default" a real level?** Today the schema has two (user preference -> product). For a solo
+   tenant a third is indistinguishable from the first. Drop it from the picker unless multi-user tenants
+   need it.
+2. **Port stripe-cart's UI or design fresh?** `CLAUDE.md` makes stripe-cart the behavioural spec and the
+   author confirms this was part of its UI, so there is likely a form to match rather than invent —
+   particularly the refund-window options and return-method wording, which are policy vocabulary rather than
+   arbitrary strings.
+
+### Interim honesty (decide when picking this up)
+
+Until a tenant can actually set this, the least-dishonest options are: stop stamping `source:
+"user_preference_default"` on a value no preference produced; or surface the current default in the wizard as
+an editable field so the tenant at least SEES what their storefront is promising before it goes live.
+
 ## ✅ FIXED 2026-09-26 — upsell orders and their parents landed in DIFFERENT TABLES
 
 Found 2026-09-25 while fixing the missing upsell shipping address, and it is the more serious half.
