@@ -2655,9 +2655,21 @@ the system cannot keep it. *Customer-facing commercial promises should never be 
 Made worse by zones (`plans/SHIPPING_ELEMENT.md`): "free shipping" is scoped to a destination, so even a tenant
 for whom it is true domestically is asserting it to a Canadian buyer who paid.
 
-**Fix:** derive the card from what the order actually says — `order.shipping_amount` for free-or-not and the
-chosen option's `transit_days_*` for the window — or drop the card from the default. A thank-you page has the
-order in hand, so there is no excuse for guessing.
+**Fix (designed in `plans/SHIPPING_ELEMENT.md`, "The thank-you page needs its own element"):** a
+`shipping_summary` element that reads the ORDER. Cheaper than it looks — `handlers/upsell.py:71` already serves
+a public, session-gated `/upsell/session` that published pages fetch at runtime and that already returns
+`shipping_address`. It needs one extra Stripe expand (`shipping_cost.shipping_rate`) and the existing
+`shipping_charges.buyer_paid_shipping()` reader, which is the same function the webhook uses — so the
+thank-you page and the order cannot disagree.
+
+The expand also makes the WINDOW honest: Stripe's shipping_rate carries `delivery_estimate`, which is the
+tenant's own `transit_days_min/max`. The invented "5–7 business days" is replaced by the real one from the
+same source that priced the parcel.
+
+The default footer's tracking promise, by contrast, is **sound** — `handlers/orders.py:202` emails the buyer
+via `notify_buyer` when the tenant records a shipment, and `domain/carriers.service_has_tracking` decides
+whether to promise a tracking NUMBER at all because USPS First-Class carries none. Checked rather than assumed;
+the shipping card is the only false claim on that page.
 
 ### ⭐⭐ HIGH — the Shipping screen collects two values nothing reads (found 2026-09-30)
 

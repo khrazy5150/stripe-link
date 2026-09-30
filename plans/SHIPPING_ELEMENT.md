@@ -279,6 +279,73 @@ The author's cases, and the element is absent from half of them:
 the element is an *enhancement*, not the mechanism — and the mechanism has to work without it. Today's shipped
 path (flat options passed to Stripe) is very close to B already.
 
+## The thank-you page needs its own element, and it is a different one
+
+The author, 2026-09-30: the baked-in Free Shipping card exists *"because the old software didn't have the level
+of sophistication that we are now building. So now, the Thank you page will also have to carry an element that
+truthfully reflects shipping."*
+
+**A separate element, not the same one.** The two have opposite jobs:
+
+| | Shipping Element (pre-purchase) | Shipping Summary (post-purchase) |
+| --- | --- | --- |
+| reads | tenant config + offer contents + destination | **the order** |
+| asks the buyer | for a destination, for a choice | nothing |
+| states | what shipping WOULD cost | what it DID cost |
+| can be wrong by | a stale quote | nothing — it is reporting |
+
+### The hard part is that the thank-you page is STATIC
+
+`runtime/upsell_pages.synthesize_thank_you_page` publishes ONE artifact at `{page_id}__thank_you`, served from
+S3 to every buyer. A static page has no order, which is precisely why the current card had to invent a promise —
+there was nothing true available to it.
+
+**But the runtime path already exists, and it already carries shipping.** The buyer arrives with Stripe's
+`session_id` in the URL (`success_url` … `&session_id={CHECKOUT_SESSION_ID}`), and `handlers/upsell.py:71`
+already serves a PUBLIC, session-gated `/upsell/session` that a published page fetches at runtime — returning
+the customer's email, name, phone and **`shipping_address`**. The exposure question is settled precedent: an
+unguessable session id returns only what that buyer already knows.
+
+So the element is a small extension, not a new surface:
+
+1. **Add one expand** to the existing Stripe retrieve: `expand[]=shipping_cost.shipping_rate`. The endpoint
+   already passes several expands.
+2. **Include `shipping_charges.buyer_paid_shipping(session)`** in the response. That is the SAME reader the
+   webhook uses for `order.shipping_amount` — one function, so the thank-you page and the order can never
+   disagree about what the buyer paid.
+3. **A `shipping_summary` element** that hydrates from it, the JS-island pattern published pages already use.
+
+### The expand is what makes the delivery window honest
+
+Stripe's shipping_rate object carries `delivery_estimate` — the very window the tenant configured as
+`transit_days_min/max` on the option. So the element can say *"Ground — arriving in 5–7 business days"* because
+**Stripe is handing back the tenant's own promise**, not because a default invented one.
+
+That closes the loop on the logged bug: the invented window is replaced by a real one from the same source that
+priced the parcel.
+
+### Rules the element must obey
+
+- **Render nothing when there is no shipping.** `buyer_paid_shipping` returns `{}` for a digital order, and a
+  "Shipping" heading on a download is noise.
+- **Never state a window Stripe did not return.** No `delivery_estimate` means no window — the service name
+  alone is still true, and true-and-brief beats complete-and-invented.
+- **"Free" only when `shipping_amount == 0`**, read from the order rather than from the tenant's intent. A
+  Canadian buyer who paid must not be told shipping was free because the US zone is.
+- **The tracking claim is fine, and I was wrong to doubt it.** The default footer says *"Look for an email from
+  us with tracking information about your order"*, and `handlers/orders.py:202` really does email the buyer via
+  `notify_buyer` when the tenant records a shipment — with `domain/carriers.service_has_tracking` deciding
+  whether to promise a tracking NUMBER, because USPS First-Class carries none. That is the careful version of
+  exactly the pattern this plan keeps finding broken elsewhere. The claim is conditional on the tenant marking
+  the order shipped, which is a fair thing for a thank-you page to say.
+
+### Removing the default card is a deliberate live change
+
+`DEFAULT_THANK_YOU.next_steps` is a PLATFORM default, so deleting the card changes every thank-you page that
+has not overridden it. That is the point — it is removing a false claim, the same call as dropping the
+duplicated refund paragraph — but it is a visible change to published pages and should be stated, not slipped
+in. Tenants who edited their cards keep exactly what they wrote.
+
 ## Two blockers this design walks into
 
 ### 1. Multi-parcel is refused, and the author's own example triggers it
