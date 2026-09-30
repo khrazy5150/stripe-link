@@ -93,6 +93,58 @@
         "$ref": "#/$defs/box"
       }
     },
+    "enabled_services": {
+      "type": "array",
+      "description": "The carrier services this tenant OFFERS a buyer, in the same {carrier, service_token} vocabulary as domain/rate_policy.py. A page element may only NARROW this set, never widen it: a customer must not be able to ask for overnight when the tenant does not ship overnight (plans/SHIPPING_ELEMENT.md). Empty or absent means nothing is offered for selection, which is today's behaviour.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service_token"],
+        "properties": {
+          "service_token": { "type": "string", "minLength": 1 },
+          "carrier": { "type": "string" },
+          "label": { "type": "string", "description": "What the BUYER reads, e.g. 'Ground (5-7 days)'. Absent falls back to the carrier's own name." },
+          "transit_days_min": { "type": ["integer", "null"], "minimum": 0 },
+          "transit_days_max": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "zones": {
+      "type": "array",
+      "description": "What buyers pay, by destination. ORDERED: the FIRST zone matching the destination wins, and the LAST zone must be the catch-all ({country: \"*\"}) so 'everywhere else' always has an answer. A country may appear in at most one non-catch-all zone -- a duplicate is not an error the tenant sees, it is a silently dead second zone (plans/SHIPPING_ELEMENT.md).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["destinations", "rule"],
+        "properties": {
+          "name": { "type": "string", "description": "The tenant's own label, e.g. 'United States'. Never shown to a buyer." },
+          "destinations": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Where this zone applies. `regions` is deliberately ABSENT in V1 -- country is the V1 granularity -- and exists in the shape so subdivisions can be added later without a second field or a migration.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["country"],
+              "properties": {
+                "country": { "type": "string", "minLength": 1, "maxLength": 2, "description": "ISO 3166-1 alpha-2, or \"*\" for the catch-all." },
+                "regions": { "type": "array", "items": { "type": "string" }, "description": "NOT USED IN V1. State/province codes within the country when subdivision targeting arrives." }
+              }
+            }
+          },
+          "rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["free", "flat", "flat_rate_box", "live"] },
+              "amount": { "type": "integer", "minimum": 0, "description": "Required when type is 'flat'. Cents the buyer pays." },
+              "services": { "type": "array", "items": { "type": "string" }, "description": "Narrows enabled_services for this zone, e.g. no overnight to Canada. Never widens it." }
+            }
+          }
+        }
+      }
+    },
     "rate_options": {
       "type": "object",
       "additionalProperties": false,
@@ -241,7 +293,12 @@
           ],
           "default": "box"
         },
-        "template": {
+        "flat_rate": {
+        "type": "object",
+        "description": "What the tenant charges a buyer for this container, keyed by destination COUNTRY (ISO alpha-2). Country-keyed because flat rate is domestic by definition -- one number cannot serve two countries. The template describes the physical container; this describes what it costs the buyer in a place. Used by a zone whose rule type is 'flat_rate_box'; a shipping-configuration concern, never an Offer one.",
+        "additionalProperties": { "type": "integer", "minimum": 0 }
+      },
+      "template": {
           "description": "A carrier's own packaging identifier (USPS flat-rate envelopes and the like), passed straight through to the provider. Flat-rate packaging is frequently the cheapest option for a soft pack, and omitting it means those rates are never quoted at all. Absent means a custom parcel, which is what every box has been until now.",
           "type": [
             "string",

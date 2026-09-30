@@ -380,11 +380,96 @@ hard ceiling per tenant per hour. **Cache first** — it removes most of the tra
 
 Nothing built so far has to be unpicked.
 
+## LOCKED 2026-09-30 — the Phase 1 contract
+
+The author locked these; the only deliberate constraint is that **country is the V1 destination granularity.**
+
+    Product          physical dimensions and weight                        (exists)
+    ShippingConfig   enabled services, boxes, ordered zones, defaults      (new)
+    Zone             {name, destinations[], rule}
+    Zone rule        free | flat | flat_rate_box | live
+    Zone matching    ordered, FIRST MATCH WINS, mandatory catch-all
+    Box              existing `template` plus country-keyed `flat_rate`
+    Shipping screen  owns tenant shipping config and "What buyers pay"
+    Offer            eligibility + optional override ONLY
+    Element          customer-facing selection; the quote endpoint stays authoritative
+
+### The zone shape, and why `destinations[]` rather than `countries[]`
+
+The author's requirement: *"design the zone shape so country-level zones are the V1 UI, but the schema can
+accommodate subdivisions later without breaking it."*
+
+Taken literally, that argues against their own strawman's `countries: ["US"]`. Evolving that to
+`destinations: [{country, regions}]` means a SECOND field and a dual-read fallback forever — two shapes meaning
+one thing, which is the failure mode this repo keeps paying for. `destinations[]` from day one, with `regions`
+simply **absent** in V1, makes the later addition purely additive: no migration, no fallback, no second field.
+Same conceptual model, same country-only UI.
+
+```jsonc
+"zones": [
+  { "name": "United States",   "destinations": [{ "country": "US" }], "rule": { "type": "live" } },
+  { "name": "Canada",          "destinations": [{ "country": "CA" }], "rule": { "type": "flat", "amount": 1299 } },
+  { "name": "Everywhere Else", "destinations": [{ "country": "*" }],  "rule": { "type": "free" } }
+]
+```
+
+Later, without touching anything above it:
+
+```jsonc
+{ "name": "Lower 48", "destinations": [{ "country": "US", "regions": ["CA", "OR", "WA"] }], ... }
+```
+
+**Deliberately NOT in V1** (author): state exclusions, Alaska/Hawaii, territories, provinces, EU regions. That
+is a substantially bigger product concept and there is no evidence yet that Junior Bay needs it.
+
+### The validation rules
+
+- **A country may appear in at most ONE non-catch-all zone.** The author's rule, and the reason is exact: with
+  first-match-wins, a duplicate is not an error the tenant sees — it is a silently ignored second zone. The
+  earlier zone wins and the later one becomes dead configuration the tenant believes is live.
+- **The last zone MUST be the catch-all** (`country: "*"`), and only the last one may be. A catch-all in the
+  middle makes every zone after it unreachable. Without one, "everywhere else" has no answer and a buyer from
+  an unlisted country hits undefined behaviour at the worst moment.
+- **`flat` requires an amount; `flat_rate_box` requires at least one box with a `flat_rate` for that zone's
+  countries.** A rule that cannot produce a number is not a rule.
+
+### The box shape
+
+`flat_rate` is country-keyed because flat rate is domestic by definition — one number cannot serve two
+countries:
+
+```jsonc
+{ "template": "usps_medium_flat_rate_box", "flat_rate": { "US": 899, "CA": 1499 } }
+```
+
+The author's framing, kept: *"The box template describes the physical container, while `flat_rate` describes
+what the tenant charges for that container in a destination country."* And critically — **flat-rate-box pricing
+is a shipping-configuration concern, never an Offer concern.**
+
+### Why the Offer editor stays small
+
+The author's reason is the one that matters: otherwise you get *"Why does this offer say $9 shipping when the
+Shipping screen says $7?"* So the Offer answers exactly two questions — does this offer ship, and does it
+override the default — and holds **no zone editor, no carrier config, no second copy of the shipping system.**
+
 ## Phases
 
-1. **`ShippingConfig.enabled_services` + a real UI for it**, replacing the two dead inputs. Ships value alone:
-   it is the first time a tenant can say what they offer, and it makes `markup_amount`/`free_shipping_threshold`
-   honest instead of decorative.
+1. **`ShippingConfig.enabled_services` + zones + box `flat_rate`, and a UI for them** — replacing the two dead
+   inputs. Ships value alone: the first time a tenant can say what they offer and what it costs a buyer.
+
+   **Backend ✅ SHIPPED 2026-09-30** (36 tests): schema, `domain/shipping_zones.py` (pure — matching,
+   `services_for`, `allowed_countries`, `resolved_amount`, `flat_rate_for_box`), and
+   `validate_shipping_zones` wired into `validate_shipping_config`. **UI still to build.**
+
+   Decisions worth keeping, all of them "None is not zero":
+
+   - `resolved_amount` returns **None** for `live` and `flat_rate_box` — "not answerable from the destination",
+     one needing the packed box and the other the carrier. A caller treating it as 0 ships for free.
+   - `flat_rate_for_box` returns **None** for an unpriced country. An unpriced box is not a free box.
+   - A destination no zone claims is **not served** rather than silently free. Inventing a rule on the tenant's
+     behalf is the implicit promise this plan family exists to stop.
+   - A catch-all placed early does not shadow a real zone. The schema requires it last, but a hand-written
+     document still resolves sensibly rather than making every later zone dead.
 2. **Tenant default → offer override resolution** in `shipping_charges`. Removes the forty-times problem.
 3. **Offer B end to end** — server picks the default service, no element, no address form. The common case, and
    it needs nothing public.

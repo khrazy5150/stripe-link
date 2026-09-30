@@ -2745,12 +2745,89 @@ def validate_legal_page(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Legal page page_id must be 'terms', 'privacy', or 'refund'.")
 
 
+def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
+    """Ordered destination zones -- what buyers pay, by where they are (plans/SHIPPING_ELEMENT.md).
+
+    Three rules, each because a violation is SILENT rather than visible:
+
+    - **A country in two non-catch-all zones.** With first-match-wins the second one is not an error the tenant
+      sees, it is dead configuration they believe is live. The author's rule.
+    - **A catch-all anywhere but last.** Every zone after it is unreachable, for the same reason.
+    - **A rule that cannot produce a number.** `flat` with no amount prices nothing, and a page asking for a
+      price would get silence at the moment a buyer is deciding.
+    """
+    if zones is None:
+        return
+    from stripe_link.domain.shipping_zones import ANYWHERE, FLAT, FLAT_RATE_BOX, RULE_TYPES, zone_countries
+
+    if not isinstance(zones, list):
+        raise DocumentValidationError("Shipping config zones must be an array.")
+    seen: dict[str, int] = {}
+    for index, zone in enumerate(zones):
+        if not isinstance(zone, dict):
+            raise DocumentValidationError(f"Shipping config zones[{index}] must be an object.")
+        optional_string(zone, "name", f"zones[{index}].name", max_length=120)
+        destinations = zone.get("destinations")
+        if not isinstance(destinations, list) or not destinations:
+            raise DocumentValidationError(
+                f"Shipping config zones[{index}] needs at least one destination.")
+        countries = zone_countries(zone)
+        if not countries:
+            raise DocumentValidationError(
+                f"Shipping config zones[{index}] has no usable country code.")
+        if ANYWHERE in countries and index != len(zones) - 1:
+            raise DocumentValidationError(
+                f"Shipping config zones[{index}] is the catch-all ('*') but is not last; "
+                f"every zone after it would be unreachable.")
+        for code in countries:
+            if code == ANYWHERE:
+                continue
+            if code in seen:
+                raise DocumentValidationError(
+                    f"Shipping config zones[{index}] repeats country '{code}', already claimed by "
+                    f"zones[{seen[code]}]. First match wins, so the later zone would never apply.")
+            seen[code] = index
+        for destination in destinations:
+            if not isinstance(destination, dict):
+                raise DocumentValidationError(
+                    f"Shipping config zones[{index}] destinations must be objects.")
+            require_string(destination, "country", f"zones[{index}].country")
+            if destination.get("regions") is not None:
+                optional_string_list(destination, "regions", f"zones[{index}].regions")
+
+        rule = zone.get("rule")
+        if not isinstance(rule, dict):
+            raise DocumentValidationError(f"Shipping config zones[{index}] needs a rule.")
+        require_enum(rule, "type", set(RULE_TYPES), f"zones[{index}].rule.type")
+        optional_non_negative_int(rule, "amount", f"zones[{index}].rule.amount")
+        if rule.get("services") is not None:
+            optional_string_list(rule, "services", f"zones[{index}].rule.services")
+        if rule["type"] == FLAT and rule.get("amount") is None:
+            raise DocumentValidationError(
+                f"Shipping config zones[{index}] is a flat rate with no amount, so it prices nothing.")
+        if rule["type"] == FLAT_RATE_BOX:
+            priced = any(isinstance(box, dict) and isinstance(box.get("flat_rate"), dict)
+                         and any(str(k).strip().upper()[:2] in countries for k in box["flat_rate"])
+                         for box in (boxes if isinstance(boxes, list) else []))
+            if not priced and ANYWHERE not in countries:
+                raise DocumentValidationError(
+                    f"Shipping config zones[{index}] prices by flat-rate box, but no box has a flat_rate for "
+                    f"{', '.join(countries)}.")
+
+    if zones and ANYWHERE not in zone_countries(zones[-1]):
+        # Without one, a buyer from an unlisted country reaches undefined behaviour at the moment of purchase.
+        raise DocumentValidationError(
+            "Shipping config zones must end with a catch-all zone (country '*') so 'everywhere else' has an "
+            "answer.")
+
+
 def validate_shipping_config(document: dict[str, Any]) -> None:
     # Only the provider is required. A tenant must be able to save a key and TEST it before filling in
     # addresses -- testing is the first thing anyone wants to do, and gating it behind the most tedious
     # part of the form is backwards. Whether the config is COMPLETE enough to buy a label is a different
     # question, answered by label_readiness() rather than by refusing the save.
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider"])
+    validate_shipping_zones(document.get("zones"), document.get("boxes"))
     if document.get("document_type") != "shipping_config":
         raise DocumentValidationError("Shipping config document_type must be 'shipping_config'.")
     provider = document.get("provider")
