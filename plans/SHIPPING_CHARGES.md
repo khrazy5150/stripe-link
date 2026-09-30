@@ -166,6 +166,13 @@ zero is not, because zero is a claim that postage was free.
 - **International.** Checkout allows US and CA today, hardcoded. A shipping charge that ignores destination
   is wrong the moment a second country is allowed.
 
+## Inbound shipping is a different number
+
+`plans/INVENTORY_COST_BASIS.md` owns the cost of ACQUIRING inventory (`lot.inbound_shipping`); this plan owns
+fulfilling one order (`order.shipping_cost`, and `order.shipping_amount` for what the buyer paid). Three
+numbers, three names, none of them just "shipping". Inbound is never charged to a buyer, so the double-count
+invariant above applies to the outbound pair only.
+
 ## The principle both plans exist to serve
 
 > *"Customer-facing commercial promises should never be implicit."* — the author, 2026-09-30

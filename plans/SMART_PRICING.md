@@ -133,6 +133,17 @@ this profile** rather than typed.
 
 ---
 
+## 5b. Where the cost lines come from
+
+`plans/INVENTORY_COST_BASIS.md` (2026-09-30) supplies them for physical goods. A tenant records what a batch
+cost — product, inbound freight, duties — and the lot derives the per-unit `fixed` lines above instead of the
+tenant dividing by hand. Two consequences for this plan: where a lot exists its **actual** duties become a
+`fixed` amount rather than an estimated `pct_of_cost` rate, and §6 below is the staleness mechanism a new lot
+triggers, so inventory does not need its own. A product with no lots has no cost basis and this plan keeps
+asking the tenant — never $0.
+
+---
+
 ## 6. Costs go stale, and the price does not follow
 
 A price is a SNAPSHOT of a cost profile. When the source cost rises the price does not move, and it

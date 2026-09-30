@@ -2664,6 +2664,36 @@ Pricing fact and does not belong in a checkout mode.
 shipping (an explicit rule in `fees.py`, never inferred from Stripe's transaction total), and the invariant
 above. Checkout is where a wrong answer becomes a charge to a real buyer.
 
+### ⭐⭐ HIGH — there is no cost basis: "what did I pay to acquire these units?" (raised 2026-09-30)
+
+Plan: **`plans/INVENTORY_COST_BASIS.md`**. The author: *"a lightweight inventory/cost-basis module is
+justified, but I would not build a full inventory-management system yet."*
+
+**Nothing to migrate.** stripe-link has no inventory concept; stripe-cart has an `inventory` key on the offer
+(`api_offers.py:523,606`) that is written and **never read**. No behaviour to preserve.
+
+**The seam is narrower than it looks.** SMART_PRICING §2 already models "Source cost", "Inbound freight" and
+"Import duties" as per-unit cost lines — the tenant just divides by hand. A lot derives lines Smart Pricing
+already understands, and where a lot exists, actual duties replace the estimated `pct_of_cost` rate. §6
+staleness already handles "a new lot costs more than the price assumes"; do not build that twice.
+
+**Two decisions the sketch left open, both settled in the plan:** with multiple lots at different costs,
+*which* lot a sale consumes (DECIDED: oldest open lot first by `received_at`, not configurable — that is a
+sort and a loop, not the excluded FIFO/LIFO accounting), and therefore that the resolved `cost_basis` must be
+**stamped on the order item at sale time** — because late duty invoices are normal, and editing a lot must not
+retroactively rewrite the margin of orders that already shipped.
+
+**V1 records, it does not enforce.** No oversell blocking, and `units_remaining` is allowed to go negative
+because "you sold more than you recorded receiving" is true and actionable. `total_cost` and `unit_cost` are
+derived, never stored — $1,000 over 3 units does not divide evenly, and two stored numbers that disagree have
+no correct answer.
+
+**Absence means unknown, not zero.** Digital goods and services will never have a lot; a zero cost basis
+would report infinite margin. Same rule the shipping plan reached for `shipping_cost`.
+
+Three numbers called shipping, three names: `inbound_shipping` (lot, acquisition), `shipping_cost` (order,
+carrier), `shipping_amount` (order, buyer-paid). Only the outbound pair needs the double-count invariant.
+
 ### Smart Pricing — cost profiles, and a price the tenant does not have to guess (plan plans/SMART_PRICING.md, 2026-09-28)
 
 A tenant states what a thing costs them and what they want to earn; the platform states what to
