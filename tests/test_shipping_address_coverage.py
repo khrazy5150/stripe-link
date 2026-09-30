@@ -71,7 +71,28 @@ class SubscriptionCheckoutTests(unittest.TestCase):
         self.assertIn('payload["mode"] in {"payment", "subscription"}', self.SOURCE)
 
     def test_it_is_no_longer_restricted_to_one_time_payments(self):
-        self.assertNotIn('collect_shipping and payload["mode"] == "payment"', self.SOURCE)
+        """Asserted by BUILDING a subscription payload rather than by searching the source.
+
+        This was a `assertNotIn('collect_shipping and payload["mode"] == "payment"', SOURCE)`, which had two
+        faults: it passed if someone deleted the address block entirely (the string is absent either way), and
+        it false-tripped when an unrelated feature legitimately needed a payment-only condition -- which
+        shipping options did on 2026-09-30. Asserting the behaviour cannot do either.
+        """
+        from handlers.checkout import build_checkout_payload
+
+        products = {"p1": {"product_id": "p1", "name": "Creatine", "product_type": "physical",
+                           "prices": [{"price_id": "pr1", "unit_amount": 3291, "currency": "usd"}]}}
+        built = build_checkout_payload(
+            tenant_id="t1", offer={"offer_id": "o1", "stripe_mode": "test",
+                                   "checkout": {"mode": "subscription"}},
+            products_by_id=products,
+            resolved={"items": [{"product_id": "p1", "price_id": "pr1", "quantity": 1,
+                                 "unit_amount": 3291, "currency": "usd",
+                                 "recurring": {"interval": "month"}}],
+                      "subtotal": 3291, "currency": "usd"},
+            success_url="https://x/s", cancel_url="https://x/c")
+        self.assertEqual(built["mode"], "subscription")
+        self.assertEqual(built["shipping_address_collection[allowed_countries][0]"], "US")
 
     def test_it_is_still_gated_on_there_being_something_physical(self):
         # A service subscription must not start demanding an address it has no use for.

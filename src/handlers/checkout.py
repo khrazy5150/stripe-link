@@ -19,6 +19,7 @@ from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.fees import (application_fee_percent, build_fee_context, cached_billing_config,
                                      calculate_price, normalize_tier_id)
+from stripe_link.domain.shipping_charges import stripe_shipping_options
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
@@ -583,6 +584,28 @@ def materialize_platform_discount(coupon, resolved, coupon_code, tenant_id, mate
         raise CouponUnavailable(str(coupon_code or "")) from exc
 
 
+def _flatten_params(value, prefix: str = "") -> dict[str, str]:
+    """Nested dict -> Stripe's bracket form encoding.
+
+    Written once rather than per field: a shipping rate nests three deep
+    (`[shipping_rate_data][delivery_estimate][minimum][unit]`), and hand-writing those keys is how one gets
+    quietly misspelled — Stripe ignores an unknown parameter rather than refusing it, so a typo there does not
+    fail, it just silently drops the delivery estimate.
+    """
+    flat: dict[str, str] = {}
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            flat.update(_flatten_params(inner, f"{prefix}[{key}]"))
+    elif isinstance(value, (list, tuple)):
+        for index, inner in enumerate(value):
+            flat.update(_flatten_params(inner, f"{prefix}[{index}]"))
+    elif isinstance(value, bool):
+        flat[prefix] = "true" if value else "false"
+    elif value is not None:
+        flat[prefix] = str(value)
+    return flat
+
+
 def build_checkout_payload(
     *,
     tenant_id,
@@ -669,6 +692,7 @@ def build_checkout_payload(
         payload["customer"] = grant_customer_id
 
     collect_shipping = False
+    shippable_units = 0
     first_product_id = ""
     first_price_id = ""
     first_product_name = ""
@@ -723,7 +747,11 @@ def build_checkout_payload(
                 payload[f"{prefix}[price_data][recurring][interval]"] = recurring.get("interval") or "month"
                 payload[f"{prefix}[price_data][recurring][interval_count]"] = str(int(recurring.get("interval_count") or 1))
         payload[f"{prefix}[quantity]"] = str(int(item.get("quantity") or 1))
-        collect_shipping = collect_shipping or product.get("product_type") == "physical"
+        if product.get("product_type") == "physical":
+            collect_shipping = True
+            # Only PHYSICAL units count toward per-item shipping: a cart of three shirts and an ebook is
+            # three things to post, not four (domain/shipping_charges.resolve_amount).
+            shippable_units += int(item.get("quantity") or 1)
 
     # Booking metadata so the webhook can fan out 1..N appointments + no_booking invoice lines
     # (STORY-2.3). service_lines carries ALL service lines; service_booking_mode coordinates grouping.
@@ -764,6 +792,34 @@ def build_checkout_payload(
     if collect_shipping and payload["mode"] in {"payment", "subscription"}:
         payload["shipping_address_collection[allowed_countries][0]"] = "US"
         payload["shipping_address_collection[allowed_countries][1]"] = "CA"
+
+    # What shipping COSTS the buyer (plans/SHIPPING_CHARGES.md phase 6). The last thing wired, deliberately:
+    # Checkout is the one consumer that cannot be corrected after the fact, because a session that quoted the
+    # wrong postage has already told someone a price.
+    #
+    # PAYMENT MODE ONLY, and that is a decision rather than an oversight. Two unresolved things gate
+    # subscriptions:
+    #   1. Whether the chosen shipping recurs on every invoice or applies only to the first is UNVERIFIED
+    #      against Stripe's current behaviour. A monthly box needs postage each cycle; a one-shipment
+    #      subscription does not, and guessing wrong either double-charges a buyer every month or ships
+    #      eleven parcels free.
+    #   2. A subscription fee is a PERCENT, not an amount, so with buyer-chosen shipping the absolute
+    #      platform fee cannot be made exact -- the denominator has to assume which option they pick. See
+    #      `fees.application_fee_percent`.
+    # A subscription therefore still collects an address (it must, to ship at all) and charges nothing for
+    # postage, which is exactly today's behaviour and is safe.
+    # Written as a set to read in parallel with the address-collection condition above: an address is
+    # collected in BOTH modes, postage is charged in ONE.
+    if collect_shipping and payload["mode"] in {"payment"}:
+        shipping_options = stripe_shipping_options(
+            offer,
+            currency=resolved.get("currency", "usd"),
+            merchandise_amount=int(resolved.get("subtotal") or 0),
+            item_count=max(1, shippable_units),
+        )
+        for index, option in enumerate(shipping_options):
+            for key, value in _flatten_params(option).items():
+                payload[f"shipping_options[{index}]{key}"] = value
     # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same
     # session if the buyer adds them). plans/SALES_FUNNELS.md P2.
     order_bumps = order_bump_optional_items(offer, products_by_id, key_mode)

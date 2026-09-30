@@ -395,9 +395,36 @@ The author's order, 2026-09-30, with Checkout deliberately LAST:
 
    Still to come with SHIPPING_PROVIDERS: a `shipping_cost` ledger entry when a label is bought. The entry type
    already exists in `LedgerEntry.schema.json`; nothing writes one.
-6. **Stripe Checkout `shipping_options`** — last, on purpose. Checkout is where a wrong rule stops being a
-   design question and becomes a charge to a real buyer, and it is the one consumer that cannot be corrected
-   after the fact: a session that quoted the wrong shipping has already told someone a price.
+6. **Stripe Checkout `shipping_options`** — ✅ **SHIPPED 2026-09-30**, last on purpose. Checkout is where a
+   wrong rule stops being a design question and becomes a charge to a real buyer, and it is the one consumer
+   that cannot be corrected after the fact: a session that quoted the wrong shipping has already told someone
+   a price.
+
+   Options are resolved against the real cart — `resolved.subtotal` for the free-above threshold, and **physical
+   units only** for per-item pricing, because three shirts and an ebook is three things to post, not four.
+
+   **PAYMENT MODE ONLY, and that is a decision.** A subscription still collects an address (it must, or the
+   2026-09-25 unshippable-subscription bug returns) and charges nothing for postage, which is exactly today's
+   behaviour. Two unresolved things gate it:
+
+   - Whether the chosen shipping **recurs on every invoice** or applies only to the first is still unverified.
+     A monthly box needs postage each cycle; a one-shipment subscription does not. Guessing wrong either
+     double-charges a buyer every month or ships eleven parcels free.
+   - A subscription fee is a **percent**, so with buyer-chosen shipping the absolute platform fee cannot be
+     made exact — the denominator must assume which option the buyer picks. If subscription shipping is ever
+     wired, the conservative choice is the MOST expensive option, so the platform under-collects rather than
+     over-charging a tenant.
+
+   Two things this phase caught, neither related to shipping:
+
+   - **A bare `Any` annotation with no import.** Python 3.14 evaluates annotations lazily, so it imported
+     cleanly locally; **Lambda runs python3.12**, which evaluates them at definition time and would have raised
+     `NameError` on import — taking down every checkout. A test now forces annotation evaluation across every
+     handler module, verified to fail on the bug and pass without it.
+   - **A fragile source-string guard.** The 2026-09-25 address fix was pinned by
+     `assertNotIn('collect_shipping and payload["mode"] == "payment"', SOURCE)`, which passed if the address
+     block were deleted entirely and false-tripped the moment an unrelated feature needed a payment-only
+     condition. Replaced with a test that builds a subscription payload and asserts the address is collected.
 
 `shipping_cost` has no source yet — no carrier integration exists, so it starts nullable and tenant-entered,
 and is trued up when SHIPPING_PROVIDERS lands and a real label has a real price. Nullable is honest here;
