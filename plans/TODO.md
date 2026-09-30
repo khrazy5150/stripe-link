@@ -3331,6 +3331,27 @@ settings. Same pattern the BNPL work already uses, where a toggle records displa
 the authority on what is actually active (`plans/BNPL_PAYMENT_METHODS.md`). Here even the intent belongs to the
 tenant, so there is nothing for us to toggle.
 
+### LOW — the app never mentions sales tax to a tenant (noted 2026-09-30)
+
+**Plan: `plans/TAX_STATUS_AND_THRESHOLDS.md`, phase 2 ONLY.** The author's decision, 2026-09-30: Stripe
+notifies tenants and tenants are responsible for enabling their own tax, so phases 3-5 (in-app notice, email,
+embedded panel) are **dropped**, not deferred.
+
+What is left is one read-only row on the Payments screen:
+
+    Sales tax                                        Not enabled
+    No sales tax is being collected on your orders.
+    Stripe can monitor for free where you may need to register.   [Open Stripe Tax ↗]
+
+**Why it is still worth a day eventually.** Dropping the rest rests on Stripe notifying a tenant who has
+**never enabled Stripe Tax** — and that is one of the plan's unverified items. Threshold monitoring is free,
+but free is not the same as on-by-default, and a tenant who never opens their Stripe Dashboard's tax section
+may hear nothing from anyone. The row makes no claim about liability and turns silence into a pointer.
+
+Low priority because it is nobody's blocker: it changes no behaviour, collects no tax, and the liability is
+the tenant's either way. Trigger to revisit: the first tenant who asks about sales tax, or verification that
+Stripe does NOT notify unenrolled accounts.
+
 ## Production setup
 
 ### LOW — no backups and no log retention; neither is a cost problem (noted 2026-09-29)
