@@ -42,9 +42,16 @@ Three questions the primitive must answer, and today none of them has a home:
    double-counting note above is what happens when nobody decides. This is a FIELD, not an inference.
 2. **What is the amount?** Flat per order, flat per item, by weight band, or free above a threshold. All are
    ordinary retail policies and none is expressible today.
-3. **Where does it land on the order?** Neither field exists. Without them: the tenant's P&L is wrong
-   (shipping revenue is invisible), the fee calculation is wrong (is the platform fee charged on shipping?),
-   tax is wrong in jurisdictions that tax shipping, and a refund cannot know whether shipping comes back.
+3. **Where does it land on the order?** Neither field exists. Without them: shipping margin cannot be
+   computed, the fee calculation has no stated base, tax cannot be reasoned about in jurisdictions that tax
+   shipping, and a refund cannot know whether shipping comes back.
+
+   **Correcting an earlier overclaim in this plan (2026-09-30):** it said the tenant's P&L is wrong because
+   "shipping revenue is invisible". It is not wrong. `domain/ledger.py` already has `shipping_cost` and `cogs`
+   as profit components, and `gross` is `session.amount_total` — Stripe's whole total, buyer-paid shipping
+   included. So total profit already comes out right. What is missing is the ability to ISOLATE shipping
+   revenue: `shipping_amount` sits inside `gross` undifferentiated, so shipping margin cannot be separated
+   from product margin. An incomplete breakdown, not a wrong bottom line.
 
 **That third one is why this is a primitive and not a feature.** Every downstream system already in the repo
 — ledger, fees, refunds, tax fields — has a shipping-shaped hole in it.
@@ -196,6 +203,46 @@ tenant would notice from the numbers. `shipping_cost` stays truthful in every ro
 it charges regardless of who ends up paying for it. The `absorbed` row is a legitimate choice and the UI
 should say so out loud ("you are paying for shipping on this offer") rather than letting a tenant discover
 their margin at tax time.
+
+## How Stripe treats shipping, and how that differs from tax
+
+Asked by the author, 2026-09-30: *does Stripe allow a separate shipping charge like they do taxes?* Yes — a
+separate line, separately reported, independently reconcilable. But the two are handled in fundamentally
+different ways, and the difference is the whole reason `domain/shipping_charges.py` has to exist:
+
+| | Tax | Shipping |
+| --- | --- | --- |
+| Who decides the amount | **Stripe.** `automatic_tax[enabled]=true` and Stripe Tax resolves jurisdiction, nexus and product tax codes | **We do.** Stripe only presents the options we supply |
+| Reported on the session as | `total_details.amount_tax` | `shipping_cost.amount_total` and `total_details.amount_shipping` |
+| Does the buyer choose | No | **Yes** — up to 5 `shipping_options` |
+| Recalculates as the buyer types their address | Yes | **No** |
+| Can the other one apply to it | n/a | Yes — `tax_behavior` on the rate, reported as `shipping_cost.amount_tax` |
+
+**Stripe computes tax. Stripe does not compute shipping.** If it did, this module would be a thin wrapper
+around an API call. It is a real calculator because the amount is ours to decide.
+
+### The constraint that follows, and it is a hard one
+
+**Hosted Checkout cannot call back to us mid-session.** Stripe recalculates tax as the buyer edits their
+address; it will never ask us for a shipping rate for the address they just typed. So on hosted Checkout,
+shipping options must be decided BEFORE the session opens — flat or table rates, which is what `options_for`
+returns.
+
+That is a real limit on `plans/SHIPPING_PROVIDERS.md`: a live carrier quote for *this* buyer's address is not
+possible during hosted checkout. A tenant can buy a real rate AFTER the sale (which is what `rate_policy.py`
+is for), but quoting one DURING it needs Payment Element or a custom flow, which is a much larger change than
+this plan. Flat options are not a shortcut here — they are what the chosen checkout surface supports.
+
+### Two things to verify before step 6 (Checkout)
+
+- **Stripe Tax is not enabled in this app at all** — no `automatic_tax` anywhere in `src/`. So tax is not
+  currently collected on anything, and `shipping_cost.amount_tax` will be zero until that changes. Worth
+  knowing before claiming shipping tax is handled.
+- **Recurring shipping in `mode=subscription` is UNVERIFIED.** Checkout accepts `shipping_options` in
+  subscription mode, but whether the chosen shipping recurs on every invoice or applies only to the first has
+  not been checked against Stripe's current behaviour. It matters: a subscription box that ships monthly needs
+  shipping on each invoice, and one that ships once does not. Do not wire subscription shipping on an
+  assumption — the fee-percent trap above came from exactly that kind of guess.
 
 ## Phases
 
