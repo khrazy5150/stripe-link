@@ -790,7 +790,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # A lone trailing card spans the row, so 1 card is one wide and 3 cards are 2 + 1 — no count in the markup.
     "    .sl-brag-grid > .sl-brag-card:last-child:nth-child(odd){grid-column:1/-1}",
     "    .sl-brag-card{display:grid;gap:0.4rem;align-content:center;padding:2rem 1.6rem;border-radius:1rem;background:var(--sl-section-accent,rgba(127,127,127,0.12));color:var(--sl-section-accent-ink,var(--sl-section-ink,var(--sl-text)))}",
-    "    .sl-brag-value{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.4rem);line-height:1.1;font-weight:800}",
+    # The VALUE carries the accent, the label stays body ink: the figure is the claim and the label only says
+    # what it counts, so colouring both flattens the distinction the element exists to make (author,
+    # 2026-09-30). Falls back to the section ink, so a preset without an accent is unchanged rather than
+    # invisible.
+    "    .sl-brag-value{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.4rem);line-height:1.1;font-weight:800;color:var(--sl-accent,var(--sl-section-ink,var(--sl-text)))}",
     # Muted by OPACITY, not a second colour: it stays readable against whatever ink was derived.
     "    .sl-brag-label{margin:0;font-size:1.4rem;line-height:1.5;opacity:0.75}",
     # QUOTE. minmax(0,1fr) for the same reason as bragging points: justify-items:center leaves an auto

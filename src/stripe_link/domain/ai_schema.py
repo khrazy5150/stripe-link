@@ -52,12 +52,20 @@ def _obj(props: dict[str, Any], required=None) -> dict[str, Any]:
 SECTION_SHAPES: dict[str, dict[str, Any]] = {
     "headline": {"text": _TEXT},
     "subheadline": {"text": _TEXT},
-    "seo_title": {"text": _TEXT},
-    "hero": {"tagline": _TEXT},
+    # `label`, because render_seo_title reads that -- with "text" the model's title was silently
+    # discarded and the section fell back to the product name, which is what put a duplicate product name
+    # at the top of every generated page (author, 2026-09-30).
+    "seo_title": {"label": _TEXT},
+    # `headline`/`subheadline`, which is what `hero_copy` reads before falling back to the offer and then the
+    # product. The schema asked for a `tagline` nothing reads, so the model's hero copy was discarded and the
+    # hero fell back to the product name and description -- the duplicated title block on every generated
+    # page (author, 2026-09-30).
+    "hero": {"headline": _TEXT, "subheadline": _TEXT},
+
     "quote": {"text": _TEXT},
     "content_block": {"heading": _TEXT, "body": _TEXT},
-    "author_bio": {"heading": _TEXT, "body": _TEXT},
-    "page_ribbon": {"text": _TEXT},
+    "author_bio": {"headline": _TEXT, "body": _TEXT},
+    "page_ribbon": {"headline": _TEXT, "body": _TEXT},
     "bragging_points": {"heading": _TEXT,
                         "items": {"type": "array", "items": _obj({"label": _TEXT, "value": _TEXT})}},
     # STRINGS, not {label, value} objects. `render_numbered_list` is the authority and it renders one

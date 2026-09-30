@@ -79,6 +79,10 @@ def _items(section: dict[str, Any]) -> list[dict[str, Any]]:
 # policy section saying the same thing (author, 2026-09-29). The floor did not catch it because the claim was
 # perfectly GROUNDED; being true was never the question, being evidence was.
 POLICY_TERMS = ("refund", "return", "warrant", "guarantee", "money back", "money-back", "exchange")
+# A PRICE is not evidence either. It is the one number already on the page in its own element, and a stat
+# card repeating it says the same thing twice while spending a slot that could carry real proof. Seen on a
+# real generated page as "$56.79 / Price" beside the price selector (author, 2026-09-30).
+PRICE_TERMS = ("price", "cost", "rrp", "msrp")
 
 
 def _is_policy_term(text: str) -> bool:
@@ -106,6 +110,11 @@ def violations(sections) -> list[dict[str, str]]:
             for item in _items(section):
                 if not isinstance(item, dict):
                     continue
+                label = str(item.get("label") or "").strip().lower()
+                if label in PRICE_TERMS or any(label.startswith(f"{t} ") for t in PRICE_TERMS):
+                    fail(section, f"bragging_points must not carry the price ({item.get('value')!r}). It is "
+                                  "already the price card, and a stat repeating it spends a slot that could "
+                                  "carry real proof.")
                 if _is_policy_term(item.get("label")) or _is_policy_term(item.get("value")):
                     fail(section, "bragging_points must not carry a policy term "
                                   f"({item.get('label') or item.get('value')!r}). A refund window, warranty "

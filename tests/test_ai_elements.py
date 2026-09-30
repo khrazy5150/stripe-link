@@ -9,6 +9,7 @@ model may be persuaded differently; a value with no digit in it fails either way
 """
 
 import json
+import re
 import unittest
 
 from stripe_link.domain.ai_elements import (MAX_STAT_CHARS, assert_contracts, contract, contracted,
@@ -379,3 +380,86 @@ class TonePresetTests(unittest.TestCase):
 
     def test_an_unknown_tone_is_ignored_rather_than_breaking(self):
         self.assertTrue(self._preset(category="supplement", tone="shouty")["value"])
+
+
+class SchemaRendererAgreementTests(unittest.TestCase):
+    """Every field the AI is asked for must be a field some renderer READS.
+
+    Four had drifted and each failed silently, which is the whole danger: the model spends tokens writing a
+    field, the strict schema accepts it, the document stores it, and the page never shows it. `seo_title`
+    asked for `text` while the renderer read `label`, so the model's title was discarded and the section fell
+    back to the product name -- a duplicate product name at the top of every generated page. `author_bio`
+    said `heading` for `headline`, `page_ribbon` said `text` for `headline`/`body`, and `hero` offered a
+    `tagline` no renderer reads at all (author, 2026-09-30).
+
+    Parsed rather than listed, so a renderer that renames a field fails here instead of on a tenant's page.
+    """
+
+    def _renderer_fields(self, name):
+        import pathlib
+
+        source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "stripe_link" / "runtime"
+                  / "html.py").read_text(encoding="utf-8")
+        found = re.search(rf"def render_{name}\(.*?(?=\ndef |\Z)", source, re.S)
+        if not found:
+            return None
+        body = found.group(0)
+        fields = set(re.findall(r"""section\.get\(['"](\w+)['"]""", body))
+        # Follow one level of helper. `render_hero` reads nothing directly -- it hands the section to
+        # `hero_copy`, which reads headline/subheadline. Without this the audit calls hero a mismatch when
+        # it is not, and a false positive in a drift check is how the check gets ignored.
+        for helper in set(re.findall(r"\b(\w+)\(\s*section\b", body)):
+            inner = re.search(rf"def {helper}\(.*?(?=\ndef |\Z)", source, re.S)
+            if inner:
+                fields |= set(re.findall(r"""section\.get\(['"](\w+)['"]""", inner.group(0)))
+        return fields
+
+    def test_every_generatable_field_is_read_by_its_renderer(self):
+        from stripe_link.domain.ai_schema import SECTION_SHAPES
+
+        for name, shape in sorted(SECTION_SHAPES.items()):
+            read = self._renderer_fields(name)
+            if read is None:
+                continue  # rendered by a shared function; covered by its own tests
+            with self.subTest(section=name):
+                unread = sorted(set(shape) - read)
+                self.assertEqual(unread, [], f"{name} asks the model for {unread}, which nothing renders")
+
+    def test_the_audit_actually_finds_renderers(self):
+        # A parse that silently matched nothing would make the check above vacuously pass.
+        self.assertTrue(self._renderer_fields("seo_title"))
+        self.assertIn("label", self._renderer_fields("seo_title"))
+
+
+class PriceAsAStatTests(unittest.TestCase):
+    """A price is not evidence. It is already the price card."""
+
+    def _violations(self, items):
+        from stripe_link.domain.ai_elements import violations
+
+        return violations([{"id": "b1", "type": "bragging_points", "items": items}])
+
+    def test_a_price_stat_is_refused(self):
+        found = self._violations([{"value": "$56.79", "label": "Price"}])
+        self.assertTrue(found)
+        self.assertIn("price card", found[0]["reason"])
+
+    def test_its_cousins_are_caught_too(self):
+        for label in ("Price", "Cost", "RRP", "MSRP", "Price per unit"):
+            with self.subTest(label=label):
+                self.assertTrue(self._violations([{"value": "$10", "label": label}]))
+
+    def test_a_real_measurement_with_a_currency_still_passes(self):
+        # "$2 saved per wash" is evidence about value, not the product's own price tag.
+        self.assertEqual(self._violations([{"value": "$2", "label": "Saved per wash"}]), [])
+
+    def test_the_stat_value_carries_the_accent(self):
+        # The figure is the claim; the label only says what it counts. Colouring both flattens the
+        # distinction the element exists to make.
+        import pathlib
+
+        css = (pathlib.Path(__file__).resolve().parents[1] / "src" / "stripe_link" / "runtime"
+               / "html.py").read_text(encoding="utf-8")
+        rule = re.search(r"\.sl-brag-value\{[^}]*\}", css).group(0)
+        self.assertIn("--sl-accent", rule)
+        self.assertIn("--sl-section-ink", rule, "and falls back, so an accentless preset is unchanged")
