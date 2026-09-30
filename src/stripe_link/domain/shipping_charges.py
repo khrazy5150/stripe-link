@@ -335,7 +335,7 @@ def offer_override(offer: dict[str, Any] | None) -> dict[str, Any]:
 
 def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] | None, *,
                     country: Any, merchandise_amount: Any = 0, item_count: int = 1,
-                    box: dict[str, Any] | None = None) -> dict[str, Any]:
+                    box_amount: int | None = None) -> dict[str, Any]:
     """What this buyer, at this destination, may choose from — and whether we can price it yet.
 
     Returns `{options, mode, source, needs}`:
@@ -376,7 +376,6 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
         FLAT_RATE_BOX,
         FREE as ZONE_FREE,
         LIVE,
-        flat_rate_for_box,
         rule_for,
         services_for,
     )
@@ -393,7 +392,7 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
         elif override["type"] == OVERRIDE_FLAT:
             rule = {"type": ZONE_FLAT, "amount": _whole(override.get("amount"))}
         else:  # calculated: force rating even where the zone says a flat price
-            rule = {"type": FLAT_RATE_BOX if box else LIVE}
+            rule = {"type": FLAT_RATE_BOX if box_amount is not None else LIVE}
         source = "offer_override"
     else:
         source = "zone" if rule else "unserved"
@@ -410,7 +409,9 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
     elif kind == ZONE_FLAT:
         amount = _whole(rule.get("amount"))
     elif kind == FLAT_RATE_BOX:
-        amount = flat_rate_for_box(box, country) if box else None
+        # Worked out by the CALLER from the boxes this cart packs into (`packed_box_price`), so this stays
+        # pure and knows nothing about packing. None means it could not be priced, never that it is free.
+        amount = box_amount
         if amount is None:
             needs = "box_price"
     else:  # live
@@ -445,7 +446,8 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
 
 def checkout_shipping(offer: dict[str, Any] | None, tenant_config: dict[str, Any] | None, *,
                       merchandise_amount: Any = 0, item_count: int = 1,
-                      box: dict[str, Any] | None = None,
+                      items: list[dict[str, Any]] | None = None,
+                      products_by_id: dict[str, Any] | None = None,
                       countries: list[str] | None = None) -> dict[str, Any]:
     """What a hosted Checkout Session may charge for shipping when NO page element asked the buyer anything.
 
@@ -482,8 +484,11 @@ def checkout_shipping(offer: dict[str, Any] | None, tenant_config: dict[str, Any
 
     resolved: dict[str, dict[str, Any]] = {}
     for country in destinations:
+        # Priced per country, because a flat-rate box costs a different amount in each one.
+        priced = packed_box_price(items, products_by_id, tenant_config, country)
         result = resolve_options(offer, tenant_config, country=country,
-                                 merchandise_amount=merchandise_amount, item_count=item_count, box=box)
+                                 merchandise_amount=merchandise_amount, item_count=item_count,
+                                 box_amount=priced["amount"])
         if result["needs"]:
             # One unpriceable destination poisons the whole session, because the buyer picks the country
             # AFTER these options are fixed. Better to charge nothing than to quote a price that is only
@@ -510,3 +515,60 @@ def checkout_shipping(offer: dict[str, Any] | None, tenant_config: dict[str, Any
                            f"the buyer's country first.")}
 
     return {"options": resolved[destinations[0]]["options"], "countries": destinations, "reason": ""}
+
+
+def packed_box_price(items: list[dict[str, Any]] | None, products_by_id: dict[str, Any] | None,
+                     tenant_config: dict[str, Any] | None, country: Any) -> dict[str, Any]:
+    """What this cart costs to post, from the BOXES it actually packs into. No carrier call, no postcode.
+
+    plans/SHIPPING_ELEMENT.md phase 4, tier 2. The author's insight: a flat-rate service is
+    destination-independent domestically, so its price is a function of the box and the weight tier rather
+    than of where it is going. That makes a real price showable with **only the country** — which is a
+    dropdown, not a form.
+
+    Returns `{amount, boxes, reason}`. `amount` is None when it cannot be worked out, and `reason` says why:
+    `no_dimensions` (nothing to pack — the products have no sizes), `no_box` (the cart fits no box the tenant
+    listed), or `no_price` (it fits, but that box has no price for this country).
+
+    **This tier only reaches carts that fit ONE listed box, and that is the packer's design rather than a
+    gap here.** `shipping_packing` has two strategies -- everything in one shared box, or *"one parcel per
+    thing... the honest fallback"* when anything does not fit -- and the per-item fallback assigns no box at
+    all. So a cart needing two boxes comes back with parcels that have no box, and there is no flat rate for
+    a box that does not exist.
+
+    I first wrote this as "multi-parcel prices naturally by summing, two boxes is two flat rates". That is
+    true of how carriers bill and false of this packer, which never allocates a second named box. Anything
+    larger than one box needs tier 3 (a live quote) or a tenant-set flat amount.
+    """
+    from stripe_link.domain.shipping import packable_items
+    from stripe_link.domain.shipping_packing import pack
+    from stripe_link.domain.shipping_zones import flat_rate_for_box
+
+    boxes = (tenant_config or {}).get("boxes")
+    boxes = [b for b in boxes if isinstance(b, dict)] if isinstance(boxes, list) else []
+    packable = packable_items(items or [], products_by_id or {})
+    if not packable:
+        return {"amount": None, "boxes": [], "reason": "no_dimensions"}
+
+    parcels = pack(packable, boxes)
+    if not parcels:
+        # The packer returns nothing rather than inventing a parcel: a made-up box buys postage at the wrong
+        # price. Its restraint is the right behaviour and it means we cannot quote.
+        return {"amount": None, "boxes": [], "reason": "no_dimensions"}
+
+    by_name = {_text(box.get("name")): box for box in boxes if _text(box.get("name"))}
+    total = 0
+    used: list[str] = []
+    for parcel in parcels:
+        name = _text(parcel.get("box"))
+        if not name:
+            # The packer's per-item fallback, used whenever the cart does not fit a single listed box. There
+            # is no flat rate for a box that does not exist, so this is the CEILING on what tier 2 can
+            # price -- a boundary, not an error.
+            return {"amount": None, "boxes": used, "reason": "no_box"}
+        price = flat_rate_for_box(by_name.get(name), country)
+        if price is None:
+            return {"amount": None, "boxes": used + [name], "reason": "no_price"}
+        total += price
+        used.append(name)
+    return {"amount": total, "boxes": used, "reason": ""}

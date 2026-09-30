@@ -31,7 +31,9 @@ TENANT = {
         {"name": "Rest", "destinations": [{"country": "*"}], "rule": {"type": "live"}},
     ],
 }
-BOX = {"name": "Medium", "flat_rate": {"US": 899}}
+# The amount a caller works out from packing (`packed_box_price`), not a box document: `resolve_options`
+# is pure and knows nothing about boxes.
+BOX_PRICE = 899
 DOMESTIC_ONLY = {"enabled_services": [{"service_token": "ground", "label": "Ground"}],
                  "zones": [{"destinations": [{"country": "US"}], "rule": {"type": "flat", "amount": 500}}]}
 
@@ -50,7 +52,7 @@ class ThePrecedenceChain(unittest.TestCase):
         """It is what stripe_shipping_options already reads, it is deployed, and a tenant who hand-built one
         meant it."""
         offer = {"shipping": {"options": [{"label": "My rate", "amount": 700}]}}
-        result = resolve(offer, box=BOX)
+        result = resolve(offer, box_amount=BOX_PRICE)
         self.assertEqual(result["source"], "offer_options")
         self.assertEqual([o["label"] for o in result["options"]], ["My rate"])
 
@@ -71,7 +73,10 @@ class ThePrecedenceChain(unittest.TestCase):
     def test_calculated_forces_rating_where_the_zone_said_flat(self):
         offer = {"shipping": {"override": {"type": "calculated"}}}
         self.assertEqual(resolve(offer, country="CA")["needs"], "carrier")
-        self.assertEqual(resolve(offer, country="CA", box=BOX)["needs"], "box_price")
+        # With a box price in hand it prices rather than asking for a carrier.
+        priced = resolve(offer, country="CA", box_amount=BOX_PRICE)
+        self.assertEqual(priced["needs"], "")
+        self.assertEqual(priced["options"][0]["amount"], BOX_PRICE)
 
     def test_an_unknown_override_type_is_ignored_not_guessed(self):
         offer = {"shipping": {"override": {"type": "telepathy"}}}
@@ -94,7 +99,7 @@ class NoOptionsDoesNotMeanFree(unittest.TestCase):
         self.assertEqual(result["options"], [])
 
     def test_the_same_zone_prices_once_the_box_has_a_price(self):
-        result = resolve(country="US", box=BOX)
+        result = resolve(country="US", box_amount=BOX_PRICE)
         self.assertEqual(result["needs"], "")
         self.assertEqual([o["amount"] for o in result["options"]], [899, 899])
 
@@ -108,7 +113,7 @@ class NoOptionsDoesNotMeanFree(unittest.TestCase):
 
     def test_an_offer_that_does_not_ship_has_an_EMPTY_mode_too(self):
         """No shipping is a different fact from free shipping."""
-        result = resolve({"shipping": {"eligibility": "none"}}, box=BOX)
+        result = resolve({"shipping": {"eligibility": "none"}}, box_amount=BOX_PRICE)
         self.assertEqual(result["mode"], "")
         self.assertEqual(result["source"], "none")
         self.assertEqual(result["options"], [])
@@ -140,12 +145,12 @@ class Eligibility(unittest.TestCase):
 class OneOptionPerService(unittest.TestCase):
     def test_a_flat_zone_charges_the_same_for_every_speed(self):
         """Differential pricing per speed is what live and flat_rate_box are for."""
-        result = resolve(country="US", box=BOX)
+        result = resolve(country="US", box_amount=BOX_PRICE)
         self.assertEqual({o["amount"] for o in result["options"]}, {899})
         self.assertEqual([o["label"] for o in result["options"]], ["Ground", "Overnight"])
 
     def test_transit_days_travel_from_the_tenants_service(self):
-        option = resolve(country="US", box=BOX)["options"][0]
+        option = resolve(country="US", box_amount=BOX_PRICE)["options"][0]
         self.assertEqual(option["transit_days_min"], 5)
         self.assertEqual(option["transit_days_max"], 7)
 

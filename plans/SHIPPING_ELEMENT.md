@@ -558,9 +558,29 @@ override the default — and holds **no zone editor, no carrier config, no secon
    - **The config is only read when it can matter**: a digital cart, or an offer marked not-shipping, pays for
      no lookup. The read fails open with a logged reason, because it runs in the buyer's path and a settings
      table that blinked must not refuse a sale.
-4. **Flat-rate box pricing (tier 2)** — a stored price per carrier template, priced off the packer's chosen box
-   and the weight tier. Needs the country and nothing else, and no carrier integration, so it is the cheapest
-   real carrier price the platform can offer.
+4. **Flat-rate box pricing (tier 2)** — ✅ **SHIPPED 2026-09-30** (16 tests).
+   `shipping_charges.packed_box_price(items, products, tenant_config, country)` packs the cart with the
+   existing `shipping_packing.pack` and prices it from the chosen box's `flat_rate` for that country. No
+   carrier call, no postcode — the country and nothing else.
+
+   `resolve_options` now takes a computed `box_amount` rather than a box document, so it stays pure and knows
+   nothing about packing; `checkout_shipping` prices per country, because a flat-rate box costs a different
+   amount in each.
+
+   Three distinct refusals, because each needs a different thing from the tenant: `no_dimensions` (the products
+   have no sizes, so the packer will not invent a parcel), `no_box` (fits nothing listed), `no_price` (fits,
+   but that box has no price for this country). None of them is ever 0.
+
+   **CORRECTION — the reach of this tier is narrower than this plan implied.** I wrote that multi-parcel would
+   price naturally by summing, two boxes being two flat rates. That is how carriers bill and **not how this
+   packer works**: `shipping_packing` has two strategies, everything in one shared box or *"one parcel per
+   thing... the honest fallback"*, and the per-item fallback **assigns no box at all**. So a cart larger than
+   one listed box cannot be flat-rated, and needs tier 3 or a tenant-set flat amount. Tier 2 covers
+   **single-box carts**, which is still most small-parcel domestic commerce but is not "most orders" without
+   qualification.
+
+   That also means the multi-parcel blocker (phase 7) gates more than the plan said: not only bundles under
+   live rating, but any by-box cart that outgrows one box.
 5. **The Shipping Element for tiers 1–2** (offer C/D): the page component, a country selector, and the
    omit-Stripe's-address-collection change. This is the buyer-visible feature, reachable without a public rate
    endpoint.

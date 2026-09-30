@@ -867,6 +867,9 @@ def build_checkout_payload(
             offer, shipping_config or {},
             merchandise_amount=int(resolved.get("subtotal") or 0),
             item_count=max(1, shippable_units),
+            # The cart itself, so a by-box zone can be priced from the boxes it actually packs into.
+            items=resolved.get("items") or [],
+            products_by_id=products_by_id,
         )
         if decision["reason"]:
             # Said out loud rather than silently shipping free: a tenant whose zones are not being charged
