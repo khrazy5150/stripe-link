@@ -2633,6 +2633,66 @@ the larger half and it needs the decision above applied — empty by default, wi
 tenant's own `refund_policy` for a guarantee one. Both are facts the platform already holds, which is the
 difference between a derived badge and an invented one.
 
+### ⭐⭐ HIGH — the ledger reports `profit` and `tax_liability` from components NOTHING writes (found 2026-09-30)
+
+`domain/ledger.py:15` declares `AMOUNT_COMPONENTS = (gross, stripe_fee, platform_fee, tax, cogs,
+shipping_cost)` and `summarize()` computes:
+
+    net    = gross + stripe_fee + platform_fee
+    profit = net + cogs + shipping_cost - tax
+    tax_liability = tax
+
+`sale_entry` accepts `tax` and `cogs`, both defaulting to 0, and **neither webhook caller passes either**
+(`stripe_webhook.py:1092` and `:1205` pass only gross and the two fees). Nothing writes a `shipping_cost`
+entry either. So:
+
+- **`tax_liability` is structurally always 0.** A tenant reading "tax liability: $0" would reasonably conclude
+  they owe nothing.
+- **`profit` equals `net`** — it deducts no cost of goods and no postage, so it overstates by the entire cost
+  base. On a $50 sale of a $10 item with $6 postage it reports about $48 instead of about $32.
+
+`handlers/ledger.py:31` serves this as `summary` on `/ledger`. **The dashboard does not display it yet**, so
+nobody is being shown a wrong number today — it is a trap rather than an active lie, and the moment anyone
+builds a P&L widget on `/ledger` they get these figures. Worth fixing before that, not after.
+
+The two missing inputs each belong to a plan already written:
+
+- **`cogs`** is exactly what `plans/INVENTORY_COST_BASIS.md` produces — its step 5 stamps `cost_basis` on the
+  order item, which is the number this component wants.
+- **`tax`** needs `total_details.amount_tax` captured from the session, which needs Stripe Tax to be on, which
+  is per-tenant (below).
+- **`shipping_cost`** needs `plans/SHIPPING_CHARGES.md`, where the entry type already exists in the schema.
+
+Cheapest interim honesty, if the full fix waits: have `summarize()` omit `profit` and `tax_liability` (or
+return them alongside a flag saying which components have no source) rather than publishing a figure that
+looks authoritative and cannot be right. Same principle as the refund-policy fix — a number with no
+provenance is worse than a missing one.
+
+### ⭐⭐ HIGH — Stripe Tax is per-tenant and nothing knows whether a tenant has it (found 2026-09-30)
+
+The author, 2026-09-30: *"each tenant must enable Stripe Tax on their own."* Stripe Tax lives on the
+CONNECTED account — the tenant registers jurisdictions and enables it in their own Dashboard. The platform
+cannot do it for them and must not assume it.
+
+No `automatic_tax` appears anywhere in `src/`, so **no tax is collected on anything today**. When it is wired:
+
+> Send `automatic_tax[enabled]=true` only on evidence that THIS tenant's account has tax active. On no
+> evidence, omit it and collect none. Fail open — an uncollected tax is recoverable and the tenant can be
+> told; a refused checkout is revenue that never arrives.
+
+Sending it unconditionally risks no session at all for every tenant who has not set tax up, which is all of
+them. The same shape as the `application_fee_percent` trap: a platform-level assumption about a per-tenant
+setting, invisible until it fires.
+
+Needs: a per-tenant tax status (Stripe's Tax Settings API on the connected account is the likely source —
+**verify the shape**), cached the way `fees.py` caches billing config rather than read in the buyer's path;
+`connect_sync.py` currently learns `charges_enabled` and `details_submitted` and nothing about tax. Plus a
+tenant-level `tax_behavior` stance (inclusive/exclusive) which `plans/SHIPPING_CHARGES.md` deliberately did
+not invent a field for, and an actionable notice for a tenant who is probably required to collect and is not.
+
+**This is its own plan and has none yet.** Shipping classifies its line correctly
+(`txcd_92010001`, `tax_behavior` passed through) and does not otherwise "handle tax".
+
 ### ⭐⭐ HIGH — there is no primitive for shipping CHARGES (found 2026-09-30)
 
 Plan: **`plans/SHIPPING_CHARGES.md`**. The author, 2026-09-30: *"I was so focused on 'free shipping' that

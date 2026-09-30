@@ -289,6 +289,41 @@ postage or taken out of it is a tenant decision with a real cash consequence, an
 
 Both are carried in readiness rather than in use: **Stripe Tax is not enabled anywhere in this app**.
 
+### Tax is PER-TENANT, which changes what this plan may assume
+
+The author, 2026-09-30: *"each tenant must enable Stripe Tax on their own."* Correct, and it has consequences
+this plan has to respect rather than design around.
+
+Stripe Tax lives on the **connected account**: the tenant registers their jurisdictions and turns it on in
+their own Stripe Dashboard. The platform cannot enable it for them and cannot assume it. So:
+
+1. **`automatic_tax[enabled]=true` must NEVER be sent unconditionally.** For a tenant who has not set Stripe
+   Tax up, that flag does not produce a tax-free session — it risks producing **no session at all**, which is
+   a lost sale at the pay button. Every tenant is in that state today. The rule for whoever wires this:
+
+   > Send `automatic_tax` only on evidence that THIS tenant's account has tax active. On no evidence, omit it
+   > and collect no tax. Fail open — an uncollected tax is recoverable and the tenant can be told; a refused
+   > checkout is revenue that never arrives.
+
+   Same shape as the `application_fee_percent` trap earlier in this plan: a platform-level assumption about a
+   per-tenant setting, invisible until it fires.
+
+2. **We need to KNOW the status, per tenant.** `domain/connect_sync.py` captures `charges_enabled` and
+   `details_submitted` and nothing about tax. Stripe's Tax Settings API on the connected account is the
+   likely source (a status of active/pending) — **verify the exact shape before relying on it**, the same
+   caution as the subscription-shipping question above. Cache it the way `fees.py` caches billing config; a
+   status read on every checkout is a round trip in the buyer's path.
+
+3. **`tax_behavior` is really a TENANT-level decision, not a per-option one.** Inclusive-vs-exclusive is one
+   accounting stance, not something a merchant varies between Ground and Overnight. Stripe requires it per
+   rate, so the per-option field stays as the wire format — but the tenant should set it once. The storage and
+   the UI belong with the tax work, not here: this plan will not invent a settings field it has no screen for.
+
+**So shipping does not "handle tax", and this plan should stop implying it.** It classifies the line correctly
+and carries the tenant's stance through. Whether any tax is computed is entirely the tenant's Stripe Tax
+setup, and making that work is **its own plan** — there is no `plans/TAX*.md` yet. What shipping needs from it
+is recorded in TODO.
+
 ### Inline rate, not a persisted Shipping Rate object
 
 Both are the same thing to Stripe and both accept `tax_code` and `tax_behavior`, so the tax participation is
