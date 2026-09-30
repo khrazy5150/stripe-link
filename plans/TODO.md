@@ -2552,10 +2552,20 @@ been** — `trust_badges` is in `ai_floor.FLOOR_SECTIONS` ("a badge asserts a ce
 and has no generation shape, so the model cannot emit one. The floor did its job; the DEFAULTS predate it.
 Which is the interesting part: the AI is now held to a standard the builder is not.
 
-**Fix shape, not yet decided.** Either default to badges that assert nothing about the seller (a payment-
-security badge is true because Stripe makes it true), or ship the element empty and let the tenant choose,
-or derive shipping origin from `ShippingConfig.ship_from` — which exists and is the honest source. The last
-is the most work and the only one that is actually right for a badge that names a country.
+**DECIDED 2026-09-30 (author): a trust badge is crafted for the OFFER, or it is not shown at all.** No
+defaults. The author's reasoning, on being told the AI had not authored these: *"Trust badges should be
+carefully crafted according to the offer (or not presented at all)."* A badge is a claim, and a claim nobody
+chose is a claim nobody stands behind — defaulting them is the platform putting words in a tenant's mouth,
+which is the same standard the field floor already holds the AI to.
+
+**Partly done.** The AI flow now seeds `trust_badges` with an EMPTY badge list
+(`domain/ai_provision._structural_defaults`), so a generated page never asserts provenance or a guarantee
+nobody chose. **Still open:** `LandingPages.vue:3532` seeds the same three on every hand-built page. That is
+the larger half and it needs the decision above applied — empty by default, with the tenant choosing.
+
+**Where derived badges could be honest, later:** `ShippingConfig.ship_from` for an origin claim, and the
+tenant's own `refund_policy` for a guarantee one. Both are facts the platform already holds, which is the
+difference between a derived badge and an invented one.
 
 ### Smart Pricing — cost profiles, and a price the tenant does not have to guess (plan plans/SMART_PRICING.md, 2026-09-28)
 
