@@ -295,3 +295,62 @@ class PolicyTermTests(unittest.TestCase):
         # card would leave the tenant wondering why they asked for four stats and got three.
         found = self._violations([{"value": "30 days", "label": "Refund window"}])
         self.assertEqual(found[0]["element"], "bragging_points")
+
+
+class TonePresetTests(unittest.TestCase):
+    """The tenant's VOICE reaches the palette, not just the words.
+
+    `tone` was collected, bounded to five values, and changed only the copy — so every generated page came
+    out "clean-slate", the first fallback, whatever the tenant said they sounded like (author, 2026-09-29).
+
+    Deliberately a table rather than the model's judgment: picking a palette is a taste call with nothing to
+    ground it, and a deterministic resolver can be explained to a tenant, reproduced, and tested. The
+    shortlist is still returned, so handing the final pick to the model later needs no rework.
+    """
+
+    def _preset(self, **kwargs):
+        from stripe_link.domain.ai_resolvers import resolve_preset
+
+        return resolve_preset(**kwargs)
+
+    def test_voice_changes_the_default_for_the_same_product(self):
+        chosen = {tone: self._preset(category="electronics", tone=tone)["value"]
+                  for tone in ("warm", "technical", "premium")}
+        self.assertEqual(len(set(chosen.values())), 3, f"each voice should land somewhere else: {chosen}")
+
+    def test_no_tone_still_resolves(self):
+        # The old behaviour has to survive: a brief without a tone is valid, tone being optional.
+        self.assertTrue(self._preset(category="electronics")["value"])
+
+    def test_the_CATEGORY_keeps_its_say(self):
+        # A playful supplement brand is still a supplement brand. Tone REORDERS the category's shortlist
+        # rather than replacing it, so the palette never chases the adjective out of its own sector.
+        from stripe_link.domain.ai_resolvers import CATEGORY_PRESETS
+
+        decision = self._preset(category="supplement", tone="playful")
+        self.assertIn(decision["value"], CATEGORY_PRESETS["supplement"])
+
+    def test_the_options_are_unchanged_only_the_default_moves(self):
+        plain = set(self._preset(category="supplement")["shortlist"])
+        toned = set(self._preset(category="supplement", tone="premium")["shortlist"])
+        self.assertTrue(plain.issubset(toned), "a tone must not take options away")
+
+    def test_an_explicit_request_and_a_tenant_preset_still_win(self):
+        # Precedence is the file's contract: explicit > tenant > rules > AI. Tone lives at the bottom.
+        self.assertEqual(
+            self._preset(category="supplement", tone="playful", requested="royal-velvet")["source"],
+            "explicit")
+        self.assertEqual(
+            self._preset(category="supplement", tone="playful", tenant_preset="trust-blue")["source"],
+            "tenant")
+
+    def test_an_unsupported_preset_is_never_chosen(self):
+        decision = self._preset(category="supplement", tone="premium", supported={"clean-slate"})
+        self.assertEqual(decision["value"], "clean-slate")
+
+    def test_the_reason_names_the_voice(self):
+        # "the AI chose it" is not a diagnosis — this file returns WHY for exactly that reason.
+        self.assertIn("premium", self._preset(category="electronics", tone="premium")["why"])
+
+    def test_an_unknown_tone_is_ignored_rather_than_breaking(self):
+        self.assertTrue(self._preset(category="supplement", tone="shouty")["value"])

@@ -953,3 +953,56 @@ class ForkFromProductTests(GenerateTests):
         response = self.fork(context={})
         self.assertEqual(json.loads(response["body"])["error"], "invalid_brief")
         self.assertEqual(self.usage.consumed, 0)
+
+
+class HeroImageSeedTests(ForkFromProductTests):
+    """The page says what it shows, rather than leaving it to be inferred.
+
+    `hero_media_images` CAN fall back — section images, then the offer's hero image, then the product's —
+    but that needs whoever renders to have resolved the product, and `page_render` takes products from the
+    REQUEST. A page opened before its product was to hand rendered with no hero image, and only looked fixed
+    after an edit, because saving materialises the image into the section (author, 2026-09-29).
+    """
+
+    def _hero(self, page):
+        return next((s for s in page["sections"] if s.get("type") == "hero_media"), None)
+
+    def test_the_product_image_is_written_onto_the_page(self):
+        from stripe_link.domain.ai_provision import seed_hero_images
+
+        sections = [{"id": "hm", "type": "hero_media", "images": []}]
+        seeded = seed_hero_images(sections, {"images": ["https://cdn/img.webp"]})
+        self.assertEqual(seeded[0]["images"], ["https://cdn/img.webp"])
+
+    def test_it_never_overwrites_an_existing_choice(self):
+        from stripe_link.domain.ai_provision import seed_hero_images
+
+        sections = [{"id": "hm", "type": "hero_media", "images": ["https://cdn/chosen.webp"]}]
+        seeded = seed_hero_images(sections, {"images": ["https://cdn/other.webp"]})
+        self.assertEqual(seeded[0]["images"], ["https://cdn/chosen.webp"])
+
+    def test_a_product_with_no_image_leaves_the_section_alone(self):
+        from stripe_link.domain.ai_provision import seed_hero_images
+
+        sections = [{"id": "hm", "type": "hero_media", "images": []}]
+        self.assertEqual(seed_hero_images(sections, {})[0]["images"], [])
+        self.assertEqual(seed_hero_images(sections, {"images": [""]})[0]["images"], [])
+
+    def test_other_sections_pass_through_untouched(self):
+        from stripe_link.domain.ai_provision import seed_hero_images
+
+        sections = [{"id": "h", "type": "hero", "headline": "Hi"},
+                    {"id": "hm", "type": "hero_media", "images": []}]
+        seeded = seed_hero_images(sections, {"images": ["https://cdn/img.webp"]})
+        self.assertEqual(seeded[0], sections[0])
+
+    def test_the_handler_seeds_from_the_PRODUCT_it_forked_from(self):
+        # Wiring, asserted at the source rather than through the pipeline: the test generator emits no
+        # hero_media section, so an end-to-end assertion here would pass for the wrong reason — there would
+        # be nothing to seed either way.
+        import pathlib
+
+        source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                  / "ai_generate.py").read_text(encoding="utf-8")
+        self.assertIn('seed_hero_images(result["sections"], product)', source,
+                      "the page must be built from seeded sections, and seeded from the fork's own product")

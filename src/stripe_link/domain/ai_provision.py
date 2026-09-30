@@ -206,6 +206,36 @@ def offer_document(brief: dict[str, Any], *, tenant_id: str, offer_id: str, prod
     }
 
 
+def seed_hero_images(sections: list[dict[str, Any]] | None,
+                     product: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Write the product's image onto `hero_media` rather than leaving it to be inferred later.
+
+    The renderer CAN fall back -- `hero_media_images` walks section images, then the offer's hero image,
+    then the product's -- but that fallback needs whoever renders to have resolved the product, and
+    `page_render` takes products from the REQUEST. A page opened before its product is to hand rendered
+    with no hero image, and only looked fixed after an edit, because saving materialises the image into
+    the section and the fallback is never consulted again (author, 2026-09-29).
+
+    The fork knows the product: it is the input. So put the image on the page and let the document say what
+    it shows, rather than depending on the renderer's caller to supply the thing we already had.
+
+    Only fills an EMPTY hero_media. A section that already names images is the tenant's choice.
+    """
+    seeded: list[dict[str, Any]] = []
+    image = ""
+    for candidate in (product or {}).get("images") or []:
+        if isinstance(candidate, str) and candidate.strip():
+            image = candidate.strip()
+            break
+    for section in sections or []:
+        if (isinstance(section, dict) and section.get("type") == "hero_media"
+                and not (section.get("images") or []) and image):
+            seeded.append({**section, "images": [image]})
+        else:
+            seeded.append(section)
+    return seeded
+
+
 def page_document(brief: dict[str, Any], *, tenant_id: str, page_id: str, offer_id: str, slug: str,
                   sections: list[dict[str, Any]], preset: str, mode: str, now: int,
                   provenance: dict[str, Any]) -> dict[str, Any]:

@@ -37,6 +37,41 @@ CATEGORY_PRESETS: dict[str, tuple[str, ...]] = {
 }
 FALLBACK_PRESETS = ("clean-slate", "trust-blue", "coral-sunrise")
 
+# The tenant's VOICE, as a palette. `tone` is already asked for, already bounded to five values, and until
+# now changed only the words -- so every generated page came out "clean-slate", the first fallback, whatever
+# the tenant said they sounded like (author, 2026-09-29).
+#
+# Tone RANKS the category's shortlist rather than replacing it: a playful supplement brand is still a
+# supplement brand, and a palette that ignores the category to chase the adjective is a worse answer than
+# one that respects both. Anything the category did not offer is appended, so a tone preference can still
+# be honoured when the category has no opinion.
+#
+# Deliberately a table and not the model's judgment. Picking a palette is a taste call with nothing to
+# ground it, and this file's whole contract is that rules narrow and the model picks inside -- a resolver
+# that is deterministic can be explained to a tenant ("you said playful"), reproduced, and tested. The
+# shortlist is still returned, so handing the final pick to the model later needs no rework here.
+TONE_PRESETS: dict[str, tuple[str, ...]] = {
+    "direct": ("clean-slate", "trust-blue", "techno-green"),
+    "warm": ("coral-sunrise", "natural-calm", "rose-minimalist"),
+    "playful": ("coral-sunrise", "fire-sale", "cyber-pulse"),
+    "technical": ("cyber-pulse", "techno-green", "midnight-luxe"),
+    "premium": ("midnight-luxe", "royal-velvet", "rose-minimalist"),
+}
+
+
+def _ranked_by_tone(shortlist: list[str], tone: str) -> list[str]:
+    """The category's shortlist, reordered so the tone's preferences come first.
+
+    Reordering, not filtering: every preset the category offered survives, so the model (or a later
+    tenant override) keeps the same options and only the DEFAULT moves.
+    """
+    preferred = TONE_PRESETS.get(str(tone or "").strip().lower())
+    if not preferred:
+        return shortlist
+    liked = [p for p in preferred if p in shortlist]
+    rest = [p for p in shortlist if p not in liked]
+    return liked + rest
+
 
 def _decision(value: Any, source: str, why: str, shortlist=None) -> dict[str, Any]:
     out = {"value": value, "source": source, "why": why}
@@ -45,13 +80,16 @@ def _decision(value: Any, source: str, why: str, shortlist=None) -> dict[str, An
     return out
 
 
-def resolve_preset(*, requested: str = "", tenant_preset: str = "", category: str = "",
+def resolve_preset(*, requested: str = "", tenant_preset: str = "", category: str = "", tone: str = "",
                    supported: set[str] | None = None) -> dict[str, Any]:
     """Which palette. Returns the decision AND the shortlist the AI may choose within.
 
     A tenant who already has a preset keeps it even when the category suggests otherwise: their other
     pages look like that, and a generated page that does not match their own site is a worse answer
     than an imperfect palette.
+
+    `tone` reorders the category's shortlist (see TONE_PRESETS) rather than replacing it, and only ever
+    decides the default -- the options are unchanged.
     """
     known = supported or set()
 
@@ -62,13 +100,29 @@ def resolve_preset(*, requested: str = "", tenant_preset: str = "", category: st
         return _decision(requested, EXPLICIT, "the request named this preset")
     if ok(tenant_preset):
         return _decision(tenant_preset, TENANT, "the tenant's other pages already use this preset")
-    shortlist = [p for p in CATEGORY_PRESETS.get(str(category or "").strip().lower(), FALLBACK_PRESETS)
-                 if ok(p)] or [p for p in FALLBACK_PRESETS if ok(p)]
+    category_key = str(category or "").strip().lower()
+    shortlist = [p for p in CATEGORY_PRESETS.get(category_key, FALLBACK_PRESETS) if ok(p)] \
+        or [p for p in FALLBACK_PRESETS if ok(p)]
     if not shortlist:
         return _decision("", RULES, "no supported preset could be resolved")
-    return _decision(shortlist[0], AI,
-                     f"category '{category or 'unknown'}' suits these; the model may pick among them",
-                     shortlist=shortlist)
+
+    tone_key = str(tone or "").strip().lower()
+    # A tone the category never offered is still worth honouring when the category had no opinion of its
+    # own -- otherwise every uncategorised product lands on the same first fallback regardless of voice,
+    # which is exactly the complaint this exists to answer.
+    if tone_key in TONE_PRESETS and category_key not in CATEGORY_PRESETS:
+        shortlist = [p for p in TONE_PRESETS[tone_key] if ok(p)] + \
+            [p for p in shortlist if p not in TONE_PRESETS[tone_key]] or shortlist
+    ranked = _ranked_by_tone(shortlist, tone_key)
+
+    why = f"category '{category or 'unknown'}' suits these; the model may pick among them"
+    if tone_key in TONE_PRESETS and ranked and ranked[0] != shortlist[0]:
+        why = (f"category '{category or 'unknown'}' suits these and the '{tone_key}' voice "
+               f"prefers '{ranked[0]}'; the model may pick among them")
+    elif tone_key in TONE_PRESETS:
+        why = (f"category '{category or 'unknown'}' suits these and the '{tone_key}' voice agrees; "
+               "the model may pick among them")
+    return _decision(ranked[0], AI, why, shortlist=ranked)
 
 
 def resolve_sections(*, offer_type: str = "", goal: str = "",

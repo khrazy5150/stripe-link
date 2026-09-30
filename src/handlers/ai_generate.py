@@ -46,6 +46,7 @@ from stripe_link.domain.ai_elements import assert_contracts, violations as contr
 from stripe_link.domain.ai_floor import assert_within_floor, claim_violations
 from stripe_link.domain.ai_models import default_model
 from stripe_link.domain.ai_provision import (needs_service_handoff, new_id, offer_document,
+                                             seed_hero_images,
                                              page_document, product_document, provenance_block,
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
@@ -393,7 +394,10 @@ def _release(usage_repo, tenant_id, period, now):
 
 def _generate(brief, *, model, provider, generator=None):
     sections = resolve_sections(offer_type="single", goal="")
+    # `tone` is the tenant's VOICE and it now reaches the palette, not just the words. Until this, every
+    # generated page came out "clean-slate" -- the first fallback -- however the tenant said they sounded.
     preset = resolve_preset(category=str(brief.get("category") or ""),
+                            tone=str(brief.get("tone") or ""),
                             supported=SUPPORTED_THEME_PRESETS)
     schema = page_sections_schema(sections["value"])
     grounding = grounding_text(brief)
@@ -481,8 +485,8 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
     offer = offer_document(brief, tenant_id=tenant_id, offer_id=offer_id, product_id=product_id,
                            price_id=price_id, slug=slug, mode=mode, now=now, provenance=provenance)
     page = page_document(brief, tenant_id=tenant_id, page_id=page_id, offer_id=offer_id, slug=slug,
-                         sections=result["sections"], preset=result["preset"], mode=mode, now=now,
-                         provenance=provenance)
+                         sections=seed_hero_images(result["sections"], product),
+                         preset=result["preset"], mode=mode, now=now, provenance=provenance)
     # The SHARED assigner, not a local one. Writing the page straight to the repository skipped
     # `create_page` and therefore this, and a page without a short_code is not merely missing a field:
     # the dashboard's pageUrl() keys the test viewer on it, so the card fell through to the live
