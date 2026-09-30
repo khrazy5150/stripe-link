@@ -257,6 +257,22 @@ def handler(
         return error_response("clientID or tenant_id is required.", code="missing_tenant")
     if not offer_id:
         return error_response("offer is required.", code="missing_offer")
+
+    # A QUOTE, not a session: what shipping would cost, so a page element can show it and ask the buyer where
+    # to send it. Lives on this function because it needs exactly what checkout already loads -- the offer, its
+    # products and the tenant's shipping config -- and every grant for them (plans/SHIPPING_ELEMENT.md phase 6).
+    #
+    # Public, and for tiers 1 and 2 that costs nothing to abuse: the answer is a cached config read plus
+    # arithmetic, with NO carrier call. The cache-and-throttle the plan calls for becomes a hard prerequisite
+    # when tier 3 arrives and each quote spends money at a carrier.
+    if str((event or {}).get("resource") or "").endswith("/shipping-quote"):
+        return shipping_quote(
+            tenant_id=tenant_id, offer_id=offer_id, product_id=product_id, price_id=price_id,
+            quantity=str(params.get("quantity") or "1"),
+            country=str(params.get("country") or "").strip().upper()[:2],
+            mode=resolve_stripe_mode(event),
+            offers_repo=offers_repo, products_repo=products_repo,
+        )
     if not success_url or not cancel_url:
         return error_response("success_url and cancel_url are required.", code="missing_redirect_url")
 
@@ -611,6 +627,79 @@ def _flatten_params(value, prefix: str = "") -> dict[str, str]:
     elif value is not None:
         flat[prefix] = str(value)
     return flat
+
+
+def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, country, mode,
+                   offers_repo=None, products_repo=None):
+    """What shipping would cost this cart, and where it may be sent.
+
+    Answers the two questions a page element needs and nothing else: which countries this tenant ships to, and
+    what the chosen one costs. Returns `needs` rather than a price when it cannot say -- `carrier` for a live
+    zone, `box_price` for a by-box cart with no priced box, `zone` for a destination nothing serves. **Never
+    zero for "unknown"**: a page that renders an unknown as "Free shipping" makes a promise the tenant did not.
+    """
+    from stripe_link.domain.shipping_charges import packed_box_price, resolve_options, ships_at_all
+    from stripe_link.domain.shipping_zones import allowed_countries as zone_countries
+
+    offers_repo = offers_repo or offers_repository(mode=mode)
+    products_repo = products_repo or products_repository(mode=mode)
+    offer = offers_repo.get(tenant_id, offer_id)
+    if not offer:
+        return error_response("Offer not found.", status_code=404, code="offer_not_found")
+
+    try:
+        products_by_id = load_offer_products(tenant_id, offer, products_repo)
+    except PricingError as exc:
+        return error_response(str(exc), code="invalid_offer")
+
+    config = _tenant_shipping_config(tenant_id)
+    countries = zone_countries(config)
+    if not ships_at_all(offer):
+        # Nothing to ask and nothing to charge. An element rendering this must show no selector at all rather
+        # than an empty dropdown.
+        return json_response({"ships": False, "countries": [], "options": [], "needs": "", "mode": ""})
+
+    # The cart, as a single line unless the page said otherwise. A quote is per-cart because a by-box price
+    # depends on what is being packed.
+    try:
+        units = max(1, int(str(quantity or "1").strip() or "1"))
+    except ValueError:
+        units = 1
+    chosen_product = product_id or next((str(i.get("product_id") or "")
+                                         for i in (offer.get("items") or []) if i.get("product_id")), "")
+    items = [{"product_id": chosen_product, "price_id": price_id, "quantity": units}]
+
+    merchandise = 0
+    product = products_by_id.get(chosen_product) or {}
+    for price in product.get("prices") or []:
+        if not price_id or str(price.get("price_id") or "") == price_id:
+            merchandise = int(price.get("unit_amount") or 0) * units
+            break
+
+    target = country if country in countries else ""
+    payload = {"ships": True, "countries": countries, "country": target,
+               "options": [], "needs": "", "mode": "", "source": ""}
+    if not target:
+        # A country is required to price anything -- zones ARE destinations. Returning the list without a price
+        # is the honest answer to "what are my choices", and the element asks again once one is picked.
+        payload["needs"] = "country"
+        return json_response(payload)
+
+    priced = packed_box_price(items, products_by_id, config, target)
+    result = resolve_options(offer, config, country=target, merchandise_amount=merchandise,
+                             item_count=units, box_amount=priced["amount"])
+    payload.update({
+        "options": [{"label": opt["label"], "amount": opt["amount"],
+                     "service_token": opt.get("service_token", ""),
+                     "transit_days_min": opt.get("transit_days_min"),
+                     "transit_days_max": opt.get("transit_days_max")}
+                    for opt in result["options"]],
+        "needs": result["needs"], "mode": result["mode"], "source": result["source"],
+    })
+    # Why it could not be priced, for the element to show something truthful instead of a blank.
+    if result["needs"] == "box_price" and priced["reason"]:
+        payload["box_reason"] = priced["reason"]
+    return json_response(payload)
 
 
 def collect_shipping_for(offer, products_by_id):

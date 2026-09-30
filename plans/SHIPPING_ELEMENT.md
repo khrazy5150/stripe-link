@@ -609,8 +609,26 @@ override the default — and holds **no zone editor, no carrier config, no secon
 
    That is a real intermediate step rather than the finished feature: it is what makes a multi-country tenant
    chargeable at all, and it needs no public endpoint.
-6. **`POST /shipping/quote` (tier 3)**, public, cached, throttled, single-parcel only. Returns services and
-   prices; never accepts an amount. Only needed for parcels no flat-rate box fits.
+6. **`GET /shipping-quote`** — ✅ **SHIPPED 2026-09-30** (15 tests), and it came BEFORE the element rather
+   than after. Returns `{ships, countries, country, options, needs, mode, source}`; never accepts an amount.
+
+   **Reordered deliberately.** The element needs the country LIST as well as prices, and seeding that list
+   into a static page reintroduces exactly the stale-snapshot problem this plan forbids — a tenant who adds a
+   zone would not see it until republish. With the endpoint first, the element asks for both in one call and
+   nothing in the artifact can go stale.
+
+   **It lives on the checkout function**, because a quote needs precisely what checkout already loads (the
+   offer, its products, the tenant's shipping config) and every grant for them. It branches before checkout's
+   redirect-url validation, since a quote needs no `success_url`.
+
+   **The abuse picture is smaller than this plan assumed.** For tiers 1–2 a quote makes **no carrier call** —
+   it is a config read plus arithmetic — so it costs nothing to abuse beyond ordinary API traffic. The
+   cache-and-throttle the plan calls for becomes a hard prerequisite when **tier 3** arrives and each quote
+   spends money at a carrier. Stated so nobody reads its absence as an oversight.
+
+   `needs` is never a zero price: `country` (nothing chosen, or one the tenant does not serve), `carrier`,
+   `box_price` (with a `box_reason` naming which of the three packing refusals it was). A page rendering an
+   unknown as "Free shipping" would make a promise the tenant did not.
 7. **Multi-parcel quoting** — the blocker for bundles, and tier 3 only: a multi-box order cannot be flat-rated
    as one parcel.
 

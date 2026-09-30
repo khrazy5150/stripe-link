@@ -1701,6 +1701,17 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /checkout
             Method: GET
+        ShippingQuote:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # PUBLIC, and deliberately on this function: a quote needs exactly what checkout already loads
+            # (the offer, its products, the tenant's shipping config) and every grant for them. For tiers 1-2
+            # the answer is a cached config read plus arithmetic with no carrier call, so it costs nothing to
+            # abuse; a throttle becomes a hard prerequisite when tier 3 spends money per quote
+            # (plans/SHIPPING_ELEMENT.md).
+            Path: /shipping-quote
+            Method: GET
         CheckoutCreatePost:
           Type: Api
           Properties:
