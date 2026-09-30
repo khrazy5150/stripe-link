@@ -1873,6 +1873,13 @@ Resources:
         # The generation counter: read to show the allowance, write to spend against it.
         - DynamoDBCrudPolicy:
             TableName: !Ref AiUsageTable
+        # The CONFIG row carries the trial/free AI allowances and the platform budget, and this function
+        # reads them through domain/platform_billing (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8). Reached
+        # by IMPORT rather than by naming the table, which is how it shipped ungranted: the read raises
+        # AccessDenied, the caller swallows it, and every tenant silently gets the code defaults instead of
+        # the numbers the Admin Site edited.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformPlansTable
         # The plan decides the allowance, and billing_exempt lifts it.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
@@ -1965,6 +1972,13 @@ Resources:
         # for one the tenant already wrote (plans/AI_PAGE_BRIEF.md v2 §4).
         - DynamoDBReadPolicy:
             TableName: !Ref ShippingConfigTable
+        # The CONFIG row carries the trial/free AI allowances and the platform budget, and this function
+        # reads them through domain/platform_billing (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8). Reached
+        # by IMPORT rather than by naming the table, which is how it shipped ungranted: the read raises
+        # AccessDenied, the caller swallows it, and every tenant silently gets the code defaults instead of
+        # the numbers the Admin Site edited.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformPlansTable
         # Invoke ITSELF asynchronously: the request path queues, the event path generates. Same code,
         # same deploy, no second function to keep in step.
         - Statement:

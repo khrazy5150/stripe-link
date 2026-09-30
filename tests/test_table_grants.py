@@ -93,6 +93,7 @@ class TableGrantTests(unittest.TestCase):
     def test_every_handler_that_names_a_table_is_granted_it(self):
         missing = []
         repo_factories = self._repository_factories()
+        domain_readers = self._domain_readers(repo_factories)
         for path in sorted(HANDLERS.glob("*.py")):
             source = path.read_text(encoding="utf-8")
             for env, table in sorted(self.env_to_table.items()):
@@ -110,7 +111,14 @@ class TableGrantTests(unittest.TestCase):
                 sole_entry_point = len(self.functions_by_module.get(path.stem, [])) == 1
                 calls_factory = sole_entry_point and any(
                     re.search(rf"\b{factory}\s*\(", source) for factory in repo_factories.get(env, ()))
-                if not (names_env or calls_factory):
+                # A THIRD way, and the one that shipped ungranted twice over: the handler imports a domain
+                # module which reads the table on its behalf. `ai_generate` never names PLATFORM_PLANS_TABLE
+                # and never calls its factory -- it imports domain/platform_billing, which does both. The
+                # read then raised AccessDenied, the caller swallowed it, and every tenant silently got the
+                # code defaults instead of the numbers the Admin Site had edited (author, 2026-09-30).
+                reaches_via_domain = sole_entry_point and any(
+                    re.search(rf"\b{module}\b", source) for module in domain_readers.get(env, ()))
+                if not (names_env or calls_factory or reaches_via_domain):
                     continue
                 for function in self.functions_by_module.get(path.stem, []):
                     exemption = PURE_ENTRY_POINTS.get((function, env))
@@ -122,13 +130,51 @@ class TableGrantTests(unittest.TestCase):
 
     @staticmethod
     def _repository_factories() -> dict[str, tuple[str, ...]]:
-        """env var -> the repository factories that read it, parsed from the repositories module."""
-        source = (ROOT / "src" / "stripe_link" / "repositories" / "documents.py").read_text(encoding="utf-8")
+        """env var -> the repository factories that read it, across EVERY repositories module.
+
+        `documents.py` alone was not enough: `platform_plans_repository` lives in its own module, so the
+        factory for PLATFORM_PLANS_TABLE was invisible here and the indirect check below found nothing to
+        follow. A directory glob rather than a list, so a new repositories module is covered on arrival.
+        """
         factories: dict[str, list[str]] = {}
-        for name, body in re.findall(r"\ndef (\w*repository)\(((?:.|\n)*?)\n\n", source):
-            for env in re.findall(r'os\.environ\.get\("(\w+_TABLE)"', body):
-                factories.setdefault(env, []).append(name)
+        for path in sorted((ROOT / "src" / "stripe_link" / "repositories").glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            # Sliced at the next top-level def/class OR end of file. The old pattern terminated on a blank
+            # line, so a factory that happened to be LAST in its module was invisible -- which is exactly
+            # what hid platform_plans_repository and, with it, the missing grant.
+            starts = [(m.group(1), m.start()) for m in re.finditer(r"^def (\w*repository)\(", source, re.M)]
+            boundaries = [m.start() for m in re.finditer(r"^(?:def|class)\s", source, re.M)] + [len(source)]
+            for name, start in starts:
+                end = next(b for b in boundaries if b > start)
+                for env in re.findall(r'os\.environ\.get\("(\w+_TABLE)"', source[start:end]):
+                    factories.setdefault(env, []).append(name)
         return {env: tuple(names) for env, names in factories.items()}
+
+    @staticmethod
+    def _domain_readers(repo_factories) -> dict[str, tuple[str, ...]]:
+        """env var -> the domain modules that reach it, so an INDIRECT read is still checked.
+
+        A handler that imports `domain/platform_billing` reaches PlatformPlansTable as surely as one that
+        names the env var, and the grant is just as required. Parsed rather than listed, so a domain module
+        that starts reading a new table is covered without anyone remembering to update a list.
+        """
+        readers: dict[str, list[str]] = {}
+        domain = ROOT / "src" / "stripe_link" / "domain"
+        for path in sorted(domain.glob("*.py")):
+            body = path.read_text(encoding="utf-8")
+            envs = set(re.findall(r'os\.environ\.get\("(\w+_TABLE)"', body))
+            for env, factories in repo_factories.items():
+                if any(re.search(rf"\b{factory}\s*\(", body) for factory in factories):
+                    envs.add(env)
+            for env in envs:
+                readers.setdefault(env, []).append(path.stem)
+        return {env: tuple(names) for env, names in readers.items()}
+
+    def test_the_domain_reader_map_actually_parsed(self):
+        """Empty would turn the indirect check back into the one that missed the AI functions."""
+        readers = self._domain_readers(self._repository_factories())
+        self.assertIn("PLATFORM_PLANS_TABLE", readers)
+        self.assertIn("platform_billing", readers["PLATFORM_PLANS_TABLE"])
 
     def test_the_factory_map_actually_parsed(self):
         """A silently empty map would turn the check above back into the one that missed refunds.py."""
