@@ -111,7 +111,7 @@
     "refund_policy": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Product-level refund policy. New products may copy this from the creating user's UserPreferences.authoring_defaults.refund_policies by product class.",
+      "description": "Product-level refund policy. RESOLVED server-side by domain/refund_policy.py: a deliberate product override outranks the tenant default for the product class, which outranks the platform fallback. A policy whose source is a retired user_preference* value is the old dashboard literal and is NOT treated as an override.",
       "required": [
         "source",
         "short_label",
@@ -121,11 +121,14 @@
         "source": {
           "type": "string",
           "enum": [
-            "user_preference_default",
+            "platform_default",
             "tenant_default",
             "product_override",
+            "tip_jar_default",
+            "user_preference_default",
             "user_preferences.physical_products"
-          ]
+          ],
+          "description": "Where this policy came from. `platform_default` means nobody chose -- the platform's fallback, and the honest answer the old code could not give. `tip_jar_default` was already being written by handlers/tip_jar_provision.py without being listed here. The `user_preference*` values are RETIRED (plans/REFUND_POLICY.md) and stay valid only so existing documents still read; nothing should write them."
         },
         "refund_window": {
           "type": "string",

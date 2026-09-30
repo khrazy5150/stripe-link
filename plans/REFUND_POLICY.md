@@ -60,9 +60,20 @@ first two were the same thing anyway.
 
 ## Phases
 
-1. **`domain/refund_policy.py`** — port the vocabulary tables, `normalize_policy`, `build_policy_definition`
-   and `resolve_effective_refund_policy`, reading the nested map. Pure, no I/O, fully testable. Include the
-   legacy coercion: products already carry policies written by the JS literal, and they must normalise.
+1. **`domain/refund_policy.py`** — ✅ **SHIPPED 2026-09-30** (41 tests). Port the ALGORITHMS —
+   `normalize`, `build`, `resolve`, two-level resolution — reading the nested map. Pure, no I/O.
+
+   **NOT the vocabulary.** This plan originally said to port stripe-cart's tables and discovery overruled it:
+   stripe-link's own enums are better and already hold live data. stripe-cart has `30/60/90_day_returns` and
+   `72/96/120_hour_renewal`; stripe-link has `7_days`/`14_days`/`custom`, digital-aware conditions
+   (`defective_only`, `not_downloaded`), a semantic `return_method` (`digital_revoke_access`) rather than
+   stripe-cart's label-printing one, and `keep_it_below`, which stripe-cart has no concept of. The repo's own
+   decision priority settles it — existing stripe-link architecture outranks stripe-cart behaviour — and a
+   test now asserts the module's three tables equal the schema's three enums, so they cannot drift.
+
+   The legacy text-sniffing coercion (`_window_from_legacy` reading "within 30 days" out of prose) was also
+   NOT ported: all 32 live dev products store well-formed values in stripe-link's vocabulary, so it would be
+   80 lines of migration code for data that does not exist.
 2. **Tenant profile field + validator** — `refund_policies.{physical,digital,subscription}`.
 3. **Settings UI** — three policies, one per class, each a window/condition/return-method picker with the
    generated `short_label` and `full_policy` shown read-only so the tenant SEES what their storefront
@@ -110,5 +121,28 @@ there is no answer the page says **nothing** — silence is recoverable, a false
 - **`refund_return_address` and `refund_request_handling`** (`manual_review | auto_reply`) exist on
   stripe-cart's tenant profile and have no stripe-link equivalent. They belong to the REQUEST flow rather
   than the policy, so they are noted here and scoped with the Refunds screen, not with this.
-- **Interim honesty.** Until step 3 ships, the least-dishonest change is to stop stamping
-  `source: "user_preference_default"` on a value no preference produced.
+- **Interim honesty.** ✅ Done in step 1: `platform_default` is now a source value, and it means what it
+  says — nobody chose, this is the fallback. Added to `Product.schema.json` along with `tip_jar_default`,
+  which `handlers/tip_jar_provision.py` was already writing without it being a valid enum value.
+- **`custom` has nowhere to put a number.** `refund_window: "custom"` means the tenant's prose governs, and
+  the schema has no days field, so `window_days()` returns None and no deadline can be computed. Nothing
+  breaks today — `handlers/refunds.py` never computes one, the merchant decides — but a future automatic
+  deadline needs a `custom_days` field. `build()` refuses a custom window with no prose in the meantime.
+
+### What step 1 found in live data
+
+- **Every published physical-product page prints the same paragraph twice.** The literal appends the
+  return-note text to `full_policy`, and `runtime/html.py` ALSO renders
+  `refund_policy_return_note(policy)` as its own paragraph — so the page says it once as "does not" and once
+  as "doesn't". Verified on `jb-pages-dev/test/page_3VmYubKR3AM`. The note belongs to the renderer; the
+  policy sentence belongs to the module. Fixed by omission.
+- **A physical product sold BOTH one-time and daily-recurring.** stripe-cart's rule (any recurring price
+  makes the product a subscription) would have narrowed that product's published promise from 30 days of
+  delivery to 72 hours of renewal — for the one-time buyers too. Split into `product_class` (the product as
+  a whole; subscription only when it is the ONLY way to buy) and `purchase_class(product, price)` for the
+  order and refund paths, where the buyer's actual choice is known.
+- **The legacy copy generator was wrong for subscriptions.** `_window_days` turned 72 hours into 3 days and
+  the single sentence template said "of delivery", producing *"within 3 days of delivery"* for a renewal
+  window — wrong unit and wrong event. The basis now follows the class: delivery / purchase / renewal.
+- **Verified across all 32 live dev products:** the only change to rendered text is the duplicated paragraph
+  disappearing. 16 digital identical, 1 tip jar identical, 3 carry no policy and still carry none.
