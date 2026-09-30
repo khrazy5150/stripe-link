@@ -19,7 +19,8 @@ from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.fees import (application_fee_percent, build_fee_context, cached_billing_config,
                                      calculate_price, normalize_tier_id)
-from stripe_link.domain.shipping_charges import stripe_shipping_options
+from stripe_link.domain.shipping_charges import checkout_shipping, stripe_option_payload
+from stripe_link.domain.shipping_zones import allowed_countries as zone_allowed_countries
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
@@ -391,6 +392,8 @@ def handler(
             coupons_repo=coupons_repo,
             grants_repo=grants_repo,
             discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
+            shipping_config=_tenant_shipping_config(tenant_id) if collect_shipping_for(
+                offer, products_by_id) else None,
         )
         stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
@@ -606,6 +609,43 @@ def _flatten_params(value, prefix: str = "") -> dict[str, str]:
     return flat
 
 
+def collect_shipping_for(offer, products_by_id):
+    """Whether this offer needs a shipping config read at all, so a digital sale pays for no lookup."""
+    from stripe_link.domain.shipping_charges import ships_at_all
+
+    if not ships_at_all(offer):
+        return False
+    for item in (offer.get("items") or []):
+        product = products_by_id.get(str(item.get("product_id") or ""))
+        fulfillment = (product or {}).get("fulfillment") or {}
+        if fulfillment.get("requires_shipping") or (product or {}).get("product_type") == "physical":
+            return True
+    return False
+
+
+def _tenant_shipping_config(tenant_id):
+    """The tenant's zones and services. NEVER fatal, and never a blocker.
+
+    A settings table that blinked must not refuse a sale. With no config the payload falls back to the
+    hardcoded allowed countries and charges nothing for shipping, which is exactly the behaviour every
+    tenant had before zones existed.
+    """
+    try:
+        from stripe_link.repositories.documents import RepositoryError, shipping_config_repository
+
+        return shipping_config_repository().get(tenant_id) or {}
+    except Exception as exc:  # noqa: BLE001
+        # Broad, and the reason is stated rather than assumed: this runs in the BUYER's path, and a shipping
+        # config that cannot be read must never cost a sale. But broad catches hide bugs -- the first version
+        # of this function called the factory with a `mode=` keyword it does not accept, and this guard would
+        # have swallowed that TypeError, silently disabling shipping charges for every tenant while looking
+        # like a working fallback. So the failure is LOGGED with its exception type, and a test asserts the
+        # fallback shape, because "it silently worked" is how the other four went unnoticed.
+        logger.warning("checkout: shipping config unreadable, no shipping charged",
+                       extra={"tenant_id": tenant_id, "error": f"{type(exc).__name__}: {exc}"})
+        return {}
+
+
 def build_checkout_payload(
     *,
     tenant_id,
@@ -623,6 +663,7 @@ def build_checkout_payload(
     coupons_repo=None,
     grants_repo=None,
     discount_materializer=None,
+    shipping_config=None,
 ):
     checkout = offer.get("checkout") or {}
     # The session's mode follows the lines it actually carries, in BOTH directions.
@@ -790,8 +831,15 @@ def build_checkout_payload(
     # the first order nor any renewal had a destination and the whole thing was unshippable by design
     # (found 2026-09-25: six subscription_cycle orders in prod, every one with no address).
     if collect_shipping and payload["mode"] in {"payment", "subscription"}:
-        payload["shipping_address_collection[allowed_countries][0]"] = "US"
-        payload["shipping_address_collection[allowed_countries][1]"] = "CA"
+        # WHERE the tenant will ship, from their own zones rather than a platform guess. Hardcoded US and CA
+        # until now, which meant a tenant who configured a UK zone still could not receive a UK order -- a
+        # rule they wrote and the platform ignored (plans/SHIPPING_ELEMENT.md). Falls back to the old pair
+        # when no zones are configured, which is every tenant until they set some: an empty allowed list
+        # would take checkout down, and a silent behaviour change for tenants who configured nothing is not
+        # an improvement.
+        destinations = zone_allowed_countries(shipping_config or {}) or ["US", "CA"]
+        for index, country in enumerate(destinations):
+            payload[f"shipping_address_collection[allowed_countries][{index}]"] = country
 
     # What shipping COSTS the buyer (plans/SHIPPING_CHARGES.md phase 6). The last thing wired, deliberately:
     # Checkout is the one consumer that cannot be corrected after the fact, because a session that quoted the
@@ -811,13 +859,22 @@ def build_checkout_payload(
     # Written as a set to read in parallel with the address-collection condition above: an address is
     # collected in BOTH modes, postage is charged in ONE.
     if collect_shipping and payload["mode"] in {"payment"}:
-        shipping_options = stripe_shipping_options(
-            offer,
-            currency=resolved.get("currency", "usd"),
+        # What the buyer is charged. `checkout_shipping` resolves the tenant's ZONES through the offer's
+        # override -- but only offers a price when every allowed destination agrees on one, because Stripe
+        # fixes this list when the session opens and never asks us again. Per-destination pricing needs the
+        # buyer's country BEFORE the session, which is the Shipping Element's job (phase 5).
+        decision = checkout_shipping(
+            offer, shipping_config or {},
             merchandise_amount=int(resolved.get("subtotal") or 0),
             item_count=max(1, shippable_units),
         )
-        for index, option in enumerate(shipping_options):
+        if decision["reason"]:
+            # Said out loud rather than silently shipping free: a tenant whose zones are not being charged
+            # needs to know which of their own settings stopped it.
+            logger.info("checkout shipping not charged", extra={
+                "tenant_id": tenant_id, "offer_id": offer.get("offer_id"), "reason": decision["reason"]})
+        for index, option in enumerate(
+                stripe_option_payload(decision["options"], currency=resolved.get("currency", "usd"))):
             for key, value in _flatten_params(option).items():
                 payload[f"shipping_options[{index}]{key}"] = value
     # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same

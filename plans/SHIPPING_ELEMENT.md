@@ -529,8 +529,35 @@ override the default — and holds **no zone editor, no carrier config, no secon
    none at session-creation time, so wiring it there would mean assuming a country — showing a Canadian buyer
    the US zone's prices. The no-element path stays on the explicit table until the element can supply a
    country (phase 5). Zones resolve for the element's benefit first.
-3. **Offer B end to end** — server picks the default service, no element, no address form. The common case, and
-   it needs nothing public.
+3. **Offer B end to end** — ✅ **SHIPPED 2026-09-30** (18 tests). `checkout_shipping()` resolves the tenant's
+   zones through the offer's override and hands Checkout at most ONE priced set. No element, no address form,
+   nothing public.
+
+   **The constraint that shaped it, and it is narrower than this plan first implied.** Stripe fixes
+   `shipping_options` when the session opens and never asks again, so it shows ONE list to every buyer
+   whatever address they type. Zone pricing is therefore safe here only when **every allowed destination
+   agrees**:
+
+       US $7.00, CA $7.00     ->  one option, correct for everyone who can reach checkout
+       US $7.00, CA $12.99    ->  no option is right for both. Charge nothing, and SAY WHY.
+
+   Where they disagree, `reason` names it (*"shipping costs differ by destination (CA [1299], US [700]) and
+   Stripe shows one list to every buyer"*) and it is logged — a tenant whose zones are not being charged needs
+   to know which of their own settings stopped it, not discover it as silently free shipping.
+
+   - **Agreement means the same priced SERVICES, not merely the same total.** A buyer offered Ground-only in
+     one country and Ground-plus-Overnight in another is being shown a list that is wrong for one of them.
+   - **One unpriceable destination poisons the whole session** — a live zone with no carrier means no price
+     for anyone, because the buyer picks the country after the options are fixed.
+   - **An offer-level flat override RESOLVES the multi-country problem** rather than working around it: it is
+     destination-independent by construction, so a tenant with disagreeing zones can still charge for shipping
+     on one offer.
+   - **`allowed_countries` now comes from the zones**, with the old hardcoded US/CA as the fallback when none
+     are configured — an empty allowed list would take checkout down, and silently changing behaviour for
+     tenants who configured nothing is not an improvement.
+   - **The config is only read when it can matter**: a digital cart, or an offer marked not-shipping, pays for
+     no lookup. The read fails open with a logged reason, because it runs in the buyer's path and a settings
+     table that blinked must not refuse a sale.
 4. **Flat-rate box pricing (tier 2)** — a stored price per carrier template, priced off the packer's chosen box
    and the weight tier. Needs the country and nothing else, and no carrier integration, so it is the cheapest
    real carrier price the platform can offer.

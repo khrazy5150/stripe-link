@@ -1651,6 +1651,10 @@ Resources:
       Handler: handlers.checkout.handler
       Description: Creates Stripe Checkout sessions from stripe-link offer, product, and service documents.
       Policies:
+        # The tenant's shipping zones and services decide what a buyer is charged for postage and which
+        # countries Checkout will accept an address from (plans/SHIPPING_ELEMENT.md phase 3). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
         # A campaign coupon carried in from a coupon element is resolved from its CODE, because the

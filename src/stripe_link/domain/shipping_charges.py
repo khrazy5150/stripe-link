@@ -214,8 +214,19 @@ def stripe_shipping_options(offer: dict[str, Any] | None, *, currency: str = "us
     Shape only -- `handlers/checkout` does the form encoding. Kept here so the 5-option cap, the ordering and
     the tax classification are decided in the same place as everything else about shipping.
     """
+    return stripe_option_payload(
+        options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count), currency=currency)
+
+
+def stripe_option_payload(options: list[dict[str, Any]] | None, *, currency: str = "usd") -> list[dict[str, Any]]:
+    """Already-resolved options in Stripe's shape. The wire format, separated from WHICH options to send.
+
+    Two callers need the same encoding from different decisions: an offer's explicit table
+    (`stripe_shipping_options`) and a zone resolution (`checkout_shipping`). One encoder, so the 5-option cap
+    and the tax classification cannot drift apart.
+    """
     payload: list[dict[str, Any]] = []
-    for option in options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count):
+    for option in (options or [])[:MAX_OPTIONS]:
         rate: dict[str, Any] = {
             "type": "fixed_amount",
             "fixed_amount": {"amount": option["amount"], "currency": str(currency or "usd").lower()},
@@ -430,3 +441,72 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
     return {"options": options[:MAX_OPTIONS],
             "mode": CHARGED if amount > 0 else FREE,
             "source": source, "needs": ""}
+
+
+def checkout_shipping(offer: dict[str, Any] | None, tenant_config: dict[str, Any] | None, *,
+                      merchandise_amount: Any = 0, item_count: int = 1,
+                      box: dict[str, Any] | None = None,
+                      countries: list[str] | None = None) -> dict[str, Any]:
+    """What a hosted Checkout Session may charge for shipping when NO page element asked the buyer anything.
+
+    plans/SHIPPING_ELEMENT.md phase 3 — the author's "offer B": physical goods, shipping handled
+    automatically, the buyer never presented with a choice.
+
+    **The constraint that shapes this: Stripe presents ONE shipping list to every buyer, whatever address they
+    type.** `shipping_options` is fixed when the session is created and Stripe never asks us again. So
+    zone-derived pricing is only safe here when every destination the tenant allows agrees on the price:
+
+        US $7.00, CA $12.99   ->  no single option is right for both. Charge nothing, say why.
+        US $7.00, CA $7.00    ->  one option, correct for everyone who can reach checkout.
+
+    Returns `{options, countries, reason}`. A `reason` with no options is the honest outcome, not a failure:
+    it names what stopped us so a tenant can see why their zones are not being charged, rather than
+    discovering it as silently free shipping. Per-destination pricing needs the buyer's country BEFORE the
+    session, which is what the Shipping Element exists to collect.
+    """
+    if not ships_at_all(offer):
+        return {"options": [], "countries": [], "reason": "this offer does not ship"}
+
+    # An explicit per-offer table is destination-independent by construction -- the tenant typed the numbers --
+    # so it needs none of the agreement checking below.
+    explicit = options_for(offer, merchandise_amount=merchandise_amount, item_count=item_count)
+    if explicit:
+        return {"options": explicit, "countries": [], "reason": ""}
+
+    from stripe_link.domain.shipping_zones import allowed_countries
+
+    destinations = [c for c in (countries or allowed_countries(tenant_config)) if c]
+    if not destinations:
+        return {"options": [], "countries": [],
+                "reason": "no shipping zones are configured, so nothing is charged"}
+
+    resolved: dict[str, dict[str, Any]] = {}
+    for country in destinations:
+        result = resolve_options(offer, tenant_config, country=country,
+                                 merchandise_amount=merchandise_amount, item_count=item_count, box=box)
+        if result["needs"]:
+            # One unpriceable destination poisons the whole session, because the buyer picks the country
+            # AFTER these options are fixed. Better to charge nothing than to quote a price that is only
+            # right for some of the people who can reach the page.
+            return {"options": [], "countries": destinations,
+                    "reason": (f"shipping to {country} needs {result['needs'].replace('_', ' ')}, "
+                               f"and Stripe cannot ask again once checkout opens")}
+        resolved[country] = result
+
+    # "Agree" means the same priced services, not merely the same total: a buyer offered Ground-only in one
+    # country and Ground-plus-Overnight in another is being shown a list that is wrong for one of them.
+    def signature(result: dict[str, Any]) -> tuple:
+        return tuple((opt["label"], opt["amount"]) for opt in result["options"])
+
+    signatures = {country: signature(result) for country, result in resolved.items()}
+    distinct = set(signatures.values())
+    if len(distinct) > 1:
+        disagreeing = ", ".join(
+            f"{country} {[amount for _, amount in sig] or 'nothing'}"
+            for country, sig in sorted(signatures.items()))
+        return {"options": [], "countries": destinations,
+                "reason": (f"shipping costs differ by destination ({disagreeing}) and Stripe shows one list "
+                           f"to every buyer, so nothing is charged. A shipping element on the page can ask "
+                           f"the buyer's country first.")}
+
+    return {"options": resolved[destinations[0]]["options"], "countries": destinations, "reason": ""}
