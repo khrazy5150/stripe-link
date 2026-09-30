@@ -106,6 +106,64 @@ def _round_cents(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+# ---------------------------------------------------------------------------------------------------
+# WHAT THE PLATFORM FEE IS CHARGED ON. An explicit JuniorBay rule, decided by the author 2026-09-30.
+#
+#     fee_base = merchandise_amount - discounts        <- shipping EXCLUDED
+#
+# The author's instruction: *"I would not let Stripe's resulting transaction amount implicitly determine
+# this. Make it an explicit JuniorBay rule."* Until now the answer was an accident of the code -- fees were
+# computed per line item and no shipping amount existed, so shipping happened to be excluded with nothing
+# anywhere saying so. An accident cannot be audited, explained to a tenant, or deliberately changed.
+#
+# Why excluded: postage is a cost a tenant passes through, often at break-even. Taking a percentage of it is
+# hard to defend ("we charge you 2% of the stamp") and makes the platform's cut depend on how heavy the goods
+# are rather than on the value we added. "We never charge you on shipping" is a promise worth being able to
+# make. One constant, so reversing the decision is a one-line change with a test that fails loudly.
+#
+# `order.shipping_cost` -- what the CARRIER charged the tenant -- never appears here under any setting. The
+# platform fee is a share of what the BUYER paid; the tenant's own costs are none of the platform's business
+# (plans/SHIPPING_CHARGES.md).
+FEE_APPLIES_TO_SHIPPING = False
+
+
+def fee_base(merchandise_amount: Any, *, shipping_amount: Any = 0, discounts: Any = 0) -> int:
+    """The amount the platform fee is charged on. The ONE place that answers this.
+
+    Never negative: a discount larger than the goods is a data problem, and a negative fee base would make
+    the platform pay the tenant.
+    """
+    base = _non_negative_int(merchandise_amount, "merchandise_amount")
+    if FEE_APPLIES_TO_SHIPPING:
+        base += _non_negative_int(shipping_amount, "shipping_amount")
+    return max(0, base - _non_negative_int(discounts, "discounts"))
+
+
+def application_fee_percent(platform_fee: Any, charged_total: Any) -> Decimal:
+    """The percent to send Stripe for a SUBSCRIPTION, given a fee already computed in cents.
+
+    Stripe has no `application_fee_amount` on a subscription -- only `application_fee_percent`, which it
+    applies to **each invoice's whole total**. So the denominator must be everything the buyer is charged,
+    shipping included, or the absolute fee comes out wrong.
+
+    This is the trap that made the fee-on-shipping rule worth settling before Checkout was wired
+    (plans/SHIPPING_CHARGES.md). `checkout.py` computed `platform_fee / subtotal`, where `subtotal` is
+    merchandise only. Add a shipping line to a subscription and Stripe would have applied that percent to
+    merchandise + shipping -- quietly charging the tenant a fee on postage that this module's rule says is
+    exempt, on every renewal, with nothing in the code contradicting itself. Dividing by the CHARGED total
+    keeps the absolute fee equal to the merchandise-only figure whatever shipping does.
+
+    Rounded to TWO decimal places because Stripe rejects the whole session otherwise ("Invalid decimal:
+    5.0137"), taking every subscription checkout down with it.
+    """
+    fee = _non_negative_int(platform_fee, "platform_fee")
+    total = _non_negative_int(charged_total, "charged_total")
+    if fee <= 0 or total <= 0:
+        return Decimal("0.00")
+    percent = (Decimal(fee) / Decimal(total)) * Decimal("100")
+    return percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 # fee_handling -> the merchant's share of the fees (2026-08-26 pricing pivot, plans/TODO.md b2).
 # standard: merchant absorbs everything (buyer pays the keyed price); net_guaranteed: buyer covers
 # everything (price grossed up so the merchant nets the keyed amount); split: shared 50/50 — the

@@ -88,13 +88,39 @@ must be made once, in `domain/fees.py`, rather than emerging from whichever code
 **It must be an explicit JuniorBay rule, never inferred from Stripe's resulting transaction total**
 (author, 2026-09-30). Stripe will happily report one number; which parts of it we were entitled to a
 percentage of is our decision, and a rule that exists only as "whatever the total happened to be" cannot be
-audited, explained to a tenant, or changed without archaeology. Written as one of:
+audited, explained to a tenant, or changed without archaeology.
 
-    fee_base = merchandise_amount + shipping_amount - discounts    # fee applies to shipping
-    fee_base = merchandise_amount - discounts                      # it does not
+### ✅ DECIDED 2026-09-30: shipping is EXCLUDED
 
-Note that `shipping_cost` never appears. The platform fee is a share of what the BUYER paid; what the
-carrier charged the tenant is the tenant's cost and none of the platform's business.
+    fee_base = merchandise_amount - discounts
+
+Shipped in `domain/fees.py` as `FEE_APPLIES_TO_SHIPPING = False` plus `fee_base()`, with 11 tests. Postage is
+a cost the tenant passes through, often at break-even; taking a percentage of it is hard to defend ("we charge
+you 2% of the stamp") and would make the platform's cut depend on how heavy the goods are rather than on the
+value we added. *"We never charge you on shipping"* is a promise worth being able to make. One constant, so
+reversing it is a one-line change that fails a loud test.
+
+`shipping_cost` never appears, under any setting. The platform fee is a share of what the BUYER paid; what the
+carrier charged the tenant is the tenant's own cost and none of the platform's business.
+
+### The trap this rule caught, before Checkout was wired
+
+**Stripe has no `application_fee_amount` on a subscription — only `application_fee_percent`, applied to each
+invoice's WHOLE total.** `handlers/checkout.py` computed `platform_fee / subtotal`, where `subtotal` is
+merchandise only. Add a shipping line to a subscription and Stripe would have applied that percent to
+merchandise + shipping:
+
+    merchandise $50.00   shipping $8.00   fee base $50.00   fee owed $1.00
+    naive percent = 1.00 / 50.00 = 2.00%
+    Stripe charges 2.00% of $58.00 = $1.16      <- 16% more than the rule allows
+
+Charged on every renewal, to every subscription with shipping, with nothing in the code contradicting itself —
+the fee module would say shipping is exempt while the checkout payload quietly taxed it. Fixed by dividing by
+the CHARGED total (`domain/fees.application_fee_percent`), which keeps the absolute fee equal to the
+merchandise-only figure whatever shipping does.
+
+This is exactly what the author meant by resolving the fee interaction *before* wiring Checkout. The bug was
+unreachable today — no shipping amount exists yet — and would have shipped the moment one did.
 
 ## `free` is not a third pricing model (author's question, 2026-09-30)
 

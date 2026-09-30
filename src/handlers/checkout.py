@@ -17,7 +17,8 @@ from stripe_link.common import error_response, json_response, query_params, reso
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
-from stripe_link.domain.fees import build_fee_context, cached_billing_config, calculate_price, normalize_tier_id
+from stripe_link.domain.fees import (application_fee_percent, build_fee_context, cached_billing_config,
+                                     calculate_price, normalize_tier_id)
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
@@ -895,11 +896,12 @@ def build_checkout_payload(
         subtotal = int(fee_context.get("subtotal") or 0)
         if apply_application_fee and platform_fee > 0 and subtotal > 0:
             if payload["mode"] == "subscription":
-                # Stripe accepts application_fee_percent to TWO decimal places and rejects the whole session
-                # otherwise ("Invalid decimal: 5.0137; must contain at maximum two decimal places"), taking
-                # every subscription checkout down with it. The rounding costs a fraction of a cent per
-                # cycle; a four-decimal fee that Stripe refuses costs the entire sale.
-                percent = round((platform_fee / subtotal) * 100, 2)
+                # The denominator is everything the BUYER is charged, not merchandise alone. Stripe applies
+                # `application_fee_percent` to each invoice's whole total, so once a shipping line exists a
+                # percent computed against the merchandise subtotal would charge a fee on postage -- which
+                # `domain/fees.FEE_APPLIES_TO_SHIPPING` says is exempt. See that module for the full trap.
+                charged_total = subtotal + int(fee_context.get("shipping_amount") or 0)
+                percent = application_fee_percent(platform_fee, charged_total)
                 payload["subscription_data[application_fee_percent]"] = f"{percent:.2f}"
             else:
                 payload["payment_intent_data[application_fee_amount]"] = str(platform_fee)
