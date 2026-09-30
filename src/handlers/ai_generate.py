@@ -502,6 +502,16 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
         product_id, price_id = new_id("local", pick), new_id("price", pick)
         product = product_document(brief, tenant_id=tenant_id, product_id=product_id, price_id=price_id,
                                    mode=mode, now=now, provenance=provenance)
+        # The SAME rule the dashboard's save path applies (plans/REFUND_POLICY.md step 5).
+        #
+        # Placed here rather than just before the write so the policy exists before anything READS it:
+        # `chosen_badges` below labels the money-back badge from it. That ordering is currently belt and
+        # braces, not a live fix -- a brand-new product has no `ai_context` (only `_save_ai_context` writes
+        # one, and only for a product that already exists), so no badge is chosen for it either way, and an
+        # EXISTING product already carries a policy resolved on its last save. It is ordered this way because
+        # a value computed after its only reader is the same as no value at all, and the next reader added
+        # here should not have to discover that.
+        apply_to_product(product, _tenant_refund_config(tenant_id))
     offer = offer_document(brief, tenant_id=tenant_id, offer_id=offer_id, product_id=product_id,
                            price_id=price_id, slug=slug, mode=mode, now=now, provenance=provenance)
     # Compose BEFORE seeding: seed_hero_images fills a hero_media section, and until the composer adds one
@@ -527,10 +537,6 @@ def _persist(brief, result, *, tenant_id, mode, now, pick, products_repo, offers
     # Validate BOTH before writing either: an offer saved beside a rejected page is the half-made thing the
     # tenant cannot finish, and validation is free next to a partial write.
     if not existing_product_id:
-        # The SAME rule the dashboard's save path applies (plans/REFUND_POLICY.md step 5). Without this an
-        # AI-generated product saved with no policy at all, so its page showed no refund section and
-        # `chosen_badges` had no guarantee to read -- a second write path quietly disagreeing with the first.
-        apply_to_product(product, _tenant_refund_config(tenant_id))
         validate_product_document(product)
     validate_offer_document(offer)
     validate_page_document(page)

@@ -150,8 +150,24 @@ first two were the same thing anyway.
 ## What this does NOT change
 
 `refund_requests` and the Refunds screen were built assuming this existed (author: *"putting the cart before
-the horse"*). They consume a policy rather than defining one, so they should need little: verify
-`refund_policy_return_note` and the request flow read the resolved policy rather than the raw product field.
+the horse"*). They consume a policy rather than defining one.
+
+✅ **Verified 2026-09-30, no change needed.** `domain/returns.py` reads `product.refund_policy.return_method`
+and `handlers/refunds._keep_it_below` reads `refund_policy.keep_it_below` — both off the product's STORED
+policy, which is now the server-resolved one. Resolution on write is what makes the consumers correct without
+touching them: the stored field IS the resolved policy, so there is no second read path to keep in step.
+`returns.policy_snapshot` then freezes the terms at request time, so a tenant editing their default cannot
+retroactively change a return already in flight.
+
+## Known gap: `keep_it_below` is tenant-level only
+
+The Configuration card sets it per class; the product override form does not offer it. The domain and
+`handlers/refunds` both honour a per-product value (and `apply_to_product` preserves one across a fall-through
+to the tenant default), so the only missing piece is the input.
+
+Arguably it belongs per-product more than per-class — it is a fact about one item's postage economics, not a
+policy choice — so this is worth adding. Not a regression: before this work there were no product-level refund
+inputs at all.
 
 ## Order, and why this plan goes first
 

@@ -348,6 +348,26 @@ class GenerateTests(unittest.TestCase):
         if badges is not None:
             self.assertEqual(badges.get("badges"), [])
 
+    def test_an_ai_created_product_carries_a_resolved_refund_policy(self):
+        """`ai_provision.product_document` sets no policy, so without the handler resolving one the product
+        saved with NONE -- its page showed no refund section, and `chosen_badges` had nothing to label a
+        money-back badge from. The policy is stamped before composition so it exists before anything reads it.
+        """
+        body = json.loads(self.call()["body"])
+        policy = body["product"].get("refund_policy") or {}
+        self.assertTrue(policy.get("short_label"), "an AI-created product must carry a resolved policy")
+        self.assertTrue(policy.get("full_policy"))
+        # No tenant config in this harness, so the platform fallback applies -- and says so honestly.
+        self.assertEqual(policy.get("source"), "platform_default")
+        self.assertEqual(self.products.saved[0]["refund_policy"], policy)
+
+    def test_the_ai_product_class_follows_its_recurring_price(self):
+        """The BRIEF's price is monthly recurring, so the window runs from RENEWAL, not delivery. The legacy
+        generator rendered this as "within 3 days of delivery" -- wrong unit and wrong event."""
+        body = json.loads(self.call()["body"])
+        self.assertEqual(body["product"]["refund_policy"]["full_policy"],
+                         "Refunds are available within 72 hours of renewal.")
+
     def test_the_brief_is_what_the_model_is_grounded_on(self):
         self.call()
         prompt = self.seen[0]["prompt"]
