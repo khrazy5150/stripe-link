@@ -462,6 +462,56 @@
             </div>
           </section>
 
+          <!-- Deliberately SMALL. The Offer answers only "does this ship, and does it override the default" --
+               no zone editor, no carrier config, no second copy of the tenant shipping system, because that
+               is how a tenant ends up asking why an offer says $9 when the Shipping screen says $7
+               (plans/SHIPPING_ELEMENT.md). Hidden entirely unless something here actually ships. -->
+          <section v-if="hasPhysicalItems && productIntent === 'transaction'" class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Shipping</h3>
+                <p>Your shipping zones decide what buyers pay. Set an override here only if this offer should
+                  differ —
+                  <button v-if="navigateTo" class="link-action" type="button" @click="navigateTo('shipping')">Shipping settings</button>
+                  <span v-else>Shipping settings</span>
+                  is where zones live.</p>
+              </div>
+            </header>
+
+            <div class="offer-three-column">
+              <label class="offer-field">
+                <span>Eligibility</span>
+                <select v-model="form.shipping.eligibility">
+                  <option value="physical">Ships to the buyer</option>
+                  <option value="none">No shipping</option>
+                </select>
+              </label>
+
+              <label v-if="form.shipping.eligibility === 'physical'" class="offer-field">
+                <span>Shipping charge</span>
+                <select v-model="form.shipping.override">
+                  <option value="none">Use my shipping zones</option>
+                  <option value="free">Free for this offer</option>
+                  <option value="flat">A flat amount</option>
+                  <option value="calculated">Always calculate a rate</option>
+                </select>
+              </label>
+
+              <label v-if="form.shipping.eligibility === 'physical' && form.shipping.override === 'flat'"
+                     class="offer-field">
+                <span>Flat amount <strong>*</strong></span>
+                <input v-model.trim="form.shipping.amount" type="text" inputmode="decimal" placeholder="12.99" />
+              </label>
+            </div>
+
+            <p v-if="form.shipping.eligibility === 'none'" class="field-hint">
+              Nothing is charged for shipping and no address is needed, whatever your zones say.
+            </p>
+            <p v-else-if="form.shipping.override !== 'none'" class="field-hint">
+              {{ shippingOverrideNote }}
+            </p>
+          </section>
+
           <section v-if="landingProducts.length && productIntent === 'transaction'" class="offer-form-section">
             <header class="offer-section-header">
               <div>
@@ -628,7 +678,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, inject, onMounted, reactive, ref, watch } from "vue";
 import SelectorCard from "./SelectorCard.vue";
 import { leadActionIcon } from "../utils/leadActionIcon";
 import { recurringSuffix } from "../utils/priceForm";
@@ -797,7 +847,27 @@ function landingPrices(product) {
 }
 // Only products with a landing price are landing items. A product priced ONLY as a bump/upsell/downsell is a
 // funnel-only product (selected in Select Items, but never rendered as a landing card).
+// The shell's navigation. This app has NO vue-router -- App.vue provides this, and a <router-link> here would
+// have built cleanly and rendered nothing (Orders.vue:385 says so in as many words).
+const navigateTo = inject("navigateTo", null);
+
 const landingProducts = computed(() => selectedProducts.value.filter((product) => landingPrices(product).length > 0));
+
+// Whether anything in this offer actually needs posting. The section stays hidden otherwise, because a
+// shipping override on a digital course is a control with nothing to act on. Reads `requires_shipping` first
+// -- the fulfilment field the packer and checkout both use -- and falls back to product_type for documents
+// written before it existed.
+const hasPhysicalItems = computed(() => selectedProducts.value.some((product) => {
+  const requires = product?.fulfillment?.requires_shipping;
+  if (typeof requires === "boolean") return requires;
+  return product?.product_type === "physical";
+}));
+
+const shippingOverrideNote = computed(() => ({
+  free: "Buyers pay nothing for shipping on this offer, in every country you ship to.",
+  flat: "Every buyer pays this one amount, whatever their country and whichever speed they pick.",
+  calculated: "A rate is worked out per order even where a zone sets a flat price. Needs a connected carrier, or box prices.",
+}[form.shipping.override] || ""));
 
 // Every landing price a tip? Then the offer is a tip jar, and its page composes as one.
 function landingPricesAreTips() {
@@ -1135,6 +1205,9 @@ function defaultOfferForm() {
       allow_promotion_codes: false,
       promotion_code: "",
     },
+    // "physical" + "none" means: this ships, and the tenant's zones decide -- the state an offer should be in
+    // unless someone deliberately says otherwise.
+    shipping: { eligibility: "physical", override: "none", amount: "" },
     userEditedName: false,
     userEditedSlug: false,
   };
@@ -1627,6 +1700,10 @@ function buildOfferDocument() {
       cta_label: cta.label || "Buy Now",
       cta: cleanObject({ type: cta.type, label: cta.label, target: cta.target || undefined }),
     }),
+    // Only sent when there is something to say. An offer that ships and defers to the tenant's zones is the
+    // DEFAULT, and storing that would turn "not configured" into a decision nobody made -- the same reason
+    // the Shipping screen does not save a lone catch-all.
+    shipping: effectiveIntent === "transaction" ? buildShippingBlock() : undefined,
     checkout: effectiveIntent === "transaction" ? {
       mode: checkoutMode,
       phone_number_collection: form.checkout.phone_number_collection,
@@ -1648,6 +1725,20 @@ function buildOfferDocument() {
   return { offer };
 }
 
+/** `undefined` when the offer ships and defers to the tenant's zones, which is the default. */
+function buildShippingBlock() {
+  const eligibility = form.shipping.eligibility === "none" ? "none" : "physical";
+  const override = form.shipping.override;
+  if (eligibility === "none") return { eligibility: "none" };
+  if (!override || override === "none") return undefined;
+  const block = { override: { type: override } };
+  if (override === "flat") {
+    // Typed in dollars, stored in CENTS like every other amount in this codebase.
+    block.override.amount = Math.max(0, Math.round(Number(String(form.shipping.amount || "").replace(/[$,]/g, "")) * 100) || 0);
+  }
+  return block;
+}
+
 function loadOfferIntoForm(offer) {
   editingOfferId.value = offer.offer_id;
   form.name = offer.name || "";
@@ -1666,6 +1757,12 @@ function loadOfferIntoForm(offer) {
     duration: offer.discount?.duration || "once",
     duration_months: Number(offer.discount?.duration_months || 1),
     first_time_only: Boolean(offer.discount?.first_time_only),
+  };
+  const shipping = offer.shipping || {};
+  form.shipping = {
+    eligibility: shipping.eligibility === "none" ? "none" : "physical",
+    override: shipping.override?.type || "none",
+    amount: shipping.override?.amount ? (Number(shipping.override.amount) / 100).toFixed(2) : "",
   };
   form.checkout = {
     ...defaultOfferForm().checkout,

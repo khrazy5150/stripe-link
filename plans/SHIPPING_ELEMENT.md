@@ -446,6 +446,23 @@ The author's framing, kept: *"The box template describes the physical container,
 what the tenant charges for that container in a destination country."* And critically — **flat-rate-box pricing
 is a shipping-configuration concern, never an Offer concern.**
 
+### The Offer editor — ✅ SHIPPED 2026-09-30
+
+A single section on the offer form, hidden entirely unless something in the offer actually ships
+(`requires_shipping` first, falling back to `product_type` for documents written before that field):
+
+    Eligibility      [ Ships to the buyer ▾ ]   or   No shipping
+    Shipping charge  [ Use my shipping zones ▾ ]  Free / A flat amount / Always calculate a rate
+    Flat amount      [ 12.99 ]                    only when "A flat amount"
+
+**Nothing is stored for the default.** An offer that ships and defers to the tenant's zones emits no
+`shipping` block at all — storing it would turn "not configured" into a decision nobody made, the same reason
+the Shipping screen does not save a lone catch-all.
+
+It links to the Shipping screen for the zones themselves. **Note for anyone adding such a link: this app has
+no vue-router.** A `<router-link>` builds cleanly and renders nothing; the shell provides
+`inject("navigateTo")`, as `Orders.vue:385` says in as many words.
+
 ### Why the Offer editor stays small
 
 The author's reason is the one that matters: otherwise you get *"Why does this offer say $9 shipping when the
