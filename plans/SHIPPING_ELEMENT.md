@@ -457,9 +457,27 @@ override the default — and holds **no zone editor, no carrier config, no secon
 1. **`ShippingConfig.enabled_services` + zones + box `flat_rate`, and a UI for them** — replacing the two dead
    inputs. Ships value alone: the first time a tenant can say what they offer and what it costs a buyer.
 
-   **Backend ✅ SHIPPED 2026-09-30** (36 tests): schema, `domain/shipping_zones.py` (pure — matching,
-   `services_for`, `allowed_countries`, `resolved_amount`, `flat_rate_for_box`), and
-   `validate_shipping_zones` wired into `validate_shipping_config`. **UI still to build.**
+   **✅ SHIPPED 2026-09-30** — backend (36 tests) and UI. `domain/shipping_zones.py` (pure — matching,
+   `services_for`, `allowed_countries`, `resolved_amount`, `flat_rate_for_box`), `validate_shipping_zones`
+   wired into `validate_shipping_config`, and two new cards on the Shipping screen: **Services** (what speeds
+   the tenant offers) and **What buyers pay** (ordered zones), plus per-box prices on the Boxes card.
+
+   The two dead inputs are gone from the form. A stored `markup_amount` or `free_shipping_threshold` is
+   carried through on save rather than deleted — a tenant who set one should not lose data to a screen that
+   stopped showing it; retiring the fields properly belongs with the handling-fee work.
+
+   UI decisions worth keeping:
+
+   - **The catch-all is structural, not a choice.** The form always keeps exactly one, last, un-removable and
+     un-renamable, and `zonesFromDocument` normalises a stored set that has none or several. The tenant never
+     sees an error about a shape they did not type, and the validator can never fire on this screen's output.
+   - **"Add zone" inserts BEFORE the catch-all**, because a zone after it would never be reached.
+   - **A duplicate country is named inline**, identifying the earlier zone that wins — first-match-wins makes
+     the LATER zone silently dead, so the tenant would otherwise believe both were live.
+   - **Per-box price fields appear only for countries in a zone priced by box**, so a tenant charging flat or
+     live rates never sees a column they do not use.
+   - **A lone catch-all is not saved.** It is the form's own default, and storing it would turn "not
+     configured" into "everything ships free".
 
    Decisions worth keeping, all of them "None is not zero":
 

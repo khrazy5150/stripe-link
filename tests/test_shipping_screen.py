@@ -113,7 +113,10 @@ class CopyBusinessAddressTests(unittest.TestCase):
 
 
 class SavedShapeTests(unittest.TestCase):
-    BLOCK = SCREEN.split("doc.boxes = form.boxes", 1)[1][:900]
+    # Bounded by the END OF THE BLOCK rather than a character count. It was [:900], and adding a comment
+    # inside the mapper pushed `max_weight` out of the window and failed a test about a line that had not
+    # changed. A window measured in characters breaks on edits it is not testing.
+    BLOCK = SCREEN.split("doc.boxes = form.boxes", 1)[1].split("doc.ship_from_address", 1)[0]
 
     def test_a_half_filled_row_is_not_saved(self):
         """An unnamed or sizeless box would fail validation on save and lose the whole form."""

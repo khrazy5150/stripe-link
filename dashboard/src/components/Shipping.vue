@@ -193,6 +193,21 @@
             Inside measurements. Box weight counts — the carrier bills the cardboard too. Max weight is
             optional; leave it blank unless the box has a stated limit.
           </small>
+          <!-- Only shown when a zone actually prices this way, so a tenant charging flat or live rates never
+               sees a column they do not use. -->
+          <div v-if="boxPricingUsed" class="box-prices">
+            <span class="box-prices-title">What a buyer pays when their order fits this box</span>
+            <div class="offer-three-column">
+              <label v-for="code in boxPricingCountries" :key="code" class="offer-field">
+                <span>{{ code }}</span>
+                <input v-model.trim="box.prices[code]" type="text" inputmode="decimal" placeholder="—" />
+              </label>
+            </div>
+            <small class="field-hint">
+              Blank means this box has no price for that country, so an order needing it cannot be
+              quoted — leave it blank only if you never ship that size there.
+            </small>
+          </div>
           <small v-if="box.kind === 'soft_pack'" class="field-hint">
             Height is how thick it lies flat. An envelope stretches, so products marked
             <strong>“this item squashes”</strong> can go in one thicker than that — up to about three
@@ -231,6 +246,117 @@
 
 
     <section class="dashboard-card">
+      <header class="dashboard-card-header">
+        <h2>Services</h2>
+        <p>The delivery speeds you offer a buyer. A landing page can show fewer of these, never more — a
+          customer cannot ask for overnight if you do not ship overnight.</p>
+      </header>
+      <div class="dashboard-card-body">
+        <p v-if="!form.enabled_services.length" class="field-hint">
+          No services yet.
+          <button class="link-action" type="button" @click="useStarterServices">Start with common speeds</button>
+        </p>
+        <div v-for="(service, index) in form.enabled_services" :key="index" class="offer-item-editor">
+          <header>
+            <div><h4>{{ service.label || service.service_token || "Untitled service" }}</h4></div>
+            <button class="secondary-action compact" type="button" @click="form.enabled_services.splice(index, 1)">Remove</button>
+          </header>
+          <div class="offer-three-column">
+            <label class="offer-field">
+              <span>Buyer sees</span>
+              <input v-model.trim="service.label" type="text" placeholder="e.g. Ground (5–7 days)" />
+            </label>
+            <label class="offer-field">
+              <span>Service code</span>
+              <input v-model.trim="service.service_token" type="text" placeholder="e.g. usps_ground_advantage" />
+            </label>
+            <label class="offer-field">
+              <span>Carrier</span>
+              <input v-model.trim="service.carrier" type="text" placeholder="e.g. USPS" />
+            </label>
+          </div>
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Fastest (business days)</span>
+              <input v-model.number="service.transit_days_min" type="number" min="0" step="1" />
+            </label>
+            <label class="offer-field">
+              <span>Slowest (business days)</span>
+              <input v-model.number="service.transit_days_max" type="number" min="0" step="1" />
+            </label>
+          </div>
+        </div>
+        <button class="secondary-action" type="button" @click="form.enabled_services.push(emptyService())">Add service</button>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
+      <header class="dashboard-card-header">
+        <h2>What buyers pay</h2>
+        <p>Shipping charges by destination, checked <strong>in order</strong> — the first zone that matches a
+          buyer's country decides. The last zone catches everywhere you have not listed, so every buyer has an
+          answer. Amounts are in your store's default currency.</p>
+      </header>
+      <div class="dashboard-card-body">
+        <div v-for="(zone, index) in form.zones" :key="index" class="offer-item-editor">
+          <header>
+            <div>
+              <h4>{{ isCatchAllZone(zone) ? "Everywhere else" : (zone.name || "Untitled zone") }}</h4>
+              <p class="field-note">{{ zoneSummary(zone) }}</p>
+            </div>
+            <div class="zone-actions">
+              <button v-if="!isCatchAllZone(zone) && index > 0" class="secondary-action compact" type="button"
+                      title="Move up" @click="moveZone(index, -1)">↑</button>
+              <button v-if="!isCatchAllZone(zone) && index < form.zones.length - 2" class="secondary-action compact"
+                      type="button" title="Move down" @click="moveZone(index, 1)">↓</button>
+              <button v-if="!isCatchAllZone(zone)" class="secondary-action compact" type="button"
+                      @click="form.zones.splice(index, 1)">Remove</button>
+            </div>
+          </header>
+
+          <div v-if="!isCatchAllZone(zone)" class="offer-two-column">
+            <label class="offer-field">
+              <span>Zone name</span>
+              <input v-model.trim="zone.name" type="text" placeholder="e.g. United States" />
+            </label>
+            <label class="offer-field">
+              <span>Countries <em>(two-letter codes)</em></span>
+              <input v-model.trim="zone.countries_text" type="text" placeholder="e.g. US" />
+              <small v-if="zoneCountryError(index)" class="field-error">{{ zoneCountryError(index) }}</small>
+            </label>
+          </div>
+
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Buyers here pay</span>
+              <select v-model="zone.rule.type">
+                <option value="free">Nothing — free shipping</option>
+                <option value="flat">A flat amount</option>
+                <option value="flat_rate_box">The price of the box it fits</option>
+                <option value="live">Live carrier rates</option>
+              </select>
+            </label>
+            <label v-if="zone.rule.type === 'flat'" class="offer-field">
+              <span>Flat amount</span>
+              <input v-model.trim="zone.rule.amount_text" type="text" inputmode="decimal" placeholder="e.g. 12.99" />
+            </label>
+          </div>
+
+          <p v-if="zone.rule.type === 'flat_rate_box'" class="field-hint">
+            Priced from the <strong>Boxes</strong> section below — give each box a price for
+            {{ isCatchAllZone(zone) ? "these destinations" : (zone.countries_text || "these countries") }}.
+            {{ boxPricingGap(zone) }}
+          </p>
+          <p v-if="zone.rule.type === 'live'" class="field-hint">
+            Needs a connected carrier and the buyer's postal code, so a page showing these rates has to ask for
+            it. Until a carrier is connected, buyers here are not charged for shipping.
+          </p>
+        </div>
+        <button class="secondary-action" type="button" @click="addZone">Add zone</button>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Rate &amp; Label Options</h2></header>
       <div class="dashboard-card-body">
         <p class="field-note">Optional.</p>
@@ -242,16 +368,6 @@
           <label class="offer-field">
             <span>Allowed Carriers</span>
             <input v-model.trim="form.rate_options.allowed_carriers" type="text" placeholder="Comma-separated, e.g. usps, ups" />
-          </label>
-        </div>
-        <div class="offer-two-column">
-          <label class="offer-field">
-            <span>Markup Amount (cents)</span>
-            <input v-model.number="form.rate_options.markup_amount" type="number" min="0" step="1" />
-          </label>
-          <label class="offer-field">
-            <span>Free Shipping Threshold (cents)</span>
-            <input v-model.number="form.rate_options.free_shipping_threshold" type="number" min="0" step="1" />
           </label>
         </div>
         <div class="offer-two-column">
@@ -325,11 +441,115 @@ function defaultForm() {
     provider: { name: "", base_url: "", api_key: "" },
     ship_from_address: emptyAddress(),
     return_address: emptyAddress(),
-    rate_options: { default_service_level: "", allowed_carriers: "", markup_amount: "", free_shipping_threshold: "",
+    // `markup_amount` and `free_shipping_threshold` are NOT edited here any more. They had inputs on this
+    // screen, were saved, and were read by NOTHING -- rate_policy.py says in its own docstring that they
+    // belong to charging the buyer, "which is a different question... untouched here". A control implying a
+    // promise the system does not keep (plans/SHIPPING_ELEMENT.md). "What buyers pay" replaces them. Stored
+    // values are preserved on save so nothing is destroyed for a tenant who set one.
+    rate_options: { default_service_level: "", allowed_carriers: "",
                     prefer: "cheapest", max_transit_days: "", preferred_carrier: "", max_auto_amount: "" },
     label_options: { format: "pdf", size: "4x6" },
     boxes: [],
+    enabled_services: [],
+    // The catch-all is structural, not a choice: without it a buyer from an unlisted country reaches
+    // undefined behaviour at the moment of purchase, and the validator refuses the save. So the UI always
+    // keeps one last and does not let it be removed or renamed.
+    zones: [catchAllZone()],
   };
+}
+
+function emptyService() {
+  return { service_token: "", carrier: "", label: "", transit_days_min: "", transit_days_max: "" };
+}
+
+// Mirrors the Boxes convenience seed: a tenant should not have to invent service codes from nothing.
+const STARTER_SERVICES = [
+  { service_token: "ground", carrier: "", label: "Ground (5–7 business days)", transit_days_min: 5, transit_days_max: 7 },
+  { service_token: "two_day", carrier: "", label: "2-day", transit_days_min: 2, transit_days_max: 2 },
+  { service_token: "overnight", carrier: "", label: "Overnight", transit_days_min: 1, transit_days_max: 1 },
+];
+
+function useStarterServices() {
+  form.enabled_services = STARTER_SERVICES.map((service) => ({ ...service }));
+}
+
+function emptyZone() {
+  return { name: "", countries_text: "", rule: { type: "flat", amount_text: "" } };
+}
+
+function catchAllZone() {
+  return { name: "Everywhere else", countries_text: "*", rule: { type: "free", amount_text: "" } };
+}
+
+function isCatchAllZone(zone) {
+  return String(zone?.countries_text || "").trim() === "*";
+}
+
+function addZone() {
+  // Inserted BEFORE the catch-all, because a zone after it would never be reached.
+  form.zones.splice(Math.max(0, form.zones.length - 1), 0, emptyZone());
+}
+
+function moveZone(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= form.zones.length - 1) return;
+  const [zone] = form.zones.splice(index, 1);
+  form.zones.splice(target, 0, zone);
+}
+
+function zoneCountryCodes(zone) {
+  return String(zone?.countries_text || "")
+    .split(/[,\s]+/)
+    .map((code) => code.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+/** The validator refuses a country claimed by two zones; say so here rather than on save. */
+function zoneCountryError(index) {
+  const zone = form.zones[index];
+  const codes = zoneCountryCodes(zone);
+  if (!codes.length) return "Add at least one country code, e.g. US.";
+  const bad = codes.find((code) => code !== "*" && !/^[A-Z]{2}$/.test(code));
+  if (bad) return `"${bad}" is not a two-letter country code.`;
+  for (let other = 0; other < form.zones.length - 1; other += 1) {
+    if (other === index) continue;
+    const clash = zoneCountryCodes(form.zones[other]).find((code) => codes.includes(code));
+    // First match wins, so the LATER zone is the dead one -- name it, because the tenant would otherwise
+    // believe both were live.
+    if (clash) return `${clash} is already in "${form.zones[other].name || 'another zone'}", which comes first.`;
+  }
+  return "";
+}
+
+function zoneSummary(zone) {
+  const kind = zone?.rule?.type;
+  if (kind === "free") return "Free shipping";
+  if (kind === "flat") return zone.rule.amount_text ? `Flat ${zone.rule.amount_text}` : "Flat rate — no amount set";
+  if (kind === "flat_rate_box") return "Priced by the box it fits";
+  if (kind === "live") return "Live carrier rates";
+  return "";
+}
+
+/** Which countries need a per-box price, i.e. those in a zone priced by box. */
+const boxPricingCountries = computed(() => {
+  const codes = [];
+  form.zones.forEach((zone) => {
+    if (zone?.rule?.type !== "flat_rate_box") return;
+    zoneCountryCodes(zone).forEach((code) => {
+      if (code !== "*" && !codes.includes(code)) codes.push(code);
+    });
+  });
+  return codes;
+});
+
+const boxPricingUsed = computed(() => boxPricingCountries.value.length > 0);
+
+/** Names what is missing, because a box-priced zone with no priced box cannot quote at all. */
+function boxPricingGap(zone) {
+  const codes = zoneCountryCodes(zone).filter((code) => code !== "*");
+  if (!codes.length || !form.boxes.length) return "";
+  const unpriced = codes.filter((code) => !form.boxes.some((box) => String(box.prices?.[code] || "").trim()));
+  return unpriced.length ? `No box has a price for ${unpriced.join(", ")} yet.` : "";
 }
 
 // Ordinary corrugated sizes, mirroring STARTER_BOXES in domain/shipping.py. A convenience seed so a tenant
@@ -341,7 +561,7 @@ const STARTER_BOXES = [
   { name: "Large box (14x11x8)", kind: "box", length: 14, width: 11, height: 8, empty_weight: 0.6, max_weight: "" },
   { name: "Extra large box (18x14x12)", kind: "box", length: 18, width: 14, height: 12, empty_weight: 1.0, max_weight: "" },
   { name: "Padded mailer (9x6x1)", kind: "soft_pack", length: 9, width: 6, height: 1, empty_weight: 0.05, max_weight: "" },
-];
+].map((box) => ({ ...box, prices: {} }));
 
 function emptyBox() {
   // `kind` defaults to a box because rigid is the safe assumption: a mailer mistakenly treated as a
@@ -351,7 +571,9 @@ function emptyBox() {
   // records why: carrier packaging is fetched from the provider as parcel templates, because hand-copied
   // carrier dimensions go stale the moment a size is retired. The packer and the adapter already pass one
   // through when a box carries it; asking a tenant to type "USPS_FlatRateEnvelope" would contradict that.
-  return { name: "", kind: "box", length: "", width: "", height: "", empty_weight: "", max_weight: "" };
+  // `prices` is UI-side only: country -> typed text. `buildPayload` converts it to the schema's
+  // `flat_rate` (country -> cents), so a half-typed "12." never reaches the document.
+  return { name: "", kind: "box", length: "", width: "", height: "", empty_weight: "", max_weight: "", prices: {} };
 }
 
 function addBox() {
@@ -360,6 +582,14 @@ function addBox() {
 
 function removeBox(index) {
   form.boxes.splice(index, 1);
+}
+
+function boxFormFromDocument(box) {
+  const prices = {};
+  Object.entries(box.flat_rate || {}).forEach(([code, cents]) => {
+    prices[String(code).toUpperCase()] = (Number(cents) / 100).toFixed(2);
+  });
+  return { ...emptyBox(), ...box, prices };
 }
 
 function useStarterBoxes() {
@@ -419,6 +649,25 @@ function fillAddress(target, source) {
   });
 }
 
+/** Stored zones -> editor rows, always ending in exactly one catch-all the UI owns. */
+function zonesFromDocument(zones) {
+  const rows = (Array.isArray(zones) ? zones : [])
+    .map((zone) => ({
+      name: zone.name || "",
+      countries_text: (zone.destinations || []).map((d) => String(d.country || "").toUpperCase()).join(", "),
+      rule: {
+        type: zone.rule?.type || "flat",
+        amount_text: zone.rule?.amount ? (Number(zone.rule.amount) / 100).toFixed(2) : "",
+      },
+    }))
+    .filter((row) => row.countries_text);
+  const catchAll = rows.filter(isCatchAllZone);
+  const specific = rows.filter((row) => !isCatchAllZone(row));
+  // Exactly one, always last. A stored document with none (or several) is normalised rather than refused --
+  // the tenant sees a complete, valid set instead of an error about a shape they never typed.
+  return [...specific, catchAll[0] || catchAllZone()];
+}
+
 function applyConfig(config) {
   rawDoc.value = config || {};
   const base = defaultForm();
@@ -431,14 +680,20 @@ function applyConfig(config) {
   fillAddress(form.ship_from_address, config.ship_from_address);
   fillAddress(form.return_address, config.return_address);
   form.boxes = Array.isArray(config.boxes)
-    ? config.boxes.map((box) => ({ ...emptyBox(), ...box, max_weight: box.max_weight ?? "" }))
+    ? config.boxes.map((box) => ({ ...boxFormFromDocument(box), max_weight: box.max_weight ?? "" }))
     : [];
+  form.enabled_services = Array.isArray(config.enabled_services)
+    ? config.enabled_services.map((service) => ({
+        ...emptyService(), ...service,
+        transit_days_min: service.transit_days_min ?? "",
+        transit_days_max: service.transit_days_max ?? "",
+      }))
+    : [];
+  form.zones = zonesFromDocument(config.zones);
   const rate = config.rate_options || {};
   form.rate_options = {
     default_service_level: rate.default_service_level || "",
     allowed_carriers: Array.isArray(rate.allowed_carriers) ? rate.allowed_carriers.join(", ") : "",
-    markup_amount: rate.markup_amount ?? "",
-    free_shipping_threshold: rate.free_shipping_threshold ?? "",
     prefer: rate.prefer || "cheapest",
     max_transit_days: rate.max_transit_days ?? "",
     preferred_carrier: rate.preferred_carrier || "",
@@ -485,6 +740,17 @@ function validationErrors() {
     });
     const country = String(addr.country || "").trim();
     if (country && country.length !== 2) errors.push(`${label} country must be a 2-letter code`);
+  });
+  // Zones, checked here so the server's refusal is never the first the tenant hears of it. Each message names
+  // what is wrong rather than saying "invalid zone" -- a duplicate country in particular is invisible
+  // otherwise, because first-match-wins makes the LATER zone silently dead.
+  form.zones.forEach((zone, index) => {
+    if (isCatchAllZone(zone)) return;
+    const problem = zoneCountryError(index);
+    if (problem) errors.push(`Zone "${zone.name || index + 1}": ${problem}`);
+    if (zone.rule?.type === "flat" && !String(zone.rule.amount_text || "").trim()) {
+      errors.push(`Zone "${zone.name || index + 1}" is a flat rate with no amount`);
+    }
   });
   return errors;
 }
@@ -564,8 +830,23 @@ function buildPayload() {
         name: String(box.name).trim(),
         length: Number(box.length), width: Number(box.width), height: Number(box.height),
       };
+      // `kind` was COLLECTED BY THE FORM AND NEVER SENT. Live dev data shows a "Padded mailer" stored with
+      // no kind, so the packer treated it as a rigid carton -- the schema warns in its own words that
+      // "pricing one as the other is why an 8x5x2 pouch used to climb to a carton". Fixed here because it is
+      // the same fault this screen is being rebuilt to remove: a control whose value is discarded.
+      if (box.kind === "soft_pack") entry.kind = "soft_pack";
       if (Number(box.empty_weight) > 0) entry.empty_weight = Number(box.empty_weight);
       if (Number(box.max_weight) > 0) entry.max_weight = Number(box.max_weight);
+      // A carrier's own packaging identifier, never typed here -- carried through when a stored box has one.
+      if (String(box.template || "").trim()) entry.template = String(box.template).trim();
+      // What a buyer pays when their order fits this box, per destination country. Only well-formed amounts
+      // travel: a half-typed "12." must not become a price.
+      const flat = {};
+      Object.entries(box.prices || {}).forEach(([code, text]) => {
+        const cents = Math.round(Number(String(text).replace(/[$,]/g, "")) * 100);
+        if (Number.isFinite(cents) && cents >= 0 && String(text).trim()) flat[String(code).toUpperCase()] = cents;
+      });
+      if (Object.keys(flat).length) entry.flat_rate = flat;
       return entry;
     });
 
@@ -579,8 +860,13 @@ function buildPayload() {
   if (form.rate_options.default_service_level.trim()) rate.default_service_level = form.rate_options.default_service_level.trim();
   const carriers = form.rate_options.allowed_carriers.split(",").map((item) => item.trim()).filter(Boolean);
   if (carriers.length) rate.allowed_carriers = carriers;
-  if (form.rate_options.markup_amount !== "" && form.rate_options.markup_amount != null) rate.markup_amount = Number(form.rate_options.markup_amount);
-  if (form.rate_options.free_shipping_threshold !== "" && form.rate_options.free_shipping_threshold != null) rate.free_shipping_threshold = Number(form.rate_options.free_shipping_threshold);
+  // markup_amount and free_shipping_threshold are no longer EDITED here -- nothing ever read them, and "What
+  // buyers pay" replaces them. A stored value is carried through rather than deleted: a tenant who set one
+  // should not have data silently removed by a screen that stopped showing it. Retiring the fields properly
+  // belongs with the handling-fee work (plans/SHIPPING_ELEMENT.md).
+  const storedRate = rawDoc.value.rate_options || {};
+  if (storedRate.markup_amount != null) rate.markup_amount = storedRate.markup_amount;
+  if (storedRate.free_shipping_threshold != null) rate.free_shipping_threshold = storedRate.free_shipping_threshold;
 
   // The rate PREFERENCE. "cheapest" is the default the server falls back to anyway, so storing it would
   // only pin a choice the tenant never made.
@@ -594,6 +880,46 @@ function buildPayload() {
 
   if (Object.keys(rate).length) doc.rate_options = rate;
   else delete doc.rate_options;
+
+  // Services the tenant offers a buyer. A row with no code cannot be matched to a carrier, so it is dropped
+  // rather than saved as an unusable choice.
+  const services = form.enabled_services
+    .filter((service) => String(service.service_token || "").trim())
+    .map((service) => {
+      const entry = { service_token: String(service.service_token).trim() };
+      if (String(service.carrier || "").trim()) entry.carrier = String(service.carrier).trim();
+      if (String(service.label || "").trim()) entry.label = String(service.label).trim();
+      if (Number(service.transit_days_min) >= 0 && service.transit_days_min !== "") {
+        entry.transit_days_min = Math.floor(Number(service.transit_days_min));
+      }
+      if (Number(service.transit_days_max) >= 0 && service.transit_days_max !== "") {
+        entry.transit_days_max = Math.floor(Number(service.transit_days_max));
+      }
+      return entry;
+    });
+  if (services.length) doc.enabled_services = services;
+  else delete doc.enabled_services;
+
+  // Zones, in the tenant's order, catch-all last. Emitted as `destinations[{country}]` -- the shape that can
+  // gain `regions` later without a second field (plans/SHIPPING_ELEMENT.md).
+  const zones = form.zones
+    .map((zone) => {
+      const codes = zoneCountryCodes(zone);
+      if (!codes.length) return null;
+      const rule = { type: zone.rule?.type || "flat" };
+      if (rule.type === "flat") {
+        rule.amount = Math.max(0, Math.round(Number(String(zone.rule.amount_text || "").replace(/[$,]/g, "")) * 100) || 0);
+      }
+      const entry = { destinations: codes.map((country) => ({ country })), rule };
+      if (String(zone.name || "").trim()) entry.name = String(zone.name).trim();
+      return entry;
+    })
+    .filter(Boolean);
+  // Only sent once the tenant has configured something beyond the UI's own catch-all. A lone catch-all is the
+  // default the form starts with, and storing it would turn "not configured" into "everything ships free".
+  const meaningful = zones.length > 1 || (zones.length === 1 && zones[0].rule.type !== "free");
+  if (meaningful) doc.zones = zones;
+  else delete doc.zones;
 
   doc.label_options = { format: form.label_options.format, size: form.label_options.size };
   doc.updated_at = Math.floor(Date.now() / 1000);

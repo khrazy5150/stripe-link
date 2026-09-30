@@ -2671,6 +2671,24 @@ via `notify_buyer` when the tenant records a shipment, and `domain/carriers.serv
 whether to promise a tracking NUMBER at all because USPS First-Class carries none. Checked rather than assumed;
 the shipping card is the only false claim on that page.
 
+### ✅ FIXED 2026-09-30 — the Shipping screen dropped the box `kind` it collected
+
+Found while building "What buyers pay". `buildPayload` in `Shipping.vue` mapped a box to
+name/length/width/height/empty_weight/max_weight and **never sent `kind`**, which the form collects and the
+schema warns about in its own words:
+
+> *"a padded mailer's stated height is its FLAT measurement; stuffed, it bulges... Pricing one as the other is
+> why an 8x5x2 pouch used to climb to a carton."*
+
+**Confirmed in live dev data:** the one real shipping config has a box named "Padded mailer (9x6x1)" stored with
+no `kind`, so the packer has been treating it as a rigid carton — oversizing parcels and overpaying postage,
+which is the exact regression that comment was written to prevent.
+
+Fourth instance in one day of a control whose value is discarded (refund literal, dead shipping inputs, the
+thank-you card, this). The cheapest one to fix and the only one with a measurable cost per order. **Existing
+stored boxes are not rewritten** — a tenant's mailer regains its `kind` when they next save, which is the
+organic rule this repo follows.
+
 ### ⭐⭐ HIGH — the Shipping screen collects two values nothing reads (found 2026-09-30)
 
 `dashboard/src/components/Shipping.vue:249-255` renders two inputs under "Rate & Label Options":
@@ -2688,10 +2706,10 @@ here."*
 Arguably worse, because a tenant who types "Free Shipping Threshold: 5000" has made a deliberate commercial
 decision that is silently discarded — where the refund literal at least produced a policy.
 
-Fixed by `plans/SHIPPING_ELEMENT.md` phase 1: `free_shipping_threshold` folds into the tenant's default
-shipping shape and `markup_amount` becomes the handling fee applied to a quoted rate. **Interim honesty if
-that waits:** remove the two inputs, or label them as not yet in effect. An input that does nothing is worse
-than a missing feature — the tenant believes they have configured something.
+✅ **Inputs removed 2026-09-30** — "What buyers pay" replaces them, and a stored value is carried through on
+save rather than deleted, so no tenant loses data to a screen that stopped showing it. **Still open:** the
+fields themselves remain in the schema, and `markup_amount` becoming a real handling fee on a quoted rate
+belongs with the handling-fee work (its granularity — per parcel, order or item — is still undecided).
 
 Verify both tables are empty before retiring the fields, the way the `UserPreferences` refund slot was checked.
 
