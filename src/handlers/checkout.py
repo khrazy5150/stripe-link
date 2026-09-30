@@ -638,7 +638,7 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
     zone, `box_price` for a by-box cart with no priced box, `zone` for a destination nothing serves. **Never
     zero for "unknown"**: a page that renders an unknown as "Free shipping" makes a promise the tenant did not.
     """
-    from stripe_link.domain.shipping_charges import packed_box_price, resolve_options, ships_at_all
+    from stripe_link.domain.shipping_charges import packed_box_price, resolve_options
     from stripe_link.domain.shipping_zones import allowed_countries as zone_countries
 
     offers_repo = offers_repo or offers_repository(mode=mode)
@@ -652,12 +652,17 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
     except PricingError as exc:
         return error_response(str(exc), code="invalid_offer")
 
-    config = _tenant_shipping_config(tenant_id)
-    countries = zone_countries(config)
-    if not ships_at_all(offer):
+    # `collect_shipping_for`, not `ships_at_all`: the latter only reads the offer's eligibility FLAG, so a
+    # digital offer with no flag set answered "ships: True" and an element would have rendered for a download.
+    # Found by calling the deployed endpoint against a second real offer -- the link-in-bio one -- after the
+    # first looked correct. One example is not a check.
+    if not collect_shipping_for(offer, products_by_id):
         # Nothing to ask and nothing to charge. An element rendering this must show no selector at all rather
         # than an empty dropdown.
         return json_response({"ships": False, "countries": [], "options": [], "needs": "", "mode": ""})
+
+    config = _tenant_shipping_config(tenant_id)
+    countries = zone_countries(config)
 
     # The cart, as a single line unless the page said otherwise. A quote is per-cart because a by-box price
     # depends on what is being packed.

@@ -93,6 +93,24 @@ class QuoteTests(unittest.TestCase):
         self.assertEqual(body["needs"], "country")
         self.assertEqual(body["country"], "")
 
+    def test_a_DIGITAL_offer_does_not_ship_even_with_no_eligibility_flag(self):
+        """Found on the deployed endpoint: a link-in-bio offer answered `ships: True`, because the check read
+        only the offer's eligibility FLAG and not whether anything in it is physical. An element would have
+        rendered a destination selector for a download. The first real offer I tried looked correct, which is
+        why one example is not a check."""
+        digital = {"product_id": "d1", "name": "Ebook", "product_type": "digital",
+                   "fulfillment": {"requires_shipping": False},
+                   "prices": [{"price_id": "pr1", "unit_amount": 2000, "currency": "usd"}]}
+        response = shipping_quote(
+            tenant_id="t1", offer_id="o1", product_id="d1", price_id="pr1", quantity="1",
+            country="US", mode="test",
+            offers_repo=Repo({"o1": {"offer_id": "o1", "tenant_id": "t1",
+                                     "items": [{"product_id": "d1", "price_id": "pr1"}]}}),
+            products_repo=Repo({"d1": digital}))
+        body = json.loads(response["body"])
+        self.assertFalse(body["ships"])
+        self.assertEqual(body["countries"], [])
+
     def test_an_offer_that_does_not_ship_says_so_and_offers_no_dropdown(self):
         """An element rendering this must show no selector at all, not an empty one."""
         body = self.quote("US", offer=dict(OFFER, shipping={"eligibility": "none"}))
