@@ -2633,6 +2633,30 @@ the larger half and it needs the decision above applied — empty by default, wi
 tenant's own `refund_policy` for a guarantee one. Both are facts the platform already holds, which is the
 difference between a derived badge and an invented one.
 
+### ⭐⭐ HIGH — the Shipping screen collects two values nothing reads (found 2026-09-30)
+
+`dashboard/src/components/Shipping.vue:249-255` renders two inputs under "Rate & Label Options":
+
+    Markup Amount (cents)            [    ]
+    Free Shipping Threshold (cents)  [    ]
+
+A tenant can fill both in and save. The store persists them
+(`rate_options.markup_amount`, `rate_options.free_shipping_threshold`), the schema declares them, and **nothing
+in `src/` reads either one.** The only mention is a docstring in `domain/rate_policy.py` saying they *"belong to
+charging the BUYER, which is a different question with a different latency budget, and they are untouched
+here."*
+
+**Same fault as the refund-policy literal: a control that implies a promise the system does not keep.**
+Arguably worse, because a tenant who types "Free Shipping Threshold: 5000" has made a deliberate commercial
+decision that is silently discarded — where the refund literal at least produced a policy.
+
+Fixed by `plans/SHIPPING_ELEMENT.md` phase 1: `free_shipping_threshold` folds into the tenant's default
+shipping shape and `markup_amount` becomes the handling fee applied to a quoted rate. **Interim honesty if
+that waits:** remove the two inputs, or label them as not yet in effect. An input that does nothing is worse
+than a missing feature — the tenant believes they have configured something.
+
+Verify both tables are empty before retiring the fields, the way the `UserPreferences` refund slot was checked.
+
 ### ⭐⭐ HIGH — the ledger reports `profit` and `tax_liability` from components NOTHING writes (found 2026-09-30)
 
 `domain/ledger.py:15` declares `AMOUNT_COMPONENTS = (gross, stripe_fee, platform_fee, tax, cogs,
@@ -2696,6 +2720,18 @@ not invent a field for, and an actionable notice for a tenant who is probably re
 
 **This is its own plan and has none yet.** Shipping classifies its line correctly
 (`txcd_92010001`, `tax_behavior` passed through) and does not otherwise "handle tax".
+
+### ⭐⭐ HIGH — no UI can define what a buyer pays for shipping (found 2026-09-30)
+
+**Plan: `plans/SHIPPING_ELEMENT.md`** (written 2026-09-30) — the author's three-level architecture: tenant
+defines capability and enabled services, offer defines physical contents and eligibility, a page element
+defines how the customer interacts. Rates are computed at runtime and **never stored in the Page**.
+
+The backend primitive shipped (below); nothing can configure it. Two things that plan flags as blockers rather
+than follow-ups: **real carrier rates need a destination the landing page does not have** (resolved by
+collecting country + postcode and then omitting Stripe's own address collection, so a quote cannot drift), and
+**multi-parcel quoting is refused today** (`handlers/shipping.py:289`) — which the author's own 3-bottle →
+6-bottle example triggers, six bottles being exactly when a second box appears.
 
 ### ⭐⭐ HIGH — there is no primitive for shipping CHARGES (found 2026-09-30)
 
