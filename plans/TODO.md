@@ -2648,9 +2648,21 @@ ledger cannot see shipping revenue, `fees.py` has no shipping fee class and ther
 the platform charges a percentage on postage, tax cannot tax it where jurisdictions do, and a refund cannot
 know whether shipping comes back. Every downstream system already has a shipping-shaped hole.
 
+**Two numbers, not one** (author, 2026-09-30): `order.shipping_amount` is what the BUYER paid,
+`order.shipping_cost` is what the CARRIER charged the tenant. Collapsing them loses shipping margin — the
+only commercially interesting figure — and they are known at different times by different actors, so one
+field would have to mean two things.
+
 **Interacts with SMART_PRICING**, which models outbound shipping as a cost line — i.e. baked into the price.
-A tenant who bakes it AND charges for it is paid twice, so one rule is needed and the plan proposes it lives
-here: `baked` means Smart Pricing owns it, `charged` means this does.
+A tenant who bakes it AND charges for it is paid twice. The plan resolves this as a stated invariant: an
+offer may charge the buyer for outbound shipping **or** carry it in its Smart Pricing cost profile, never
+both. Following it through collapsed the mode to two values — `charged` | `free` — because `baked` and
+`free` are identical to the buyer and differ only in whether the price recovered the cost, which is a Smart
+Pricing fact and does not belong in a checkout mode.
+
+**Two rules must be settled before Checkout is wired** (author): whether the platform fee applies to
+shipping (an explicit rule in `fees.py`, never inferred from Stripe's transaction total), and the invariant
+above. Checkout is where a wrong answer becomes a charge to a real buyer.
 
 ### Smart Pricing — cost profiles, and a price the tenant does not have to guess (plan plans/SMART_PRICING.md, 2026-09-28)
 

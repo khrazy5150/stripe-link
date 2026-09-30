@@ -79,6 +79,32 @@ first two were the same thing anyway.
 the horse"*). They consume a policy rather than defining one, so they should need little: verify
 `refund_policy_return_note` and the request flow read the resolved policy rather than the raw product field.
 
+## Order, and why this plan goes first
+
+The author's sequence, 2026-09-30 — this plan, then `plans/SHIPPING_CHARGES.md`:
+
+    1. refund policy primitive -> tenant defaults -> product override
+       -> server-side resolution -> storefront/refund/AI consumers
+    2. shipping primitive -> offer shipping mode -> shipping calculation
+       -> order shipping_amount (+ eventually shipping_cost)
+       -> fee/tax/refund/ledger -> Stripe Checkout shipping_options
+
+Refunds lead because the damage is already live: pages are promising a window right now, and every day of
+delay is more orders carrying a term nobody chose. Shipping is a missing capability, which is a smaller
+category of wrong than a false statement already published.
+
+The phase order WITHIN each plan matters for the same reason in both: the resolution step (5 here, the fee
+and invariant rules there) comes before the consumers, because a rule settled after its consumers are built
+has to be retrofitted through all of them.
+
+## The principle both plans exist to serve
+
+> *"Customer-facing commercial promises should never be implicit."* — the author, 2026-09-30
+
+Two bugs, one shape. The refund policy was implicit because a default was hardcoded; shipping was implicit
+because "free" was assumed. Both become explicit domain data that downstream systems consume, and where
+there is no answer the page says **nothing** — silence is recoverable, a false promise is a dispute.
+
 ## Open
 
 - **`refund_return_address` and `refund_request_handling`** (`manual_review | auto_reply`) exist on

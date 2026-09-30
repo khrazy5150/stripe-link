@@ -42,13 +42,33 @@ Three questions the primitive must answer, and today none of them has a home:
    double-counting note above is what happens when nobody decides. This is a FIELD, not an inference.
 2. **What is the amount?** Flat per order, flat per item, by weight band, or free above a threshold. All are
    ordinary retail policies and none is expressible today.
-3. **Where does it land on the order?** `order.shipping_amount` does not exist. Without it: the tenant's P&L
-   is wrong (shipping revenue is invisible), the fee calculation is wrong (is the platform fee charged on
-   shipping?), tax is wrong in jurisdictions that tax shipping, and a refund cannot know whether shipping
-   comes back.
+3. **Where does it land on the order?** Neither field exists. Without them: the tenant's P&L is wrong
+   (shipping revenue is invisible), the fee calculation is wrong (is the platform fee charged on shipping?),
+   tax is wrong in jurisdictions that tax shipping, and a refund cannot know whether shipping comes back.
 
 **That third one is why this is a primitive and not a feature.** Every downstream system already in the repo
 — ledger, fees, refunds, tax fields — has a shipping-shaped hole in it.
+
+### TWO numbers, not one (author, 2026-09-30)
+
+    order.shipping_amount    what the BUYER paid
+    order.shipping_cost      what the CARRIER charged the tenant
+
+They are fundamentally different, and collapsing them loses the only number that matters commercially:
+
+    Product        $50      gross merchandise   $50
+    Buyer shipping  $8      shipping revenue     $8
+    Carrier cost    $6      shipping cost        $6
+                            shipping margin      $2   <- invisible with one field
+
+Under `baked` the same two fields still say something true: `shipping_amount = 0`, `shipping_cost = $6`, and
+the margin is wherever Smart Pricing put it.
+
+**A second reason they cannot be one field: they are known at different TIMES, by different actors.**
+`shipping_amount` is settled at checkout, by us. `shipping_cost` is not known until a label is bought, which
+may be days later and may never happen. One field would have to be written twice with different meanings —
+and this repo already has the pattern for exactly this shape: estimated at the time, trued up against the
+authority later, the way `fees.py` reconciles against Stripe balance transactions.
 
 ## Sequencing, and the one hard question
 
@@ -65,22 +85,93 @@ Charging a percentage on postage is a real business decision with a defensible a
 must be made once, in `domain/fees.py`, rather than emerging from whichever code path happens to run.
 `fee_class_for` has no shipping class today.
 
+**It must be an explicit JuniorBay rule, never inferred from Stripe's resulting transaction total**
+(author, 2026-09-30). Stripe will happily report one number; which parts of it we were entitled to a
+percentage of is our decision, and a rule that exists only as "whatever the total happened to be" cannot be
+audited, explained to a tenant, or changed without archaeology. Written as one of:
+
+    fee_base = merchandise_amount + shipping_amount - discounts    # fee applies to shipping
+    fee_base = merchandise_amount - discounts                      # it does not
+
+Note that `shipping_cost` never appears. The platform fee is a share of what the BUYER paid; what the
+carrier charged the tenant is the tenant's cost and none of the platform's business.
+
+## `free` is not a third pricing model (author's question, 2026-09-30)
+
+> *"`free` needs a little more thought because 'free to the buyer' doesn't mean 'free to the merchant.'"*
+
+Correct, and following it through says the three-mode list above is subtly wrong. Look at what the buyer
+sees:
+
+| mode | buyer sees | price recovers the cost? |
+|---|---|---|
+| `charged` | a shipping line | no — the buyer paid it directly |
+| `baked` | no line ("free shipping") | yes — Smart Pricing put it in the price |
+| `free` | no line ("free shipping") | **no — the tenant eats it** |
+
+`baked` and `free` are IDENTICAL at checkout and differ only in whether the price was computed to cover the
+cost. That is not a checkout fact, it is a Smart Pricing fact — so encoding it in the checkout mode puts one
+decision in two places, which is the same failure that produced this plan. **Two axes instead:**
+
+    offer.shipping.mode          charged | free      <- what the BUYER experiences
+    Smart Pricing cost profile   has an outbound shipping cost line, or not
+
+    free    + cost line      = baked     (recovered in the price)
+    free    + no cost line   = absorbed  (a loss leader, deliberately)
+    charged + no cost line   = the buyer pays it
+    charged + cost line      = DOUBLE-COUNTED  <- forbidden
+
+**The invariant, stated once** (resolving the SMART_PRICING interaction that was "Open" below):
+
+> A given offer may charge the buyer for outbound shipping **or** carry outbound shipping in its Smart
+> Pricing cost profile. Never both. `mode = charged` ⇒ Smart Pricing MUST NOT include buyer-paid outbound
+> shipping; `mode = free` ⇒ Smart Pricing MAY include it, and if it does not, the tenant is knowingly
+> absorbing the cost.
+
+This is a validator, not a comment — the forbidden row pays the tenant twice for the same postage and no
+tenant would notice from the numbers. `shipping_cost` stays truthful in every row: the carrier charges what
+it charges regardless of who ends up paying for it. The `absorbed` row is a legitimate choice and the UI
+should say so out loud ("you are paying for shipping on this offer") rather than letting a tenant discover
+their margin at tax time.
+
 ## Phases
 
-1. **`order.shipping_amount` + the offer's shipping mode** (`baked` | `charged` | `free`). Schema and
-   validators first, so nothing downstream has to guess.
+The author's order, 2026-09-30, with Checkout deliberately LAST:
+
+1. **`offer.shipping.mode`** (`charged` | `free`) — schema and validators first, so nothing downstream has to
+   guess.
 2. **`domain/shipping_charges.py`** — pure: given the config, the cart and the mode, return the amount. Flat
    and threshold first; weight bands when the box catalogue justifies them.
-3. **The fee decision** (above), recorded in `fees.py` with its reasoning.
-4. **Checkout wiring** — `shipping_options` on the session for `charged`; nothing for `baked` or `free`.
-5. **Ledger, refunds and tax** read `shipping_amount` rather than assuming zero.
+3. **`order.shipping_amount`**, and `order.shipping_cost` alongside it — the author's *"(+ eventually
+   `shipping_cost`)"*. Both fields land now because adding the second one later means a migration and a
+   period where shipping margin cannot be computed for past orders; only its SOURCE is deferred.
+4. **The fee-base rule** and **the Smart Pricing invariant** (both above), in `fees.py` and as a validator.
+   *"Those two decisions determine the economics of the entire shipping primitive, so they're much cheaper to
+   settle now than after Stripe, ledger, refunds, and pricing have all been built around an assumption."*
+5. **Fee, tax, refund and ledger** read `shipping_amount` rather than assuming zero; P&L and analytics read
+   both fields and get shipping margin (`shipping_amount - shipping_cost`) for free.
+6. **Stripe Checkout `shipping_options`** — last, on purpose. Checkout is where a wrong rule stops being a
+   design question and becomes a charge to a real buyer, and it is the one consumer that cannot be corrected
+   after the fact: a session that quoted the wrong shipping has already told someone a price.
+
+`shipping_cost` has no source yet — no carrier integration exists, so it starts nullable and tenant-entered,
+and is trued up when SHIPPING_PROVIDERS lands and a real label has a real price. Nullable is honest here;
+zero is not, because zero is a claim that postage was free.
 
 ## Open
 
-- **Does the buyer ever see a shipping line under `baked`?** SHIPPING_PROVIDERS §8 asks this already and it
-  is still unanswered. Under `baked` the page may honestly say "free shipping"; under `charged` it must not.
+- **Does the buyer ever see a shipping line under `free`?** No — that is what the mode means. SHIPPING_PROVIDERS
+  §8 asked this of `baked` and the two-axis model answers it: the buyer sees no line, and whether the price
+  recovered the cost is invisible to them and none of their business.
 - **International.** Checkout allows US and CA today, hardcoded. A shipping charge that ignores destination
   is wrong the moment a second country is allowed.
-- **Interaction with SMART_PRICING.** If a tenant models shipping as a cost line AND charges for it, they
-  are paid twice. The two plans need one rule, and it probably belongs here: `baked` means Smart Pricing
-  owns it, `charged` means this does.
+
+## The principle both plans exist to serve
+
+> *"Customer-facing commercial promises should never be implicit."* — the author, 2026-09-30
+
+A 30-day refund window nobody configured and a "free shipping" nobody priced are the same bug wearing two
+costumes: a promise made to a buyer by a default that no one chose and no one can point to. Every such
+promise needs a stored, tenant-visible, tenant-editable answer, and the renderer must say only what that
+answer says. Where there is no answer, the page says **nothing** — silence is recoverable, a false promise
+is a refund dispute.
