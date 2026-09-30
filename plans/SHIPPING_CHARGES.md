@@ -369,8 +369,32 @@ The author's order, 2026-09-30, with Checkout deliberately LAST:
    conflict with yet and the check has no caller.
    *"Those two decisions determine the economics of the entire shipping primitive, so they're much cheaper to
    settle now than after Stripe, ledger, refunds, and pricing have all been built around an assumption."*
-5. **Fee, tax, refund and ledger** read `shipping_amount` rather than assuming zero; P&L and analytics read
-   both fields and get shipping margin (`shipping_amount - shipping_cost`) for free.
+5. **Fee, refund and ledger** — ✅ **SHIPPED 2026-09-30**.
+
+   - **Ledger:** `shipping_revenue` is recorded as a **PARTITION of `gross`**, not an addition to it — the
+     postage is already inside `session.amount_total`, so adding it to `net` or `profit` would count the same
+     money twice. It lives in a separate `BREAKDOWN_COMPONENTS` tuple rather than in `AMOUNT_COMPONENTS`,
+     whose stated contract is that every member is additive; a breakdown key in that list is an invitation for
+     the next person to sum it. Tests pin that `net` and `profit` do not move.
+   - **`shipping_margin` is `None` when the carrier cost is unknown**, which is always, until
+     SHIPPING_PROVIDERS writes a `shipping_cost` entry. Returning `revenue + 0` would have published a margin
+     implying postage was free — the same shape as the `tax_liability` bug written up in TODO the same day. A
+     negative margin is reported as-is when both halves exist: a tenant undercharging for postage is exactly
+     what the figure is for.
+   - **Refunds:** `refund_entry(shipping_reversed=...)` reverses it, and the amount is the CALLER's to decide.
+     A partial refund cannot be attributed between goods and postage from the amount alone, and guessing would
+     make shipping margin quietly wrong for every partially refunded order.
+   - **Fee:** `build_fee_context` now carries `shipping_amount`, closing a read `handlers/checkout` was already
+     making against a key nothing set. It never enters the fee base; it exists so the subscription path can
+     divide by what the buyer is actually charged.
+
+   **`validate_ledger_entry` had a hand-written copy of the component list** and rejected `shipping_revenue`
+   the moment the builders learned it — a validator refusing its own builders' output. Nothing calls it yet, so
+   nothing broke, which is why it would have stayed hidden until someone wired it in and every physical sale
+   failed validation. Now derived from the ledger module, with a test pinning the agreement.
+
+   Still to come with SHIPPING_PROVIDERS: a `shipping_cost` ledger entry when a label is bought. The entry type
+   already exists in `LedgerEntry.schema.json`; nothing writes one.
 6. **Stripe Checkout `shipping_options`** — last, on purpose. Checkout is where a wrong rule stops being a
    design question and becomes a charge to a real buyer, and it is the one consumer that cannot be corrected
    after the fact: a session that quoted the wrong shipping has already told someone a price.

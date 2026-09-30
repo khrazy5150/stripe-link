@@ -14,6 +14,17 @@ LEDGER_SCHEMA_VERSION = "2026-07-07"
 
 AMOUNT_COMPONENTS = ("gross", "stripe_fee", "platform_fee", "tax", "cogs", "shipping_cost")
 
+# A PARTITION of an additive component, never an addition to it. `shipping_revenue` is the part of `gross` the
+# buyer paid for postage -- it is already inside `gross`, so adding it to `net` or `profit` would count the
+# same money twice (plans/SHIPPING_CHARGES.md).
+#
+# Kept in its own tuple rather than appended to AMOUNT_COMPONENTS because that tuple's contract is stated in
+# this module's docstring: summing a component across entries yields its running total, and every one of them
+# is additive from the tenant's-cash perspective. A breakdown key sitting in the same list is an invitation for
+# the next person to add it up. `summarize` reports it and excludes it from both derived figures, and a test
+# pins that net and profit are unchanged by its presence.
+BREAKDOWN_COMPONENTS = ("shipping_revenue",)
+
 
 def _clean_amounts(**components: int) -> dict[str, int]:
     # Store only non-zero components; every value is an int (minor units).
@@ -84,17 +95,24 @@ def sale_entry(
     platform_fee: int = 0,
     tax: int = 0,
     cogs: int = 0,
+    shipping_revenue: int = 0,
     idempotency_key: str,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """A sale: customer pays (gross +); Stripe and platform fees and COGS reduce the
-    tenant's cash (stored negative); collected tax is a liability (+)."""
+    tenant's cash (stored negative); collected tax is a liability (+).
+
+    `shipping_revenue` is what the buyer paid for postage. It is a PARTITION of `gross`, not an addition to
+    it -- see BREAKDOWN_COMPONENTS. Recording it is what lets shipping margin be separated from product
+    margin later, which `gross` alone cannot express.
+    """
     amounts = _clean_amounts(
         gross=abs(int(gross)),
         stripe_fee=-abs(int(stripe_fee)),
         platform_fee=-abs(int(platform_fee)),
         tax=abs(int(tax)),
         cogs=-abs(int(cogs)),
+        shipping_revenue=abs(int(shipping_revenue)),
     )
     return _entry(
         tenant_id=tenant_id, entry_id=entry_id, entry_type="sale", occurred_at=occurred_at,
@@ -112,16 +130,23 @@ def refund_entry(
     refund_amount: int,
     stripe_fee_returned: int = 0,
     tax_reversed: int = 0,
+    shipping_reversed: int = 0,
     idempotency_key: str,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """A refund: gross reverses (-); the platform keeps its application fee (0);
-    Stripe fees are returned only if refunded (usually 0); collected tax reverses (-)."""
+    Stripe fees are returned only if refunded (usually 0); collected tax reverses (-).
+
+    `shipping_reversed` is the postage that went back with it, and it is the CALLER's job to work out --
+    a partial refund cannot be attributed between goods and shipping from the amount alone, and guessing
+    would make shipping margin quietly wrong for every partially refunded order.
+    """
     amounts = _clean_amounts(
         gross=-abs(int(refund_amount)),
         stripe_fee=abs(int(stripe_fee_returned)),
         platform_fee=0,
         tax=-abs(int(tax_reversed)),
+        shipping_revenue=-abs(int(shipping_reversed)),
     )
     return _entry(
         tenant_id=tenant_id, entry_id=entry_id, entry_type="refund", occurred_at=occurred_at,
@@ -149,6 +174,9 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int) -> dict[str,
         gross=gross,
         stripe_fee=int(order.get("stripe_fee") or 0),
         platform_fee=int(order.get("platform_fee") or 0),
+        # Written by `shipping_charges.buyer_paid_shipping` on both order paths. Absent on a digital order,
+        # which is why `or 0` is safe here and a stored 0 would not have been (plans/SHIPPING_CHARGES.md).
+        shipping_revenue=int(order.get("shipping_amount") or 0),
         idempotency_key=f"sale:{key_ref}",
         order_id=order_id or None,
         offer_id=str(order.get("offer_id") or "") or None,
@@ -161,13 +189,15 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int) -> dict[str,
 
 def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Derived totals — pure sums over the additive components (never stored)."""
-    totals = {key: 0 for key in AMOUNT_COMPONENTS}
+    totals = {key: 0 for key in AMOUNT_COMPONENTS + BREAKDOWN_COMPONENTS}
     counts: dict[str, int] = {}
     for entry in entries:
         for key, value in (entry.get("amounts") or {}).items():
             totals[key] = totals.get(key, 0) + int(value or 0)
         entry_type = str(entry.get("entry_type") or "")
         counts[entry_type] = counts.get(entry_type, 0) + 1
+    # Deliberately names its inputs rather than summing `totals`: `shipping_revenue` is already inside
+    # `gross`, so a blanket sum would count the postage twice.
     net = totals["gross"] + totals["stripe_fee"] + totals["platform_fee"]
     profit = net + totals["cogs"] + totals["shipping_cost"] - totals["tax"]
     return {
@@ -175,5 +205,16 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "net": net,
         "profit": profit,
         "tax_liability": totals["tax"],
+        # What the buyer paid for postage. The margin needs BOTH halves, and `shipping_cost` has no source
+        # until a carrier label is bought (plans/SHIPPING_CHARGES.md), so it is **None when unknowable**
+        # rather than equal to the revenue.
+        #
+        # Returning `revenue + 0` here would have published a margin implying postage was free -- the exact
+        # shape of the `tax_liability` bug this module already has (plans/TODO.md): a figure that looks
+        # authoritative, is structurally always wrong, and nobody can tell from reading it. Not worth
+        # repeating in new code on the same day it was written up.
+        "shipping_revenue": totals["shipping_revenue"],
+        "shipping_margin": (totals["shipping_revenue"] + totals["shipping_cost"]
+                            if totals["shipping_cost"] else None),
         "counts": counts,
     }

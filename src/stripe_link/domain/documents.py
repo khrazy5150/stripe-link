@@ -2408,7 +2408,16 @@ _LEDGER_ENTRY_TYPES = {
     "sale", "refund", "dispute", "dispute_won", "shipping_cost",
     "cost_adjustment", "fee_adjustment", "tax_remittance", "adjustment",
 }
-_LEDGER_AMOUNT_COMPONENTS = {"gross", "stripe_fee", "platform_fee", "tax", "cogs", "shipping_cost"}
+def _ledger_amount_components() -> set[str]:
+    """The allowed keys, taken FROM the builders rather than restated here.
+
+    The hand-written copy of this set rejected `shipping_revenue` the moment the ledger learned to record it
+    (plans/SHIPPING_CHARGES.md phase 5) -- a validator refusing documents its own builders produce. Nothing
+    called it yet, so nothing broke, which is exactly why it would have gone unnoticed until it did.
+    """
+    from stripe_link.domain.ledger import AMOUNT_COMPONENTS, BREAKDOWN_COMPONENTS
+
+    return set(AMOUNT_COMPONENTS) | set(BREAKDOWN_COMPONENTS)
 
 
 def validate_ledger_entry(document: dict[str, Any]) -> None:
@@ -2423,7 +2432,7 @@ def validate_ledger_entry(document: dict[str, Any]) -> None:
     if not isinstance(amounts, dict):
         raise DocumentValidationError("Ledger entry amounts must be an object.")
     for key, value in amounts.items():
-        if key not in _LEDGER_AMOUNT_COMPONENTS:
+        if key not in _ledger_amount_components():
             raise DocumentValidationError(f"Unknown ledger amount component '{key}'.")
         if not isinstance(value, int) or isinstance(value, bool):
             raise DocumentValidationError("Ledger amount components must be integers (minor units).")

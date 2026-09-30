@@ -392,11 +392,19 @@ def build_fee_context(
     resolved: dict[str, Any],
     tenant_repo: Any,
     billing_config_loader: Any = None,
+    shipping_amount: Any = 0,
 ) -> dict[str, Any]:
     """Resolve the product type/tenant tier/platform-fee context for a resolved offer.
 
     Shared by the initial checkout session and one-click post-purchase upsell charges,
     since both charge against a resolved Offer document with the same fee-tier rules.
+
+    `shipping_amount` does NOT enter the fee (FEE_APPLIES_TO_SHIPPING is False) and is carried only so the
+    subscription path can divide by what the buyer is actually charged: Stripe applies
+    `application_fee_percent` to each invoice's whole total, so omitting shipping from the denominator would
+    charge a fee on postage. See `application_fee_percent` above. It is a parameter rather than something read
+    off `resolved` because at session-creation time the buyer has not chosen a service level yet — the caller
+    supplies whatever it is offering.
     """
     items = resolved.get("items") or []
     primary = items[0] if items else {}
@@ -424,6 +432,8 @@ def build_fee_context(
         "product_type": product_type,
         "tenant_plan": tenant_plan,
         "subtotal": subtotal,
+        # Carried, never added to the fee base. `checkout.py` reads it to size the subscription fee percent.
+        "shipping_amount": _non_negative_int(shipping_amount, "shipping_amount"),
         "platform_fee": fee_result["breakdown"]["platform_fee"],
         "fees": fee_result["breakdown"],
     }
