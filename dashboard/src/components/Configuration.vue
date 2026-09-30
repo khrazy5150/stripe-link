@@ -195,6 +195,71 @@
     </section>
 
     <section class="dashboard-card">
+      <header class="dashboard-card-header"><h2>Refund Policy</h2></header>
+      <div class="dashboard-card-body">
+        <p class="field-note">
+          What your storefront promises buyers, per kind of product. Until you set these, the platform's
+          default applies and is labelled as such — it is not a policy you chose.
+        </p>
+        <div v-for="cls in refundClasses" :key="cls" class="refund-class">
+          <div class="refund-class-head">
+            <div>
+              <h3>{{ refundOptions.class_labels?.[cls] || cls }}</h3>
+              <p class="field-note">{{ refundOptions.class_hints?.[cls] }}</p>
+            </div>
+            <label class="builder-toggle">
+              <input v-model="form.refund_policies[cls].enabled" type="checkbox" />
+              <span>Set my own</span>
+            </label>
+          </div>
+
+          <div v-if="form.refund_policies[cls].enabled" class="offer-three-column">
+            <label class="offer-field">
+              <span>Refund window</span>
+              <select v-model="form.refund_policies[cls].refund_window">
+                <option v-for="w in refundOptions.windows || []" :key="w.value" :value="w.value">{{ w.label }}</option>
+              </select>
+            </label>
+            <label class="offer-field">
+              <span>Condition required</span>
+              <select v-model="form.refund_policies[cls].condition">
+                <option v-for="c in refundOptions.conditions || []" :key="c.value" :value="c.value">{{ c.label }}</option>
+              </select>
+            </label>
+            <label class="offer-field">
+              <span>Return handling</span>
+              <select v-model="form.refund_policies[cls].return_method">
+                <option v-for="m in refundOptions.return_methods || []" :key="m.value" :value="m.value">{{ m.label }}</option>
+              </select>
+            </label>
+          </div>
+
+          <label v-if="form.refund_policies[cls].enabled && form.refund_policies[cls].refund_window === 'custom'" class="offer-field">
+            <span>Your policy wording <em>(required for a custom window)</em></span>
+            <textarea v-model="form.refund_policies[cls].full_policy" rows="3"
+                      placeholder="Describe your refund terms in full. This is what buyers read."></textarea>
+          </label>
+
+          <label v-if="form.refund_policies[cls].enabled && form.refund_policies[cls].return_method === 'return_required'" class="offer-field">
+            <span>Waive the return below this order value <em>(optional, in {{ (form.default_currency || 'usd').toUpperCase() }})</em></span>
+            <input v-model="form.refund_policies[cls].keep_it_below" type="text" inputmode="decimal" placeholder="e.g. 20.00" />
+            <small class="field-note">
+              When return postage costs more than the item is worth, asking for it back loses money — and a
+              buyer held waiting files a chargeback that costs more than the refund.
+            </small>
+          </label>
+
+          <div class="refund-preview">
+            <span class="refund-preview-badge">{{ refundPreview(cls).short_label }}</span>
+            <p v-if="refundPreview(cls).full_policy">{{ refundPreview(cls).full_policy }}</p>
+            <p v-else class="field-note">Write your wording above — a custom window has nothing to show without it.</p>
+            <small class="field-note">{{ refundSourceNote(cls) }}</small>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Analytics Defaults</h2></header>
       <div class="dashboard-card-body">
         <p class="field-note">Applied to landing pages that don't set their own tracking IDs.</p>
@@ -295,6 +360,40 @@ const CONFIG_THANK_YOU_CARDS = [
   { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
   { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
 ];
+// Vocabulary and generated sentences come from the SERVER (/config?refund_options=1). Composing the
+// sentence here in JavaScript is precisely the bug this screen exists to fix: a browser file became the
+// author of a commercial promise (plans/REFUND_POLICY.md).
+const refundOptions = ref({});
+const refundResolved = ref({});
+const refundClasses = computed(() => refundOptions.value.classes || ["physical", "digital", "subscription"]);
+
+function blankRefundPolicy() {
+  return { enabled: false, refund_window: "", condition: "", return_method: "", full_policy: "", keep_it_below: "" };
+}
+
+function refundPreview(cls) {
+  const entry = form.refund_policies[cls];
+  if (!entry.enabled) {
+    const resolved = refundResolved.value[cls] || {};
+    return { short_label: resolved.short_label || "", full_policy: resolved.full_policy || "" };
+  }
+  if (String(entry.full_policy || "").trim()) {
+    const key = `${cls}|${entry.refund_window}|${entry.condition}`;
+    const generated = (refundOptions.value.previews || {})[key] || {};
+    return { short_label: generated.short_label || "", full_policy: entry.full_policy.trim() };
+  }
+  const key = `${cls}|${entry.refund_window}|${entry.condition}`;
+  return (refundOptions.value.previews || {})[key] || { short_label: "", full_policy: "" };
+}
+
+function refundSourceNote(cls) {
+  if (form.refund_policies[cls].enabled) return "Your default. Products can still override it individually.";
+  const source = (refundResolved.value[cls] || {}).source;
+  return source === "tenant_default"
+    ? "Saved as your default."
+    : "The platform's default — nobody chose this. Switch on “Set my own” to decide it yourself.";
+}
+
 const form = reactive(defaultForm());
 
 const apiBase = computed(() => getApiBase());
@@ -374,6 +473,13 @@ function defaultForm() {
       },
     },
     legal_defaults: { terms_url: "", privacy_url: "", refund_url: "" },
+    // One block per product class. `enabled` is the tenant's own default vs the platform fallback -- the
+    // distinction the old code erased by stamping `user_preference_default` on a hardcoded literal.
+    refund_policies: {
+      physical: blankRefundPolicy(),
+      digital: blankRefundPolicy(),
+      subscription: blankRefundPolicy(),
+    },
     analytics_defaults: { google_tag_id: "", pixel_id: "" },
   };
 }
@@ -428,6 +534,22 @@ function applyConfig(config) {
   };
   form.legal_defaults = { terms_url: legal.terms_url || "", privacy_url: legal.privacy_url || "", refund_url: legal.refund_url || "" };
   form.analytics_defaults = { google_tag_id: analytics.google_tag_id || "", pixel_id: analytics.pixel_id || "" };
+
+  const storedPolicies = legal.refund_policies || {};
+  refundClasses.value.forEach((cls) => {
+    const stored = storedPolicies[cls];
+    const fallback = refundResolved.value[cls] || {};
+    // An absent class is the platform fallback, and the pickers are seeded from it so switching the toggle
+    // on starts from what the storefront already says rather than from blanks.
+    form.refund_policies[cls] = {
+      enabled: Boolean(stored),
+      refund_window: (stored || fallback).refund_window || "",
+      condition: (stored || fallback).condition || "",
+      return_method: (stored || fallback).return_method || "",
+      full_policy: stored ? stored.full_policy || "" : "",
+      keep_it_below: stored && stored.keep_it_below ? (stored.keep_it_below / 100).toFixed(2) : "",
+    };
+  });
 }
 
 async function load() {
@@ -435,12 +557,23 @@ async function load() {
   error.value = "";
   message.value = "";
   try {
-    const body = await apiRequest("/config");
+    const body = await apiRequest("/config", { params: { refund_options: "1" } });
     rawConfig.value = body.config || {};
+    refundOptions.value = body.refund_policy_options || {};
+    refundResolved.value = body.refund_policies || {};
     applyConfig(rawConfig.value);
   } catch (err) {
     if (/not found/i.test(err.message)) {
       rawConfig.value = {};
+      // A tenant with no saved config still needs the pickers populated, so the vocabulary is fetched on
+      // its own rather than lost with the 404.
+      try {
+        const options = await apiRequest("/config", { params: { refund_options: "1" }, method: "GET" });
+        refundOptions.value = options.refund_policy_options || {};
+        refundResolved.value = options.refund_policies || {};
+      } catch (ignored) {
+        refundOptions.value = {};
+      }
       applyConfig({});
       message.value = "No configuration saved yet. Fill in the fields and save.";
     } else {
@@ -494,6 +627,46 @@ function completeOrNull(formSection, defaults) {
   );
 }
 
+// Only the classes the tenant switched on, and only the three structured choices plus their own wording.
+// `short_label` and `full_policy` are generated SERVER-SIDE (handlers/config._generate_refund_copy), so this
+// deliberately does not send them unless the tenant typed their own.
+function refundPoliciesPayload() {
+  const out = {};
+  refundClasses.value.forEach((cls) => {
+    const entry = form.refund_policies[cls];
+    if (!entry || !entry.enabled) return;
+    const policy = {
+      refund_window: entry.refund_window,
+      condition: entry.condition,
+      return_method: entry.return_method,
+    };
+    const wording = String(entry.full_policy || "").trim();
+    if (wording) policy.full_policy = wording;
+    const threshold = Math.round(Number(entry.keep_it_below) * 100);
+    if (entry.return_method === "return_required" && Number.isFinite(threshold) && threshold > 0) {
+      policy.keep_it_below = threshold;
+    }
+    out[cls] = policy;
+  });
+  return out;
+}
+
+function refundPolicyProblem() {
+  for (const cls of refundClasses.value) {
+    const entry = form.refund_policies[cls];
+    if (!entry || !entry.enabled) continue;
+    const label = refundOptions.value.class_labels?.[cls] || cls;
+    if (!entry.refund_window || !entry.condition || !entry.return_method) {
+      return `${label}: choose a refund window, a condition and how returns are handled.`;
+    }
+    if (entry.refund_window === "custom" && !String(entry.full_policy || "").trim()) {
+      // A custom policy IS its prose. Saving without it publishes a summary line opening onto nothing.
+      return `${label}: a custom refund window needs your own wording, or buyers see an empty policy.`;
+    }
+  }
+  return "";
+}
+
 function buildPayload() {
   // Start from the stored document so custom_domains and any other unmanaged
   // sections are preserved, then overlay only the fields this screen owns.
@@ -520,7 +693,13 @@ function buildPayload() {
   setOrDelete(pageDefaults, "thank_you", thankYouDefaultsPayload());
   setOrDelete(doc, "page_defaults", pageDefaults);
 
-  setOrDelete(doc, "legal_defaults", prunedStrings(form.legal_defaults));
+  const legal = prunedStrings({
+    terms_url: form.legal_defaults.terms_url,
+    privacy_url: form.legal_defaults.privacy_url,
+    refund_url: form.legal_defaults.refund_url,
+  });
+  setOrDelete(legal, "refund_policies", refundPoliciesPayload());
+  setOrDelete(doc, "legal_defaults", legal);
   setOrDelete(doc, "analytics_defaults", prunedStrings(form.analytics_defaults));
 
   return doc;
@@ -534,6 +713,12 @@ async function save() {
     const currency = (form.default_currency || "usd").toLowerCase();
     if (!/^[a-z]{3}$/.test(currency)) {
       error.value = "Default currency must be a three-letter code, e.g. usd.";
+      return;
+    }
+    // The server refuses these too -- this is only so the tenant reads what is wrong rather than a 400.
+    const refundProblem = refundPolicyProblem();
+    if (refundProblem) {
+      error.value = refundProblem;
       return;
     }
     const payload = buildPayload();
@@ -576,4 +761,42 @@ onMounted(load);
 }
 .delete-summary { color: #16a34a; margin-top: 0.8rem; }
 .delete-test-data-modal { width: min(100%, 52rem); }
+
+.refund-class {
+  border-top: 1px solid var(--border, rgba(148, 163, 184, 0.25));
+  padding-top: 1rem;
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+.refund-class:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+.refund-class-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.refund-class-head h3 { margin: 0 0 0.2rem; font-size: 1rem; }
+.refund-class-head .field-note { margin: 0; max-width: 46ch; }
+/* The preview is the point of the screen: a tenant must be able to read the sentence their storefront
+   publishes before they publish it. Deliberately quiet -- it is a statement, not a control. */
+.refund-preview {
+  border-left: 3px solid var(--accent, #6366f1);
+  background: var(--surface-muted, rgba(148, 163, 184, 0.08));
+  border-radius: 0 8px 8px 0;
+  padding: 0.7rem 0.9rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.refund-preview p { margin: 0; line-height: 1.55; }
+.refund-preview-badge {
+  justify-self: start;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.refund-preview .field-note { margin: 0; }
 </style>

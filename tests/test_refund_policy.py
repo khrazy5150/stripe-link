@@ -219,7 +219,7 @@ class Resolution(unittest.TestCase):
         product = {"product_type": "physical", "refund_policy": LITERAL_PHYSICAL}
         tenant = {"refund_policies": {PHYSICAL: {"refund_window": "60_days", "condition": "any",
                                                 "return_method": "no_return_customer_keeps"}}}
-        policy = resolve(tenant_profile=tenant, product=product)
+        policy = resolve(tenant_config=tenant, product=product)
         self.assertEqual(policy["refund_window"], "60_days")
         self.assertEqual(policy["source"], SOURCE_TENANT_DEFAULT)
 
@@ -228,7 +228,7 @@ class Resolution(unittest.TestCase):
             LITERAL_PHYSICAL, source=SOURCE_PRODUCT_OVERRIDE, refund_window="7_days")}
         tenant = {"refund_policies": {PHYSICAL: {"refund_window": "60_days", "condition": "any",
                                                 "return_method": "no_return_customer_keeps"}}}
-        policy = resolve(tenant_profile=tenant, product=product)
+        policy = resolve(tenant_config=tenant, product=product)
         self.assertEqual(policy["refund_window"], "7_days")
         self.assertEqual(policy["mode"], "override")
 
@@ -241,7 +241,7 @@ class Resolution(unittest.TestCase):
             "full_policy": "Tips are gifts and are non-refundable."}}
         tenant = {"refund_policies": {DIGITAL: {"refund_window": "30_days", "condition": "any",
                                                "return_method": "no_return_customer_keeps"}}}
-        policy = resolve(tenant_profile=tenant, product=product)
+        policy = resolve(tenant_config=tenant, product=product)
         self.assertEqual(policy["refund_window"], NON_REFUNDABLE)
         self.assertEqual(policy["full_policy"], "Tips are gifts and are non-refundable.")
 

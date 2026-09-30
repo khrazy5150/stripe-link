@@ -129,7 +129,56 @@
       "properties": {
         "terms_url": { "type": "string" },
         "privacy_url": { "type": "string" },
-        "refund_url": { "type": "string" }
+        "refund_url": { "type": "string" },
+        "refund_policies": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The tenant's DEFAULT refund terms, one per product class. The home that never existed: without it the dashboard invented a policy literal and published it (plans/REFUND_POLICY.md). Resolution lives in domain/refund_policy.py -- a deliberate product override outranks these, and these outrank the platform fallback. A class left unset resolves to the platform default and is recorded as `platform_default`, never claimed as the tenant's.",
+          "properties": {
+            "physical": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["refund_window", "condition", "return_method"],
+              "properties": {
+                "refund_window": { "type": "string", "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"] },
+                "condition": { "type": "string", "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"] },
+                "return_method": { "type": "string", "enum": ["return_required", "no_return_customer_keeps", "digital_revoke_access", "custom"] },
+                "short_label": { "type": "string" },
+                "full_policy": { "type": "string" },
+                "return_note": { "type": "string" },
+                "keep_it_below": { "type": "integer", "minimum": 0, "description": "Below this order value (cents), a refund that would normally require a physical return is granted without one." }
+              }
+            },
+            "digital": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["refund_window", "condition", "return_method"],
+              "properties": {
+                "refund_window": { "type": "string", "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"] },
+                "condition": { "type": "string", "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"] },
+                "return_method": { "type": "string", "enum": ["return_required", "no_return_customer_keeps", "digital_revoke_access", "custom"] },
+                "short_label": { "type": "string" },
+                "full_policy": { "type": "string" },
+                "return_note": { "type": "string" },
+                "keep_it_below": { "type": "integer", "minimum": 0, "description": "Below this order value (cents), a refund that would normally require a physical return is granted without one." }
+              }
+            },
+            "subscription": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["refund_window", "condition", "return_method"],
+              "properties": {
+                "refund_window": { "type": "string", "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"] },
+                "condition": { "type": "string", "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"] },
+                "return_method": { "type": "string", "enum": ["return_required", "no_return_customer_keeps", "digital_revoke_access", "custom"] },
+                "short_label": { "type": "string" },
+                "full_policy": { "type": "string" },
+                "return_note": { "type": "string" },
+                "keep_it_below": { "type": "integer", "minimum": 0, "description": "Below this order value (cents), a refund that would normally require a physical return is granted without one." }
+              }
+            }
+          }
+        }
       }
     },
     "analytics_defaults": {

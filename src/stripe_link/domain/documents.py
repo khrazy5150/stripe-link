@@ -1824,6 +1824,51 @@ def validate_stripe_keys_document(document: dict[str, Any]) -> None:
                     raise DocumentValidationError(f"payment_methods.bnpl.{method}.capability_status is invalid.")
 
 
+def validate_refund_policies(policies: Any, label: str) -> None:
+    """The tenant's per-class refund defaults, validated against the ONE vocabulary.
+
+    Strict about the enums on purpose. These three objects are what a storefront promises a buyer, and the
+    whole reason this field exists is that the promise used to come from a hardcoded literal nobody could
+    see or change (plans/REFUND_POLICY.md). A typo'd window that silently fell back to a default would be
+    the same class of fault: a commercial term the tenant did not choose.
+
+    `short_label` and `full_policy` are NOT required here. The server generates them from the structured
+    fields via `domain/refund_policy.build`, so a client that sends only the three choices is correct --
+    and a client that sends copy without choices is not.
+    """
+    if policies is None:
+        return
+    from stripe_link.domain.refund_policy import (
+        CLASSES, CONDITION_OPTIONS, RETURN_METHOD_OPTIONS, WINDOW_OPTIONS,
+    )
+    if not isinstance(policies, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    for policy_class, policy in policies.items():
+        if policy_class not in CLASSES:
+            raise DocumentValidationError(
+                f"{label}: unsupported product class '{policy_class}'.")
+        if not isinstance(policy, dict):
+            raise DocumentValidationError(f"{label}.{policy_class} must be an object.")
+        require_enum(policy, "refund_window", set(WINDOW_OPTIONS), f"{label}.{policy_class}.refund_window")
+        require_enum(policy, "condition", set(CONDITION_OPTIONS), f"{label}.{policy_class}.condition")
+        require_enum(policy, "return_method", set(RETURN_METHOD_OPTIONS),
+                     f"{label}.{policy_class}.return_method")
+        optional_string(policy, "short_label", f"{label}.{policy_class}.short_label", max_length=120)
+        optional_string(policy, "full_policy", f"{label}.{policy_class}.full_policy", max_length=2000)
+        optional_string(policy, "return_note", f"{label}.{policy_class}.return_note", max_length=2000)
+        threshold = policy.get("keep_it_below")
+        if threshold is not None:
+            if isinstance(threshold, bool) or not isinstance(threshold, (int, float, Decimal)):
+                raise DocumentValidationError(f"{label}.{policy_class}.keep_it_below must be an integer.")
+            if int(threshold) < 0:
+                raise DocumentValidationError(f"{label}.{policy_class}.keep_it_below cannot be negative.")
+        # A custom window IS its prose: without it the storefront shows a summary line opening onto
+        # nothing, which is the failure this field exists to stop wearing a different hat.
+        if policy.get("refund_window") == "custom" and not str(policy.get("full_policy") or "").strip():
+            raise DocumentValidationError(
+                f"{label}.{policy_class}: a custom refund window requires full_policy text.")
+
+
 def validate_tenant_config(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id"])
     if document.get("document_type") != "tenant_config":
@@ -1870,6 +1915,12 @@ def validate_tenant_config(document: dict[str, Any]) -> None:
                 raise DocumentValidationError("Tenant config checkout.phone_number_collection must be an object.")
             if not isinstance(phone_collection.get("enabled", False), bool):
                 raise DocumentValidationError("Tenant config checkout.phone_number_collection.enabled must be boolean.")
+    legal_defaults = document.get("legal_defaults")
+    if legal_defaults is not None:
+        if not isinstance(legal_defaults, dict):
+            raise DocumentValidationError("Tenant config legal_defaults must be an object.")
+        validate_refund_policies(legal_defaults.get("refund_policies"),
+                                 "Tenant config legal_defaults.refund_policies")
     custom_domains = document.get("custom_domains")
     if custom_domains is not None:
         if not isinstance(custom_domains, dict):

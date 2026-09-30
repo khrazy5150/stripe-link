@@ -74,14 +74,46 @@ first two were the same thing anyway.
    The legacy text-sniffing coercion (`_window_from_legacy` reading "within 30 days" out of prose) was also
    NOT ported: all 32 live dev products store well-formed values in stripe-link's vocabulary, so it would be
    80 lines of migration code for data that does not exist.
-2. **Tenant profile field + validator** — `refund_policies.{physical,digital,subscription}`.
-3. **Settings UI** — three policies, one per class, each a window/condition/return-method picker with the
-   generated `short_label` and `full_policy` shown read-only so the tenant SEES what their storefront
-   promises. This is the screen whose absence caused the whole problem.
+2. **Tenant-level field + validator** — ✅ **SHIPPED 2026-09-30** (23 tests).
+   `legal_defaults.refund_policies.{physical,digital,subscription}` on **TenantConfig**, not TenantProfile.
+
+   **Why the change of document.** TenantProfile is written only by registration, auth and Stripe webhooks,
+   and it holds `billing_status`, `tier_id`, `billing_exempt` and `stripe_subscription_id`. Reaching a refund
+   setting there means giving the dashboard a PUT over that document — which would hand every tenant their
+   own billing tier. TenantConfig is already the tenant-editable settings document, already served at
+   `/config` with GET and PUT, already validated, and already holds `legal_defaults`, so the refund URL now
+   sits beside the policy it links to. Same intent as the plan (ONE tenant-level home, not per-user, not
+   `UserPreferences`), without inventing an endpoint or an exposure.
+
+   The validator is strict about the three enums rather than falling back: a typo'd window that silently
+   defaulted would be the same fault as the literal — a commercial term the tenant did not choose. A custom
+   window with no prose is refused, because a custom policy IS its prose.
+3. **Settings UI** — ✅ **SHIPPED 2026-09-30**. A "Refund Policy" card on Configuration, one block per
+   class, each with a window/condition/return-method picker and the generated sentence shown read-only so the
+   tenant SEES what their storefront promises. This is the screen whose absence caused the whole problem.
+
+   Three things it does deliberately:
+
+   - **A per-class "Set my own" toggle.** Off means the platform's default applies and the preview says so in
+     those words — *"The platform's default — nobody chose this."* The distinction between a chosen default
+     and a fallback is the entire point, so the UI states it rather than hiding it behind an identical-looking
+     pre-filled form.
+   - **The sentence comes from the server.** `/config?refund_options=1` returns the vocabulary AND a generated
+     preview for all 126 class/window/condition combinations. A JavaScript copy of the sentence template is
+     *precisely* how the literal in `stores/products.js` came to be published, so the browser is not allowed
+     to compose one. The 20KB payload is opt-in per request so no other caller of `/config` pays for it.
+   - **The class labels name the mapping.** "Digital goods & services" makes it visible that services resolve
+     under `digital`; a tenant selling services would otherwise hunt for a block that does not exist.
 4. **Product override UI** — render the inputs the wizard's picker already implies. They exist as form state
    with no fields; that is why "Override for this product" does nothing today.
 5. **Server-side resolution on write.** The policy must be resolved by a HANDLER, not by the browser. Today
    the dashboard decides what a product promises, which is how a literal ended up on live pages.
+
+   **Partly done:** `/config` PUT already generates the tenant defaults' copy server-side
+   (`handlers/config._generate_refund_copy`), so the sentence a buyer reads is composed in one place from one
+   template. The PRODUCT path is untouched — `stores/products.js:550` still writes the literal on every new
+   product, so **the bug is not yet fixed end to end.** A tenant can now set a default; new products still do
+   not consult it. That is this step plus step 6.
 6. **Retire the JS literal and the UserPreferences slot.**
 
 ## What this does NOT change

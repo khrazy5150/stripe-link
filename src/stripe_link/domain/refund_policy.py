@@ -60,7 +60,8 @@ AUTHORITATIVE_SOURCES = frozenset({SOURCE_PRODUCT_OVERRIDE, SOURCE_TIP_JAR})
 # a 72-hour subscription window as "within 3 days of delivery" -- wrong unit AND wrong event, on a page
 # making a commercial promise. Nothing is delivered to a subscriber and nothing arrives on renewal.
 WINDOW_OPTIONS: dict[str, dict[str, Any]] = {
-    NON_REFUNDABLE: {"short_label": "Non-refundable", "days": None, "hours": None},
+    NON_REFUNDABLE: {"short_label": "Non-refundable", "select_label": "No refunds",
+                     "days": None, "hours": None},
     "72_hours": {"short_label": "72-hour refunds", "days": None, "hours": 72},
     "7_days": {"short_label": "7-day money-back", "days": 7, "hours": None},
     "14_days": {"short_label": "14-day money-back", "days": 14, "hours": None},
@@ -68,7 +69,8 @@ WINDOW_OPTIONS: dict[str, dict[str, Any]] = {
     "60_days": {"short_label": "60-day money-back", "days": 60, "hours": None},
     # `custom` means the structured fields do not describe this policy -- the tenant's own prose governs.
     # There is no numeric field to hold "45 days", so no deadline can be computed from it. See `Open`.
-    CUSTOM: {"short_label": "Refund policy", "days": None, "hours": None},
+    CUSTOM: {"short_label": "Refund policy", "select_label": "Custom — write your own",
+             "days": None, "hours": None},
 }
 
 # The clause appended to the generated sentence. Empty means the condition adds nothing a buyer needs told:
@@ -80,6 +82,32 @@ CONDITION_OPTIONS: dict[str, str] = {
     "defective_only": "for defective items only",
     "not_downloaded": "provided the file has not been downloaded",
     CUSTOM: "",
+}
+
+# Human labels for the pickers. They live here, next to the values they name, so a screen never has to
+# invent wording for a commercial term -- and `CLASS_LABELS` makes the service-to-digital mapping VISIBLE,
+# which matters because a tenant selling services would otherwise hunt for a block that does not exist.
+CONDITION_LABELS: dict[str, str] = {
+    "any": "Any condition",
+    "unused": "Unused",
+    "unopened": "Unopened",
+    "defective_only": "Defective items only",
+    "not_downloaded": "Not yet downloaded",
+    CUSTOM: "Custom",
+}
+
+CLASS_LABELS: dict[str, str] = {
+    PHYSICAL: "Physical goods",
+    DIGITAL: "Digital goods & services",
+    SUBSCRIPTION: "Subscriptions & recurring",
+}
+
+CLASS_HINTS: dict[str, str] = {
+    PHYSICAL: "Anything that ships. The window runs from delivery.",
+    DIGITAL: "Downloads, courses, services and bookings — nothing ships, so nothing comes back. "
+             "The window runs from purchase.",
+    SUBSCRIPTION: "Anything billed on a schedule. The window runs from each renewal, so a buyer who "
+                  "forgets to cancel has this long to ask.",
 }
 
 RETURN_METHOD_OPTIONS: dict[str, str] = {
@@ -317,14 +345,32 @@ def platform_default(policy_class: str) -> dict[str, Any]:
                  return_method=rule["return_method"], source=SOURCE_PLATFORM_DEFAULT)
 
 
-def tenant_policies(tenant_profile: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+def stored_policies(tenant_config: dict[str, Any] | None) -> dict[str, Any]:
+    """Pull the tenant's per-class defaults out of their settings document.
+
+    They live at `legal_defaults.refund_policies` on **TenantConfig**, not on TenantProfile as this plan
+    first said. TenantProfile is written only by registration, auth and Stripe webhooks, and it holds
+    `billing_status`, `tier_id`, `billing_exempt` and `stripe_subscription_id`; giving the dashboard a PUT
+    over that document to reach a refund setting would hand tenants their own billing tier. TenantConfig is
+    already the tenant-editable settings document, already served at `/config` with GET and PUT, and already
+    holds `legal_defaults` -- the refund URL sits right beside the policy it links to.
+
+    A bare top-level `refund_policies` map is also accepted, so a caller holding just the map still works.
+    """
+    config = tenant_config or {}
+    legal = config.get("legal_defaults")
+    if isinstance(legal, dict) and isinstance(legal.get("refund_policies"), dict):
+        return legal["refund_policies"]
+    stored = config.get("refund_policies")
+    return stored if isinstance(stored, dict) else {}
+
+
+def tenant_policies(tenant_config: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     """The tenant's three defaults, with the platform's fallback standing in where they set none.
 
-    `set_classes` names which ones are genuinely theirs, so a caller can tell a real default from a
-    stand-in without re-deriving it.
+    Each policy's `source` says which it is, so a caller never has to guess whether a tenant chose this.
     """
-    stored = (tenant_profile or {}).get("refund_policies")
-    stored = stored if isinstance(stored, dict) else {}
+    stored = stored_policies(tenant_config)
     out: dict[str, dict[str, Any]] = {}
     for policy_class in CLASSES:
         raw = stored.get(policy_class)
@@ -337,7 +383,7 @@ def tenant_policies(tenant_profile: dict[str, Any] | None) -> dict[str, dict[str
     return out
 
 
-def resolve(*, tenant_profile: dict[str, Any] | None = None,
+def resolve(*, tenant_config: dict[str, Any] | None = None,
             product: dict[str, Any] | None = None,
             price: dict[str, Any] | None = None) -> dict[str, Any]:
     """The policy this product actually promises. Two levels, and an honest `source`.
@@ -366,7 +412,7 @@ def resolve(*, tenant_profile: dict[str, Any] | None = None,
         resolved = normalize(stored, policy_class=policy_class)
         mode = "override"
     else:
-        resolved = tenant_policies(tenant_profile)[policy_class]
+        resolved = tenant_policies(tenant_config)[policy_class]
         mode = "default"
         # A per-product `keep_it_below` is a fact about THIS item's postage economics, not a policy choice,
         # so it survives falling through to the tenant default. `domain/returns.py` reads it off the
@@ -377,3 +423,34 @@ def resolve(*, tenant_profile: dict[str, Any] | None = None,
             resolved["keep_it_below"] = threshold
 
     return dict(resolved) | {"policy_class": policy_class, "mode": mode}
+
+
+def vocabulary() -> dict[str, Any]:
+    """Everything a settings screen needs to offer these choices -- INCLUDING the generated sentences.
+
+    The previews are precomputed here rather than left to the client, and that is the whole point. A
+    JavaScript copy of this sentence template is how the bug in `stores/products.js` happened: the browser
+    became the author of a commercial promise. 126 short strings is a cheap price for the server staying the
+    only thing that can write one.
+    """
+    previews: dict[str, dict[str, str]] = {}
+    for policy_class in CLASSES:
+        for window in WINDOW_OPTIONS:
+            for condition in CONDITION_OPTIONS:
+                label, full = generate_copy(policy_class, window, condition)
+                previews[f"{policy_class}|{window}|{condition}"] = {"short_label": label,
+                                                                    "full_policy": full}
+    return {
+        "classes": list(CLASSES),
+        "class_labels": dict(CLASS_LABELS),
+        "class_hints": dict(CLASS_HINTS),
+        "windows": [{"value": key, "label": option.get("select_label") or option["short_label"],
+                     "badge": option["short_label"], "days": window_days(key)}
+                    for key, option in WINDOW_OPTIONS.items()],
+        "conditions": [{"value": key, "label": CONDITION_LABELS[key], "clause": clause}
+                       for key, clause in CONDITION_OPTIONS.items()],
+        "return_methods": [{"value": key, "label": label}
+                           for key, label in RETURN_METHOD_OPTIONS.items()],
+        "class_defaults": {k: dict(v) for k, v in CLASS_DEFAULTS.items()},
+        "previews": previews,
+    }
