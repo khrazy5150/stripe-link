@@ -214,6 +214,76 @@ def refund_entry(
     )
 
 
+def dispute_entry(
+    *,
+    tenant_id: str,
+    entry_id: str,
+    occurred_at: int,
+    mode: str,
+    currency: str,
+    dispute_amount: int,
+    dispute_fee: int = 0,
+    shipping_reversed: int = 0,
+    idempotency_key: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """A chargeback: the money goes back to the buyer (gross -) and the card network charges for it.
+
+    PRD Phase 5 names `dispute` as one of the four financial events that must append an entry, and until
+    now only `charge.dispute.created`'s ORDER FLAG existed -- the ledger never heard about it. A disputed
+    order therefore kept counting as revenue, which overstates every report containing one.
+
+    The dispute fee is a cost of taking the payment, so it sits in `stripe_fee` beside the processing fee
+    rather than inventing a component for it. Unlike a refund, the platform's application fee is NOT
+    returned either -- the same asymmetry `refund_entry` already records.
+    """
+    amounts = _clean_amounts(
+        gross=-abs(int(dispute_amount)),
+        stripe_fee=-abs(int(dispute_fee)),
+        shipping_revenue=-abs(int(shipping_reversed)),
+    )
+    return _entry(
+        tenant_id=tenant_id, entry_id=entry_id, entry_type="dispute", occurred_at=occurred_at,
+        mode=mode, currency=currency, amounts=amounts, idempotency_key=idempotency_key, **kwargs,
+    )
+
+
+def dispute_entry_from_event(dispute: dict[str, Any], order: dict[str, Any], *,
+                             now_epoch: int) -> dict[str, Any] | None:
+    """Build it from Stripe's dispute object. None when there is nothing to record.
+
+    The dispute FEE lives on the dispute's own balance transactions, not on the dispute. Absent is zero --
+    the chargeback itself is the figure that matters and a missing fee must not cost us the entry.
+    """
+    dispute_id = str((dispute or {}).get("id") or "").strip()
+    amount = int((dispute or {}).get("amount") or 0)
+    if not dispute_id or not amount:
+        return None
+    fee = 0
+    for txn in (dispute or {}).get("balance_transactions") or []:
+        if isinstance(txn, dict):
+            fee += abs(int(txn.get("fee") or 0))
+    order = order or {}
+    return dispute_entry(
+        tenant_id=str(order.get("tenant_id") or ""),
+        entry_id=f"le_dispute_{dispute_id}",
+        occurred_at=int((dispute or {}).get("created") or now_epoch),
+        mode="live" if order.get("mode") == "live" else "test",
+        currency=str((dispute or {}).get("currency") or order.get("currency") or "usd"),
+        dispute_amount=amount,
+        dispute_fee=fee,
+        # A chargeback takes the WHOLE charge back, postage included -- unlike a partial refund, there is
+        # nothing to attribute. Only reversed when the dispute covers the whole order.
+        shipping_reversed=(int(order.get("shipping_amount") or 0)
+                           if amount >= int(order.get("amount_total") or 0) > 0 else 0),
+        idempotency_key=f"dispute:{dispute_id}",
+        order_id=str(order.get("order_id") or "") or None,
+        stripe={"dispute_id": dispute_id,
+                "payment_intent_id": str((dispute or {}).get("payment_intent") or "")},
+        now_epoch=now_epoch,
+    )
+
+
 def _fee_of(order: dict[str, Any], key: str) -> int:
     """A fee off an order document, from wherever that document keeps it.
 

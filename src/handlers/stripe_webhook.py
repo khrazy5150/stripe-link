@@ -30,7 +30,12 @@ from stripe_link.domain.documents import DocumentValidationError, validate_appoi
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price, settled_breakdown
 from stripe_link.delegation import apply_delegation
-from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
+from stripe_link.domain.ledger import (
+    dispute_entry_from_event,
+    refund_entry as build_ledger_refund_entry,
+    sale_entry,
+    sale_entry_from_order,
+)
 from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
 from stripe_link.domain.receipts import receipt_content, tip_renewal_content
 from stripe_link.domain.shipping_charges import buyer_paid_shipping
@@ -169,6 +174,11 @@ def handler(
     refunds_repo=None,
     webhook_events_repo=None,
     orders_repo=None,
+    # A chargeback is a financial event and appends a ledger entry (PRD Phase 5). Injectable like every
+    # other repo here; `record_dispute_ledger_entry` builds its own from LEDGER_TABLE when this is None.
+    ledger_repo=None,
+    # Tests short-circuit the balance-transaction lookup the way `line_items_fetcher` does.
+    actual_fees_fetcher=None,
     user_profiles_repo=None,
     sites_repo=None,
     tip_tokens_repo=None,
@@ -273,7 +283,8 @@ def handler(
             stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo, refunds_repo=refunds_repo, now_fn=now_fn,
         )
     elif event_type == "charge.dispute.created" and tenant_id:
-        persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo, now_fn=now_fn)
+        persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, mode=mode,
+                                        orders_repo=orders_repo, ledger_repo=ledger_repo, now_fn=now_fn)
     elif event_type == "checkout.session.completed" and tenant_id:
         session = _event_data_object(stripe_event)
         session_metadata = session.get("metadata") or {}
@@ -293,10 +304,20 @@ def handler(
                 secret_cipher=secret_cipher,
                 fetcher=line_items_fetcher,
             )
+            # The REAL Stripe fee for this charge, so the order's payout is not a cent or two light
+            # (PRD Phase 1 hygiene: "reconcile the estimated stripe_fee/net_payout to the actual value
+            # from the charge's balance transaction"). Best-effort; the estimate stands on any failure.
+            actual_fees = _actual_fees_for_session(
+                session, tenant_id,
+                repository=repository,
+                secret_cipher=secret_cipher,
+                fetcher=actual_fees_fetcher,
+            )
             persistence = persist_checkout_session_completed(
                 stripe_event,
                 tenant_id=tenant_id,
                 mode=mode,
+                actual_fees=actual_fees,
                 checkout_sessions_table=checkout_sessions_table,
                 orders_table=orders_table,
                 orders_repo=orders_repo,
@@ -659,6 +680,8 @@ def persist_checkout_session_completed(
     receipt_mailer: Callable[..., Any] | None = None,
     email_context_loader: Callable[[str], dict[str, str]] | None = None,
     line_items: list[dict[str, Any]] | None = None,
+    # The charge's REAL Stripe fee, when it could be read. Empty leaves the estimate in place.
+    actual_fees: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     session = _event_data_object(stripe_event)
     if not session:
@@ -678,7 +701,7 @@ def persist_checkout_session_completed(
         tip_tokens_repo = tip_tokens_repository(mode=mode)
     orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
 
-    fees = fee_breakdown_from_session(session, billing_config_loader)
+    fees = true_up_fees(fee_breakdown_from_session(session, billing_config_loader), actual_fees)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
     order_record = order_record_from_session(session, tenant_id, now, fees, line_items=line_items)
     invoice_record = invoice_record_from_session(session, tenant_id, now, fees)
@@ -1400,9 +1423,15 @@ def reconcile_dispute(
     tenant_id: str,
     mode: str = "test",
     orders_repo=None,
+    ledger_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
-    """Flag the order as disputed when a chargeback is opened."""
+    """Flag the order as disputed when a chargeback is opened, and tell the LEDGER about it.
+
+    Flagging the order was all this did. PRD Phase 5 names `dispute` as one of the four financial events
+    that must append an entry, and without one a disputed order kept counting as revenue -- every report
+    containing a chargeback overstated what the tenant actually earned.
+    """
     dispute = _event_data_object(stripe_event)
     payment_intent = str(dispute.get("payment_intent") or "").strip()
     orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
@@ -1415,7 +1444,28 @@ def reconcile_dispute(
     order["payment_status"] = "disputed"
     order["updated_at"] = now
     orders_repo.put(order)
-    return {"status": "disputed", "order_id": order.get("order_id", "")}
+    recorded = record_dispute_ledger_entry(dispute, order, ledger_repo, now)
+    return {"status": "disputed", "order_id": order.get("order_id", ""), "ledger_entry": recorded}
+
+
+def record_dispute_ledger_entry(dispute: dict[str, Any], order: dict[str, Any], ledger_repo, now: int) -> bool:
+    """Best-effort append of a dispute entry. Never fails the reconciliation.
+
+    Idempotent on Stripe's dispute id, so a re-delivered `charge.dispute.created` overwrites the same row
+    rather than reversing the sale twice.
+    """
+    try:
+        repo = ledger_repo or (ledger_repository(mode="live" if order.get("mode") == "live" else "test")
+                               if os.environ.get("LEDGER_TABLE") else None)
+        if repo is None:
+            return False
+        entry = dispute_entry_from_event(dispute, order, now_epoch=now)
+        if not entry:
+            return False
+        repo.append(entry)
+        return True
+    except Exception:  # noqa: BLE001 - ledger recording must not break dispute reconciliation
+        return False
 
 
 def _tip_manage_url(tenant_id, tip_tokens_repo, *, customer_id, email, subscription_id, live, now) -> str:
@@ -1723,6 +1773,75 @@ def fetch_session_line_items(session_id: str, *, api_key: str, stripe_account: s
         return []
 
 
+STRIPE_PAYMENT_INTENT_URL = "https://api.stripe.com/v1/payment_intents/{}"
+
+
+def fetch_actual_fees(payment_intent_id: str, *, api_key: str, stripe_account: str = "",
+                      opener=None) -> dict[str, int]:
+    """What Stripe ACTUALLY charged, off the charge's balance transaction.
+
+    PRD Phase 1 hygiene / Phase 5: *"reconcile the estimated `stripe_fee`/`net_payout` to the actual value
+    from the charge's balance transaction (`platform_fee` is already exact)"*. Our `stripe_fee` is computed
+    from the configured rate and rounds UP where Stripe rounds down, so a stored payout was a cent or two
+    light on every single order -- small, systematic, and exactly the kind of drift that makes a tenant
+    stop trusting a report.
+
+    Returns `{stripe_fee, net}` in minor units, or `{}` when it cannot be known. **Best-effort**: an order
+    must still record with the estimate rather than not record at all, so every failure is an empty dict.
+    """
+    if not payment_intent_id or not api_key:
+        return {}
+    opener = opener or urlopen
+    url = (STRIPE_PAYMENT_INTENT_URL.format(payment_intent_id)
+           + "?expand[]=latest_charge.balance_transaction")
+    headers = {
+        "Authorization": f"Basic {b64encode((api_key + ':').encode('utf-8')).decode('ascii')}",
+        "Stripe-Version": "2024-06-20",
+    }
+    if stripe_account:
+        headers["Stripe-Account"] = stripe_account
+    try:
+        request = Request(url, headers=headers, method="GET")
+        with opener(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        charge = data.get("latest_charge")
+        txn = charge.get("balance_transaction") if isinstance(charge, dict) else None
+        if not isinstance(txn, dict):
+            # A charge whose balance transaction has not settled yet. Not an error, and not a reason to
+            # overwrite a usable estimate with nothing.
+            return {}
+        # Only Stripe's OWN processing fee. `fee` on the transaction also contains the application fee,
+        # and counting that as a Stripe fee would double-count the platform's cut against the tenant.
+        stripe_fee = sum(abs(int(d.get("amount") or 0))
+                         for d in txn.get("fee_details") or []
+                         if str(d.get("type") or "") == "stripe_fee")
+        out: dict[str, int] = {}
+        if stripe_fee:
+            out["stripe_fee"] = stripe_fee
+        if txn.get("net") is not None:
+            out["net"] = int(txn.get("net") or 0)
+        return out
+    except Exception:  # noqa: BLE001 - the estimate stands; a true-up is an improvement, not a dependency
+        return {}
+
+
+def true_up_fees(fees: dict[str, Any], actual: dict[str, int] | None) -> dict[str, Any]:
+    """Replace the estimated Stripe fee with the real one and recompute the payout around it.
+
+    `platform_fee` is left ALONE -- it is exact already, because checkout chose the number and Stripe
+    applied it. Only Stripe's own fee was ever an estimate.
+    """
+    actual = actual or {}
+    if "stripe_fee" not in actual:
+        return fees
+    trued = dict(fees)
+    trued["stripe_fee"] = int(actual["stripe_fee"])
+    gross = int(fees.get("tenant_keyed_amount") or 0)
+    trued["net_payout"] = max(gross - trued["stripe_fee"] - int(fees.get("platform_fee") or 0), 0)
+    trued["fees_source"] = "balance_transaction"
+    return trued
+
+
 def _fetch_line_items_for_session(session, tenant_id, *, repository=None, secret_cipher=None, fetcher=None) -> list[dict[str, Any]]:
     """Resolve the tenant's Stripe creds for the session's mode and fetch its line items (best-effort). A
     `fetcher` override (tests) short-circuits the Stripe call. Never raises — a failure (incl. no keys table)
@@ -1743,6 +1862,32 @@ def _fetch_line_items_for_session(session, tenant_id, *, repository=None, secret
     except Exception:  # noqa: BLE001 - can't load creds -> skip itemization, keep the order
         return []
     return fetch_session_line_items(session_id, api_key=api_key, stripe_account=stripe_account)
+
+
+def _actual_fees_for_session(session, tenant_id, *, repository=None, secret_cipher=None, fetcher=None):
+    """The real Stripe fee for this session's charge, or {}.
+
+    Same credential resolution as the line-item fetch, kept beside it for that reason. Never raises: the
+    estimate stands when the actual cannot be had, which is also what happens for a payment method whose
+    balance transaction has not settled yet.
+    """
+    if fetcher is not None:
+        try:
+            return dict(fetcher(session) or {})
+        except Exception:  # noqa: BLE001
+            return {}
+    payment_intent = str(session.get("payment_intent") or "")
+    if not payment_intent:
+        return {}
+    mode = "live" if session.get("livemode") else "test"
+    try:
+        stripe_repo = repository or stripe_keys_repository()
+        stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
+        api_key, stripe_account = checkout_credentials(
+            tenant_id, mode, stripe_keys, secret_cipher or KmsSecretCipher())
+    except Exception:  # noqa: BLE001
+        return {}
+    return fetch_actual_fees(payment_intent, api_key=api_key, stripe_account=stripe_account)
 
 
 def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_price_ids: set[str], currency: str) -> list[dict[str, Any]]:
