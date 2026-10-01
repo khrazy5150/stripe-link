@@ -574,6 +574,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # page's palette rather than asserting its own, and the selected rate is marked by BORDER and weight
     # rather than by colour alone, so it survives a preset whose accent is close to its surface.
     "    .sl-shipping{width:min(52rem,100%);margin:2.4rem auto;text-align:left}",
+    # The `hidden` ATTRIBUTE must win inside this element. A class selector that sets `display` beats the
+    # UA's `[hidden]{display:none}`, so `.sl-shipping-summary{display:flex}` left an empty Subtotal /
+    # Shipping / Total block on the page whenever there was nothing to put in it, and a `.sl-shipping-field`
+    # region input would show for countries that do not use one. Scoped rather than global so it cannot
+    # surprise anything else on the page.
+    "    .sl-shipping [hidden]{display:none!important}",
     "    .sl-shipping-prompt{color:var(--sl-muted);margin:0 0 1rem}",
     "    .sl-shipping-where{display:flex;flex-wrap:wrap;gap:1.2rem;margin-bottom:1.6rem}",
     "    .sl-shipping-field{display:flex;flex-direction:column;gap:0.4rem;flex:1 1 14rem;min-width:0}",
@@ -3772,7 +3778,14 @@ def render_shipping_selector_script() -> str:
         "    var POSTAL_LABEL = { US:'ZIP code', GB:'Postcode', AU:'Postcode', NZ:'Postcode', IE:'Eircode' };",
         "    var seq = 0, lastData = null;",
         "    var cart = function(){",
-        "      var card = document.querySelector('.sl-price-option[aria-checked=\"true\"], .sl-price-option.is-selected');",
+        # `.selected`, and fall back to the FIRST card -- the convention the rest of this page already
+        # uses (`querySelector('.sl-price-option.selected') || cards[0]`). The element shipped looking for
+        # `[aria-checked="true"]` or `.is-selected`, neither of which this renderer ever writes, so `card`
+        # was always null: no product_id, price_id or quantity reached /shipping-quote, every quote was
+        # computed from the offer's first item regardless of the tier chosen, and the order summary had no
+        # subtotal to show. Found by reading the PUBLISHED page rather than the source (2026-10-01).
+        "      var cards = document.querySelectorAll('.sl-price-option');",
+        "      var card = document.querySelector('.sl-price-option.selected') || cards[0] || null;",
         "      return { product_id: (card && card.dataset.productId) || '', price_id: (card && card.dataset.priceId) || '',",
         "               quantity: (card && card.dataset.quantity) || '1', card: card };",
         "    };",

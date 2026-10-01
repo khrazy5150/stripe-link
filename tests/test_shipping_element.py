@@ -330,3 +330,51 @@ class TheChoiceReachesCheckout(unittest.TestCase):
         source = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
         self.assertNotIn("params.set('shipping_amount'", source)
         self.assertNotIn("set('shipping_cost'", source)
+
+
+class TheElementAgreesWithTheRestOfThePage(unittest.TestCase):
+    """Cross-checks between the element and the renderer that writes what it reads.
+
+    Both bugs here shipped green: every test string-matched the element's own source, so a selector that
+    matched nothing on the real page, and a CSS rule that defeated its own `hidden` attribute, both looked
+    correct in isolation. They were found by downloading the PUBLISHED page.
+    """
+
+    SOURCE = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+
+    def _script(self):
+        # The GENERATED script, not the module source -- a comment explaining the old selector would
+        # otherwise satisfy a source-level assertion while the shipped JS still had the bug.
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        render_shipping_selector({"id": "s"}, OFFER, PHYSICAL, API)
+        return render_shipping_selector_script()
+
+    def test_the_cart_reads_the_class_the_price_cards_actually_carry(self):
+        # The page marks a chosen card `.selected` -- the CTA and the price selector both say so. The
+        # element looked for `[aria-checked="true"]` and `.is-selected`, neither of which is ever written,
+        # so no product_id, price_id or quantity ever reached /shipping-quote and every quote came from
+        # the offer's first item whatever tier the buyer picked.
+        js = self._script()
+        self.assertIn("document.querySelector('.sl-price-option.selected')", js)
+        self.assertNotIn("aria-checked", js)
+        self.assertNotIn("is-selected", js)
+
+    def test_it_falls_back_to_the_first_card_like_the_rest_of_the_page(self):
+        self.assertIn("cards[0]", self._script())
+
+    def test_the_hidden_attribute_survives_the_elements_own_css(self):
+        # A class selector that sets `display` beats the UA's `[hidden]{display:none}`, so the summary
+        # block rendered as empty Subtotal / Shipping / Total rows whenever there was nothing to show.
+        self.assertIn('.sl-shipping [hidden]{display:none!important}', self.SOURCE)
+
+    def test_every_shipping_rule_that_sets_display_is_covered_by_that_guard(self):
+        import re
+
+        rules = re.findall(r'"    (\.sl-shipping[\w-]*(?:\[[^\]]+\])?)\{([^}]*)\}"', self.SOURCE)
+        setting_display = [name for name, body in rules
+                           if "display:" in body and "[hidden]" not in name]
+        # Any of these can carry `hidden` at runtime; the scoped guard is what keeps the attribute working.
+        self.assertTrue(setting_display, "expected shipping rules that set display")
+        self.assertIn('.sl-shipping [hidden]{display:none!important}', self.SOURCE)
