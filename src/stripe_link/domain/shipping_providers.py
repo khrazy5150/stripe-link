@@ -58,6 +58,18 @@ class ShippingProvider:
     def rates(self, *, from_address: dict, to_address: dict, parcel: dict) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    def parcel_templates(self) -> list[dict[str, Any]]:
+        """Carrier-supplied packaging -- USPS Flat Rate boxes, FedEx Paks and the like.
+
+        The one case where a container's price really is destination-independent, because the CARRIER says
+        so. A tenant's own carton is never that, whatever its dimensions: it is rated on size, weight and
+        distance like anything else (plans/LIVE_SHIPPING_RATES.md phase 7).
+
+        Empty by default rather than NotImplementedError: a provider with no template list is a provider
+        offering no carrier packaging, which is a true answer and not a crash.
+        """
+        return []
+
     def buy_label(self, *, rate_id: str, label_format: str = "PDF",
                   idempotency_key: str = "") -> dict[str, Any]:
         """Turn a rate into a bought label. Returns the normalised purchase."""
@@ -161,6 +173,28 @@ class ShippoProvider(ShippingProvider):
             detail = "; ".join(str(m.get("text") or "") for m in messages if m.get("text"))[:300]
             raise ProviderError(detail or "Shippo returned no rates for that parcel and address.")
         return [_shippo_rate(rate) for rate in rates]
+
+    def parcel_templates(self) -> list[dict[str, Any]]:
+        # GET /parcel-templates/ -- "a package used for shipping that has preset dimensions defined by a
+        # carrier" (Shippo). The `token` is what `_shippo_parcel` already forwards as `template`, so
+        # adopting one needs no change to the rating path at all.
+        body = self._request("/parcel-templates", params={"results": 100})
+        out = []
+        for entry in body.get("results") or []:
+            token = str(entry.get("token") or "").strip()
+            if not token:
+                continue
+            out.append({
+                "template": token,
+                "name": str(entry.get("name") or token),
+                "carrier": str(entry.get("carrier") or "").strip().lower(),
+                "length": entry.get("length"),
+                "width": entry.get("width"),
+                "height": entry.get("height"),
+                "distance_unit": str(entry.get("distance_unit") or "in"),
+            })
+        out.sort(key=lambda t: (t["carrier"], t["name"]))
+        return out
 
 
 def _shippo_buy(self, *, rate_id: str, label_format: str = "PDF",
@@ -395,6 +429,14 @@ class MockProvider(ShippingProvider):
             })
         return out
 
+
+    def parcel_templates(self) -> list[dict[str, Any]]:
+        return [
+            {"template": "USPS_FlatRateSmallBox", "name": "USPS Small Flat Rate Box", "carrier": "usps",
+             "length": 8.69, "width": 5.44, "height": 1.75, "distance_unit": "in"},
+            {"template": "USPS_FlatRateMediumBox", "name": "USPS Medium Flat Rate Box", "carrier": "usps",
+             "length": 11.25, "width": 8.75, "height": 6, "distance_unit": "in"},
+        ]
 
     def carrier_accounts(self) -> list[dict[str, Any]]:
         return [{"account_id": f"mock_acct_{carrier}", "carrier": carrier, "active": True}

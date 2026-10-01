@@ -49,10 +49,10 @@ class QuoteTests(unittest.TestCase):
     def tearDown(self):
         checkout_module._tenant_shipping_config = self._real
 
-    def quote(self, country="", offer=None, quantity="1"):
+    def quote(self, country="", offer=None, quantity="1", postal_code=""):
         response = shipping_quote(
             tenant_id="t1", offer_id="o1", product_id="p1", price_id="pr1", quantity=quantity,
-            country=country, mode="test",
+            country=country, postal_code=postal_code, mode="test",
             offers_repo=Repo({"o1": offer or OFFER}), products_repo=Repo({"p1": PRODUCT}))
         return json.loads(response["body"])
 
@@ -117,12 +117,28 @@ class QuoteTests(unittest.TestCase):
         self.assertFalse(body["ships"])
         self.assertEqual(body["countries"], [])
 
-    def test_a_live_zone_asks_for_a_carrier_rather_than_quoting_zero(self):
+    def test_a_live_zone_asks_for_a_postcode_rather_than_quoting_zero(self):
+        """Was `needs: carrier` until live rating shipped (plans/LIVE_SHIPPING_RATES.md phase 2).
+
+        A country is not an address, so the honest first answer is now "tell me where" rather than "we
+        cannot price this". `carrier` still means what it always did -- nobody could be asked -- and is
+        asserted below once a postcode exists but no provider does. The invariant across both: never zero.
+        """
         self.config = dict(CONFIG, zones=[
             {"destinations": [{"country": "US"}], "rule": {"type": "live"}},
             {"destinations": [{"country": "*"}], "rule": {"type": "free"}}])
         body = self.quote("US")
+        self.assertEqual(body["needs"], "postal_code")
+        self.assertEqual(body["options"], [])
+        self.assertNotEqual(body["mode"], "free")
+
+    def test_a_live_zone_with_no_provider_still_says_carrier(self):
+        self.config = dict(CONFIG, zones=[
+            {"destinations": [{"country": "US"}], "rule": {"type": "live"}},
+            {"destinations": [{"country": "*"}], "rule": {"type": "free"}}])
+        body = self.quote("US", postal_code="80202")
         self.assertEqual(body["needs"], "carrier")
+        self.assertEqual(body["rate_error"], "no_provider")
         self.assertEqual(body["options"], [])
 
     def test_an_unpriced_box_says_box_price_and_names_the_reason(self):

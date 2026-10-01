@@ -27,6 +27,7 @@ from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_stat
 from stripe_link.domain.handover import handover_groups, orders_csv
 from stripe_link.domain.order_reference import matches_reference, short_refs
 from stripe_link.domain.shipment_notice import notify_buyer
+from stripe_link.domain.shipping_quotes import order_variance
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.domain.shipping import ShipmentError, build_manual_shipment, label_readiness
@@ -109,6 +110,14 @@ def list_orders(event, repository, mode, *, products_repo=None, shipments_repo=N
         # The Status column is the DELIVERY story, derived once here so the table, the drawer and the CSV
         # cannot each tell a different one.
         order["delivery"] = delivery_status(order)
+        # What the buyer was charged for postage against what the label actually cost
+        # (plans/LIVE_SHIPPING_RATES.md phase 5). Derived from the two halves already loaded rather than
+        # read per order: the durable record is `shipping_actual`, but a list of forty orders must not
+        # become forty extra lookups to render a badge most of them never show. Absent when there is
+        # nothing to compare, which is most orders.
+        variance = order_variance(order, context["shipments"].get(str(order.get("order_id") or "")))
+        if variance:
+            order["shipping_variance"] = variance
         suggestion = suggested_correction(order)
         if suggestion:
             order["address_suggestion"] = suggestion

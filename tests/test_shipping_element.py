@@ -34,6 +34,9 @@ class NothingIsBakedIntoTheArtifact(unittest.TestCase):
         self.html = render_shipping_selector({"id": "shipping"}, OFFER, PHYSICAL, API)
 
     def test_it_carries_no_prices(self):
+        # "amount" is checked as a bare substring on purpose: it is blunt, and the bluntness is the point --
+        # a published page is a static S3 artifact, so ANY price-shaped thing in it starts rotting the
+        # moment it is written. A class name that trips this gets renamed; the guard stays strict.
         self.assertNotIn("$", self.html)
         for digit in ("699", "1299", "amount"):
             self.assertNotIn(digit, self.html)
@@ -92,7 +95,16 @@ class TheScriptSendsAServiceNotAnAmount(unittest.TestCase):
     def test_an_unknown_is_never_shown_as_free_shipping(self):
         """`needs` means "not answerable yet". Rendering it as free would make a promise the tenant did not."""
         self.assertNotIn("Free shipping", self.js)
-        self.assertIn("calculated at checkout", self.js)
+
+    def test_it_no_longer_promises_shipping_is_calculated_at_checkout(self):
+        """It was not. `needs: carrier` produced empty `shipping_options`, Stripe charged nothing, and the
+        buyer had been told on the page that a cost was coming (removed 2026-10-01, with live rating).
+
+        The replacement says what is true -- we could not get a rate -- and the element offers a retry.
+        """
+        self.assertNotIn("calculated at checkout", self.js)
+        self.assertIn("could not get shipping rates", self.js)
+        self.assertIn("sl-shipping-retry", self.js)
 
     def test_no_zones_keeps_the_element_hidden(self):
         self.assertIn("data.needs === 'zones'", self.js)
@@ -214,3 +226,107 @@ class TheBUILDERSaysWhyNothingRendered(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheElementCollectsAnAddressNotJustACountry(unittest.TestCase):
+    """plans/LIVE_SHIPPING_RATES.md phase 3. A carrier prices a journey between two postcodes; until the
+    element grew a second field, every live zone answered `needs: carrier` and every buyer shipped free."""
+
+    def setUp(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        self.html = render_shipping_selector({"id": "s"}, OFFER, PHYSICAL, API)
+        self.js = render_shipping_selector_script()
+
+    def test_it_asks_for_a_postal_code(self):
+        self.assertIn('class="sl-shipping-postal"', self.html)
+        self.assertIn('autocomplete="postal-code"', self.html)
+
+    def test_the_postcode_rides_to_the_quote_endpoint(self):
+        self.assertIn("'&postal_code=' + encodeURIComponent(postal.value.trim())", self.js)
+
+    def test_the_region_field_is_hidden_until_a_country_needs_one(self):
+        # Most countries do not use a subdivision for rating. An always-visible field a buyer must guess
+        # at is friction bought for nothing.
+        self.assertIn('class="sl-shipping-field sl-shipping-region-field" hidden', self.html)
+        self.assertIn("regionField.hidden = !needsRegion", self.js)
+
+    def test_the_countries_that_need_a_region_are_named(self):
+        for code in ("US", "CA", "AU", "BR", "IN", "MX"):
+            self.assertIn(f"{code}:", self.js.split("REGION_REQUIRED", 1)[1][:200])
+
+    def test_the_field_is_labelled_in_the_buyers_own_vocabulary(self):
+        self.assertIn("ZIP code", self.js)
+        self.assertIn("Postcode", self.js)
+        self.assertIn("Province", self.js)
+
+    def test_a_carrier_call_is_not_made_per_keystroke(self):
+        self.assertIn("clearTimeout(timer)", self.js)
+        self.assertIn("postal.value.trim().length >= 3", self.js)
+
+    def test_a_slow_answer_never_overwrites_a_newer_one(self):
+        # The buyer has typed since. Painting the stale answer would show a price for the wrong address.
+        self.assertIn("var mine = ++seq", self.js)
+        self.assertIn("mine === seq ? data : undefined", self.js)
+
+
+class TheBuyerComparesBeforePaying(unittest.TestCase):
+    def setUp(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        self.html = render_shipping_selector({"id": "s"}, OFFER, PHYSICAL, API)
+        self.js = render_shipping_selector_script()
+
+    def test_each_option_shows_a_name_a_price_and_an_estimate(self):
+        self.assertIn("sl-shipping-rate-label", self.js)
+        self.assertIn("sl-shipping-rate-price", self.js)
+        self.assertIn("sl-shipping-rate-estimate", self.js)
+
+    def test_a_single_day_estimate_reads_naturally(self):
+        self.assertIn("'Estimated ' + one + ' business day'", self.js)
+        self.assertIn("'Estimated ' + lo + '-' + hi + ' business days'", self.js)
+
+    def test_the_order_total_moves_with_the_chosen_service(self):
+        self.assertIn("sl-shipping-total", self.html)
+        self.assertIn("money(sub + shipping)", self.js)
+
+    def test_choosing_a_service_updates_the_total(self):
+        self.assertIn("input.addEventListener('change', function(){ choose(input.value, option.amount); })",
+                      self.js)
+
+    def test_every_state_the_buyer_can_be_in_is_handled(self):
+        for state in ("loading", "error", "rates", "idle"):
+            with self.subTest(state=state):
+                self.assertIn(f"'{state}'", self.js)
+
+    def test_a_failure_offers_a_retry_rather_than_a_dead_end(self):
+        self.assertIn("retry.addEventListener('click', run)", self.js)
+        self.assertIn("retry.hidden = state !== 'error'", self.js)
+
+    def test_the_element_has_a_stylesheet_at_all(self):
+        # It shipped as structure with no CSS whatsoever, so the mock's card was never going to appear.
+        source = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+        self.assertIn(".sl-shipping-rate{", source)
+        self.assertIn(".sl-shipping-summary{", source)
+
+    def test_the_selected_rate_is_not_marked_by_colour_alone(self):
+        source = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+        selected = source.split(".sl-shipping-rate:has(input:checked)", 1)[1][:120]
+        self.assertIn("border-width:2px", selected)
+
+
+class TheChoiceReachesCheckout(unittest.TestCase):
+    """Until now the radios were decorative: `input.value` was set to the service token and the token never
+    left the page. Only `ship_to_country` travelled."""
+
+    def test_the_quote_and_the_service_both_ride_to_checkout(self):
+        source = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+        self.assertIn("params.set('shipping_quote', window.__jbShipQuote)", source)
+        self.assertIn("params.set('shipping_service', window.__jbShipService)", source)
+
+    def test_the_amount_never_rides_to_checkout(self):
+        source = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+        self.assertNotIn("params.set('shipping_amount'", source)
+        self.assertNotIn("set('shipping_cost'", source)

@@ -62,6 +62,39 @@
           </dd></div>
         </dl>
 
+        <!-- WHAT THE BUYER PAID FOR POSTAGE against what the label actually cost
+             (plans/LIVE_SHIPPING_RATES.md phase 5). Informative, never obstructive: hosted Checkout
+             prefills a shipping address but gives us no way to lock it, so a buyer quoted for one
+             postcode can type another. The order ships either way; this is the explanation. -->
+        <template v-if="variance">
+          <h3 class="details-subheading">Shipping cost variance</h3>
+          <dl class="drawer-facts">
+            <div><dt>Quoted destination</dt><dd>{{ variance.quoted_postal_code || "—" }}</dd></div>
+            <div><dt>Actual destination</dt><dd>{{ variance.actual_postal_code || "—" }}</dd></div>
+            <div><dt>Customer shipping charge</dt><dd>{{ formatMoney(variance.quoted_amount, order.currency) }}</dd></div>
+            <div><dt>Actual label cost</dt><dd>{{ formatMoney(variance.actual_amount, order.currency) }}</dd></div>
+            <div><dt>Cost variance</dt><dd>
+              <strong>{{ variance.delta >= 0 ? "+" : "−" }}{{ formatMoney(Math.abs(variance.delta), order.currency) }}</strong>
+            </dd></div>
+          </dl>
+          <p v-if="variance.flagged" class="keys-status-banner warning">
+            Exceeds the {{ formatMoney(variance.threshold, order.currency) }} threshold. Order can still be fulfilled.
+          </p>
+          <!-- A label cheaper than the quote is a saving, not an alert. Saying so plainly stops the
+               section reading like a problem whenever it appears. -->
+          <p v-else-if="variance.direction === 'under'" class="field-hint">
+            The label cost less than the buyer was charged — within tolerance, nothing to do.
+          </p>
+          <p v-else class="field-hint">Within the {{ formatMoney(variance.threshold, order.currency) }} tolerance.</p>
+          <!-- A service the carrier could not carry is a DIFFERENT exception from a price that moved,
+               and the buyer's delivery promise does not survive it. -->
+          <p v-if="variance.service_substituted" class="keys-status-banner warning">
+            Shipped by <strong>{{ variance.service_token }}</strong>, not the
+            <strong>{{ variance.quoted_service_token }}</strong> the buyer chose. The delivery estimate
+            they were shown no longer applies.
+          </p>
+        </template>
+
         <template v-if="order.address_validation">
           <h3 class="details-subheading">Address check</h3>
           <p>
@@ -161,6 +194,7 @@ const formatDate = formatEpochDate;
 
 const shipment = computed(() => props.order?.fulfilment?.shipment || null);
 const address = computed(() => props.order?.shipping_address || null);
+const variance = computed(() => props.order?.shipping_variance || null);
 
 const lines = computed(() => {
   const items = props.order?.line_items;

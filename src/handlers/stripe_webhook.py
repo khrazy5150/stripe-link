@@ -34,6 +34,7 @@ from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry,
 from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
 from stripe_link.domain.receipts import receipt_content, tip_renewal_content
 from stripe_link.domain.shipping_charges import buyer_paid_shipping
+from stripe_link.domain.shipping_quotes import agreed_shipping
 from stripe_link.domain.shipping import (
     destination_address_from_invoice,
     destination_address_from_session,
@@ -2114,6 +2115,11 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         # amount only exists once Stripe reports it (plans/SHIPPING_CHARGES.md). Absent for digital orders
         # rather than zero -- a stored 0 would claim shipping was offered and declined.
         **buyer_paid_shipping(session),
+        # WHAT WE QUOTED, beside what Stripe collected (plans/LIVE_SHIPPING_RATES.md phase 5). The quote
+        # row itself is a TTL'd cache; this is the durable record of what this buyer agreed to, and the
+        # baseline any later shipping-cost variance is measured against. Absent when no quote priced the
+        # sale, rather than a block of empty strings claiming one.
+        **agreed_shipping(metadata, shipping_address),
         "product": {
             "product_id": metadata.get("product_id", ""),
             "price_id": metadata.get("price_id", ""),

@@ -270,6 +270,12 @@ def handler(
             tenant_id=tenant_id, offer_id=offer_id, product_id=product_id, price_id=price_id,
             quantity=str(params.get("quantity") or "1"),
             country=str(params.get("country") or "").strip().upper()[:2],
+            # A carrier prices a journey between two postcodes, so tier 3 needs more than a country.
+            # `region` is only required where carriers insist on it (US, CA, AU, BR, IN, MX...), and is
+            # passed through rather than validated here: the carrier is the authority on its own address
+            # rules, and guessing them in two places is how they drift.
+            postal_code=str(params.get("postal_code") or "").strip()[:12],
+            region=str(params.get("region") or "").strip()[:3],
             mode=resolve_stripe_mode(event),
             offers_repo=offers_repo, products_repo=products_repo,
         )
@@ -414,6 +420,11 @@ def handler(
             # country lifts the unanimity restriction: we can price that one zone correctly instead of needing
             # every allowed destination to agree (plans/SHIPPING_ELEMENT.md phase 5).
             ship_to_country=str(params.get("ship_to_country") or "").strip().upper()[:2],
+            # WHICH quote the buyer was looking at, and WHICH service they picked on it. Never an amount:
+            # the price is read off the server's own row (plans/LIVE_SHIPPING_RATES.md phase 4).
+            shipping_quote_id=str(params.get("shipping_quote") or "").strip()[:64],
+            shipping_service=str(params.get("shipping_service") or "").strip()[:64],
+            secret_cipher=secret_cipher,
         )
         stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
@@ -630,7 +641,8 @@ def _flatten_params(value, prefix: str = "") -> dict[str, str]:
 
 
 def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, country, mode,
-                   offers_repo=None, products_repo=None):
+                   postal_code="", region="", offers_repo=None, products_repo=None,
+                   quotes_repo=None, secret_cipher=None):
     """What shipping would cost this cart, and where it may be sent.
 
     Answers the two questions a page element needs and nothing else: which countries this tenant ships to, and
@@ -638,8 +650,17 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
     zone, `box_price` for a by-box cart with no priced box, `zone` for a destination nothing serves. **Never
     zero for "unknown"**: a page that renders an unknown as "Free shipping" makes a promise the tenant did not.
     """
+    from handlers.shipping import live_rates_for
     from stripe_link.domain.shipping_charges import packed_box_price, resolve_options
+    from stripe_link.domain.shipping_quotes import (
+        build_quote,
+        cache_id,
+        fingerprint as quote_fingerprint,
+        is_expired as quote_expired,
+        normalize_destination,
+    )
     from stripe_link.domain.shipping_zones import allowed_countries as zone_countries
+    from stripe_link.domain.shipping_zones import rule_for as zone_rule_for
 
     offers_repo = offers_repo or offers_repository(mode=mode)
     products_repo = products_repo or products_repository(mode=mode)
@@ -698,20 +719,265 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
         return json_response(payload)
 
     priced = packed_box_price(items, products_by_id, config, target)
+
+    # TIER 3 -- a real carrier quote for a real address (plans/LIVE_SHIPPING_RATES.md phase 2).
+    #
+    # Only a LIVE zone reaches a carrier. free / flat / flat_rate_box are arithmetic over the tenant's own
+    # settings and must stay free to ask, which is what makes this endpoint safe to leave public.
+    destination = normalize_destination({"country": target, "postal_code": postal_code, "region": region})
+    parcels, live_options, quote = [], None, None
+    if zone_rule_for(config, target).get("type") == "live":
+        if not destination["postal_code"]:
+            # A country is not an address. Carriers price a journey between two postcodes, and asking for
+            # one is the entire reason this element grew a second field.
+            payload["needs"] = "postal_code"
+            return json_response(payload)
+        parcels = _quote_parcels(items, products_by_id, config)
+        if not parcels:
+            payload["needs"] = "carrier"
+            payload["rate_error"] = "no_dimensions"
+            return json_response(payload)
+
+        fingerprint = quote_fingerprint(offer_id=offer_id, items=items, parcels=parcels,
+                                        destination=destination)
+        quote_id = cache_id(tenant_id=tenant_id, mode=mode, cart_fingerprint=fingerprint)
+        now = int(time.time())
+        quotes = quotes_repo or _shipping_quotes_repo(mode)
+        # The row IS the cache. A buyer toggling services, reloading, or coming back in ten minutes reads
+        # the answer we already have -- one `get`, no carrier call, no index to maintain.
+        quote = _read_quote(quotes, tenant_id, quote_id)
+        if quote and not quote_expired(quote, now):
+            live_options = quote.get("options") or []
+        else:
+            rated = live_rates_for(config, tenant_id, parcels=parcels, destination=destination,
+                                   secret_cipher=secret_cipher or KmsSecretCipher())
+            if rated["error"]:
+                # Named, never swallowed. "We could not get rates" is a truthful thing to show a buyer;
+                # an empty list rendered as free shipping is not.
+                payload["needs"] = "carrier"
+                payload["rate_error"] = rated["error"]
+                return json_response(payload)
+            live_options = rated["options"]
+
     result = resolve_options(offer, config, country=target, merchandise_amount=merchandise,
-                             item_count=units, box_amount=priced["amount"])
+                             item_count=units, box_amount=priced["amount"],
+                             live_options=live_options)
     payload.update({
         "options": [{"label": opt["label"], "amount": opt["amount"],
                      "service_token": opt.get("service_token", ""),
+                     "carrier": opt.get("carrier", ""),
                      "transit_days_min": opt.get("transit_days_min"),
                      "transit_days_max": opt.get("transit_days_max")}
                     for opt in result["options"]],
         "needs": result["needs"], "mode": result["mode"], "source": result["source"],
     })
+
+    # A quote is minted for ANY priced answer, not only a live one: checkout reads the amount off the row
+    # whatever produced it, so a flat zone gets the same tamper-proofing as a carrier rate for free.
+    if result["options"] and not result["needs"]:
+        payload.update(_mint_quote(
+            quotes_repo, mode, tenant_id=tenant_id, offer_id=offer_id, items=items, parcels=parcels,
+            destination=destination, options=result["options"], source=result["source"],
+            existing=quote, currency="usd"))
+
     # Why it could not be priced, for the element to show something truthful instead of a blank.
     if result["needs"] == "box_price" and priced["reason"]:
         payload["box_reason"] = priced["reason"]
     return json_response(payload)
+
+
+def _quote_parcels(items, products_by_id, config):
+    """The cart as parcels, packed exactly the way the label flow packs it.
+
+    Same `packable_items` + `pack` + `tenant_boxes` the tenant's own rate preview uses, so a buyer is never
+    quoted for a parcel the tenant would not actually post.
+    """
+    from stripe_link.domain.shipping import packable_items, tenant_boxes
+    from stripe_link.domain.shipping_packing import pack
+
+    return pack(packable_items(items, products_by_id), tenant_boxes(config or {}))
+
+
+def _shipping_quotes_repo(mode):
+    """The quote store, or None. **Constructing it is itself allowed to fail.**
+
+    The guard is around the FACTORY CALL and not only around the reads, because that is where this has
+    gone wrong before: `_tenant_shipping_config`'s first version called a factory with a keyword it did not
+    accept, and a try that only wrapped the query would have let the TypeError through. A buyer's page must
+    survive a missing table, a missing env var and a bad signature alike -- all three cost a carrier call,
+    none of them cost a sale.
+    """
+    try:
+        from stripe_link.repositories.documents import shipping_quotes_repository
+
+        return shipping_quotes_repository(mode=mode)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("shipping quote store unavailable",
+                       extra={"error": f"{type(exc).__name__}: {exc}"})
+        return None
+
+
+def _read_quote(quotes, tenant_id, quote_id):
+    """Never fatal. A quote cache that cannot be read costs a carrier call, not a sale."""
+    if quotes is None:
+        return None
+    try:
+        return quotes.get(tenant_id, quote_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("shipping quote unreadable", extra={"tenant_id": tenant_id, "quote_id": quote_id,
+                                                           "error": f"{type(exc).__name__}: {exc}"})
+        return None
+
+
+def _mint_quote(quotes_repo, mode, *, tenant_id, offer_id, items, parcels, destination, options,
+                source, existing, currency):
+    """Persist what we just offered, and hand the buyer its id.
+
+    Returns the fields to merge into the response. On ANY storage failure it returns `{}` -- the buyer
+    still sees prices and still checks out; checkout simply falls back to re-deriving from zones, which is
+    exactly today's behaviour. A shipping quote that cannot be saved must not cost a sale.
+    """
+    from stripe_link.domain.shipping_quotes import (
+        build_quote,
+        cache_id,
+        fingerprint as quote_fingerprint,
+        is_expired as quote_expired,
+    )
+
+    now = int(time.time())
+    fingerprint = quote_fingerprint(offer_id=offer_id, items=items, parcels=parcels,
+                                    destination=destination)
+    quote_id = cache_id(tenant_id=tenant_id, mode=mode, cart_fingerprint=fingerprint)
+    if existing and not quote_expired(existing, now) and existing.get("quote_id") == quote_id:
+        return {"quote_id": quote_id, "expires_at": int(existing.get("expires_at") or 0)}
+    record = build_quote(quote_id=quote_id, tenant_id=tenant_id, mode=mode, offer_id=offer_id,
+                         destination=destination, parcels=parcels, items=items, options=options,
+                         source=source, currency=currency, now=now)
+    store = quotes_repo or _shipping_quotes_repo(mode)
+    if store is None:
+        return {}
+    try:
+        store.put(tenant_id, record)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("shipping quote not saved", extra={"tenant_id": tenant_id,
+                                                          "error": f"{type(exc).__name__}: {exc}"})
+        return {}
+    return {"quote_id": quote_id, "expires_at": record["expires_at"]}
+
+
+def _shipping_from_quote(*, quote_id, service_token, tenant_id, mode, offer, items, products_by_id,
+                         shipping_config, secret_cipher, allowed_countries, quotes_repo=None):
+    """The one shipping option the buyer already chose, re-derived from the server's own record.
+
+    plans/LIVE_SHIPPING_RATES.md phase 4. Returns `{option, quote_id, destination, reason}` with `option`
+    None whenever the quote may not be used -- the caller then falls back to the zone path, which is what a
+    buyer who never touched the element gets.
+
+    **The amount is never an input.** It is read off the stored row, so the worst a tampered query string
+    can do is name a service the quote does not hold, which lands on the quote's own cheapest option.
+
+    The destination comes from the ROW rather than the request, because the row was written by this server
+    and the request was not. The country is still cross-checked against the countries Stripe will be told
+    to accept: a price for one country and an address field open to another is the one combination that
+    could charge the wrong postage without anybody tampering.
+    """
+    from stripe_link.domain.shipping_quotes import (
+        FALLBACK,
+        REQUOTE,
+        USE_CHEAPEST,
+        fingerprint as quote_fingerprint,
+        validate,
+    )
+
+    blank = {"option": None, "quote_id": "", "destination": {}, "reason": ""}
+    if not quote_id:
+        return dict(blank, reason="no_quote")
+    quote = _read_quote(quotes_repo or _shipping_quotes_repo(mode), tenant_id, quote_id)
+    if not quote:
+        return dict(blank, reason="missing")
+
+    destination = quote.get("destination") or {}
+    country = str(destination.get("country") or "")
+    if allowed_countries and country not in allowed_countries:
+        # A quote for somewhere this session will not accept an address for. Refusing is the safe half of
+        # the address-mismatch problem -- the half Stripe DOES let us close.
+        return dict(blank, reason="country_not_allowed")
+
+    parcels = _quote_parcels(items, products_by_id, shipping_config)
+    cart_fingerprint = quote_fingerprint(offer_id=offer.get("offer_id") or "", items=items,
+                                         parcels=parcels, destination=destination)
+    verdict = validate(quote, tenant_id=tenant_id, mode=mode, offer_id=offer.get("offer_id") or "",
+                       cart_fingerprint=cart_fingerprint, service_token=service_token,
+                       now=int(time.time()))
+
+    if verdict["action"] == FALLBACK:
+        logger.info("checkout ignored a shipping quote",
+                    extra={"tenant_id": tenant_id, "quote_id": quote_id, "reason": verdict["reason"]})
+        return dict(blank, reason=verdict["reason"])
+
+    if verdict["action"] == REQUOTE:
+        # Expired, or the cart moved under the buyer. Asking the carrier again beats charging a number
+        # that has rotted -- and the buyer still sees the final figure on Stripe's own page before they
+        # confirm, so a changed price is disclosed rather than hidden.
+        refreshed = _requote(tenant_id=tenant_id, mode=mode, offer=offer, items=items,
+                             products_by_id=products_by_id, parcels=parcels, destination=destination,
+                             shipping_config=shipping_config, secret_cipher=secret_cipher,
+                             service_token=service_token, quotes_repo=quotes_repo)
+        logger.info("checkout re-quoted shipping",
+                    extra={"tenant_id": tenant_id, "quote_id": quote_id, "reason": verdict["reason"],
+                           "repriced": bool(refreshed["option"])})
+        return refreshed or dict(blank, reason=verdict["reason"])
+
+    if verdict["action"] == USE_CHEAPEST:
+        logger.info("checkout fell back to the quote's cheapest service",
+                    extra={"tenant_id": tenant_id, "quote_id": quote_id,
+                           "requested": service_token, "reason": verdict["reason"]})
+
+    option = verdict["option"]
+    if not option:
+        return dict(blank, reason=verdict["reason"] or "no_option")
+    return {"option": option, "quote_id": str(quote.get("quote_id") or quote_id),
+            "destination": destination, "reason": verdict["reason"]}
+
+
+def _requote(*, tenant_id, mode, offer, items, products_by_id, parcels, destination, shipping_config,
+             secret_cipher, service_token, quotes_repo=None):
+    """One carrier call to replace a quote that no longer describes this purchase.
+
+    Mints a NEW row rather than mutating the old one: the quote a buyer agreed to is immutable, and an
+    order records which quote it actually transacted on (author, 2026-10-01).
+
+    Falls back to the zone path on any failure. A carrier that cannot be reached at the pay button must
+    not take the sale down with it.
+    """
+    from handlers.shipping import live_rates_for
+    from stripe_link.domain.shipping_charges import packed_box_price, resolve_options
+    from stripe_link.domain.shipping_quotes import cheapest_option, option_for
+    from stripe_link.domain.shipping_zones import rule_for as zone_rule_for
+
+    blank = {"option": None, "quote_id": "", "destination": destination, "reason": "requote_failed"}
+    country = destination.get("country") or ""
+    live_options = None
+    if zone_rule_for(shipping_config, country).get("type") == "live":
+        rated = live_rates_for(shipping_config, tenant_id, parcels=parcels, destination=destination,
+                               secret_cipher=secret_cipher or KmsSecretCipher())
+        if rated["error"]:
+            return blank
+        live_options = rated["options"]
+
+    priced = packed_box_price(items, products_by_id, shipping_config, country)
+    result = resolve_options(offer, shipping_config, country=country,
+                             merchandise_amount=0, item_count=max(1, len(items or [])),
+                             box_amount=priced["amount"], live_options=live_options)
+    if not result["options"] or result["needs"]:
+        return blank
+    fresh = _mint_quote(quotes_repo, mode, tenant_id=tenant_id, offer_id=offer.get("offer_id") or "",
+                        items=items, parcels=parcels, destination=destination,
+                        options=result["options"], source=result["source"], existing=None,
+                        currency="usd")
+    chosen = option_for({"options": result["options"]}, service_token)         or cheapest_option({"options": result["options"]})
+    return {"option": chosen, "quote_id": fresh.get("quote_id", ""), "destination": destination,
+            "reason": "requoted"}
 
 
 def collect_shipping_for(offer, products_by_id):
@@ -770,6 +1036,10 @@ def build_checkout_payload(
     discount_materializer=None,
     shipping_config=None,
     ship_to_country="",
+    shipping_quote_id="",
+    shipping_service="",
+    secret_cipher=None,
+    quotes_repo=None,
 ):
     checkout = offer.get("checkout") or {}
     # The session's mode follows the lines it actually carries, in BOTH directions.
@@ -977,24 +1247,52 @@ def build_checkout_payload(
         # override -- but only offers a price when every allowed destination agrees on one, because Stripe
         # fixes this list when the session opens and never asks us again. Per-destination pricing needs the
         # buyer's country BEFORE the session, which is the Shipping Element's job (phase 5).
-        decision = checkout_shipping(
-            offer, shipping_config or {},
-            merchandise_amount=int(resolved.get("subtotal") or 0),
-            item_count=max(1, shippable_units),
-            # The cart itself, so a by-box zone can be priced from the boxes it actually packs into.
-            items=resolved.get("items") or [],
-            products_by_id=products_by_id,
-            # One destination when the buyer declared one, so zones that disagree no longer force us to
-            # charge nothing -- there is only one zone to satisfy.
-            countries=destinations,
-        )
-        if decision["reason"]:
-            # Said out loud rather than silently shipping free: a tenant whose zones are not being charged
-            # needs to know which of their own settings stopped it.
-            logger.info("checkout shipping not charged", extra={
-                "tenant_id": tenant_id, "offer_id": offer.get("offer_id"), "reason": decision["reason"]})
+        # A QUOTE the buyer already chose from, when the shipping element asked (phase 4 of
+        # plans/LIVE_SHIPPING_RATES.md). The amount comes off the server's own row -- the browser sends a
+        # quote id and a service token and never an amount -- so the only thing a tampered parameter can
+        # do is name a service that is not in the quote, which falls back to the quote's own cheapest.
+        # `key_mode`, NOT `mode`: `mode` is rebound above to the SESSION mode (payment/subscription),
+        # while a quote is stamped with the STRIPE mode (test/live) it was rated under. Passing `mode`
+        # here made every quote fail validation as a mode mismatch and silently fall back to the zone
+        # path -- which for a live zone means no shipping charge at all, the exact bug this work exists
+        # to fix. Caught by the integrity tests rather than in production.
+        quoted = _shipping_from_quote(
+            quote_id=shipping_quote_id, service_token=shipping_service, tenant_id=tenant_id,
+            mode=key_mode,
+            offer=offer, items=resolved.get("items") or [], products_by_id=products_by_id,
+            shipping_config=shipping_config or {}, secret_cipher=secret_cipher,
+            allowed_countries=destinations, quotes_repo=quotes_repo)
+        if quoted["option"]:
+            options = [quoted["option"]]
+            payload["metadata[shipping_quote_id]"] = quoted["quote_id"]
+            payload["metadata[shipping_service]"] = str(quoted["option"].get("service_token") or "")
+            # BOTH postal codes become answerable later: this is the one we quoted, and the webhook reads
+            # the one Stripe actually collected. A variance that cannot name the two addresses is an
+            # assertion rather than an explanation (author, 2026-10-01).
+            payload["metadata[shipping_postal_code]"] = quoted["destination"].get("postal_code", "")
+            payload["metadata[shipping_quoted_amount]"] = str(int(quoted["option"].get("amount") or 0))
+        else:
+            # No quote, or one we may not use. Exactly the path a buyer who never touched the element takes.
+            decision = checkout_shipping(
+                offer, shipping_config or {},
+                merchandise_amount=int(resolved.get("subtotal") or 0),
+                item_count=max(1, shippable_units),
+                # The cart itself, so a by-box zone can be priced from the boxes it actually packs into.
+                items=resolved.get("items") or [],
+                products_by_id=products_by_id,
+                # One destination when the buyer declared one, so zones that disagree no longer force us to
+                # charge nothing -- there is only one zone to satisfy.
+                countries=destinations,
+            )
+            options = decision["options"]
+            if decision["reason"]:
+                # Said out loud rather than silently shipping free: a tenant whose zones are not being
+                # charged needs to know which of their own settings stopped it.
+                logger.info("checkout shipping not charged", extra={
+                    "tenant_id": tenant_id, "offer_id": offer.get("offer_id"),
+                    "reason": decision["reason"], "quote_reason": quoted["reason"]})
         for index, option in enumerate(
-                stripe_option_payload(decision["options"], currency=resolved.get("currency", "usd"))):
+                stripe_option_payload(options, currency=resolved.get("currency", "usd"))):
             for key, value in _flatten_params(option).items():
                 payload[f"shipping_options[{index}]{key}"] = value
     # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same

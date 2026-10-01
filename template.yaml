@@ -1655,6 +1655,12 @@ Resources:
         # countries Checkout will accept an address from (plans/SHIPPING_ELEMENT.md phase 3). Read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref ShippingConfigTable
+        # Shipping quotes, which this function both MINTS (at /shipping-quote) and READS BACK (at /checkout,
+        # to price the session from the server's own number rather than the browser's). CRUD rather than
+        # Read because minting is a write; the rows share CartsTable with the cart and tip tokens, which is
+        # where this codebase keeps short-lived opaque buyer rows (plans/LIVE_SHIPPING_RATES.md).
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
         # A campaign coupon carried in from a coupon element is resolved from its CODE, because the
@@ -3053,6 +3059,11 @@ Resources:
         # Buying one claims a shipment row BEFORE the money is spent, then records what was bought.
         - DynamoDBCrudPolicy:
             TableName: !Ref ShipmentsTable
+        # What the carrier actually charged for a label, kept beside what the buyer was quoted so a
+        # shipping-cost variance can explain itself (plans/LIVE_SHIPPING_RATES.md phase 5). Shares
+        # CartsTable with the quotes it references, under its own document_type.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
         # A RETURN label is bought against a refund request that is already waiting for goods, and writes
         # its expiry back onto that request (plans/ORDER_FULFILMENT.md R2). Refund requests live in the
         # NOTIFICATIONS table -- refund_requests_repository() reads NOTIFICATIONS_TABLE -- so there is no
@@ -3118,6 +3129,15 @@ Resources:
             # Allowed-Carriers fields were free text, which invites typos and, worse, service codes no carrier
             # recognises (plans/SHIPPING_ELEMENT.md).
             Path: /shipping/carriers
+            Method: GET
+        ShippingParcelTemplates:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # Carrier-supplied packaging (USPS Flat Rate boxes, FedEx Paks). The rating path already
+            # forwards a box's `template`; nothing ever told a tenant which ones exist, which made the
+            # feature unreachable (plans/LIVE_SHIPPING_RATES.md phase 7).
+            Path: /shipping/parcel-templates
             Method: GET
         ShippingRates:
           Type: Api

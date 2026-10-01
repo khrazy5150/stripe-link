@@ -182,10 +182,25 @@
               </select>
             </label>
           </div>
+          <!-- CARRIER PACKAGING. The one container whose price is destination-independent, because the
+               carrier says so — a tenant's own carton never is. Its dimensions belong to the carrier, so
+               they are shown and locked rather than typed. -->
+          <label v-if="parcelTemplates.length" class="offer-field">
+            <span>Carrier packaging</span>
+            <select :value="box.template || ''" @change="useParcelTemplate(box, $event.target.value)">
+              <option value="">My own box — rated on size, weight and distance</option>
+              <option v-for="tpl in parcelTemplates" :key="tpl.template" :value="tpl.template">
+                {{ tpl.name }}
+              </option>
+            </select>
+          </label>
           <div class="modal-dimensions-grid">
-            <label>Length (in)<input v-model.number="box.length" type="number" min="0" step="0.1" /></label>
-            <label>Width (in)<input v-model.number="box.width" type="number" min="0" step="0.1" /></label>
-            <label>Height (in)<input v-model.number="box.height" type="number" min="0" step="0.1" /></label>
+            <label>Length (in)<input v-model.number="box.length" type="number" min="0" step="0.1"
+                                     :disabled="!!box.template" /></label>
+            <label>Width (in)<input v-model.number="box.width" type="number" min="0" step="0.1"
+                                    :disabled="!!box.template" /></label>
+            <label>Height (in)<input v-model.number="box.height" type="number" min="0" step="0.1"
+                                    :disabled="!!box.template" /></label>
             <label>Box weight (lb)<input v-model.number="box.empty_weight" type="number" min="0" step="0.01" /></label>
             <label>Max weight (lb)<input v-model.number="box.max_weight" type="number" min="0" step="0.1" placeholder="—" /></label>
           </div>
@@ -206,6 +221,12 @@
             <small class="field-hint">
               Blank means this box has no price for that country, so an order needing it cannot be
               quoted — leave it blank only if you never ship that size there.
+            </small>
+            <!-- Typing a price per box is guessing at postage. It is kept for tenants with no carrier
+                 connected, but it should never read as the recommended path when live rates exist. -->
+            <small v-if="form.provider.name" class="field-hint">
+              You have a carrier connected — a zone set to <strong>Live carrier rates</strong> prices
+              each order from its real size, weight and destination instead, with nothing to type here.
             </small>
           </div>
           <small v-if="box.kind === 'soft_pack'" class="field-hint">
@@ -372,11 +393,19 @@
           <p v-if="zone.rule.type === 'flat_rate_box'" class="field-hint">
             Priced from the <strong>Boxes</strong> section below — give each box a price for
             {{ isCatchAllZone(zone) ? "these destinations" : (zone.countries_text || "these countries") }}.
-            {{ boxPricingGap(zone) }}
+          </p>
+          <p v-if="zone.rule.type === 'flat_rate_box' && boxPricingGap(zone)" class="keys-status-banner warning">
+            <strong>Buyers here are not charged for shipping.</strong>
+            {{ boxPricingGap(zone) }} Checkout has no price to quote, and Stripe cannot ask again once the
+            payment page opens — so these orders ship free until a box is priced.
           </p>
           <p v-if="zone.rule.type === 'live'" class="field-hint">
-            Needs a connected carrier and the buyer's postal code, so a page showing these rates has to ask for
-            it. Until a carrier is connected, buyers here are not charged for shipping.
+            Buyers here see real carrier prices for their own address. Your page needs a
+            <strong>Shipping</strong> element so they can enter a postal code — without one there is no
+            address to rate, and nothing is charged.
+          </p>
+          <p v-if="zone.rule.type === 'live' && liveZoneGap" class="keys-status-banner warning">
+            <strong>Buyers here are not charged for shipping.</strong> {{ liveZoneGap }}
           </p>
         </div>
         <button class="secondary-action" type="button" @click="addZone">Add zone</button>
@@ -789,10 +818,25 @@ const boxPricingCountries = computed(() => {
 
 const boxPricingUsed = computed(() => boxPricingCountries.value.length > 0);
 
+/** What stops a live zone from quoting, or "" when nothing does.
+ *
+ * Only ever ONE sentence, and only when there is something the tenant must actually go and do. The
+ * previous copy blamed a missing carrier unconditionally, which was simply wrong for a tenant who had
+ * connected one -- and wrong advice is worse than silence because it sends them to the wrong screen.
+ */
+const liveZoneGap = computed(() => {
+  if (!form.provider.name) return "Connect a carrier above to get live rates.";
+  if (!form.enabled_services.length) {
+    return "Add at least one service below — buyers can only choose from services you offer.";
+  }
+  return "";
+});
+
 /** Names what is missing, because a box-priced zone with no priced box cannot quote at all. */
 function boxPricingGap(zone) {
   const codes = zoneCountryCodes(zone).filter((code) => code !== "*");
-  if (!codes.length || !form.boxes.length) return "";
+  if (!codes.length) return "";
+  if (!form.boxes.length) return "No boxes are defined yet, so nothing has a price.";
   const unpriced = codes.filter((code) => !form.boxes.some((box) => String(box.prices?.[code] || "").trim()));
   return unpriced.length ? `No box has a price for ${unpriced.join(", ")} yet.` : "";
 }
@@ -835,6 +879,35 @@ function boxFormFromDocument(box) {
     prices[String(code).toUpperCase()] = (Number(cents) / 100).toFixed(2);
   });
   return { ...emptyBox(), ...box, prices };
+}
+
+const parcelTemplates = ref([]);
+
+/** Carrier-supplied packaging, fetched once. Silent on failure: a picker that cannot populate leaves the
+ * tenant with their own boxes, which is exactly where they were before it existed. */
+async function loadParcelTemplates() {
+  try {
+    const body = await apiRequest("/shipping/parcel-templates");
+    parcelTemplates.value = Array.isArray(body?.templates) ? body.templates : [];
+  } catch {
+    parcelTemplates.value = [];
+  }
+}
+
+/** Adopting a template takes the carrier's dimensions with it — they are facts about the container, not
+ * preferences, and a tenant who edits them is describing a box that does not exist. Clearing it hands the
+ * dimensions back. */
+function useParcelTemplate(box, token) {
+  const tpl = parcelTemplates.value.find((t) => t.template === token);
+  if (!tpl) {
+    box.template = "";
+    return;
+  }
+  box.template = tpl.template;
+  box.name = tpl.name;
+  box.length = Number(tpl.length) || box.length;
+  box.width = Number(tpl.width) || box.width;
+  box.height = Number(tpl.height) || box.height;
 }
 
 function useStarterBoxes() {
@@ -1221,5 +1294,6 @@ async function save() {
 
 load();
 loadCarriers();
+loadParcelTemplates();
 loadCatalogue();
 </script>

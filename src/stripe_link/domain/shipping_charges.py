@@ -335,7 +335,8 @@ def offer_override(offer: dict[str, Any] | None) -> dict[str, Any]:
 
 def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] | None, *,
                     country: Any, merchandise_amount: Any = 0, item_count: int = 1,
-                    box_amount: int | None = None) -> dict[str, Any]:
+                    box_amount: int | None = None,
+                    live_options: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """What this buyer, at this destination, may choose from — and whether we can price it yet.
 
     Returns `{options, mode, source, needs}`:
@@ -349,9 +350,14 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
     - `source` — which layer decided: `offer_options`, `offer_override`, `zone`, or `unserved`. A tenant asking
       why a buyer saw a price needs to know WHICH of the three layers answered, exactly as
       `refund_policy.resolve` reports its source.
-    - `needs` — what is missing before a price exists: `carrier` (a live zone with no rate yet) or `box_price`
+    - `needs` — what is missing before a price exists: `carrier` (a live zone with no rate yet),
+      `services` (a live zone where rates came back but the tenant has enabled none of them) or `box_price`
       (a by-box zone whose packed box has no price for this country). **Empty options with a `needs` is not
       "free shipping"** — it is "not answerable yet", and a caller that renders it as free ships for nothing.
+
+    `live_options` is how a caller SATISFIES a live zone: already-rated, already-summed services from
+    `shipping_rating.rate_parcels`. Passing none leaves the live branch exactly as it was — `needs: carrier`
+    — which is what a caller with no carrier connected, or no postal code yet, should still get.
 
     Precedence, strongest first:
 
@@ -415,6 +421,22 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
         if amount is None:
             needs = "box_price"
     else:  # live
+        # The one branch whose price is PER SERVICE rather than one amount shared across every service, so
+        # it returns here instead of falling through to the shared-amount builder below. Narrowing stays
+        # the zone's job either way: `services` is the same list the flat path uses, applied as a filter.
+        if live_options:
+            from stripe_link.domain.shipping_rating import apply_tenant_services
+
+            offered = [normalize_option(opt) for opt in apply_tenant_services(live_options, services)]
+            offered = [opt for opt in offered if opt]
+            if offered:
+                return {"options": offered[:MAX_OPTIONS],
+                        "mode": CHARGED if any(o["amount"] for o in offered) else FREE,
+                        "source": source, "needs": ""}
+            # Rates came back and NONE survived the tenant's own service list. Distinct from `carrier`,
+            # which means nobody was asked: this one is fixed in the Shipping screen rather than by
+            # connecting a carrier, so answering "carrier" would send the tenant to the wrong setting.
+            return {"options": [], "mode": CHARGED, "source": source, "needs": "services"}
         amount = None
         needs = "carrier"
 

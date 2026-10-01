@@ -263,3 +263,67 @@ class DerivedReturnAddressTests(unittest.TestCase):
     def test_nothing_configured_is_empty_rather_than_invented(self):
         from stripe_link.domain.shipping import return_address
         self.assertEqual(return_address({}), {})
+
+
+class BoxPriceGapIsLoudTests(unittest.TestCase):
+    """A box-priced zone with no priced box means buyers ship FREE, and Stripe cannot ask again once
+    checkout opens. That was reported as "no shipping charge is shown at checkout" -- the engine refused
+    to quote, said why in a server log, and the screen mentioned the gap in a `field-hint` styled exactly
+    like the advisory text beside it. The consequence is money, so it reads as a warning."""
+
+    def _gap_block(self):
+        return SCREEN.split("function boxPricingGap(zone)", 1)[1][:700]
+
+    def test_the_gap_is_a_warning_banner_not_a_hint(self):
+        warning = [line for line in SCREEN.splitlines() if "boxPricingGap(zone)" in line
+                   and "keys-status-banner warning" in line]
+        self.assertTrue(warning, "the box-price gap must render in the warning banner style")
+
+    def test_the_warning_names_the_consequence_not_only_the_gap(self):
+        # "No box has a price for US yet" is a fact about configuration. "Buyers here are not charged for
+        # shipping" is what it COSTS, and it is the half a tenant acts on.
+        self.assertIn("Buyers here are not charged for shipping.", SCREEN)
+        self.assertIn("Stripe cannot ask again once the", SCREEN)
+
+    def test_the_remaining_hint_no_longer_carries_the_gap(self):
+        hint = SCREEN.split('<p v-if="zone.rule.type === \'flat_rate_box\'" class="field-hint">', 1)[1][:400]
+        self.assertNotIn("boxPricingGap", hint.split("</p>", 1)[0])
+
+    def test_an_empty_box_table_is_itself_the_gap(self):
+        # Zero boxes used to return "" -- the one configuration where NOTHING can ever be priced was the
+        # one that said nothing.
+        self.assertIn("No boxes are defined yet, so nothing has a price.", self._gap_block())
+
+    def test_the_warning_only_shows_for_box_priced_zones(self):
+        self.assertIn("zone.rule.type === 'flat_rate_box' && boxPricingGap(zone)", SCREEN)
+
+
+class LiveRateCopyIsTrueTests(unittest.TestCase):
+    """The live-zone hint blamed a missing carrier unconditionally -- including for a tenant who had
+    connected one and whose rate viewer was returning real UPS and USPS prices. Wrong advice is worse
+    than silence, because it sends the tenant to the wrong screen
+    (plans/LIVE_SHIPPING_RATES.md phase 6)."""
+
+    def test_it_no_longer_blames_a_missing_carrier_unconditionally(self):
+        self.assertNotIn("Until a carrier is connected", SCREEN)
+
+    def test_it_names_what_a_live_zone_actually_needs(self):
+        self.assertIn("Your page needs a", SCREEN)
+        self.assertIn("so they can enter a postal code", SCREEN)
+
+    def test_the_warning_fires_only_when_there_is_something_to_do(self):
+        gap = SCREEN.split("const liveZoneGap = computed", 1)[1][:600]
+        self.assertIn("Connect a carrier above", gap)
+        self.assertIn("Add at least one service below", gap)
+        self.assertIn('return "";', gap)
+
+    def test_no_enabled_services_is_its_own_gap(self):
+        # `services_for` returns [] with no enabled services, so every live rate is filtered away and the
+        # buyer sees nothing. Silent until now.
+        self.assertIn("buyers can only choose from services you offer", SCREEN)
+
+    def test_typed_box_prices_are_marked_as_the_fallback_they_are(self):
+        # Typing a price per box is guessing at postage. It stays for tenants with no carrier.
+        self.assertIn("prices each order from its real size, weight and destination",
+                      " ".join(SCREEN.split()))
+        self.assertIn('v-if="form.provider.name"', SCREEN)

@@ -82,6 +82,8 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
         return preview_rates(event, repository, secret_cipher, products_repo=products_repo)
     if _action(event) == "carriers" and method == "GET":
         return list_carriers(event, repository, secret_cipher)
+    if _action(event) == "parcel-templates" and method == "GET":
+        return list_parcel_templates(event, repository, secret_cipher)
     if _action(event) == "rates" and method == "POST":
         return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
                            orders_repo=orders_repo)
@@ -295,6 +297,95 @@ def _sample_destination(from_address: dict, typed: dict) -> dict:
     return {**chosen, **typed}
 
 
+def record_shipping_variance(order, shipment, tenant_id, *, mode, now, actuals_repo=None):
+    """Compare the label's real cost with the quote the buyer agreed to, and keep both.
+
+    plans/LIVE_SHIPPING_RATES.md phase 5. Writes a `shipping_actual` row, keyed per ORDER because two
+    buyers can share one quote but never share a label.
+
+    **It does NOT write back to the order**, deliberately. This function holds read-only access to orders,
+    and a `{**order, ...}` put from here would race the webhook's own updates and silently clobber
+    whichever lost -- a bookkeeping note is not worth corrupting an order over. The Orders view reads the
+    variance from its own record instead.
+
+    Returns the variance, or `{}` when there is nothing to compare -- an order with no quote, or a label
+    with no cost. **Never raises.** The label is bought and the parcel is going; a bookkeeping failure
+    must not read as a failed purchase.
+
+    Flagging is ONE-DIRECTIONAL by the author's rule: a label cheaper than the quote is recorded as a
+    saving and raises nothing.
+    """
+    from stripe_link.domain.shipping_quotes import build_actual
+
+    agreed = (order or {}).get("shipping_quote") or {}
+    cost = (shipment or {}).get("cost") or {}
+    if not agreed.get("quote_id") or cost.get("amount") is None:
+        return {}
+    try:
+        record = build_actual(
+            quote_id=agreed.get("quote_id", ""),
+            order_id=str((order or {}).get("order_id") or ""),
+            service_token=str(shipment.get("service") or agreed.get("service_token") or ""),
+            amount=cost.get("amount"), quoted_amount=agreed.get("quoted_amount"),
+            destination={"postal_code": agreed.get("actual_postal_code"),
+                         "country": ((order or {}).get("shipping_address") or {}).get("country")},
+            quoted_destination={"postal_code": agreed.get("quoted_postal_code"),
+                                "country": ((order or {}).get("shipping_address") or {}).get("country")},
+            carrier=str(shipment.get("carrier") or ""),
+            currency=str(cost.get("currency") or "usd"), now=now)
+        # The ORIGINAL service, kept beside what actually shipped. A carrier that could not carry the
+        # quoted service is a different exception from a price that moved, and conflating them would tell
+        # the tenant their postage went up when in fact the buyer's chosen speed was never available.
+        record["quoted_service_token"] = str(agreed.get("service_token") or "")
+        record["service_substituted"] = bool(
+            record["quoted_service_token"] and record["service_token"] != record["quoted_service_token"])
+        (actuals_repo or _shipping_actuals_repo(mode)).put(tenant_id, record)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[shipping] variance not recorded for order "
+              f"{(order or {}).get('order_id')}: {type(exc).__name__}: {exc}")
+        return {}
+    return record
+
+
+def _shipping_actuals_repo(mode):
+    from stripe_link.repositories.documents import shipping_actuals_repository
+
+    return shipping_actuals_repository(mode=mode)
+
+
+def live_rates_for(config, tenant_id, *, parcels, destination, secret_cipher):
+    """Live carrier rates for a BUYER's parcels, to a BUYER's address.
+
+    plans/LIVE_SHIPPING_RATES.md phase 2. Lives here rather than in `handlers/checkout` because this is
+    where the provider key is named and decrypted (`SECRET_MODE` / `SECRET_FIELD`), and a second place that
+    knows how to open a carrier credential is a second place to get it wrong.
+
+    Returns `{options, error}` and **never raises**. Every failure -- no provider, no key, no ship-from
+    address, a carrier having a bad minute -- comes back as a reason, because the caller is a landing page
+    and the honest answer there is "we could not get rates", never a 500 and never a silent zero.
+    """
+    from stripe_link.domain.shipping_rating import rate_parcels
+
+    provider_config = dict((config or {}).get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    if not name or not secret_ref:
+        return {"options": [], "error": "no_provider"}
+    from_address = (config or {}).get("ship_from_address") or {}
+    if not from_address.get("postal_code"):
+        # A carrier prices a JOURNEY. Without an origin there is nothing to price, and Shippo rejects the
+        # request rather than guessing -- so this is caught here where it can be named.
+        return {"options": [], "error": "no_ship_from"}
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        )
+    except Exception as exc:  # noqa: BLE001 - an unreadable key is one answer, not a broken page
+        return {"options": [], "error": f"key_unreadable: {type(exc).__name__}"}
+    return rate_parcels(provider_for(name, api_key), from_address=from_address,
+                        to_address=destination, parcels=parcels)
+
+
 def preview_rates(event, repository, secret_cipher, *, products_repo=None):
     """What the carriers would charge for a sample parcel, so a tenant can DISCOVER real services.
 
@@ -382,6 +473,41 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
         "destination": {"country": destination.get("country", ""),
                         "postal_code": destination.get("postal_code", "")},
     })
+
+
+def list_parcel_templates(event, repository, secret_cipher):
+    """Carrier-supplied packaging the tenant can adopt as a box.
+
+    plans/LIVE_SHIPPING_RATES.md phase 7. The rating path already forwards a box's `template` to the
+    provider (`_shippo_parcel`), so this is the missing half: nothing ever told a tenant WHICH templates
+    exist, which made the feature unreachable.
+
+    Why it matters beside live rates rather than instead of them: a carrier flat-rate container is the one
+    package whose price really is destination-independent, because the carrier says so. **A tenant's own
+    carton never is**, whatever its dimensions -- it is rated on size, weight and distance like anything
+    else, which is what the live path is for.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    config = repository.get(tenant_id) or {}
+    provider = config.get("provider") or {}
+    name = str(provider.get("name") or "").strip()
+    key_ref = str(provider.get("api_key_ref") or "").strip()
+    if not name or not key_ref:
+        # An empty list with a reason, not an error: a tenant with no carrier has no carrier packaging,
+        # and a 4xx here would read as "something is broken" rather than "connect a carrier first".
+        return json_response({"templates": [], "reason": "no_provider"})
+    try:
+        api_key = secret_cipher.decrypt(
+            key_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        )
+        templates = provider_for(name, api_key).parcel_templates()
+    except ProviderError as exc:
+        return json_response({"templates": [], "reason": str(exc)[:200]})
+    except Exception as exc:  # noqa: BLE001 - a picker that cannot populate is not a broken screen
+        return json_response({"templates": [], "reason": f"{type(exc).__name__}"})
+    return json_response({"templates": templates, "reason": ""})
 
 
 def list_carriers(event, repository, secret_cipher):
@@ -519,7 +645,37 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
         "selected": selection["rate"],
         "selection_reason": selection["reason"],
         "withheld": selection["withheld"],
+        # WHAT THE BUYER WAS SOLD, beside what the carrier will now actually carry
+        # (plans/LIVE_SHIPPING_RATES.md phase 5, the author's fourth decision). A service the carrier
+        # cannot quote for the real address is NOT a price variance and must not be silently substituted:
+        # the tenant sees the alternatives and their costs, and is told the original delivery estimate no
+        # longer applies -- a buyer promised four days by UPS Ground Saver did not agree to whatever else
+        # happens to be going.
+        **quoted_service_status(order, rates),
     })
+
+
+def quoted_service_status(order, rates):
+    """Whether the service the buyer actually paid for is still available for this address.
+
+    Returns `{}` when no quote priced the order -- most orders, and nothing to say about them. Otherwise
+    `{"quoted_service": {...}}` carrying the token, whether it is still offered, and its price now.
+    """
+    agreed = (order or {}).get("shipping_quote") or {}
+    token = str(agreed.get("service_token") or "")
+    if not token:
+        return {}
+    match = next((r for r in rates or [] if str(r.get("service_token") or "") == token), None)
+    return {"quoted_service": {
+        "service_token": token,
+        "quoted_amount": int(agreed.get("quoted_amount") or 0),
+        "available": match is not None,
+        "amount_now": int(match.get("amount") or 0) if match else None,
+        # Said explicitly rather than left to inference. The buyer saw a delivery promise attached to the
+        # service they chose; if that service cannot carry this parcel, the promise is void and the tenant
+        # is the one who has to decide what to tell them.
+        "estimate_still_applies": match is not None,
+    }}
 
 
 def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_repo=None,
@@ -619,6 +775,12 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
         saved = shipments.put(purchased)
     except RepositoryError as exc:
         return error_response(str(exc), code="shipment_not_saved")
+
+    # WHAT THE CARRIER CHARGED, against what the buyer was quoted. The second half of the audit pair, and
+    # the moment `ledger.shipping_margin` stops being None (plans/LIVE_SHIPPING_RATES.md phase 5).
+    # Best-effort: the label is bought and the parcel is going. A bookkeeping write must never turn a
+    # successful purchase into an error the tenant thinks they should retry.
+    record_shipping_variance(order, saved, tenant_id, mode=mode, now=now)
 
     # The buyer is told the same way the manual path tells them -- one builder, one mailer. Best-effort
     # HERE, unlike the manual path: the label is already bought and paid for, so a bounced address must

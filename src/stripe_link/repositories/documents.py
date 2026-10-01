@@ -1478,6 +1478,41 @@ def purchase_tokens_repository(table: Any | None = None, *, mode: str | None = N
     )
 
 
+def shipping_quotes_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    # Shares CARTS_TABLE with the cart, tip and purchase tokens: the same kind of object -- short-lived,
+    # opaque, buyer-facing, TTL'd -- distinguished by document_type. A shipping quote is a cart's price for
+    # getting somewhere, so it belongs beside the cart rather than in a table of its own.
+    #
+    # Mode-scoped because a TEST quote must never price a LIVE checkout: the two are rated against
+    # different carrier keys, and a sandbox key quotes carriers that do not exist in production.
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="shipping_quote",
+        id_field="quote_id",
+        table=table,
+        mode=mode,
+        mode_scoped=True,
+    )
+
+
+def shipping_actuals_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    # What the carrier CHARGED, kept apart from what the buyer was QUOTED so the quote stays immutable
+    # (plans/LIVE_SHIPPING_RATES.md). Overwriting the quote with the label's price would destroy the only
+    # record of what the customer actually agreed to.
+    #
+    # Keyed by ORDER, not by quote: two buyers with an identical cart and destination share one quote row
+    # (it is the same answer), but they buy two labels at two prices, and keying this by quote would let
+    # one order's actual overwrite the other's.
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="shipping_actual",
+        id_field="order_id",
+        table=table,
+        mode=mode,
+        mode_scoped=True,
+    )
+
+
 def purchase_throttles_repository(table: Any | None = None) -> DynamoDocumentRepository:
     # Counters for the public /purchase/manage lookup. Same table as the tokens they gate, TTL'd the same
     # way, distinguished by document_type. NOT mode-scoped: an abuser does not pick a Stripe mode.
