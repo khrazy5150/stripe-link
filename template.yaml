@@ -3059,6 +3059,11 @@ Resources:
         # Buying one claims a shipment row BEFORE the money is spent, then records what was bought.
         - DynamoDBCrudPolicy:
             TableName: !Ref ShipmentsTable
+        # What the carrier charged, appended to the transaction ledger so shipping MARGIN exists at all
+        # (plans/LIVE_SHIPPING_RATES.md phase 5). Append-only in practice; Crud because that is the
+        # policy shape SAM offers for a writer.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LedgerTable
         # What the carrier actually charged for a label, kept beside what the buyer was quoted so a
         # shipping-cost variance can explain itself (plans/LIVE_SHIPPING_RATES.md phase 5). Shares
         # CartsTable with the quotes it references, under its own document_type.

@@ -1291,6 +1291,19 @@ def record_refund_ledger_entry(ledger_repo, *, tenant_id: str, order: dict[str, 
             mode="live" if order.get("mode") == "live" else "test",
             currency=str(order.get("currency") or "usd"),
             refund_amount=int(refund.get("amount") or 0),
+            # THE POSTAGE THAT WENT BACK WITH IT. Never passed before, so a refunded order left its
+            # shipping revenue standing: `gross` fell, `shipping_revenue` did not, and shipping margin was
+            # overstated for every refunded order that had postage on it.
+            #
+            # Only a refund of the WHOLE order reverses it, and that is a limit rather than a shortcut --
+            # a partial refund cannot be attributed between goods and postage from the amount alone, and
+            # `ledger.refund_entry` says so in its own words. Guessing a share would make the margin
+            # quietly wrong instead of visibly incomplete.
+            shipping_reversed=(
+                int(order.get("shipping_amount") or 0)
+                if int(refund.get("amount") or 0) >= int(order.get("amount_total") or 0) > 0
+                else 0
+            ),
             idempotency_key=f"refund:{stripe_refund_id}",
             order_id=str(order.get("order_id") or "") or None,
             customer=customer,
@@ -2039,6 +2052,8 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "billing_reason": str(invoice.get("billing_reason") or ""),
         "status": "paid",
         "amount_total": amount,
+        # Same liability, read from the invoice's own field (renewals price through Invoices, not Sessions).
+        "tax_amount": int(invoice.get("tax") or 0),
         "currency": str(invoice.get("currency") or "usd"),
         "mode": "live" if invoice.get("livemode") else "test",
         "stripe_mode": "live" if invoice.get("livemode") else "test",
@@ -2130,6 +2145,11 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         # amount only exists once Stripe reports it (plans/SHIPPING_CHARGES.md). Absent for digital orders
         # rather than zero -- a stored 0 would claim shipping was offered and declined.
         **buyer_paid_shipping(session),
+        # TAX COLLECTED, which is the tenant's LIABILITY rather than their income. Never captured until
+        # now, so `ledger.summarize`'s `tax_liability` was structurally zero for every tenant -- a figure
+        # that looks authoritative and is always wrong (plans/TODO.md). Zero is the TRUE answer until a
+        # tenant enables Stripe Tax; the point is that it is now read rather than assumed.
+        "tax_amount": int((session.get("total_details") or {}).get("amount_tax") or 0),
         # WHAT WE QUOTED, beside what Stripe collected (plans/LIVE_SHIPPING_RATES.md phase 5). The quote
         # row itself is a TTL'd cache; this is the durable record of what this buyer agreed to, and the
         # baseline any later shipping-cost variance is measured against. Absent when no quote priced the

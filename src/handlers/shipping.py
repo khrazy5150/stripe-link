@@ -297,6 +297,36 @@ def _sample_destination(from_address: dict, typed: dict) -> dict:
     return {**chosen, **typed}
 
 
+def record_shipping_cost_entry(order, shipment, *, now, ledger_repo=None):
+    """Append what the carrier charged to the transaction ledger.
+
+    Its own entry rather than an edit to the sale: the ledger is append-only, and the label is bought after
+    the sale -- sometimes days after. Keyed on the shipment, so a retried purchase cannot double-count
+    postage the tenant only bought once.
+
+    Returns True when written. **Never raises** -- a bookkeeping append must not read as a failed label.
+    """
+    from stripe_link.domain.ledger import shipping_cost_entry_from_shipment
+
+    try:
+        entry = shipping_cost_entry_from_shipment(shipment, order, now_epoch=now)
+        if not entry:
+            return False
+        repo = ledger_repo
+        if repo is None:
+            if not os.environ.get("LEDGER_TABLE"):
+                return False
+            from stripe_link.repositories.documents import ledger_repository
+
+            repo = ledger_repository(mode=entry.get("mode"))
+        repo.append(entry)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[shipping] shipping cost not recorded for order "
+              f"{(order or {}).get('order_id')}: {type(exc).__name__}: {exc}")
+        return False
+
+
 def record_shipping_variance(order, shipment, tenant_id, *, mode, now, actuals_repo=None):
     """Compare the label's real cost with the quote the buyer agreed to, and keep both.
 
@@ -783,6 +813,11 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # Best-effort: the label is bought and the parcel is going. A bookkeeping write must never turn a
     # successful purchase into an error the tenant thinks they should retry.
     record_shipping_variance(order, saved, tenant_id, mode=mode, now=now)
+    # THE OTHER HALF OF SHIPPING MARGIN. `shipping_cost` sat in the ledger's AMOUNT_COMPONENTS with no
+    # builder and no writer, so `summarize`'s `shipping_margin` could only ever be None and a tenant could
+    # never learn whether their postage pricing made or lost money. Best-effort, like everything after the
+    # label is bought: the postage is paid and the parcel is going.
+    record_shipping_cost_entry(order, saved, now=now)
 
     # The buyer is told the same way the manual path tells them -- one builder, one mailer. Best-effort
     # HERE, unlike the manual path: the label is already bought and paid for, so a bounced address must
