@@ -185,15 +185,32 @@ class Validation(unittest.TestCase):
             validate_shipping_zones([{"destinations": [{"country": "CA"}], "rule": {"type": "flat"}},
                                      ELSEWHERE])
 
-    def test_flat_rate_box_without_a_priced_box_is_refused(self):
-        with self.assertRaises(DocumentValidationError) as caught:
-            validate_shipping_zones([{"destinations": [{"country": "CA"}],
-                                      "rule": {"type": "flat_rate_box"}}, ELSEWHERE], boxes=[])
-        self.assertIn("flat_rate", str(caught.exception))
+    def test_flat_rate_box_WITHOUT_a_priced_box_still_saves(self):
+        """Reported 2026-10-01 as "zones are not being saved". It refused the whole document, so a tenant
+        could not record "the US is priced by box" and then go and price the boxes -- which is the obvious
+        order, and the one the screen's layout suggests, since Boxes sits below Zones.
+
+        A validator refuses INCOHERENT data, not INCOMPLETE configuration. The gap is reported where it
+        matters: resolve_options answers `needs: box_price` and the screen says so while they work.
+        """
+        validate_shipping_zones([{"destinations": [{"country": "CA"}],
+                                  "rule": {"type": "flat_rate_box"}}, ELSEWHERE], boxes=[])
 
     def test_flat_rate_box_with_a_priced_box_passes(self):
         validate_shipping_zones([{"destinations": [{"country": "CA"}], "rule": {"type": "flat_rate_box"}},
                                  ELSEWHERE], boxes=CONFIG["boxes"])
+
+    def test_an_unpriced_by_box_zone_is_reported_at_RATING_time_instead(self):
+        """Where the tenant can act on it, and where a buyer would otherwise be mispriced."""
+        from stripe_link.domain.shipping_charges import resolve_options
+
+        config = {"enabled_services": [{"service_token": "ground", "label": "Ground"}],
+                  "zones": [{"destinations": [{"country": "US"}], "rule": {"type": "flat_rate_box"}},
+                            ELSEWHERE],
+                  "boxes": []}
+        result = resolve_options({}, config, country="US", box_amount=None)
+        self.assertEqual(result["needs"], "box_price")
+        self.assertEqual(result["options"], [])
 
     def test_a_zone_needs_a_destination(self):
         for zone in ({"rule": {"type": "free"}}, {"destinations": [], "rule": {"type": "free"}}):

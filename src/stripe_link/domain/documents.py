@@ -2806,7 +2806,7 @@ def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
     """
     if zones is None:
         return
-    from stripe_link.domain.shipping_zones import ANYWHERE, FLAT, FLAT_RATE_BOX, RULE_TYPES, zone_countries
+    from stripe_link.domain.shipping_zones import ANYWHERE, FLAT, RULE_TYPES, zone_countries
 
     if not isinstance(zones, list):
         raise DocumentValidationError("Shipping config zones must be an array.")
@@ -2853,14 +2853,16 @@ def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
         if rule["type"] == FLAT and rule.get("amount") is None:
             raise DocumentValidationError(
                 f"Shipping config zones[{index}] is a flat rate with no amount, so it prices nothing.")
-        if rule["type"] == FLAT_RATE_BOX:
-            priced = any(isinstance(box, dict) and isinstance(box.get("flat_rate"), dict)
-                         and any(str(k).strip().upper()[:2] in countries for k in box["flat_rate"])
-                         for box in (boxes if isinstance(boxes, list) else []))
-            if not priced and ANYWHERE not in countries:
-                raise DocumentValidationError(
-                    f"Shipping config zones[{index}] prices by flat-rate box, but no box has a flat_rate for "
-                    f"{', '.join(countries)}.")
+        # NOT validated: whether a `flat_rate_box` zone has a priced box yet.
+        #
+        # It was, and it was wrong. Refusing the SAVE meant a tenant could not record "the US is priced by
+        # box" and then go and price the boxes -- which is the obvious order to do it in, and the order the
+        # screen's own layout suggests, since Boxes sits below Zones. Reported 2026-10-01 as "zones are not
+        # being saved": the whole document was rejected and the tenant saw a hint that read as advisory.
+        #
+        # A validator should refuse INCOHERENT data, not INCOMPLETE configuration. The gap is already
+        # reported where it matters -- `shipping_charges.resolve_options` answers `needs: box_price`, the
+        # quote endpoint relays it, and the screen says "No box has a price for US yet" while they work.
 
     if zones and ANYWHERE not in zone_countries(zones[-1]):
         # Without one, a buyer from an unlisted country reaches undefined behaviour at the moment of purchase.
