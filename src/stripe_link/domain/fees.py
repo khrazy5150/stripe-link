@@ -384,6 +384,43 @@ def calculate_price(
     }
 
 
+def settled_breakdown(
+    *,
+    charged_amount: Any,
+    shipping_amount: Any = 0,
+    **price_kwargs: Any,
+) -> dict[str, int]:
+    """The fee split for a charge that may include postage. `fee_base`'s first caller.
+
+    Two different bases, and conflating them is how the webhook came to report a platform fee the platform
+    never took:
+
+    - **Stripe's fee is on the WHOLE charge.** Stripe processed the whole charge, postage included, and
+      bills accordingly. Nothing to exempt.
+    - **The platform's fee is on MERCHANDISE ONLY** -- the author's decision, 2026-09-30: *"No -- merchandise
+      only"*. `FEE_APPLIES_TO_SHIPPING` is what records it and `fee_base` is what applies it. Checkout has
+      always sent the right number to Stripe as `application_fee_amount`; the webhook recomputed from
+      `amount_total` and overstated it by the fee on postage, which then understated the tenant's payout.
+
+    `net_payout` is derived from the CHARGED amount, never from the fee base -- the tenant is paid out of
+    what the buyer actually paid.
+    """
+    charged = _non_negative_int(charged_amount, "charged_amount")
+    shipping = _non_negative_int(shipping_amount, "shipping_amount")
+    full = calculate_price(tenant_keyed_amount=charged, **price_kwargs)["breakdown"]
+    if not shipping:
+        return full
+    merchandise_base = fee_base(max(0, charged - shipping), shipping_amount=shipping)
+    merchandise = calculate_price(tenant_keyed_amount=merchandise_base, **price_kwargs)["breakdown"]
+    platform_fee = merchandise["platform_fee"]
+    return {
+        "tenant_keyed_amount": charged,
+        "stripe_fee": full["stripe_fee"],
+        "platform_fee": platform_fee,
+        "net_payout": max(charged - full["stripe_fee"] - platform_fee, 0),
+    }
+
+
 def build_fee_context(
     *,
     tenant_id: str,

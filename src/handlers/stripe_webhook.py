@@ -28,7 +28,7 @@ from stripe_link.domain.booking_credits import (
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment, validate_coupon_redemption_document
 from stripe_link.domain.downloads import digital_download_links
-from stripe_link.domain.fees import cached_billing_config, calculate_price
+from stripe_link.domain.fees import cached_billing_config, calculate_price, settled_breakdown
 from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
@@ -1639,8 +1639,18 @@ def fee_breakdown_from_session(
 ) -> dict[str, Any]:
     metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
     amount = int(session.get("amount_total") or 0)
-    result = calculate_price(
-        tenant_keyed_amount=amount,
+    # POSTAGE IS NOT THE PLATFORM'S TO TAKE A CUT OF (the author, 2026-09-30: "No -- merchandise only").
+    #
+    # This recomputed the whole split from `amount_total`, so once a shipping line existed it reported a
+    # platform fee the platform never charged: a $62.77 order with $5.98 postage recorded 314 against the
+    # 284 Stripe actually took, and understated the tenant's payout by the difference. Checkout was always
+    # right -- it sends `application_fee_amount` from the merchandise subtotal -- but the ORDER RECORD is
+    # what the dashboard, the ledger and the tenant's own accounting read. Caught on a real dev order by
+    # comparing the stored fees against the charge's balance transaction (2026-10-01).
+    shipping = int((session.get("shipping_cost") or {}).get("amount_total") or 0)
+    return settled_breakdown(
+        charged_amount=amount,
+        shipping_amount=shipping,
         currency=session.get("currency") or "usd",
         product_type=metadata.get("product_type") or "physical",
         fee_handling="standard",
@@ -1648,7 +1658,6 @@ def fee_breakdown_from_session(
         tenant_plan=metadata.get("tenant_plan") or "basic",
         billing_config=cached_billing_config(billing_config_loader),
     )
-    return result["breakdown"]
 
 
 def plan_order_review_invite(order_record: dict[str, Any], tenant_id: str, products_repo, invites_repo, now: int) -> bool:
@@ -1843,9 +1852,15 @@ def fee_breakdown_from_invoice(
     metadata: dict[str, Any],
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """The renewal's fee split. Priced as `recurring`, which is what it is."""
-    return calculate_price(
-        tenant_keyed_amount=int(invoice.get("amount_paid") or invoice.get("amount_due") or 0),
+    """The renewal's fee split. Priced as `recurring`, which is what it is.
+
+    Subscriptions charge no postage today, so `shipping_cost` is absent and the exemption is a no-op --
+    but it is applied here anyway, so the day recurring shipping ships it does not need remembering.
+    """
+    shipping = int((invoice.get("shipping_cost") or {}).get("amount_total") or 0)
+    return settled_breakdown(
+        charged_amount=int(invoice.get("amount_paid") or invoice.get("amount_due") or 0),
+        shipping_amount=shipping,
         currency=invoice.get("currency") or "usd",
         product_type=metadata.get("product_type") or "physical",
         fee_handling="standard",
