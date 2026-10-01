@@ -7846,3 +7846,15 @@ a.orders-place { text-decoration: underline; }
   background: var(--surface-muted, rgba(148, 163, 184, 0.12));
   cursor: default;
 }
+
+/* A page section that is switched ON and will render nothing. The published page is right to stay silent --
+   a buyer must never read "no zones configured" -- so the explanation belongs where the tenant is. */
+.composition-warning {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}

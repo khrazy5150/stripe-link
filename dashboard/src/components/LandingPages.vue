@@ -2068,6 +2068,15 @@
                 </span>
               </label>
             </div>
+            <!-- A section that is ON and will render NOTHING. The page is right to stay silent -- a buyer must
+                 never read "no zones configured" -- but the tenant ticked a box and saw nothing happen, which
+                 is the same silence this app keeps being bitten by. Say it HERE, where they are. -->
+            <p v-if="shippingSectionWarning" class="composition-warning">
+              {{ shippingSectionWarning }}
+              <button v-if="navigateTo" class="link-action" type="button" @click="navigateTo('shipping')">
+                Open Shipping settings
+              </button>
+            </p>
 
           </section>
 
@@ -2426,7 +2435,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import SelectorCard from "./SelectorCard.vue";
 import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
@@ -3327,6 +3336,41 @@ watch(
 );
 // Whether anything in this offer needs posting. Mirrors the renderer's own test (requires_shipping, then
 // product_type) so the builder and the server agree on when the section can render at all.
+// The shell's navigation. No vue-router in this app -- App.vue provides this (Orders.vue:385).
+const navigateTo = inject("navigateTo", null);
+
+// Whether the shipping element will actually RENDER, asked of the same endpoint the published page asks.
+// Checking the config ourselves would be a second implementation of the same question, and the two would
+// eventually disagree about which page shows a selector (plans/SHIPPING_ELEMENT.md).
+const shippingQuote = ref(null);
+
+async function checkShippingElement() {
+  const offerId = builderOffer.value?.offer_id;
+  if (!offerId || !sectionVisible("shipping")) { shippingQuote.value = null; return; }
+  try {
+    shippingQuote.value = await apiRequest("/shipping-quote", { params: { offer: offerId } });
+  } catch (err) {
+    // Not a blocker: the warning is a nudge, and failing to fetch it must not get in the way of editing.
+    shippingQuote.value = null;
+  }
+}
+
+const shippingSectionWarning = computed(() => {
+  if (!sectionVisible("shipping")) return "";
+  const quote = shippingQuote.value;
+  if (!quote) return "";
+  if (!quote.ships) {
+    return "Shipping options is on, but nothing in this offer ships — buyers will not see it.";
+  }
+  if (quote.needs === "zones") {
+    return "Shipping options is on, but you have no shipping zones yet, so buyers will not see it.";
+  }
+  return "";
+});
+
+// Re-ask when the toggle flips or the offer changes -- the answer depends on both.
+watch(() => [sectionVisible("shipping"), builderOffer.value?.offer_id], () => { checkShippingElement(); });
+
 const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []).some((product) => {
   const requires = product?.fulfillment?.requires_shipping;
   if (typeof requires === "boolean") return requires;

@@ -179,5 +179,38 @@ class TheComposerKnowsIt(unittest.TestCase):
             self.assertNotIn("shipping", config.get("sections", []), offer_type)
 
 
+class TheBUILDERSaysWhyNothingRendered(unittest.TestCase):
+    """Reported 2026-10-01: ticking "Shipping options" showed no element and said nothing.
+
+    The element was behaving correctly -- the tenant had no zones, so there was nothing to offer and it hid
+    itself. The PAGE is right to stay silent, because a buyer must never read "no zones configured". The
+    builder was wrong to be: a tenant ticked a box, saw nothing happen, and had no way to find out why. Same
+    silence this app keeps being bitten by.
+    """
+
+    SCREEN = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_builder_asks_the_PAGES_own_question(self):
+        """Checking the config itself would be a second implementation, and the two would eventually disagree
+        about which page shows a selector."""
+        self.assertIn('apiRequest("/shipping-quote"', self.SCREEN)
+
+    def test_it_names_the_two_reasons_an_enabled_element_renders_nothing(self):
+        self.assertIn("no shipping zones yet", self.SCREEN)
+        self.assertIn("nothing in this offer ships", self.SCREEN)
+
+    def test_it_offers_the_way_to_fix_it(self):
+        self.assertIn("Open Shipping settings", self.SCREEN)
+
+    def test_the_warning_is_gated_on_the_section_being_ON(self):
+        warning = self.SCREEN.split("const shippingSectionWarning", 1)[1].split("\nconst ", 1)[0]
+        self.assertIn('if (!sectionVisible("shipping")) return ""', warning)
+
+    def test_a_failed_check_does_not_block_editing(self):
+        """The warning is a nudge. Failing to fetch it must not get in the way."""
+        body = self.SCREEN.split("async function checkShippingElement", 1)[1].split("\nconst ", 1)[0]
+        self.assertIn("catch", body)
+
+
 if __name__ == "__main__":
     unittest.main()
