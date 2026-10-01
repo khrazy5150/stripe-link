@@ -2689,6 +2689,28 @@ thank-you card, this). The cheapest one to fix and the only one with a measurabl
 stored boxes are not rewritten** — a tenant's mailer regains its `kind` when they next save, which is the
 organic rule this repo follows.
 
+### ⭐⭐ HIGH — a shared carrier account needs a prepaid wallet first (author's design, 2026-10-01)
+
+**Plan: `plans/SHIPPING_WALLET.md`.** Tenants each procure their own Shippo key today, which is a three-day
+wait before shipping works at all. A shared platform account removes that, but postage is bought AFTER the
+sale, so the platform would front every tenant's postage and chase it afterwards.
+
+The author's answer: a **prepaid shipping balance**. Tenant tops up, labels debit postage plus a JB fee, and
+the platform never carries a receivable.
+
+**Cheaper than it looks, for two reasons found 2026-10-01.** Tenants are ALREADY Stripe customers on the
+platform account (`TenantProfile.stripe_customer_id`, created by `platform_subscription.py`), so auto-recharge
+is a PaymentIntent on a saved card rather than a new rail — and a prepaid balance needs **no metering**, which
+is the expensive half of what `plans/IDENTITY_VERIFICATION.md` proposed. The ledger also already has
+`shipping_revenue` and an unwritten `shipping_cost` component waiting for exactly this.
+
+**Must verify before building:** whether EasyPost Forge's centralised billing and FlexRate (platform margin on
+rates shown to child accounts) work as described, and whether Shippo has an equivalent. If only one does, that
+decides the provider — and the wallet's shape depends on whether the provider applies the margin or we do.
+
+**Smaller first step that needs none of it:** a platform key for RATING ONLY. Quotes cost nothing and carry no
+liability, and it would make *Try a rate* work on signup.
+
 ### ⭐⭐ HIGH — the Shipping screen collects two values nothing reads (found 2026-09-30)
 
 `dashboard/src/components/Shipping.vue:249-255` renders two inputs under "Rate & Label Options":
