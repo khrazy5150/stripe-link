@@ -363,6 +363,78 @@
     </section>
 
     <section class="dashboard-card">
+      <header class="dashboard-card-header">
+        <h2>Try a rate</h2>
+        <p>Pick what you would ship and see what each carrier charges. Adopting a rate copies its real
+          service code into <strong>Services</strong> — the code a carrier recognises, which is not something
+          you can type from memory.</p>
+      </header>
+      <div class="dashboard-card-body">
+        <div class="carrier-chips">
+          <button v-for="product in previewProducts" :key="product.product_id" class="carrier-chip"
+                  type="button" @click="togglePreviewProduct(product.product_id)">
+            {{ product.name }} <span aria-hidden="true">×</span>
+          </button>
+          <span v-if="!previewProducts.length" class="field-hint">No products chosen yet.</span>
+        </div>
+        <select class="carrier-add" :value="''" @change="togglePreviewProduct($event.target.value)">
+          <option value="">Add a product…</option>
+          <option v-for="product in unselectedPreviewProducts" :key="product.product_id"
+                  :value="product.product_id">{{ product.name }}</option>
+        </select>
+
+        <div class="offer-three-column">
+          <label class="offer-field">
+            <span>Box</span>
+            <select v-model="preview.box">
+              <option value="">Let the packer choose</option>
+              <option v-for="box in form.boxes" :key="box.name" :value="box.name">{{ box.name }}</option>
+            </select>
+          </label>
+          <label class="offer-field">
+            <span>Ship to country</span>
+            <input v-model.trim="preview.country" type="text" maxlength="2"
+                   :placeholder="form.ship_from_address.country || 'US'" />
+          </label>
+          <label class="offer-field">
+            <span>Ship to postal code</span>
+            <input v-model.trim="preview.postal_code" type="text"
+                   :placeholder="form.ship_from_address.postal_code || '80204'" />
+          </label>
+        </div>
+        <p class="field-hint">Leave the destination blank to rate against your own ship-from address.</p>
+
+        <button class="secondary-action" type="button" :disabled="previewBusy || !preview.product_ids.length"
+                @click="runRatePreview">
+          {{ previewBusy ? "Asking the carriers…" : "Get rates" }}
+        </button>
+
+        <p v-if="previewError" class="keys-status-banner warning">{{ previewError }}</p>
+        <p v-if="previewParcel" class="field-hint">
+          Rated as one <strong>{{ previewParcel.box || "custom parcel" }}</strong>
+          <span v-if="previewParcelCount > 1"> — this order would actually need
+            {{ previewParcelCount }} parcels, so the real cost is higher.</span>
+        </p>
+
+        <div v-for="rate in previewRates" :key="rate.rate_id || rate.service_token" class="offer-item-editor">
+          <header>
+            <div>
+              <h4>{{ rate.carrier?.toUpperCase() }} — {{ rate.service }}</h4>
+              <p class="field-note">
+                {{ formatRateAmount(rate) }}
+                <span v-if="rate.estimated_days"> · {{ rate.estimated_days }} business days</span>
+                · code <code>{{ rate.service_token }}</code>
+              </p>
+            </div>
+            <button class="secondary-action compact" type="button" @click="adoptRate(rate)">
+              {{ hasService(rate) ? "Already added" : "Use this" }}
+            </button>
+          </header>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Rate &amp; Label Options</h2></header>
       <div class="dashboard-card-body">
         <p class="field-note">Optional.</p>
@@ -511,6 +583,100 @@ function toggleAllowedCarrier(code) {
   const at = list.indexOf(value);
   if (at >= 0) list.splice(at, 1);
   else list.push(value);
+}
+
+// ---- Try a rate -------------------------------------------------------------------------------------
+// A service DISCOVERY tool that happens to show prices. What "Use this" copies is the carrier and its real
+// service token; the amount is context for setting a flat rate, never written into a zone, because a rate is
+// destination-specific and stale within days while the token is stable (plans/SHIPPING_ELEMENT.md).
+const catalogue = ref([]);
+const preview = reactive({ product_ids: [], box: "", country: "", postal_code: "" });
+const previewRates = ref([]);
+const previewParcel = ref(null);
+const previewParcelCount = ref(0);
+const previewError = ref("");
+const previewBusy = ref(false);
+
+async function loadCatalogue() {
+  try {
+    const body = await apiRequest("/products");
+    catalogue.value = (body.products || []).filter((product) => {
+      const requires = product?.fulfillment?.requires_shipping;
+      return typeof requires === "boolean" ? requires : product?.product_type === "physical";
+    });
+  } catch (err) {
+    catalogue.value = [];
+  }
+}
+
+const previewProducts = computed(() =>
+  preview.product_ids.map((id) => catalogue.value.find((p) => p.product_id === id)).filter(Boolean));
+const unselectedPreviewProducts = computed(() =>
+  catalogue.value.filter((product) => !preview.product_ids.includes(product.product_id)));
+
+function togglePreviewProduct(productId) {
+  const id = String(productId || "").trim();
+  if (!id) return;
+  const at = preview.product_ids.indexOf(id);
+  if (at >= 0) preview.product_ids.splice(at, 1);
+  else preview.product_ids.push(id);
+}
+
+function formatRateAmount(rate) {
+  const currency = String(rate.currency || "usd").toUpperCase();
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format((rate.amount || 0) / 100);
+  } catch (err) {
+    return `${((rate.amount || 0) / 100).toFixed(2)} ${currency}`;
+  }
+}
+
+function hasService(rate) {
+  return form.enabled_services.some((service) => service.service_token === rate.service_token);
+}
+
+async function runRatePreview() {
+  previewBusy.value = true;
+  previewError.value = "";
+  previewRates.value = [];
+  previewParcel.value = null;
+  try {
+    const to = {};
+    if (preview.country) to.country = preview.country.toUpperCase();
+    if (preview.postal_code) to.postal_code = preview.postal_code;
+    const body = await apiRequest("/shipping/rate-preview", {
+      method: "POST",
+      body: {
+        product_ids: preview.product_ids,
+        box: preview.box || undefined,
+        to_address: Object.keys(to).length ? to : undefined,
+      },
+    });
+    previewRates.value = body.rates || [];
+    previewParcel.value = body.parcel || null;
+    previewParcelCount.value = body.parcel_count || 0;
+    if (!previewRates.value.length) {
+      previewError.value = "The carrier returned no rates for this parcel.";
+    }
+  } catch (err) {
+    previewError.value = err.message || "Could not get rates.";
+  } finally {
+    previewBusy.value = false;
+  }
+}
+
+/** Copy the SERVICE, not the price. */
+function adoptRate(rate) {
+  if (hasService(rate)) return;
+  form.enabled_services.push({
+    ...emptyService(),
+    service_token: rate.service_token || "",
+    carrier: String(rate.carrier || "").toLowerCase(),
+    label: rate.service || "",
+    // The carrier's own estimate becomes the window a buyer is shown, rather than a number anyone typed.
+    transit_days_min: rate.estimated_days || "",
+    transit_days_max: rate.estimated_days || "",
+  });
 }
 
 function emptyService() {
@@ -1029,4 +1195,5 @@ async function save() {
 
 load();
 loadCarriers();
+loadCatalogue();
 </script>

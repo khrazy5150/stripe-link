@@ -739,6 +739,33 @@ amount into a zone would be a snapshot with a timestamp nobody can see.
 One before the other because the first is useful even for a tenant with no carrier connected, and the second
 cannot run without one.
 
+### ✅ BOTH SHIPPED 2026-09-30 (24 tests)
+
+**Pickers** — `GET /shipping/carriers` returns the tenant's CONNECTED carriers via `test_connection()`, falling
+back to the `carrier_options()` registry with a message saying why. Carrier is a select; Allowed Carriers is
+dismissible chips. A carrier the registry does not know is still offered: the provider is the authority on what
+this account can quote.
+
+**Rate viewer** — `POST /shipping/rate-preview` packs the chosen products into a box and asks the carrier.
+
+    Try a rate
+      Products  [ Gummies ×] [ Whey ×]          Box [ Medium ▾ ]   Ship to [ US ] [ 80204 ]
+      USPS  Ground Advantage   $8.42   6 days   code usps_ground_advantage   [ Use this ]
+      UPS   2nd Day Air       $17.31   2 days   code ups_2nd_day_air         [ Use this ]
+
+- **"Use this" copies the SERVICE, never the amount** — carrier, `service_token`, and the carrier's own transit
+  estimate become the buyer-facing window. A test asserts `adoptRate` does not touch `amount`, because the
+  temptation to import the price is exactly the mistake: a rate is destination-specific and stale within days.
+- **The destination defaults to the tenant's own ship-from**, merged field-by-field with anything they type, so
+  a partial override keeps a complete address. A carrier will not quote a postcode that does not exist, and
+  inventing one would fail in a way that looks like our bug.
+- **A named box is rated rather than the packer's preference**, because a tenant comparing boxes wants THIS one
+  priced.
+- **The parcel count is reported.** A multi-box order is several labels, and showing one parcel's rate as the
+  order's would understate it.
+- Every failure is an answer: `missing_ship_from`, `no_dimensions` (naming Products as the fix),
+  `missing_provider`, and a 502 that relays what the carrier said.
+
 ## Open
 
 - **Does a full address get collected on the page, or country + postcode?** Recommended the latter, but a

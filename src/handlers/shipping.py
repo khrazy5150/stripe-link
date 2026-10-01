@@ -78,6 +78,8 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
         return buy_label(event, repository, secret_cipher, products_repo=products_repo,
                          orders_repo=orders_repo, shipments_repo=shipments_repo,
                          user_profiles_repo=user_profiles_repo, mailer_send=mailer_send, now_fn=now_fn)
+    if _action(event) == "rate-preview" and method == "POST":
+        return preview_rates(event, repository, secret_cipher, products_repo=products_repo)
     if _action(event) == "carriers" and method == "GET":
         return list_carriers(event, repository, secret_cipher)
     if _action(event) == "rates" and method == "POST":
@@ -241,6 +243,92 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
         "connection": {"status": status, "message": message, "carriers": carriers},
         "readiness": label_readiness(saved),
     }, status_code=200 if status == "connected" else 502)
+
+
+def preview_rates(event, repository, secret_cipher, *, products_repo=None):
+    """What the carriers would charge for a sample parcel, so a tenant can DISCOVER real services.
+
+    plans/SHIPPING_ELEMENT.md. The author, 2026-09-30: let a tenant pick products and a box, ask for rates, and
+    adopt one as a Service.
+
+    **What this is for is the service IDENTITY, not the price.** A `service_code` a tenant invents never matches
+    a real rate -- Shippo's token for USPS ground is `usps_ground_advantage`, and "ground" can never be quoted,
+    with nothing to say so until a buyer sees no options. The amounts here are CONTEXT: they tell a tenant what
+    a flat rate should be set to. They are deliberately not written into a zone, because a rate is
+    destination-specific and stale within days while `usps_ground_advantage` is stable and is exactly what a
+    later live quote has to match.
+
+    The destination defaults to the tenant's OWN ship-from address -- a real domestic sample needs no typing,
+    and carriers refuse to quote a made-up one.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    body = parse_json_body(event)
+    product_ids = [str(pid).strip() for pid in (body.get("product_ids") or []) if str(pid).strip()]
+    if not product_ids:
+        return error_response("Choose at least one product to rate.", code="missing_products")
+
+    config = repository.get(tenant_id) or {}
+    from_address = config.get("ship_from_address") or {}
+    if not from_address.get("postal_code"):
+        return error_response("Add your ship-from address before previewing rates.",
+                              code="missing_ship_from")
+    # Their own address unless they typed somewhere else. A sample needs to be REAL -- a carrier will not
+    # quote a postcode that does not exist, and inventing one would fail in a way that looks like our bug.
+    to_address = {k: v for k, v in (body.get("to_address") or {}).items() if v}
+    destination = {**from_address, **to_address} if to_address else dict(from_address)
+
+    mode = resolve_stripe_mode(event)
+    products_repo = products_repo or products_repository(mode=mode)
+    quantities = body.get("quantities") or {}
+    lines, products = [], []
+    for product_id in product_ids:
+        product = products_repo.get(tenant_id, product_id)
+        if not product:
+            return error_response(f"Product '{product_id}' was not found.", status_code=404,
+                                  code="product_not_found")
+        products.append(product)
+        lines.append({"product_id": product_id, "quantity": max(1, int(quantities.get(product_id) or 1))})
+
+    boxes = tenant_boxes(config)
+    wanted_box = str(body.get("box") or "").strip()
+    if wanted_box:
+        # A tenant comparing boxes wants THIS box rated, not the one the packer prefers.
+        boxes = [box for box in boxes if str(box.get("name") or "") == wanted_box] or boxes
+    parcels = pack(packable_items(lines, {str(p.get("product_id") or ""): p for p in products}), boxes)
+    if not parcels:
+        return error_response(
+            "These products have no dimensions yet, so there is nothing to put in a box. Add sizes in "
+            "Products first.", code="no_dimensions")
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    if not name or not secret_ref:
+        return error_response("Connect a shipping provider to preview live rates.",
+                              code="missing_provider")
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        )
+        # The FIRST parcel only. A multi-box order is several labels, and showing one parcel's rate as if it
+        # were the order's would understate it -- the count is reported so the tenant can see why.
+        rates = provider_for(name, api_key).rates(
+            from_address=from_address, to_address=destination, parcel=parcels[0])
+    except ProviderError as exc:
+        return error_response(str(exc), status_code=502, code="provider_error")
+    except Exception as exc:  # noqa: BLE001 - a failed preview is an ANSWER, never a 500
+        return error_response(f"Could not reach the carrier: {type(exc).__name__}", status_code=502,
+                              code="provider_error")
+
+    return json_response({
+        "rates": sorted(rates, key=lambda rate: int(rate.get("amount") or 0)),
+        "parcel": parcels[0],
+        "parcel_count": len(parcels),
+        "destination": {"country": destination.get("country", ""),
+                        "postal_code": destination.get("postal_code", "")},
+    })
 
 
 def list_carriers(event, repository, secret_cipher):

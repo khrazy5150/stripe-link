@@ -3102,6 +3102,14 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/test
             Method: POST
+        ShippingRatePreview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # A sample quote so a tenant can DISCOVER real service tokens. A code they invent never matches a
+            # carrier rate, and nothing says so until a buyer sees no options (plans/SHIPPING_ELEMENT.md).
+            Path: /shipping/rate-preview
+            Method: POST
         ShippingCarriers:
           Type: Api
           Properties:
