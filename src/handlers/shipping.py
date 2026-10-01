@@ -245,6 +245,56 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
     }, status_code=200 if status == "connected" else 502)
 
 
+# Real, public addresses used purely as a RATING SAMPLE. A carrier will not quote a postcode that does not
+# exist, and -- found by calling the live API -- Shippo refuses outright when the origin and destination are
+# identical ("From and To Addresses are identical"), which is what defaulting to the tenant's own ship-from
+# produced. So the sample is a genuine metro address in the tenant's own country, far enough from anywhere to
+# be a representative domestic rate. The tenant can type their own instead.
+SAMPLE_DESTINATIONS = {
+    "US": [
+        {"name": "Sample", "street1": "350 5th Ave", "city": "New York", "state": "NY",
+         "postal_code": "10001", "country": "US"},
+        {"name": "Sample", "street1": "1 Dr Carlton B Goodlett Pl", "city": "San Francisco", "state": "CA",
+         "postal_code": "94102", "country": "US"},
+    ],
+    "CA": [
+        {"name": "Sample", "street1": "290 Bremner Blvd", "city": "Toronto", "state": "ON",
+         "postal_code": "M5V 3L9", "country": "CA"},
+        {"name": "Sample", "street1": "1055 Canada Pl", "city": "Vancouver", "state": "BC",
+         "postal_code": "V6C 0C3", "country": "CA"},
+    ],
+    "GB": [
+        {"name": "Sample", "street1": "10 Downing St", "city": "London", "state": "",
+         "postal_code": "SW1A 2AA", "country": "GB"},
+        {"name": "Sample", "street1": "1 St Peter's Sq", "city": "Manchester", "state": "",
+         "postal_code": "M2 3AE", "country": "GB"},
+    ],
+}
+
+
+def _sample_destination(from_address: dict, typed: dict) -> dict:
+    """Where to rate TO. The tenant's own words first, then a real sample in their country.
+
+    **Never the origin itself.** Found by calling the live API: Shippo refuses outright when the addresses
+    match ("From and To Addresses are identical"), and that refusal reads like our bug rather than their rule.
+    Defaulting to the tenant's own ship-from -- which seemed the most helpful thing -- guaranteed it.
+
+    TWO samples per country, because one is not enough: a tenant whose warehouse IS in the sample city would
+    hit the same refusal. The first whose postcode differs from the origin wins.
+    """
+    typed = {k: v for k, v in (typed or {}).items() if v}
+    country = str(typed.get("country") or from_address.get("country") or "US").strip().upper()[:2]
+    samples = SAMPLE_DESTINATIONS.get(country) or SAMPLE_DESTINATIONS["US"]
+    origin = str(from_address.get("postal_code") or "").strip().lower()
+
+    if typed.get("postal_code"):
+        # They asked for somewhere specific. Honoured even if it is their own address -- the carrier's refusal
+        # is then an answer to a question they actually asked, and it is translated into plain words.
+        return {**samples[0], **typed}
+    chosen = next((s for s in samples if str(s["postal_code"]).strip().lower() != origin), samples[0])
+    return {**chosen, **typed}
+
+
 def preview_rates(event, repository, secret_cipher, *, products_repo=None):
     """What the carriers would charge for a sample parcel, so a tenant can DISCOVER real services.
 
@@ -274,10 +324,7 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
     if not from_address.get("postal_code"):
         return error_response("Add your ship-from address before previewing rates.",
                               code="missing_ship_from")
-    # Their own address unless they typed somewhere else. A sample needs to be REAL -- a carrier will not
-    # quote a postcode that does not exist, and inventing one would fail in a way that looks like our bug.
-    to_address = {k: v for k, v in (body.get("to_address") or {}).items() if v}
-    destination = {**from_address, **to_address} if to_address else dict(from_address)
+    destination = _sample_destination(from_address, body.get("to_address") or {})
 
     mode = resolve_stripe_mode(event)
     products_repo = products_repo or products_repository(mode=mode)
@@ -317,7 +364,13 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
         rates = provider_for(name, api_key).rates(
             from_address=from_address, to_address=destination, parcel=parcels[0])
     except ProviderError as exc:
-        return error_response(str(exc), status_code=502, code="provider_error")
+        message = str(exc)
+        if "identical" in message.lower():
+            # Carrier-speak turned into something actionable. Reached when a tenant types their OWN postcode
+            # as the destination, which is a reasonable thing to try.
+            message = ("Rate to somewhere other than your own address — carriers will not quote a shipment "
+                       "that starts and ends at the same place.")
+        return error_response(message, status_code=502, code="provider_error")
     except Exception as exc:  # noqa: BLE001 - a failed preview is an ANSWER, never a 500
         return error_response(f"Could not reach the carrier: {type(exc).__name__}", status_code=502,
                               code="provider_error")

@@ -96,24 +96,43 @@ class ItReturnsRealServiceTokens(unittest.TestCase):
 
 
 class TheSampleDestination(unittest.TestCase):
-    def test_it_defaults_to_the_tenants_own_ship_from(self):
-        """A sample needs to be REAL -- a carrier will not quote a postcode that does not exist, and inventing
-        one would fail in a way that looks like our bug."""
-        _, body, captured = call({"product_ids": ["p1"]})
-        self.assertEqual(captured["to_address"]["postal_code"], "80204")
-        self.assertEqual(body["destination"], {"country": "US", "postal_code": "80204"})
+    """Never the origin. Found by calling the LIVE endpoint: Shippo refuses outright when the addresses match
+    ("From and To Addresses are identical"), and defaulting to the tenant's own ship-from -- which seemed the
+    most helpful thing -- guaranteed it on every preview.
+    """
 
-    def test_a_typed_destination_overrides_it(self):
+    def test_it_defaults_to_a_real_sample_NOT_the_tenants_own_address(self):
+        _, body, captured = call({"product_ids": ["p1"]})
+        self.assertNotEqual(captured["to_address"]["postal_code"], SHIP_FROM["postal_code"])
+        self.assertEqual(captured["to_address"]["postal_code"], "10001")
+
+    def test_a_tenant_IN_the_sample_city_gets_the_second_sample(self):
+        """One sample is not enough: a warehouse in New York would hit the same refusal."""
+        config = ConfigRepo(ship_from_address={**SHIP_FROM, "postal_code": "10001", "city": "New York"})
+        _, _, captured = call({"product_ids": ["p1"]}, config)
+        self.assertEqual(captured["to_address"]["postal_code"], "94102")
+
+    def test_the_sample_follows_the_tenants_country(self):
+        config = ConfigRepo(ship_from_address={**SHIP_FROM, "country": "CA", "postal_code": "T2P"})
+        _, _, captured = call({"product_ids": ["p1"]}, config)
+        self.assertEqual(captured["to_address"]["country"], "CA")
+
+    def test_a_typed_destination_wins(self):
         _, body, captured = call({"product_ids": ["p1"],
                                   "to_address": {"country": "CA", "postal_code": "M5V 2T6"}})
         self.assertEqual(captured["to_address"]["postal_code"], "M5V 2T6")
-        self.assertEqual(captured["to_address"]["country"], "CA")
+        self.assertEqual(body["destination"]["country"], "CA")
 
-    def test_a_partial_destination_keeps_the_rest_of_the_address(self):
-        """A carrier needs a whole address; only the parts the tenant changed should move."""
-        _, _, captured = call({"product_ids": ["p1"], "to_address": {"postal_code": "90210"}})
-        self.assertEqual(captured["to_address"]["city"], "Denver")
-        self.assertEqual(captured["to_address"]["postal_code"], "90210")
+    def test_a_typed_country_alone_picks_that_countrys_sample(self):
+        _, _, captured = call({"product_ids": ["p1"], "to_address": {"country": "GB"}})
+        self.assertEqual(captured["to_address"]["postal_code"], "SW1A 2AA")
+
+    def test_typing_your_own_postcode_is_HONOURED_and_the_refusal_explained(self):
+        """It is a reasonable thing to try, so the carrier's answer is translated into plain words rather
+        than relayed as "From and To Addresses are identical"."""
+        _, _, captured = call({"product_ids": ["p1"],
+                               "to_address": {"postal_code": SHIP_FROM["postal_code"]}})
+        self.assertEqual(captured["to_address"]["postal_code"], SHIP_FROM["postal_code"])
 
     def test_no_ship_from_is_refused_with_something_actionable(self):
         response, body, _ = call({"product_ids": ["p1"]}, ConfigRepo(ship_from_address={}))
@@ -155,6 +174,27 @@ class FailuresAreAnswersNotFiveHundreds(unittest.TestCase):
         response, body, _ = call({"product_ids": ["p1"]}, provider="error")
         self.assertEqual(response["statusCode"], 502)
         self.assertIn("Shippo", body["message"])
+
+    def test_an_identical_address_refusal_becomes_plain_words(self):
+        """Carrier-speak is not an answer a tenant can act on."""
+        real = shipping.provider_for
+
+        class Provider:
+            def rates(self, **kwargs):
+                raise shipping.ProviderError(
+                    "Shippo returned 400. {'__all__': ['From and To Addresses are identical...']}")
+
+        shipping.provider_for = lambda *a, **k: Provider()
+        try:
+            response = preview_rates(
+                {"httpMethod": "POST", "queryStringParameters": {"tenant_id": "t1"},
+                 "body": json.dumps({"product_ids": ["p1"]})},
+                ConfigRepo(), Cipher(), products_repo=ProductRepo())
+        finally:
+            shipping.provider_for = real
+        message = json.loads(response["body"])["message"]
+        self.assertIn("other than your own address", message)
+        self.assertNotIn("__all__", message)
 
     def test_an_unexpected_failure_is_still_a_502(self):
         response, body, _ = call({"product_ids": ["p1"]}, provider="boom")
