@@ -600,15 +600,36 @@ override the default — and holds **no zone editor, no carrier config, no secon
    A country the tenant does not ship to is ignored rather than honoured: a country typed into a URL is not a
    zone.
 
-   **PAGE COMPONENT STILL TO BUILD**, and its scope is narrower than the mock in this plan. A published page
-   is a static S3 artifact and this plan forbids rates inside it, so the element can collect the country and
-   hand it to checkout, but it **cannot display prices until phase 6** gives it something to fetch. So:
+   **PAGE COMPONENT ✅ SHIPPED 2026-09-30** (22 tests), and because phase 6 landed first it shows real prices
+   rather than deferring them to Checkout:
 
-       phase 5 element   "Where should we ship?" [ Country ▾ ]   -> price appears AT Stripe Checkout
-       phase 6 element   the same, plus live prices on the page
+       Shipping
+       Where should we ship your order?   [ US ▾ ]
+         ( ) Ground            $6.99
+         ( ) Overnight        $24.99
 
-   That is a real intermediate step rather than the finished feature: it is what makes a multi-country tenant
-   chargeable at all, and it needs no public endpoint.
+   Seven registration points, all mechanical: `composition_rules.json` (element, order, governed),
+   `runtime/html.py` (renderer + registry + script + the CTA param), `documents.py`, `ai_floor.py`, and the
+   builder's state/editor/save/load. The Vue composer needed no edit — it imports the rules JSON directly.
+
+   What the element puts in the artifact: **an empty shell**. No prices, no country list, nothing but the three
+   data attributes the fetch needs. It starts `hidden` so an unpopulated selector never flashes, and renders
+   nothing at all for a digital offer, with no API base, or when disabled.
+
+   - **The radio's value is the SERVICE TOKEN, never the amount.** The author's rule: a browser must not be
+     able to submit a $2.00 option it was never offered. The server re-derives the price.
+   - **An unknown is never shown as "Free".** `needs: carrier` or `box_price` becomes *"Shipping is calculated
+     at checkout"* — the honest answer, where "Free" would be a promise the tenant did not make.
+   - **`needs: zones` keeps the element hidden entirely**, so a tenant who has configured nowhere to ship gets
+     no empty dropdown.
+   - **A tier change re-asks.** A different tier is a different parcel, so it is a different price.
+   - **A failed fetch is silent and the element stays hidden.** A shipping selector that cannot reach the API
+     must never block a sale: the buyer checks out and Stripe collects the address as it does today.
+   - **The AI may not author it** (`ai_floor`), because there is nothing to write — the whole content is
+     computed from the tenant's zones.
+   - **OPT-IN, not on by default.** It is deliberately absent from every `offer_types[*].sections`: adding it
+     there would put a destination selector above the buy button on every existing physical page at its next
+     publish, and only tenants who ship multi-country need one.
 6. **`GET /shipping-quote`** — ✅ **SHIPPED 2026-09-30** (15 tests), and it came BEFORE the element rather
    than after. Returns `{ships, countries, country, options, needs, mode, source}`; never accepts an amount.
 

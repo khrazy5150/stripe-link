@@ -1713,6 +1713,19 @@ def validate_page_document(document: dict[str, Any]) -> None:
             require_string(section, "text", "Headline text")
         elif section_type == "subheadline":
             require_string(section, "text", "Subheadline text")
+        elif section_type == "shipping":
+            # Deliberately tiny. The element stores its HEADINGS and nothing else: destinations and rates come
+            # from /shipping-quote at runtime, because a rate baked into a published artifact starts rotting
+            # immediately (plans/SHIPPING_ELEMENT.md). A section carrying an `amount` or a `countries` list
+            # would be exactly the snapshot this element exists to avoid, so neither is accepted.
+            optional_bool(section, "enabled", "Shipping enabled")
+            optional_string(section, "heading", "Shipping heading", max_length=80)
+            optional_string(section, "prompt", "Shipping prompt", max_length=160)
+            for forbidden in ("amount", "options", "rates", "countries"):
+                if section.get(forbidden) is not None:
+                    raise DocumentValidationError(
+                        f"Shipping section must not store '{forbidden}': rates and destinations are resolved "
+                        f"at runtime, and a stored one is a snapshot that goes stale.")
         elif section_type == "trust_badges":
             optional_bool(section, "enabled", "Trust badges enabled")
             if section.get("orientation") is not None:

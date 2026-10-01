@@ -56,6 +56,11 @@ FLOOR_SECTIONS: dict[str, str] = {
     # checkable facts about the world, which is the original §A.7 line.
     "client_marquee": "client logos assert real customers",
     "trust_badges": "a badge asserts a certification someone can check",
+    # Shipping costs money and is COMPUTED, never written. The element's whole content arrives at runtime from
+    # /shipping-quote -- destinations from the tenant's zones, prices from their boxes -- so there is nothing
+    # here for a model to author, and a price it invented would be a commercial promise nobody made
+    # (plans/SHIPPING_ELEMENT.md).
+    "shipping": "destinations and rates are computed from the tenant's zones, never written",
     # Anything whose substance is a URL or an asset. The model has no way to know a real one, and an
     # invented link is a broken page at best and someone else's site at worst.
     "hero_media": "an image the AI cannot know the URL of",

@@ -693,6 +693,26 @@
                   </select>
                 </label>
               </template>
+            <template v-else-if="sectionEditor.row.editor === 'shipping'">
+              <label class="builder-toggle">
+                <input v-model="builder.shipping.enabled" type="checkbox" />
+                <span>Let buyers choose a destination and see the cost</span>
+              </label>
+              <label class="offer-field">
+                <span>Heading</span>
+                <input v-model.trim="builder.shipping.heading" type="text" placeholder="Shipping" />
+              </label>
+              <label class="offer-field">
+                <span>Question</span>
+                <input v-model.trim="builder.shipping.prompt" type="text"
+                       placeholder="Where should we ship your order?" />
+              </label>
+              <p class="field-hint">
+                Destinations and prices come from <strong>Shipping settings</strong> when the page loads — they
+                are never saved into the page, so a zone you change takes effect without republishing.
+              </p>
+            </template>
+
             <template v-else-if="sectionEditor.row.editor === 'refund_policy'">
                 <label class="builder-toggle">
                   <input v-model="builder.refund_policy.enabled" type="checkbox" />
@@ -3305,6 +3325,14 @@ watch(
   },
   { immediate: true },
 );
+// Whether anything in this offer needs posting. Mirrors the renderer's own test (requires_shipping, then
+// product_type) so the builder and the server agree on when the section can render at all.
+const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []).some((product) => {
+  const requires = product?.fulfillment?.requires_shipping;
+  if (typeof requires === "boolean") return requires;
+  return product?.product_type === "physical";
+}));
+
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const emptyStateText = computed(() => {
   if (pages.value.length) return "No landing pages match your search.";
@@ -3536,6 +3564,14 @@ function defaultBuilderForm() {
     },
     refund_policy: {
       enabled: true,
+    },
+    // The destination selector. It stores only its WORDING: destinations and rates arrive at runtime from
+    // /shipping-quote, because a rate baked into a published page starts rotting immediately and the server
+    // validator refuses a section carrying one (plans/SHIPPING_ELEMENT.md).
+    shipping: {
+      enabled: true,
+      heading: "Shipping",
+      prompt: "Where should we ship your order?",
     },
     // Socialite hero overlays (plans/SOCIALITE_PARITY.md).
     avatar_url: "",
@@ -4642,6 +4678,12 @@ function populateBuilderFromPage(page) {
       }))
       : defaultBuilderForm().trust_badges.badges,
   });
+  const shippingSection = sections.find((section) => section.type === "shipping") || {};
+  Object.assign(builder.shipping, defaultBuilderForm().shipping, {
+    enabled: shippingSection.enabled !== false,
+    ...(shippingSection.heading ? { heading: shippingSection.heading } : {}),
+    ...(shippingSection.prompt ? { prompt: shippingSection.prompt } : {}),
+  });
   Object.assign(builder.refund_policy, defaultBuilderForm().refund_policy, {
     enabled: refundPolicy.enabled !== false,
   });
@@ -4969,6 +5011,17 @@ function builderSectionCandidates(intent) {
   }
   // previewRefundPolicy mirrors the server's lookup (offer.refund_policy, then the product's). With no
   // policy to show, the server renders "" anyway — don't persist a section that can never render.
+  // Only for offers with something to post. The renderer returns "" for a digital offer anyway, but a
+  // section that can never render should not be persisted either.
+  if (sectionVisible("shipping") && builderHasPhysicalItems.value) {
+    sections.push({
+      id: "shipping",
+      type: "shipping",
+      enabled: builder.shipping.enabled !== false,
+      heading: builder.shipping.heading || "Shipping",
+      prompt: builder.shipping.prompt || undefined,
+    });
+  }
   if (sectionVisible("refund_policy") && previewRefundPolicy.value) {
     sections.push({
       id: "refund-policy",
@@ -5572,6 +5625,7 @@ const SECTION_EDITORS = {
   trust_badges: "trust_badges",
   checkout_cta: "checkout_cta",
   refund_policy: "refund_policy",
+  shipping: "shipping",
 };
 
 const contentRows = computed(() => {

@@ -2223,6 +2223,7 @@ def _render_page_body(
         render_price_context_script(),
         conversion_data,
         *render_bnpl_messaging_scripts(),
+        render_shipping_selector_script(),
         render_price_description_toggle_script(page),
         render_view_beacon(page, kind, api_base_url),
         render_outbound_link_script(page, kind, api_base_url),
@@ -2420,6 +2421,8 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     # price the offer_price_selector filters out, so the amount would otherwise show only in the CTA button.
     "featured_price": {"render": lambda c: render_featured_price(c.section), "version": 1},
     "refund_policy": {"render": lambda c: render_refund_policy(c.section, c.offer, c.products_by_id), "version": 1},
+    "shipping": {"render": lambda c: render_shipping_selector(c.section, c.offer, c.products_by_id,
+                                                             c.api_base_url), "version": 1},
     "faq": {"render": lambda c: render_faq(c.section), "version": 1},
     "content_block": {"render": lambda c: render_content_blocks(c.section), "version": 1},
     # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2) — emitted by synthesize_thank_you_page only.
@@ -3035,6 +3038,47 @@ def render_subheadline(section: dict[str, Any]) -> str:
     ])
 
 
+def render_shipping_selector(section: dict[str, Any], offer: dict[str, Any],
+                             products_by_id: dict[str, dict[str, Any]],
+                             api_base_url: str | None) -> str:
+    """Where the buyer wants it sent, and what that costs. A RUNTIME component, not a snapshot.
+
+    plans/SHIPPING_ELEMENT.md phase 5. Emits an empty shell with no prices and no country list in it: both come
+    from `GET /shipping-quote` when the page loads. That is the plan's rule and the reason for it -- a rate
+    depends on destination, live carrier pricing, package composition and the date, and a published page is an
+    S3 artifact, so anything baked in starts rotting immediately. Even the COUNTRY list is fetched: a tenant who
+    adds a zone would otherwise not see it until they republished.
+
+    Renders nothing at all without an API base to ask, rather than a dropdown that can never populate.
+    """
+    if section.get("enabled") is False or not api_base_url:
+        return ""
+    # Nothing physical, nothing to ask. The endpoint answers this too, but a page that never emits the markup
+    # cannot flash an empty selector before the fetch returns.
+    if not any(
+        (products_by_id.get(str(item.get("product_id") or "")) or {}).get("fulfillment", {}).get("requires_shipping")
+        or (products_by_id.get(str(item.get("product_id") or "")) or {}).get("product_type") == "physical"
+        for item in (offer.get("items") or [])
+    ):
+        return ""
+    heading = escape(str(section.get("heading") or "Shipping"))
+    prompt = escape(str(section.get("prompt") or "Where should we ship your order?"))
+    section_id = escape(str(section.get("id", "shipping")))
+    return "\n".join([
+        f"    <section class=\"sl-shipping\" data-section-id=\"{section_id}\" data-section-type=\"shipping\"",
+        f"             data-shipping-api-base=\"{escape(str(api_base_url))}\"",
+        f"             data-shipping-tenant=\"{escape(str(offer.get('tenant_id') or ''))}\"",
+        f"             data-shipping-offer=\"{escape(str(offer.get('offer_id') or ''))}\" hidden>",
+        f"      <h2>{heading}</h2>",
+        f"      <label class=\"sl-shipping-where\"><span>{prompt}</span>",
+        "        <select class=\"sl-shipping-country\" aria-label=\"Destination country\"></select>",
+        "      </label>",
+        "      <div class=\"sl-shipping-rates\" role=\"radiogroup\" aria-label=\"Shipping options\"></div>",
+        "      <p class=\"sl-shipping-note\" hidden></p>",
+        "    </section>",
+    ])
+
+
 def render_trust_badges(section: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
@@ -3627,6 +3671,108 @@ def render_bnpl_messaging_div() -> str:
         return ""
     _RENDER_BNPL["_active"] = True
     return "      <div class=\"sl-bnpl-message\" id=\"sl-bnpl-message\"></div>"
+
+
+def render_shipping_selector_script() -> str:
+    """Fetch the destinations and the rates, then let the buyer choose. Nothing is priced in the page.
+
+    plans/SHIPPING_ELEMENT.md phase 5. The element sends a SERVICE choice to checkout, never an amount: the
+    server re-derives the price, so a browser cannot submit a $2 shipping option it was never offered.
+
+    The country it settles on is published as `window.__jbShipTo` and rides to checkout as `ship_to_country`,
+    which narrows Stripe's allowed countries to that one -- so a buyer quoted for Canada cannot switch to the
+    US at the pay button and pay Canadian postage.
+
+    Fails QUIET and stays hidden. A shipping selector that cannot reach the API must not block a sale: the
+    buyer checks out and Stripe collects the address as it does today.
+    """
+    return "\n".join([
+        "  <script>",
+        "  (function(){",
+        "    var box = document.querySelector('.sl-shipping');",
+        "    if (!box) return;",
+        "    var api = box.dataset.shippingApiBase, tenant = box.dataset.shippingTenant,",
+        "        offer = box.dataset.shippingOffer;",
+        "    if (!api || !tenant || !offer) return;",
+        "    var select = box.querySelector('.sl-shipping-country');",
+        "    var rates = box.querySelector('.sl-shipping-rates');",
+        "    var note = box.querySelector('.sl-shipping-note');",
+        # The cart, read from whichever price card is selected, so a tier change asks a new question rather
+        # than keeping the first tier's answer.
+        "    var cart = function(){",
+        "      var card = document.querySelector('.sl-price-option[aria-checked=\"true\"], .sl-price-option.is-selected');",
+        "      return { product_id: (card && card.dataset.productId) || '', price_id: (card && card.dataset.priceId) || '',",
+        "               quantity: (card && card.dataset.quantity) || '1' };",
+        "    };",
+        "    var say = function(text){ note.textContent = text || ''; note.hidden = !text; };",
+        # What each `needs` MEANS to a buyer. Never "free": an unknown rendered as free is a promise the tenant
+        # did not make (plans/SHIPPING_ELEMENT.md).
+        "    var reasons = {",
+        "      carrier: 'Shipping is calculated at checkout.',",
+        "      box_price: 'Shipping is calculated at checkout.',",
+        "      country: 'Choose where to ship to see the cost.'",
+        "    };",
+        "    var money = function(cents){",
+        "      try { return (cents/100).toLocaleString(undefined,{style:'currency',currency:'USD'}); }",
+        "      catch (e) { return '$' + (cents/100).toFixed(2); }",
+        "    };",
+        "    var ask = function(country){",
+        "      var c = cart();",
+        "      var url = api.replace(/\\/$/,'') + '/shipping-quote?clientID=' + encodeURIComponent(tenant)",
+        "        + '&offer=' + encodeURIComponent(offer)",
+        "        + (c.product_id ? '&product_id=' + encodeURIComponent(c.product_id) : '')",
+        "        + (c.price_id ? '&price_id=' + encodeURIComponent(c.price_id) : '')",
+        "        + '&quantity=' + encodeURIComponent(c.quantity)",
+        "        + (country ? '&country=' + encodeURIComponent(country) : '');",
+        "      return fetch(url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });",
+        "    };",
+        "    var paint = function(data){",
+        "      if (!data || !data.ships) return;",                # nothing physical: stay hidden
+        "      if (data.needs === 'zones') return;",              # the tenant has configured nowhere to ship
+        "      if (!select.options.length) {",
+        "        (data.countries || []).forEach(function(code){",
+        "          var opt = document.createElement('option'); opt.value = code; opt.textContent = code;",
+        "          select.appendChild(opt);",
+        "        });",
+        "        if (!select.options.length) return;",
+        "      }",
+        "      box.hidden = false;",
+        "      window.__jbShipTo = data.country || select.value || '';",
+        "      rates.innerHTML = '';",
+        "      (data.options || []).forEach(function(option, index){",
+        "        var id = 'sl-ship-' + index;",
+        "        var row = document.createElement('label'); row.className = 'sl-shipping-rate'; row.setAttribute('for', id);",
+        "        var input = document.createElement('input');",
+        "        input.type = 'radio'; input.name = 'sl-shipping-rate'; input.id = id;",
+        # The SERVICE, never the amount. An amount in the DOM is an amount someone can edit.
+        "        input.value = option.service_token || '';",
+        "        if (index === 0) { input.checked = true; }",
+        "        var label = document.createElement('span'); label.className = 'sl-shipping-rate-label';",
+        "        label.textContent = option.label || 'Shipping';",
+        "        var price = document.createElement('span'); price.className = 'sl-shipping-rate-price';",
+        "        price.textContent = option.amount ? money(option.amount) : 'Free';",
+        "        row.appendChild(input); row.appendChild(label); row.appendChild(price);",
+        "        rates.appendChild(row);",
+        "      });",
+        "      say((data.options || []).length ? '' : (reasons[data.needs] || ''));",
+        "    };",
+        "    ask('').then(function(data){",
+        "      paint(data);",
+        "      if (data && data.ships && (data.countries || []).length && !data.country) {",
+        # One country is not a choice: ask for it immediately rather than making the buyer pick from a list of
+        # one before they can see a price.
+        "        if (data.countries.length === 1) { select.value = data.countries[0]; ask(data.countries[0]).then(paint); }",
+        "      }",
+        "    });",
+        "    select.addEventListener('change', function(){ ask(select.value).then(paint); });",
+        # A tier change changes the parcel, so it changes the price.
+        "    document.addEventListener('click', function(event){",
+        "      if (!event.target.closest || !event.target.closest('.sl-price-option')) return;",
+        "      setTimeout(function(){ if (select.value) ask(select.value).then(paint); }, 0);",
+        "    });",
+        "  })();",
+        "  </script>",
+    ])
 
 
 def render_bnpl_messaging_scripts() -> list[str]:
@@ -7943,6 +8089,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # used to be a direct link built at publish from the offer's FIRST item, so on a tiered or
         # multi-product offer it sent everyone to tier one regardless of their choice (found 2026-09-22).
         "        if (window.__jbCoupon) params.set('coupon', window.__jbCoupon);",
+        # Where the buyer said to send it, if a shipping element asked. This NARROWS Stripe's allowed
+        # countries to that one, so a buyer quoted for Canada cannot switch to the US at the pay button and
+        # pay Canadian postage (plans/SHIPPING_ELEMENT.md phase 5).
+        "        if (window.__jbShipTo) params.set('ship_to_country', window.__jbShipTo);",
         "        const separator = cta.dataset.checkoutBaseUrl.includes('?') ? '&' : '?';",
         "        return `${cta.dataset.checkoutBaseUrl}${separator}${params.toString()}`;",
         "      };",

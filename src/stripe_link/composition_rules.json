@@ -33,6 +33,7 @@
     "trust_badges",
     "price_highlight",
     "offer_price_selector",
+    "shipping",
     "checkout_cta",
     "refund_policy",
     "related_products",
@@ -423,6 +424,22 @@
         "cta_scrim"
       ]
     },
+    "shipping": {
+      "placement": "free",
+      "label": "Shipping options",
+      "ui": "toggle",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "shipping_bg",
+        "shipping_border",
+        "shipping_title",
+        "shipping_text",
+        "shipping_rate_border"
+      ]
+    },
     "refund_policy": {
       "placement": "free",
       "label": "Refund policy",
@@ -644,7 +661,8 @@
     "checkout_cta",
     "refund_policy",
     "legal_footer",
-    "structured_data"
+    "structured_data",
+    "shipping"
   ],
   "offer_types": {
     "single": {
