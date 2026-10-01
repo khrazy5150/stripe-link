@@ -216,6 +216,24 @@ class ThePriceIsContextNotData(unittest.TestCase):
         self.assertIn("carrier:", body)
         self.assertNotIn("amount", body)
 
+    def test_an_adopted_service_is_marked_as_the_carriers(self):
+        body = self.SCREEN.split("function adoptRate", 1)[1].split("\nfunction", 1)[0]
+        self.assertIn('source: "rate"', body)
+
+    def test_the_carriers_fields_are_LOCKED_on_an_adopted_service(self):
+        """The author, 2026-09-30: do not let tenants change the values that were pre-selected. A hand-edited
+        service code is one that can never be quoted."""
+        for field in ("service.service_token", "service.transit_days_min", "service.transit_days_max"):
+            marker = f'v-if="service.source === \'rate\'" :value="{field}"'
+            self.assertIn(marker, self.SCREEN, field)
+
+    def test_the_BUYER_FACING_label_stays_editable(self):
+        """It is how the tenant talks to their customers, not a fact about the carrier."""
+        self.assertIn('v-model.trim="service.label"', self.SCREEN)
+
+    def test_a_hand_typed_service_says_nothing_has_checked_it(self):
+        self.assertIn("nothing has checked this code against a carrier", self.SCREEN)
+
 
 if __name__ == "__main__":
     unittest.main()

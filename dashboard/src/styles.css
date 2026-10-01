@@ -7838,3 +7838,11 @@ a.orders-place { text-decoration: underline; }
 }
 .carrier-chip:hover { border-color: #dc2626; color: #dc2626; }
 .carrier-add { max-width: 16rem; }
+
+/* A field whose value came from a carrier and must not be hand-edited. Readable rather than greyed into
+   illegibility -- the value is the point, and a tenant needs to be able to read the code they are relying on
+   (plans/SHIPPING_ELEMENT.md). */
+.locked-field {
+  background: var(--surface-muted, rgba(148, 163, 184, 0.12));
+  cursor: default;
+}

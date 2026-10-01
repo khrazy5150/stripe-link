@@ -766,6 +766,54 @@ this account can quote.
 - Every failure is an answer: `missing_ship_from`, `no_dimensions` (naming Products as the fix),
   `missing_provider`, and a 502 that relays what the carrier said.
 
+## Why only UPS and USPS came back (measured 2026-09-30)
+
+The author asked, looking at a live preview that returned only those two. The answer is the Shippo
+**sandbox**, not our code. Reading the account's own `/carrier_accounts`:
+
+    ups usps canada_post chronopost colissimo couriersplease correos deutsche_post
+    dhl_express dpd_de dpd_uk hermes_uk lso sendle        <- all active=True, ALL test=True
+
+Three facts explain it:
+
+1. **Every account is `test=True`** with a `shippo_*` id — Shippo's shared sandbox accounts, not the tenant's
+   own. The API key is a `shippo_test_*` token.
+2. **FedEx is not there at all.** Shippo's sandbox provides no FedEx account; it requires connecting a real
+   one. So FedEx cannot quote, and no amount of code changes that.
+3. **The rest are origin-restricted.** `canada_post`, `chronopost`, `colissimo`, `correos`, `deutsche_post`,
+   `dpd_de`, `dpd_uk`, `hermes_uk`, `sendle` cannot quote a shipment ORIGINATING in the US, which is why a
+   US→CA and a US→GB preview also returned USPS only. `dhl_express` is connected and returns nothing on these
+   lanes for the same reason.
+
+**In live mode with the tenant's own carrier accounts, FedEx and DHL appear without any change here.** Worth
+knowing before chasing it as a bug.
+
+**A smaller finding worth acting on eventually:** `/shipping/carriers` offers all nine "connected" carriers,
+most of which can never produce a rate from a US origin. The picker is therefore honest about what the account
+has and misleading about what it can do. Filtering by what actually quotes would need a probe per carrier, so
+the cheaper fix is to say which are test accounts.
+
+## Services adopted from a rate are LOCKED
+
+The author, 2026-09-30: *"make the Service section read-only — don't allow tenants to change the values that
+were pre-selected."*
+
+Done, with one deliberate exception. A service carries `source`:
+
+- **`rate`** — adopted from a live quote. Service code, carrier and transit days are the CARRIER's and render
+  read-only. Changing one is how a service becomes unquotable, which is the whole failure this feature exists
+  to end.
+- **`manual`** — typed by hand. Still editable, and labelled *"nothing has checked this code against a
+  carrier"*, because a tenant with no provider connected must still be able to configure something.
+
+**The buyer-facing label stays editable on both.** It is how the tenant talks to their customers, not a fact
+about the carrier — locking it would stop them writing "Arrives by Friday" over "Ground Advantage" for no
+safety gain.
+
+`enabled_services` also gained a runtime validator, which it never had: the JSON schema described the shape
+and nothing enforced it. It refuses a duplicate service code (the second is dead configuration the tenant
+believes is live), a missing code, an inverted transit window, and an unknown `source`.
+
 ## Open
 
 - **Does a full address get collected on the page, or country + postcode?** Recommended the latter, but a

@@ -105,7 +105,12 @@
           "carrier": { "type": "string" },
           "label": { "type": "string", "description": "What the BUYER reads, e.g. 'Ground (5-7 days)'. Absent falls back to the carrier's own name." },
           "transit_days_min": { "type": ["integer", "null"], "minimum": 0 },
-          "transit_days_max": { "type": ["integer", "null"], "minimum": 0 }
+          "transit_days_max": { "type": ["integer", "null"], "minimum": 0 },
+          "source": {
+            "type": "string",
+            "enum": ["rate", "manual"],
+            "description": "Where this service came from. `rate` means it was adopted from a live carrier quote, so its code, carrier and transit estimate are the CARRIER's and the screen locks them -- a hand-edited service code is one that can never be quoted. `manual` means someone typed it, which stays editable and is shown as unverified."
+          }
         }
       }
     },

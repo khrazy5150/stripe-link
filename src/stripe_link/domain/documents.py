@@ -2758,6 +2758,41 @@ def validate_legal_page(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Legal page page_id must be 'terms', 'privacy', or 'refund'.")
 
 
+def validate_enabled_services(services: Any) -> None:
+    """The delivery speeds a tenant offers. Validated because nothing did -- the JSON schema described this
+    shape and no runtime check enforced it (plans/SHIPPING_ELEMENT.md).
+
+    `source` records provenance: `rate` means the service was adopted from a live carrier quote, so its code
+    and carrier are the CARRIER's and the screen locks them. A hand-edited service code is one that can never
+    be quoted, and nothing says so until a buyer sees no options.
+    """
+    if services is None:
+        return
+    if not isinstance(services, list):
+        raise DocumentValidationError("Shipping config enabled_services must be an array.")
+    seen = set()
+    for index, service in enumerate(services):
+        if not isinstance(service, dict):
+            raise DocumentValidationError(f"Shipping config enabled_services[{index}] must be an object.")
+        token = require_string(service, "service_token", f"enabled_services[{index}].service_token")
+        if token in seen:
+            # Two entries with one code are indistinguishable to everything downstream, and the second is
+            # dead configuration the tenant believes is live.
+            raise DocumentValidationError(
+                f"Shipping config enabled_services[{index}] repeats the service code '{token}'.")
+        seen.add(token)
+        optional_string(service, "carrier", f"enabled_services[{index}].carrier", max_length=40)
+        optional_string(service, "label", f"enabled_services[{index}].label", max_length=80)
+        for field in ("transit_days_min", "transit_days_max"):
+            optional_non_negative_int(service, field, f"enabled_services[{index}].{field}")
+        low, high = service.get("transit_days_min"), service.get("transit_days_max")
+        if low is not None and high is not None and int(high) < int(low):
+            raise DocumentValidationError(
+                f"Shipping config enabled_services[{index}] is slower than it is fast.")
+        if service.get("source") is not None:
+            require_enum(service, "source", {"rate", "manual"}, f"enabled_services[{index}].source")
+
+
 def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
     """Ordered destination zones -- what buyers pay, by where they are (plans/SHIPPING_ELEMENT.md).
 
@@ -2840,6 +2875,7 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
     # part of the form is backwards. Whether the config is COMPLETE enough to buy a label is a different
     # question, answered by label_readiness() rather than by refusing the save.
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider"])
+    validate_enabled_services(document.get("enabled_services"))
     validate_shipping_zones(document.get("zones"), document.get("boxes"))
     if document.get("document_type") != "shipping_config":
         raise DocumentValidationError("Shipping config document_type must be 'shipping_config'.")

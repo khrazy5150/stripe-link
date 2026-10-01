@@ -263,17 +263,26 @@
             <button class="secondary-action compact" type="button" @click="form.enabled_services.splice(index, 1)">Remove</button>
           </header>
           <div class="offer-three-column">
+            <!-- The buyer-facing wording stays the TENANT's, even on an adopted service: it is how they talk
+                 to their customers, not a fact about the carrier. -->
             <label class="offer-field">
               <span>Buyer sees</span>
               <input v-model.trim="service.label" type="text" placeholder="e.g. Ground (5–7 days)" />
             </label>
+            <!-- Everything below came from the carrier and is LOCKED. A hand-edited service code is one that
+                 can never be quoted, and nothing says so until a buyer sees no options. -->
             <label class="offer-field">
               <span>Service code</span>
-              <input v-model.trim="service.service_token" type="text" placeholder="e.g. usps_ground_advantage" />
+              <input v-if="service.source === 'rate'" :value="service.service_token" type="text" readonly
+                     class="locked-field" />
+              <input v-else v-model.trim="service.service_token" type="text"
+                     placeholder="e.g. usps_ground_advantage" />
             </label>
             <label class="offer-field">
               <span>Carrier</span>
-              <select v-model="service.carrier">
+              <input v-if="service.source === 'rate'" :value="carrierLabel(service.carrier)" type="text"
+                     readonly class="locked-field" />
+              <select v-else v-model="service.carrier">
                 <option value="">Any carrier</option>
                 <option v-for="carrier in carrierChoices" :key="carrier.key" :value="carrier.key">
                   {{ carrier.label }}
@@ -284,13 +293,25 @@
           <div class="offer-two-column">
             <label class="offer-field">
               <span>Fastest (business days)</span>
-              <input v-model.number="service.transit_days_min" type="number" min="0" step="1" />
+              <input v-if="service.source === 'rate'" :value="service.transit_days_min" type="text" readonly
+                     class="locked-field" />
+              <input v-else v-model.number="service.transit_days_min" type="number" min="0" step="1" />
             </label>
             <label class="offer-field">
               <span>Slowest (business days)</span>
-              <input v-model.number="service.transit_days_max" type="number" min="0" step="1" />
+              <input v-if="service.source === 'rate'" :value="service.transit_days_max" type="text" readonly
+                     class="locked-field" />
+              <input v-else v-model.number="service.transit_days_max" type="number" min="0" step="1" />
             </label>
           </div>
+          <small v-if="service.source === 'rate'" class="field-hint">
+            From a live carrier rate — the code, carrier and transit days are theirs. Remove it and adopt
+            another from <strong>Try a rate</strong> to change them.
+          </small>
+          <small v-else class="field-hint">
+            Typed by hand, so nothing has checked this code against a carrier. Adopt it from
+            <strong>Try a rate</strong> to be sure it can be quoted.
+          </small>
         </div>
         <button class="secondary-action" type="button" @click="form.enabled_services.push(emptyService())">Add service</button>
       </div>
@@ -676,11 +697,14 @@ function adoptRate(rate) {
     // The carrier's own estimate becomes the window a buyer is shown, rather than a number anyone typed.
     transit_days_min: rate.estimated_days || "",
     transit_days_max: rate.estimated_days || "",
+    // Provenance, and what locks the fields above: these values are the CARRIER's.
+    source: "rate",
   });
 }
 
 function emptyService() {
-  return { service_token: "", carrier: "", label: "", transit_days_min: "", transit_days_max: "" };
+  return { service_token: "", carrier: "", label: "", transit_days_min: "", transit_days_max: "",
+           source: "manual" };
 }
 
 // Mirrors the Boxes convenience seed: a tenant should not have to invent service codes from nothing.
@@ -908,6 +932,7 @@ function applyConfig(config) {
         ...emptyService(), ...service,
         transit_days_min: service.transit_days_min ?? "",
         transit_days_max: service.transit_days_max ?? "",
+        source: service.source === "rate" ? "rate" : "manual",
       }))
     : [];
   form.zones = zonesFromDocument(config.zones);
@@ -1111,7 +1136,8 @@ function buildPayload() {
   const services = form.enabled_services
     .filter((service) => String(service.service_token || "").trim())
     .map((service) => {
-      const entry = { service_token: String(service.service_token).trim() };
+      const entry = { service_token: String(service.service_token).trim(),
+                      source: service.source === "rate" ? "rate" : "manual" };
       if (String(service.carrier || "").trim()) entry.carrier = String(service.carrier).trim();
       if (String(service.label || "").trim()) entry.label = String(service.label).trim();
       if (Number(service.transit_days_min) >= 0 && service.transit_days_min !== "") {
