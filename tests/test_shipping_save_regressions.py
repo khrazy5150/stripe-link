@@ -107,7 +107,9 @@ class ReadinessComesFromTheServerTests(unittest.TestCase):
         for path, body in (("load", "applyReadiness(body)"),
                            ("save", "applyReadiness(body)"),
                            ("testConnection", "applyReadiness(body)")):
-            source = self.SCREEN.split(f"function {path}", 1)
+            # The OPEN PAREN matters: splitting on `function load` also matched `loadCarriers`, so this
+            # asserted against the wrong function's body the moment a longer name shared the prefix.
+            source = self.SCREEN.split(f"function {path}(", 1)
             self.assertEqual(len(source), 2, f"no {path}() on the screen")
             self.assertIn(body, source[1].split("\nasync function", 1)[0].split("\nfunction", 1)[0])
         # Including the FAILED connection test, whose 502 body still describes what is missing.

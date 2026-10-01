@@ -678,6 +678,67 @@ override the default — and holds **no zone editor, no carrier config, no secon
    `plans/SHIPPING_PROVIDERS.md`. Pricing a bundle and posting one are now different questions with different
    answers, and that is worth knowing before a tenant sells one.
 
+## Carriers are CHOSEN, never typed — and services are discovered, not invented (author, 2026-09-30)
+
+> *"Carriers cannot be manually entered in free-text form. That begs for typos and human error. They should be
+> choices that come straight from the API."*
+
+Right, and the typo is the smaller half of the problem. **A `service_code` a tenant invents will never match a
+real carrier rate.** The Services section currently accepts `ground`, `two_day`, `overnight` — reasonable words
+that no carrier uses. Shippo's token for USPS ground is `usps_ground_advantage`; a tenant who types `ground`
+has configured a service that can never be quoted, and nothing tells them until a buyer sees no options.
+
+So the fix is not only a picker. It is that **the service identity must come from the carrier**, which is what
+the second ask provides.
+
+### What already exists (this needs no new provider work)
+
+- **`domain/carriers.carrier_options()`** — a static registry of carriers and their services, built for a
+  picker. Four carriers today plus `other`.
+- **`ShippingProvider.test_connection()`** returns `{"ok", "message", "carriers": [...]}` — the tenant's
+  **actually connected** carriers, which is better than a static list: a tenant with no UPS account should not
+  be offered UPS.
+- **`ShippingProvider.rates(from_address, to_address, parcel)`** returns normalised rates carrying
+  `carrier`, `service`, `service_token`, `amount`, `estimated_days`, `rate_id`.
+- **`shipping_packing.pack()`** turns products + a box into the parcel those rates need.
+- **The dev tenant has Shippo connected with a live key** (`connection_status: connected`), so this is
+  buildable now rather than theoretical.
+
+### The rate viewer, and what it is actually FOR
+
+> *"Create a section where the tenant can select one or more products, select a box, and click a button that
+> will list them their options (all carriers and their rates). They can then choose... and THAT will be the
+> carrier/rate that appears in the Services section."*
+
+    Try a rate
+      Products  [ Creatine Gummies ×] [ Whey Protein ×]      <- the Offers modal's chip precedent
+      Box       [ Medium (10x8x6) ▾ ]
+      Ship to   [ US ] [ 80204 ]
+      [ Get rates ]
+
+      USPS   Ground Advantage      $8.42    5–7 days   [ Use this ]
+      USPS   Priority Mail        $11.90    2–3 days   [ Use this ]
+      UPS    2nd Day Air          $17.31    2 days     [ Use this ]
+
+**What "Use this" harvests is the SERVICE IDENTITY, not the price.** That distinction decides whether the
+feature is sound: a rate is destination-specific and goes stale within days, but `usps_ground_advantage` is
+stable and is what a later live quote needs to match. The prices are shown as CONTEXT — they tell the tenant
+what a flat rate should be set to — and are deliberately not stored as the zone price. A tenant who wants that
+number types it into a zone themselves.
+
+So the viewer is a **service discovery tool** that shows prices, not a price import. A row that wrote its
+amount into a zone would be a snapshot with a timestamp nobody can see.
+
+### Build order
+
+1. **The pickers**, which make the existing fields safe: Carrier becomes a select sourced from the tenant's
+   connected carriers (falling back to `carrier_options()` when no provider is connected), and "Allowed
+   carriers" becomes dismissible chips rather than a comma-separated string.
+2. **The rate viewer**, which makes the Service CODE correct rather than merely well-spelled.
+
+One before the other because the first is useful even for a tenant with no carrier connected, and the second
+cannot run without one.
+
 ## Open
 
 - **Does a full address get collected on the page, or country + postcode?** Recommended the latter, but a

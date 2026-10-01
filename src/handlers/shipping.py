@@ -26,6 +26,7 @@ from stripe_link.domain.shipping import (
     tenant_boxes,
 )
 from stripe_link.domain.shipping_packing import pack
+from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.domain.shipment_notice import notify_buyer
@@ -77,6 +78,8 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
         return buy_label(event, repository, secret_cipher, products_repo=products_repo,
                          orders_repo=orders_repo, shipments_repo=shipments_repo,
                          user_profiles_repo=user_profiles_repo, mailer_send=mailer_send, now_fn=now_fn)
+    if _action(event) == "carriers" and method == "GET":
+        return list_carriers(event, repository, secret_cipher)
     if _action(event) == "rates" and method == "POST":
         return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
                            orders_repo=orders_repo)
@@ -238,6 +241,62 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
         "connection": {"status": status, "message": message, "carriers": carriers},
         "readiness": label_readiness(saved),
     }, status_code=200 if status == "connected" else 502)
+
+
+def list_carriers(event, repository, secret_cipher):
+    """Which carriers this tenant may pick from. Their CONNECTED ones when we can ask, else the registry.
+
+    plans/SHIPPING_ELEMENT.md. The Services and Allowed-Carriers fields were free text, which invites typos --
+    and worse, invites a service code no carrier recognises. A picker cannot fix the second problem on its own
+    (that is what the rate viewer is for) but it removes the first entirely.
+
+    Asking the provider beats the static list because it is the tenant's OWN answer: someone with no UPS
+    account should not be offered UPS. When there is no provider, no key, or the provider is unreachable, the
+    registry still gives a picker -- which is the whole point, since a field that falls back to free text
+    falls back to the bug.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+
+    registry = carrier_options()
+    payload = {"carriers": registry, "source": "registry", "connected": []}
+    config = repository.get(tenant_id) or {}
+    provider = config.get("provider") or {}
+    name = str(provider.get("name") or "").strip()
+    key_ref = str(provider.get("api_key_ref") or "").strip()
+    if not name or not key_ref:
+        return json_response(payload)
+
+    try:
+        # Same call shape as `test_shipping_connection` -- decrypt needs the tenant/mode/field, and omitting
+        # them raises rather than returning a wrong key.
+        api_key = secret_cipher.decrypt(
+            key_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        )
+        connected = provider_for(name, api_key, base_url=str(provider.get("base_url") or "")) \
+            .test_connection().get("carriers") or []
+    except Exception as exc:  # noqa: BLE001 - follows test_shipping_connection: a failed lookup is an ANSWER
+        # NOT fatal: a picker backed by the registry is still a picker, and the whole point is that this field
+        # never falls back to free text. The reason is reported so a tenant whose list looks short is not left
+        # guessing, rather than silently getting the generic set.
+        payload["message"] = f"Showing the standard carriers: {type(exc).__name__}"
+        return json_response(payload)
+
+    known = {str(option.get("key") or "").lower(): option for option in registry}
+    # Their connected carriers first, each enriched with the registry's label and services where we know them.
+    # A carrier the registry has never heard of is still offered -- the provider is the authority on what this
+    # account can quote, and dropping it would hide a carrier the tenant actually has.
+    carriers = []
+    for code in connected:
+        slug = str(code or "").strip().lower()
+        if not slug:
+            continue
+        carriers.append(known.get(slug) or {"key": slug, "label": slug.upper(), "services": []})
+    payload.update({"carriers": carriers or registry,
+                    "source": "provider" if carriers else "registry",
+                    "connected": [str(code).lower() for code in connected]})
+    return json_response(payload)
 
 
 def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_repo=None):

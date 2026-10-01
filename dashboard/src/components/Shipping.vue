@@ -252,6 +252,7 @@
           customer cannot ask for overnight if you do not ship overnight.</p>
       </header>
       <div class="dashboard-card-body">
+        <p v-if="carrierNote" class="field-hint">{{ carrierNote }}</p>
         <p v-if="!form.enabled_services.length" class="field-hint">
           No services yet.
           <button class="link-action" type="button" @click="useStarterServices">Start with common speeds</button>
@@ -272,7 +273,12 @@
             </label>
             <label class="offer-field">
               <span>Carrier</span>
-              <input v-model.trim="service.carrier" type="text" placeholder="e.g. USPS" />
+              <select v-model="service.carrier">
+                <option value="">Any carrier</option>
+                <option v-for="carrier in carrierChoices" :key="carrier.key" :value="carrier.key">
+                  {{ carrier.label }}
+                </option>
+              </select>
             </label>
           </div>
           <div class="offer-two-column">
@@ -365,10 +371,24 @@
             <span>Default Service Level</span>
             <input v-model.trim="form.rate_options.default_service_level" type="text" placeholder="e.g. usps_priority" />
           </label>
-          <label class="offer-field">
+          <div class="offer-field">
             <span>Allowed Carriers</span>
-            <input v-model.trim="form.rate_options.allowed_carriers" type="text" placeholder="Comma-separated, e.g. usps, ups" />
-          </label>
+            <div class="carrier-chips">
+              <button v-for="code in form.rate_options.allowed_carriers" :key="code" class="carrier-chip"
+                      type="button" @click="toggleAllowedCarrier(code)">
+                {{ carrierLabel(code) }} <span aria-hidden="true">×</span>
+              </button>
+              <span v-if="!form.rate_options.allowed_carriers.length" class="field-hint">
+                Any carrier you are connected to.
+              </span>
+            </div>
+            <select class="carrier-add" :value="''" @change="toggleAllowedCarrier($event.target.value)">
+              <option value="">Add a carrier…</option>
+              <option v-for="carrier in unselectedCarriers" :key="carrier.key" :value="carrier.key">
+                {{ carrier.label }}
+              </option>
+            </select>
+          </div>
         </div>
         <div class="offer-two-column">
           <label class="offer-field">
@@ -446,7 +466,7 @@ function defaultForm() {
     // belong to charging the buyer, "which is a different question... untouched here". A control implying a
     // promise the system does not keep (plans/SHIPPING_ELEMENT.md). "What buyers pay" replaces them. Stored
     // values are preserved on save so nothing is destroyed for a tenant who set one.
-    rate_options: { default_service_level: "", allowed_carriers: "",
+    rate_options: { default_service_level: "", allowed_carriers: [],
                     prefer: "cheapest", max_transit_days: "", preferred_carrier: "", max_auto_amount: "" },
     label_options: { format: "pdf", size: "4x6" },
     boxes: [],
@@ -456,6 +476,41 @@ function defaultForm() {
     // keeps one last and does not let it be removed or renamed.
     zones: [catchAllZone()],
   };
+}
+
+// The carriers this tenant may pick from -- their CONNECTED ones when we can ask, else the standard registry.
+// Never free text: a typo'd carrier is a carrier that never quotes (plans/SHIPPING_ELEMENT.md).
+const carrierChoices = ref([]);
+const carrierNote = ref("");
+
+async function loadCarriers() {
+  try {
+    const body = await apiRequest("/shipping/carriers");
+    carrierChoices.value = body.carriers || [];
+    carrierNote.value = body.message || "";
+  } catch (err) {
+    // A picker that cannot load must not become a text box. Empty means "Any carrier" only, which is a
+    // smaller failure than inviting the typo back.
+    carrierChoices.value = [];
+    carrierNote.value = "";
+  }
+}
+
+function carrierLabel(code) {
+  const match = carrierChoices.value.find((carrier) => carrier.key === code);
+  return match ? match.label : String(code || "").toUpperCase();
+}
+
+const unselectedCarriers = computed(() =>
+  carrierChoices.value.filter((carrier) => !(form.rate_options.allowed_carriers || []).includes(carrier.key)));
+
+function toggleAllowedCarrier(code) {
+  const value = String(code || "").trim();
+  if (!value) return;
+  const list = form.rate_options.allowed_carriers;
+  const at = list.indexOf(value);
+  if (at >= 0) list.splice(at, 1);
+  else list.push(value);
 }
 
 function emptyService() {
@@ -693,7 +748,11 @@ function applyConfig(config) {
   const rate = config.rate_options || {};
   form.rate_options = {
     default_service_level: rate.default_service_level || "",
-    allowed_carriers: Array.isArray(rate.allowed_carriers) ? rate.allowed_carriers.join(", ") : "",
+    // An ARRAY now, not a comma-separated string: the field is a chip list, so a stored string from before
+    // this change is split once on load rather than being re-parsed on every save.
+    allowed_carriers: Array.isArray(rate.allowed_carriers)
+      ? rate.allowed_carriers.map((code) => String(code).trim().toLowerCase()).filter(Boolean)
+      : String(rate.allowed_carriers || "").split(",").map((code) => code.trim().toLowerCase()).filter(Boolean),
     prefer: rate.prefer || "cheapest",
     max_transit_days: rate.max_transit_days ?? "",
     preferred_carrier: rate.preferred_carrier || "",
@@ -858,7 +917,7 @@ function buildPayload() {
 
   const rate = {};
   if (form.rate_options.default_service_level.trim()) rate.default_service_level = form.rate_options.default_service_level.trim();
-  const carriers = form.rate_options.allowed_carriers.split(",").map((item) => item.trim()).filter(Boolean);
+  const carriers = (form.rate_options.allowed_carriers || []).map((code) => String(code).trim()).filter(Boolean);
   if (carriers.length) rate.allowed_carriers = carriers;
   // markup_amount and free_shipping_threshold are no longer EDITED here -- nothing ever read them, and "What
   // buyers pay" replaces them. A stored value is carried through rather than deleted: a tenant who set one
@@ -969,4 +1028,5 @@ async function save() {
 }
 
 load();
+loadCarriers();
 </script>

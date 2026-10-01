@@ -3102,6 +3102,15 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping/test
             Method: POST
+        ShippingCarriers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # The carriers a tenant may PICK from -- their connected ones, else the registry. The Services and
+            # Allowed-Carriers fields were free text, which invites typos and, worse, service codes no carrier
+            # recognises (plans/SHIPPING_ELEMENT.md).
+            Path: /shipping/carriers
+            Method: GET
         ShippingRates:
           Type: Api
           Properties:

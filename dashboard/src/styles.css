@@ -7816,3 +7816,25 @@ a.orders-place { text-decoration: underline; }
 }
 
 .drawer-order-ref:hover { color: var(--brand); }
+
+/* Dismissible carrier chips on the Shipping screen -- the Offers modal's selected-product pattern, so a
+   tenant recognises the interaction rather than learning a second one. Carriers are PICKED, never typed:
+   a misspelt carrier is a carrier that never quotes (plans/SHIPPING_ELEMENT.md). */
+.carrier-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.3rem 0;
+  min-height: 1.9rem;
+  align-items: center;
+}
+.carrier-chip {
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.4));
+  background: var(--surface-muted, rgba(148, 163, 184, 0.1));
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.carrier-chip:hover { border-color: #dc2626; color: #dc2626; }
+.carrier-add { max-width: 16rem; }
