@@ -17,10 +17,11 @@ class Actuals:
     def __init__(self, fail=False):
         self.rows, self.fail = {}, fail
 
-    def put(self, tenant_id, record):
+    def put(self, record):
+        # One argument, like the real repository. The tenant must be ON the document.
         if self.fail:
             raise RuntimeError("dynamo down")
-        self.rows[(tenant_id, record["order_id"])] = record
+        self.rows[(str(record["tenant_id"]), record["order_id"])] = record
 
 
 def an_order(**over):

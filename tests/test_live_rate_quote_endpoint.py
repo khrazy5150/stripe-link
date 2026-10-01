@@ -45,9 +45,12 @@ class QuoteStore:
         self.gets += 1
         return self.rows.get((tenant_id, quote_id))
 
-    def put(self, tenant_id, record):
+    def put(self, record):
+        # ONE argument, exactly like DynamoDocumentRepository.put -- the tenant is read off the document.
+        # The first version of this double took (tenant_id, record), so every test passed while every
+        # real call raised. A fake that accepts a signature the real thing does not proves nothing.
         self.puts += 1
-        self.rows[(tenant_id, record["quote_id"])] = record
+        self.rows[(str(record["tenant_id"]), record["quote_id"])] = record
 
 
 class Cipher:
@@ -210,3 +213,66 @@ class LiveQuoteTests(unittest.TestCase):
         body = self.quote()
         row = self.store.rows[("t1", body["quote_id"])]
         self.assertEqual(row["expires_at"] - row["created_at"], QUOTE_TTL_SECONDS)
+
+
+class TheRealRepositoryIsExercised(unittest.TestCase):
+    """The doubles above describe the repository; this one IS the repository.
+
+    `DynamoDocumentRepository.put` takes ONE argument and reads tenant_id off the document. The handler
+    called `put(tenant_id, record)`, which raised on every real request while all sixteen tests passed --
+    because the doubles implemented the signature the code assumed rather than the one that exists. The
+    deployed endpoint returned prices with no `quote_id` and logged "shipping quote not saved".
+
+    So this test drives the genuine class over a stub TABLE instead of stubbing the class. A fake one
+    level lower cannot invent a signature.
+    """
+
+    class Table:
+        def __init__(self):
+            self.items = {}
+
+        def get_item(self, Key):  # noqa: N803 - boto3's own casing
+            found = self.items.get(tuple(sorted(Key.items())))
+            return {"Item": found} if found else {}
+
+        def put_item(self, Item, **_kwargs):  # noqa: N803
+            key = tuple(sorted((k, v) for k, v in Item.items() if k in {"PK", "SK"}))
+            self.items[key] = Item
+
+        def query(self, **_kwargs):
+            return {"Items": []}
+
+    def setUp(self):
+        self._real = checkout_module._tenant_shipping_config
+        self.config = dict(LIVE_CONFIG)
+        checkout_module._tenant_shipping_config = lambda tenant_id: self.config
+
+    def tearDown(self):
+        checkout_module._tenant_shipping_config = self._real
+
+    def _repo(self):
+        from stripe_link.repositories.documents import DynamoDocumentRepository
+
+        return DynamoDocumentRepository("jb-carts-test", document_type="shipping_quote",
+                                        id_field="quote_id", table=self.Table(),
+                                        mode="test", mode_scoped=True)
+
+    def test_a_quote_round_trips_through_the_genuine_repository(self):
+        repo = self._repo()
+        first = json.loads(shipping_quote(
+            tenant_id="t1", offer_id="o1", product_id="p1", price_id="pr1", quantity="1",
+            country="US", postal_code="80202", region="CO", mode="test",
+            offers_repo=Repo({"o1": OFFER}), products_repo=Repo({"p1": PRODUCT}),
+            quotes_repo=repo, secret_cipher=Cipher())["body"])
+        self.assertTrue(first.get("quote_id", "").startswith("shq_"),
+                        "the quote must actually persist, not fail silently")
+
+        # And it reads back: the second ask is served from the stored row.
+        second = json.loads(shipping_quote(
+            tenant_id="t1", offer_id="o1", product_id="p1", price_id="pr1", quantity="1",
+            country="US", postal_code="80202", region="CO", mode="test",
+            offers_repo=Repo({"o1": OFFER}), products_repo=Repo({"p1": PRODUCT}),
+            quotes_repo=repo, secret_cipher=Cipher())["body"])
+        self.assertEqual(first["quote_id"], second["quote_id"])
+        self.assertEqual([o["amount"] for o in first["options"]],
+                         [o["amount"] for o in second["options"]])

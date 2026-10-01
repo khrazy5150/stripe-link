@@ -339,7 +339,9 @@ def record_shipping_variance(order, shipment, tenant_id, *, mode, now, actuals_r
         record["quoted_service_token"] = str(agreed.get("service_token") or "")
         record["service_substituted"] = bool(
             record["quoted_service_token"] and record["service_token"] != record["quoted_service_token"])
-        (actuals_repo or _shipping_actuals_repo(mode)).put(tenant_id, record)
+        # tenant_id lives ON the document: `put` takes one argument and keys from it.
+        record["tenant_id"] = tenant_id
+        (actuals_repo or _shipping_actuals_repo(mode)).put(record)
     except Exception as exc:  # noqa: BLE001
         print(f"[shipping] variance not recorded for order "
               f"{(order or {}).get('order_id')}: {type(exc).__name__}: {exc}")

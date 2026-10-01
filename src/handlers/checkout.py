@@ -857,7 +857,10 @@ def _mint_quote(quotes_repo, mode, *, tenant_id, offer_id, items, parcels, desti
     if store is None:
         return {}
     try:
-        store.put(tenant_id, record)
+        # `put(document)`, one argument -- the repository reads tenant_id off the document itself. Passing
+        # a tenant positionally raised on every real call while every test passed, because the test
+        # doubles implemented the signature this code assumed rather than the one the repository has.
+        store.put(record)
     except Exception as exc:  # noqa: BLE001
         logger.warning("shipping quote not saved", extra={"tenant_id": tenant_id,
                                                           "error": f"{type(exc).__name__}: {exc}"})

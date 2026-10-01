@@ -44,9 +44,12 @@ class Store:
     def get(self, tenant_id, quote_id):
         return self.rows.get((tenant_id, quote_id))
 
-    def put(self, tenant_id, record):
+    def put(self, record):
+        # ONE argument, exactly like DynamoDocumentRepository.put -- the tenant is read off the document.
+        # The first version of this double took (tenant_id, record), so every test passed while every
+        # real call raised. A fake that accepts a signature the real thing does not proves nothing.
         self.puts += 1
-        self.rows[(tenant_id, record["quote_id"])] = record
+        self.rows[(str(record["tenant_id"]), record["quote_id"])] = record
 
 
 class Cipher:
