@@ -1,5 +1,13 @@
 # Smart Pricing — design note
 
+> **Promoted from convenience to prerequisite, 2026-10-01.** `offer.shipping.free_above_amount` — free
+> shipping over a cart threshold — is a promise to lose more money the more a customer buys *unless the
+> cost was recovered in the price*, which is what this document is for. Free shipping as every other
+> platform does it is Smart Pricing wearing a different hat. See
+> `plans/SHIPPING_BEYOND_THE_FIRST_SALE.md §4`, which also records that the invariant in
+> `plans/SHIPPING_CHARGES.md` (`charged + cost line = DOUBLE-COUNTED`) is implemented in
+> `shipping_charges.smart_pricing_conflict` and has **no production caller**.
+
 **Status:** design, nothing built · **Written:** 2026-09-28 · **Scope:** stripe-link
 
 A tenant tells us what a thing costs them and what they want to earn. We tell them what to charge.
@@ -236,9 +244,13 @@ knowing what things cost.
 - **Multi-currency source costs.** A supplier invoices in CNY; the price is in USD. Convert at entry
   and store the rate, or store the source currency and convert on read? The first is simpler and
   wrong the moment rates move; the second needs a rate source we do not have.
-- **Outbound shipping as a `fixed` line is an estimate** until the carrier rate API is wired
-  (plans/TODO.md, "Wire the shipping providers"). The formula does not change when it lands — only
-  where that one number comes from — but a tenant should be told it is their estimate, not a quote.
+- ~~**Outbound shipping as a `fixed` line is an estimate** until the carrier rate API is wired.~~
+  **RESOLVED 2026-10-01.** The carrier rate API is wired (`plans/LIVE_SHIPPING_RATES.md`, shipped):
+  `domain/shipping_rating.rate_parcels` rates a real packed parcel against a real destination. As
+  predicted, the formula did not change — only where the number comes from. Deriving the line from a
+  carrier quote is P4 of `plans/SHIPPING_BEYOND_THE_FIRST_SALE.md`; a typed estimate stays allowed for
+  tenants with no carrier connected, and a derived one carries its date and destination so staleness
+  stays visible (§6).
 - **Does the customer-facing price interact with `fee_handling`?** A `net_guaranteed` product already
   grosses fees onto the buyer. Applying a markup on top of that is coherent but needs its display
   thought through, so the tenant is not shown two different "what you keep" numbers.
