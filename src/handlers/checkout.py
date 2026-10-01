@@ -12,6 +12,11 @@ class StripeCheckoutError(RuntimeError):
 
 
 logger = logging.getLogger(__name__)
+# Lambda leaves the root logger at WARNING, so every `logger.info` in this module has been swallowed since
+# it was written -- including "checkout shipping not charged", the line whose whole job is to say out loud
+# why a buyer was not charged for postage. A diagnostic nobody can hear is the same silence it was added to
+# remove. `page_publish` already sets its own level; this follows it (2026-10-01).
+logger.setLevel(logging.INFO)
 
 from stripe_link.common import error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
