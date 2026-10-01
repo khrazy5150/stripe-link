@@ -76,6 +76,10 @@ class TheScriptSendsAServiceNotAnAmount(unittest.TestCase):
     option that was never actually returned by your shipping service."*"""
 
     def setUp(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        render_shipping_selector({"id": "s"}, OFFER, PHYSICAL, API)
         self.js = render_shipping_selector_script()
 
     def test_the_radio_value_is_the_service_token(self):
@@ -100,6 +104,31 @@ class TheScriptSendsAServiceNotAnAmount(unittest.TestCase):
     def test_a_failed_fetch_is_silent(self):
         """A shipping selector that cannot reach the API must not block a sale."""
         self.assertIn(".catch(", self.js)
+
+
+class TheScriptIsNotShippedToPagesThatCannotUseIt(unittest.TestCase):
+    """~4KB of JS. The first version emitted it unconditionally, so every page carried a selector driver --
+    including digital ones with no element to drive. Caught after deploying, by measuring it."""
+
+    def test_no_element_means_no_script(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        self.assertEqual(render_shipping_selector_script(), "")
+
+    def test_rendering_the_element_turns_the_script_on(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        render_shipping_selector({"id": "s"}, OFFER, PHYSICAL, API)
+        self.assertTrue(render_shipping_selector_script())
+
+    def test_a_digital_offer_leaves_it_off(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        render_shipping_selector({"id": "s"}, OFFER, DIGITAL, API)
+        self.assertEqual(render_shipping_selector_script(), "")
 
 
 class TheCtaCarriesTheDestination(unittest.TestCase):

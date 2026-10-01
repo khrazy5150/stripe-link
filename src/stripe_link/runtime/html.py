@@ -1752,6 +1752,9 @@ _RENDER_ORG: dict[str, Any] = {}
 # renderer fills from the resolved offer. Drives Stripe's Payment Method Messaging Element below the price.
 # Render-scoped like _RENDER_ORG; empty when the tenant has no enabled installment methods / no publishable key.
 _RENDER_BNPL: dict[str, Any] = {}
+# Set by `render_shipping_selector` when it actually emits a shell, so the ~4KB of selector JS is not shipped
+# on pages that can never use it. Follows `_RENDER_BNPL`'s gate: emitted only when the markup exists.
+_RENDER_SHIPPING: dict[str, Any] = {}
 # The Site's SEO config for this render (plans/SITE_OBJECT.md §2.4): webmaster-verification tokens (SEO-16),
 # title suffix, default OG image. Render-scoped like _RENDER_ORG; empty when the page has no Site.
 _RENDER_SEO: dict[str, Any] = {}
@@ -1979,6 +1982,7 @@ def render_page(
         active_context = "standard"
     _RENDER_STATE["active_price_context"] = active_context
     _RENDER_BNPL.clear()
+    _RENDER_SHIPPING.clear()
     if bnpl_messaging and bnpl_messaging.get("publishable_key") and bnpl_messaging.get("payment_method_types"):
         _RENDER_BNPL.update(bnpl_messaging)   # amount/currency get filled from the resolved offer in the body
     # The Site's menus, resolved to {label, url} against the home host (SEO-13). Only meaningful where the
@@ -3064,6 +3068,9 @@ def render_shipping_selector(section: dict[str, Any], offer: dict[str, Any],
     heading = escape(str(section.get("heading") or "Shipping"))
     prompt = escape(str(section.get("prompt") or "Where should we ship your order?"))
     section_id = escape(str(section.get("id", "shipping")))
+    # Only now does the page need the script. Without this gate every page carried ~4KB of selector JS,
+    # including digital ones with no element to drive -- dead weight the PageSpeed work would have objected to.
+    _RENDER_SHIPPING["_active"] = True
     return "\n".join([
         f"    <section class=\"sl-shipping\" data-section-id=\"{section_id}\" data-section-type=\"shipping\"",
         f"             data-shipping-api-base=\"{escape(str(api_base_url))}\"",
@@ -3676,6 +3683,9 @@ def render_bnpl_messaging_div() -> str:
 def render_shipping_selector_script() -> str:
     """Fetch the destinations and the rates, then let the buyer choose. Nothing is priced in the page.
 
+    Emitted ONLY when a shipping shell was rendered. The first version shipped unconditionally, putting ~4KB
+    of JS on every page including digital ones that could never use it.
+
     plans/SHIPPING_ELEMENT.md phase 5. The element sends a SERVICE choice to checkout, never an amount: the
     server re-derives the price, so a browser cannot submit a $2 shipping option it was never offered.
 
@@ -3686,6 +3696,8 @@ def render_shipping_selector_script() -> str:
     Fails QUIET and stays hidden. A shipping selector that cannot reach the API must not block a sale: the
     buyer checks out and Stripe collects the address as it does today.
     """
+    if not _RENDER_SHIPPING.get("_active"):
+        return ""
     return "\n".join([
         "  <script>",
         "  (function(){",
