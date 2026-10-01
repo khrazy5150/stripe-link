@@ -3828,6 +3828,26 @@ def render_shipping_selector_script() -> str:
         "    var choose = function(token, amount){",
         "      window.__jbShipService = token || '';",
         "      showTotals(typeof amount === 'number' ? amount : null);",
+        "      syncCta();",
+        "    };",
+        # The CTA's href is built ONCE at page load and rebuilt only when a PRICE CARD changes -- never
+        # when a shipping service is chosen. Since the quote is fetched asynchronously, the href was always
+        # frozen before `__jbShipQuote` existed, so the globals were set and nothing ever read them: the
+        # buyer picked a service, saw a total, and checked out with no postage. Setting the globals is not
+        # enough; the link has to be rewritten.
+        "    var syncCta = function(){",
+        "      var cta = document.querySelector('.sl-cta[data-checkout-base-url], [data-checkout-base-url]');",
+        "      if (!cta || !cta.href) return;",
+        "      try {",
+        "        var url = new URL(cta.href, window.location.href);",
+        "        var put = function(key, value){",
+        "          if (value) { url.searchParams.set(key, value); } else { url.searchParams.delete(key); }",
+        "        };",
+        "        put('ship_to_country', window.__jbShipTo);",
+        "        put('shipping_quote', window.__jbShipQuote);",
+        "        put('shipping_service', window.__jbShipService);",
+        "        cta.href = url.toString();",
+        "      } catch (e) {}",
         "    };",
         "    var ask = function(){",
         "      var c = cart(), country = select.value || '';",
@@ -3905,6 +3925,7 @@ def render_shipping_selector_script() -> str:
         "        rates.innerHTML = ''; summary.hidden = true; choose('', null);",
         "        say(reasons[data.needs] || '', data.needs === 'carrier' ? 'error' : 'idle');",
         "      }",
+        "      syncCta();",
         "    };",
         "    var run = function(){ say('Checking rates...', 'loading'); ask().then(paint); };",
         # Typing a postcode fires per keystroke; a carrier call per keystroke does not. Debounced, and
@@ -3926,11 +3947,19 @@ def render_shipping_selector_script() -> str:
         "    postal.addEventListener('input', runSoon);",
         "    region.addEventListener('input', runSoon);",
         "    retry.addEventListener('click', run);",
-        # A tier change changes the parcel, so it changes the price.
+        # A tier change changes the parcel, so it changes the price -- AND it rebuilds the CTA href from
+        # scratch, dropping the shipping params. Re-quoting puts them back, but asynchronously.
         "    document.addEventListener('click', function(event){",
         "      if (!event.target.closest || !event.target.closest('.sl-price-option')) return;",
-        "      setTimeout(function(){ if (select.value) run(); }, 0);",
+        "      setTimeout(function(){ syncCta(); if (select.value) run(); }, 0);",
         "    });",
+        # The belt to that braces: rewrite the link in the CAPTURE phase, before the CTA's own click
+        # handler reads `cta.href`. Without this, a buyer who picks a tier and immediately hits Buy beats
+        # the re-quote and checks out with no postage -- a race that would be rare, silent, and only ever
+        # cost the tenant money.
+        "    document.addEventListener('click', function(event){",
+        "      if (event.target.closest && event.target.closest('.sl-cta, [data-checkout-base-url]')) syncCta();",
+        "    }, true);",
         "  })();",
         "  </script>",
     ])

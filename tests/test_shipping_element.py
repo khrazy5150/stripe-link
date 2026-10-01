@@ -378,3 +378,50 @@ class TheElementAgreesWithTheRestOfThePage(unittest.TestCase):
         # Any of these can carry `hidden` at runtime; the scoped guard is what keeps the attribute working.
         self.assertTrue(setting_display, "expected shipping rules that set display")
         self.assertIn('.sl-shipping [hidden]{display:none!important}', self.SOURCE)
+
+
+class TheChosenServiceReachesTheLink(unittest.TestCase):
+    """Setting `window.__jbShipQuote` is not the same as the CTA using it.
+
+    The CTA's href is built ONCE at page load and rebuilt only when a PRICE CARD changes. The quote is
+    fetched asynchronously, so the link was always frozen before the globals existed, and nothing ever
+    rebuilt it when a shipping service was picked. The buyer chose a service, saw a total, and checked out
+    with no postage -- while every test asserting "the quote rides to checkout" passed, because the
+    PARAMETER was in the builder and the builder was never re-run.
+    """
+
+    def setUp(self):
+        import stripe_link.runtime.html as module
+
+        module._RENDER_SHIPPING.clear()
+        render_shipping_selector({"id": "s"}, OFFER, PHYSICAL, API)
+        self.js = render_shipping_selector_script()
+
+    def test_the_element_rewrites_the_links_shipping_params(self):
+        self.assertIn("var syncCta = function()", self.js)
+        for param in ("ship_to_country", "shipping_quote", "shipping_service"):
+            with self.subTest(param=param):
+                self.assertIn(f"put('{param}'", self.js)
+
+    def test_choosing_a_service_updates_the_link_not_just_a_global(self):
+        choose = self.js.split("var choose = function(token, amount){", 1)[1].split("};", 1)[0]
+        self.assertIn("syncCta()", choose)
+
+    def test_an_absent_value_is_removed_rather_than_left_stale(self):
+        # A buyer who changes country to one with no rates must not check out on the previous quote.
+        self.assertIn("url.searchParams.delete(key)", self.js)
+
+    def test_the_link_is_fixed_in_the_capture_phase_before_the_cta_reads_it(self):
+        # A buyer who picks a tier and immediately hits Buy beats the async re-quote. That race would be
+        # rare, silent, and would only ever cost the tenant money. The CTA's own handler reads `cta.href`
+        # at click time, so a capture-phase rewrite lands before it.
+        listener = self.js.split("'.sl-cta, [data-checkout-base-url]'", 1)[1][:80]
+        self.assertIn("syncCta()", listener)
+        self.assertIn("}, true);", listener)
+
+    def test_a_tier_change_resyncs_the_link(self):
+        tier = self.js.split(".sl-price-option')) return;", 1)[1][:160]
+        self.assertIn("syncCta()", tier)
+
+    def test_it_never_writes_an_amount_onto_the_link(self):
+        self.assertNotIn("shipping_amount", self.js)
