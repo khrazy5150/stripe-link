@@ -320,6 +320,43 @@ def return_address(config: dict[str, Any] | None) -> dict[str, Any]:
     return dict(ship_from) if isinstance(ship_from, dict) else {}
 
 
+def dimensions_consequence(config: dict[str, Any] | None) -> dict[str, str]:
+    """What leaving a product unmeasured actually COSTS this tenant, given the zones they configured.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0b. The obvious warning -- *"leaving this blank will prevent
+    you from charging shipping"* -- is true for two of the four zone rules and FALSE for the other two:
+
+        free            works with no dimensions
+        flat            works with no dimensions -- $7 is $7
+        flat_rate_box   needs them: nothing to match to a box
+        live            needs them: nothing to rate
+
+    A tenant on flat zones who is told they cannot charge shipping, and then finds that they can, learns
+    to ignore every other warning the product shows. This repo has removed four of those already; a fifth
+    is not worth the convenience of one sentence that fits every case.
+
+    Returns `{severity, message}`. `severity` is `"warning"` when a real charge is lost and `"info"` when
+    only label-buying is, and the message is empty when there is nothing true to say -- a tenant who has
+    not configured shipping at all is at step 2 of 5 and has made no decision to warn them about.
+    """
+    rules = {str((zone or {}).get("rule", {}).get("type") or "")
+             for zone in (config or {}).get("zones") or []}
+    if not rules:
+        # No zones means no shipping decision yet. Silence is the honest answer, not a default warning.
+        return {"severity": "", "message": ""}
+    if "live" in rules:
+        return {"severity": "warning",
+                "message": ("You charge live carrier rates. Without a size and weight this product "
+                            "cannot be rated, and orders containing it will ship free.")}
+    if "flat_rate_box" in rules:
+        return {"severity": "warning",
+                "message": ("You price shipping by the box an order fits. Without a size and weight this "
+                            "product cannot be matched to a box, and orders containing it will ship free.")}
+    return {"severity": "info",
+            "message": ("Your shipping rates do not depend on size, so buyers are still charged. You will "
+                        "not be able to buy labels for this product until it has a size and weight.")}
+
+
 def product_readiness(products: list[dict[str, Any]] | None) -> list[str]:
     """What is still missing on the PRODUCTS before an order can be packed properly. Empty means ready.
 

@@ -31,11 +31,19 @@
       <button type="button" class="secondary-action" @click="addColor">+ New Color</button>
     </div>
 
-    <h3>Size &amp; Weight <span class="field-optional">optional</span></h3>
+    <h3>Size &amp; Weight <span class="field-optional">{{ sizeBadge }}</span></h3>
     <p class="field-hint">
       The product itself, out of any packaging. Needed to buy shipping labels — with it we pick the
       cheapest box that fits the whole order, so two things bought together share one parcel instead of
       shipping separately. You can skip it and take parcels to the post office yourself.
+    </p>
+    <!-- WHAT LEAVING IT BLANK ACTUALLY COSTS, derived from the tenant's own zones rather than asserted
+         (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0b). "You cannot charge shipping" is false for flat and
+         free zones, and a warning that is wrong teaches tenants to ignore the ones that are right. Shown
+         only while the fields are actually blank: a solved problem is not a notice. -->
+    <p v-if="unmeasured && consequence.message"
+       :class="consequence.severity === 'warning' ? 'keys-status-banner warning' : 'field-hint'">
+      {{ consequence.message }}
     </p>
     <div class="modal-dimensions-grid">
       <label>Length (inches)<input v-model.number="form.item_length_in" type="number" min="0" step="0.1" placeholder="—" /></label>
@@ -81,6 +89,7 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 /**
  * Size and colour variants, and how the thing ships.
  *
@@ -102,7 +111,18 @@ import { defaultColorVariant, defaultSizeVariant } from "../../utils/productVari
 const props = defineProps({
   form: { type: Object, required: true },
   surface: { type: String, default: "edit" },
+  // `{severity, message}` from GET /shipping -- the server decides what is true for these zones, because
+  // the rule lives beside the zones it reads, not in a component.
+  consequence: { type: Object, default: () => ({}) },
 });
+
+/** Blank means ANY of the four is missing: a parcel needs all three sides and a weight to be rated. */
+const unmeasured = computed(() => ["item_length_in", "item_width_in", "item_height_in", "item_weight_lb"]
+  .some((field) => !(Number(props.form[field]) > 0)));
+
+/** Optional to SAVE, required to QUOTE -- and which applies depends on the tenant's zones. */
+const sizeBadge = computed(() => (props.consequence.severity === "warning" ? "needed to charge shipping"
+                                                                          : "optional"));
 
 function ensureSize() {
   if (props.form.size_enabled && !props.form.sizes.length) addSize();

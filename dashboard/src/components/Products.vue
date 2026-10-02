@@ -263,7 +263,7 @@
               <!-- Only for something that ships. A digital download has no box and no size chart, and
                    showing the fields anyway is what made the old single form feel like a tax form. -->
               <section v-if="form.product_type === 'physical'" class="wizard-subsection">
-                <ProductVariantsField :form="form" surface="wizard" />
+                <ProductVariantsField :form="form" surface="wizard" :consequence="shippingConsequence" />
               </section>
             </template>
 
@@ -518,7 +518,7 @@
           </section>
 
           <section v-if="form.product_intent === 'transaction' && form.product_type === 'physical'" class="modal-form-section">
-            <ProductVariantsField :form="form" surface="edit" />
+            <ProductVariantsField :form="form" surface="edit" :consequence="shippingConsequence" />
           </section>
 
           <footer class="product-modal-footer">
@@ -676,10 +676,27 @@ const navigateTo = inject("navigateTo", null);
 // Arriving from "+ Add package info" on the Orders screen: open that product's editor rather than a list
 // to search through. Read once and cleared, so returning later does not reopen it.
 const takeViewIntent = inject("takeViewIntent", null);
+// What leaving a product unmeasured costs THIS tenant, decided by the server from their own zones
+// (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0b). Empty when shipping is not configured, which is the
+// honest answer for a tenant who has not made that decision yet.
+const shippingConsequence = ref({});
+
+async function loadShippingConsequence() {
+  try {
+    const body = await apiRequest("/shipping");
+    shippingConsequence.value = body?.dimensions_consequence || {};
+  } catch {
+    // 404 = no shipping config at all, and any other failure is the same answer: say nothing. A warning
+    // this screen could not verify is exactly the kind this one exists to stop showing.
+    shippingConsequence.value = {};
+  }
+}
+
 onMounted(async () => {
   // The vocabulary and the tenant's resolved defaults, so the pickers and the preview have something to
   // show. Not awaited with the rest: a failure here must not stop the product list from loading.
   refundStore.load();
+  loadShippingConsequence();
   const intent = takeViewIntent?.();
   if (!intent?.edit) return;
   if (!store.loaded) await store.load();

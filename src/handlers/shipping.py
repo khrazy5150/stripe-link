@@ -16,6 +16,7 @@ from stripe_link.domain.returns import RETURN_STATES, return_deadline, return_la
 from stripe_link.domain.shipping import (
     ShipmentError,
     build_shipment,
+    dimensions_consequence,
     label_readiness,
     mark_failed,
     mark_purchased,
@@ -103,6 +104,10 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
             # while this is about the catalogue and costs money without blocking anything.
             "product_readiness": catalogue_readiness(
                 tenant_id, products_repo, resolve_stripe_mode(event)),
+            # What an UNMEASURED product costs this tenant, given the zones they actually configured --
+            # so the product form can say something true rather than one sentence that fits every case
+            # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0b).
+            "dimensions_consequence": dimensions_consequence(config),
         })
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
@@ -139,6 +144,7 @@ def save_shipping_config(event, repository, secret_cipher, products_repo=None):
             "readiness": label_readiness(saved),
             "product_readiness": catalogue_readiness(
                 tenant_id, products_repo, resolve_stripe_mode(event)),
+            "dimensions_consequence": dimensions_consequence(saved),
         }, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_shipping_config")
