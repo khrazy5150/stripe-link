@@ -502,7 +502,25 @@
                 <span>Flat amount <strong>*</strong></span>
                 <input v-model.trim="form.shipping.amount" type="text" inputmode="decimal" placeholder="12.99" />
               </label>
+
+              <!-- FREE OVER A THRESHOLD. The engine has honoured `free_above_amount` since zones shipped
+                   and no screen could set it, so no tenant could offer the one shipping promise every
+                   other platform makes (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P3). -->
+              <label v-if="form.shipping.eligibility === 'physical'" class="offer-field">
+                <span>Free shipping over</span>
+                <input v-model.trim="form.shipping.free_above_amount" type="text" inputmode="decimal"
+                       placeholder="No threshold" />
+              </label>
             </div>
+
+            <!-- A threshold is a promise to lose MORE the more a buyer buys, unless the cost was recovered
+                 in the price. Said plainly, because that is the whole reason Smart Pricing matters and the
+                 number looks free either way. -->
+            <p v-if="form.shipping.eligibility === 'physical' && thresholdSet" class="field-hint">
+              Orders over {{ form.shipping.free_above_amount }} ship free on your cheapest option. Faster
+              options stay paid. Bigger orders cost you more to post, so build that into your prices or it
+              comes out of your margin.
+            </p>
 
             <p v-if="form.shipping.eligibility === 'none'" class="field-hint">
               Nothing is charged for shipping and no address is needed, whatever your zones say.
@@ -869,6 +887,9 @@ const shippingOverrideNote = computed(() => ({
   calculated: "A rate is worked out per order even where a zone sets a flat price. Needs a connected carrier, or box prices.",
 }[form.shipping.override] || ""));
 
+const thresholdSet = computed(() => Number(String(form.shipping.free_above_amount || "")
+  .replace(/[$,]/g, "")) > 0);
+
 // Every landing price a tip? Then the offer is a tip jar, and its page composes as one.
 function landingPricesAreTips() {
   const products = landingProducts.value;
@@ -1207,7 +1228,7 @@ function defaultOfferForm() {
     },
     // "physical" + "none" means: this ships, and the tenant's zones decide -- the state an offer should be in
     // unless someone deliberately says otherwise.
-    shipping: { eligibility: "physical", override: "none", amount: "" },
+    shipping: { eligibility: "physical", override: "none", amount: "", free_above_amount: "" },
     userEditedName: false,
     userEditedSlug: false,
   };
@@ -1725,18 +1746,29 @@ function buildOfferDocument() {
   return { offer };
 }
 
-/** `undefined` when the offer ships and defers to the tenant's zones, which is the default. */
+/** `undefined` when the offer ships, defers to the tenant's zones AND sets no threshold -- the default. */
 function buildShippingBlock() {
   const eligibility = form.shipping.eligibility === "none" ? "none" : "physical";
   const override = form.shipping.override;
   if (eligibility === "none") return { eligibility: "none" };
-  if (!override || override === "none") return undefined;
-  const block = { override: { type: override } };
-  if (override === "flat") {
-    // Typed in dollars, stored in CENTS like every other amount in this codebase.
-    block.override.amount = Math.max(0, Math.round(Number(String(form.shipping.amount || "").replace(/[$,]/g, "")) * 100) || 0);
+  const threshold = toCents(form.shipping.free_above_amount);
+  // A THRESHOLD IS INDEPENDENT of the override: "use my zones, but free over $50" is the commonest
+  // shape there is. Returning undefined whenever the override was "none" would have silently dropped it.
+  if ((!override || override === "none") && !threshold) return undefined;
+  const block = {};
+  if (override && override !== "none") {
+    block.override = { type: override };
+    if (override === "flat") {
+      // Typed in dollars, stored in CENTS like every other amount in this codebase.
+      block.override.amount = toCents(form.shipping.amount);
+    }
   }
+  if (threshold) block.free_above_amount = threshold;
   return block;
+}
+
+function toCents(typed) {
+  return Math.max(0, Math.round(Number(String(typed || "").replace(/[$,]/g, "")) * 100) || 0);
 }
 
 function loadOfferIntoForm(offer) {
@@ -1763,6 +1795,8 @@ function loadOfferIntoForm(offer) {
     eligibility: shipping.eligibility === "none" ? "none" : "physical",
     override: shipping.override?.type || "none",
     amount: shipping.override?.amount ? (Number(shipping.override.amount) / 100).toFixed(2) : "",
+    free_above_amount: shipping.free_above_amount
+      ? (Number(shipping.free_above_amount) / 100).toFixed(2) : "",
   };
   form.checkout = {
     ...defaultOfferForm().checkout,
