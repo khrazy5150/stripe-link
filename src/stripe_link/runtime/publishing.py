@@ -280,11 +280,20 @@ def attach_funnel_slugs(
         desired["/thank-you"] = {"page_id": page_id, "page_type": "thank_you", "funnel_role": "thank_you", "strategy": strategy, "enabled": True}
     pages = dict(site.get("pages") or {})
     # The ROOT page keeps the default when there is one, so a Site that worked before is unchanged. Any
-    # other page only claims a slug nobody holds yet -- it must not steal the default from the root.
+    # other page only claims a slug nobody ELSE holds -- it must not steal the default from the root, nor
+    # overwrite a tenant's own same-named page.
+    #
+    # "Nobody else" is doing real work here. The first version of this filter skipped every slug that was
+    # already occupied, INCLUDING the ones this very page owned -- so a second publish of the same page
+    # dropped them from `desired`, the retire loop below saw them as unwanted, and deleted the page's own
+    # funnel routes. Republishing a page silently destroyed its funnel (author, 2026-10-02).
     is_root = str(site_page_slug(site, page_id)) == "/"
     if not is_root:
-        desired = {slug: entry for slug, entry in desired.items()
-                   if not isinstance(pages.get(slug), dict) or not pages[slug].get("funnel_role")}
+        def _held_by_another(slug):
+            held = pages.get(slug)
+            return isinstance(held, dict) and str(held.get("page_id") or "") != page_id
+
+        desired = {slug: entry for slug, entry in desired.items() if not _held_by_another(slug)}
     changed = False
     for slug, entry in desired.items():
         if pages.get(slug) != entry:

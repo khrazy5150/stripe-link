@@ -146,3 +146,60 @@ class TheEdgeMustForwardThemTests(unittest.TestCase):
     def test_a_plain_page_still_caches_by_host_and_path(self):
         # funnelQuery is empty without them, so ordinary pages keep exactly the key they had.
         self.assertIn('const funnelQuery = (funnelStep ?', self.WORKER)
+
+
+class RepublishingIsIdempotentTests(unittest.TestCase):
+    """Republishing a page must not destroy its own funnel.
+
+    The first version of the non-root filter skipped every slug that was already occupied -- including the
+    ones this very page owned. A second publish dropped them from `desired`, the retire loop saw them as
+    unwanted, and deleted them. The author republished the Workout Bundle and `/thank-you` started 404ing
+    (2026-10-02).
+    """
+
+    def setUp(self):
+        import stripe_link.runtime.publishing as pub
+
+        self.pub = pub
+        self.real = pub.post_purchase_plan
+        pub.post_purchase_plan = lambda offer, products: {"upsells": [{"product_id": "p1"}],
+                                                          "strategy": "sequence"}
+
+    def tearDown(self):
+        self.pub.post_purchase_plan = self.real
+
+    def _publish(self, state, page_id="page_b"):
+        out, _ = self.pub.attach_funnel_slugs(state, {"page_id": page_id}, OFFER, {})
+        return out
+
+    def test_publishing_three_times_keeps_the_funnel(self):
+        state = site({"/bundle": {"page_id": "page_b"}})
+        for _ in range(3):
+            state = self._publish(state)
+        self.assertEqual(state["pages"]["/upsell"]["page_id"], "page_b")
+        self.assertEqual(state["pages"]["/thank-you"]["page_id"], "page_b")
+
+    def test_the_second_publish_changes_nothing(self):
+        state = self._publish(site({"/bundle": {"page_id": "page_b"}}))
+        _, changed = self.pub.attach_funnel_slugs(state, {"page_id": "page_b"}, OFFER, {})
+        self.assertFalse(changed, "a no-op republish must not rewrite the Site")
+
+    def test_a_tenants_OWN_thank_you_page_is_never_overwritten(self):
+        # It has no funnel_role; it is a real page the tenant attached themselves.
+        state = site({"/bundle": {"page_id": "page_b"},
+                      "/thank-you": {"page_id": "page_mine", "page_type": "thank_you"}})
+        out = self._publish(state)
+        self.assertEqual(out["pages"]["/thank-you"]["page_id"], "page_mine")
+
+    def test_another_funnel_pages_slug_is_never_taken(self):
+        state = site({"/bundle": {"page_id": "page_b"}, "/other": {"page_id": "page_o"}})
+        state = self._publish(state, "page_b")
+        state = self._publish(state, "page_o")
+        self.assertEqual(state["pages"]["/upsell"]["page_id"], "page_b")
+
+    def test_a_page_still_retires_its_own_funnel_when_the_offer_loses_its_upsells(self):
+        state = self._publish(site({"/bundle": {"page_id": "page_b"}}))
+        self.pub.post_purchase_plan = lambda offer, products: {"upsells": [], "strategy": "sequence"}
+        gone, changed = self.pub.attach_funnel_slugs(gone_state := state, {"page_id": "page_b"}, OFFER, {})
+        self.assertTrue(changed)
+        self.assertNotIn("/upsell", gone["pages"])
