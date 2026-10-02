@@ -8567,7 +8567,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # `&offer=` so the response can carry the postage this upsell will add. The accept label states a
         # price, and charging more than it says is a misstatement to a buyer
         # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
-        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}&offer=${encodeURIComponent(cta.dataset.checkoutOfferId || '')}&mode=${encodeURIComponent(cta.dataset.checkoutMode || 'test')}`)",
+        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}&offer=${encodeURIComponent(cta.dataset.checkoutOfferId || '')}&product_id=${encodeURIComponent(cta.dataset.checkoutProductId || '')}&mode=${encodeURIComponent(cta.dataset.checkoutMode || 'test')}`)",
         "          .then((response) => response.json())",
         "          .then((body) => {",
         "            const session = (body && body.session) || {};",

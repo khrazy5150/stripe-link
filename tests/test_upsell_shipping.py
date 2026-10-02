@@ -155,9 +155,29 @@ class TheButtonTellsTheBuyerTests(unittest.TestCase):
     def test_the_session_endpoint_can_quote_the_upsells_postage(self):
         self.assertIn('"shipping": _session_shipping_quote(', self.UPSELL)
 
-    def test_it_only_quotes_when_the_page_names_its_offer(self):
-        # A page that does not send one gets no shipping figure, which is what every page did until now.
-        self.assertIn('if offer_id else {}', self.UPSELL)
+    def test_it_only_quotes_when_the_page_names_its_offer_AND_product(self):
+        # The offer alone is not enough: an upsell page's CTA carries the funnel's SOURCE offer, whose
+        # items are the original bundle. Quoting those disclosed the wrong parcel entirely.
+        self.assertIn('if offer_id and product_id else {}', self.UPSELL)
+
+    def test_the_disclosure_rates_the_UPSELLS_product_not_the_offers_bundle(self):
+        block = self.UPSELL.split("def _session_shipping_quote", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('[{"product_id": wanted, "quantity": 1}]', block)
+        self.assertNotIn('offer.get("items")', block)
+
+    def test_the_disclosure_uses_the_SAME_baseline_as_the_charge(self):
+        # Otherwise the button prices a standalone parcel while the card prices the delta: "+ $6.11" for
+        # an item the charge added for $0.08.
+        self.assertIn("baseline=session_shipping_baseline(session_id", self.UPSELL)
+        block = self.UPSELL.split("def _session_shipping_quote", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("baseline=baseline", block)
+
+    def test_the_island_sends_the_product(self):
+        import pathlib as _p
+
+        html = (_p.Path(__file__).resolve().parents[1]
+                / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+        self.assertIn("product_id=${encodeURIComponent(cta.dataset.checkoutProductId", html)
 
     def test_a_failed_disclosure_charges_nothing_rather_than_breaking_the_page(self):
         block = self.UPSELL.split("def _session_shipping_quote", 1)[1].split("\ndef ", 1)[0]
@@ -283,3 +303,40 @@ class TheUpsellReachesTheLedgerTests(unittest.TestCase):
                     / "template.yaml").read_text(encoding="utf-8")
         block = template.split("  UpsellFunction:", 1)[1].split("      Events:", 1)[0]
         self.assertIn("!Ref LedgerTable", block)
+
+
+class TheBaselineComesFromTheSessionTests(unittest.TestCase):
+    """A buyer reaches the first upsell seconds after paying, and the ORDER is written by the webhook.
+
+    Reading the baseline from the order lost that race: in one real run the first upsell fell back to a
+    full standalone parcel at $6.27 while the second, moments later, got its delta of $0.08 -- for
+    comparably sized items (author, 2026-10-02). The SESSION carries the same facts the instant checkout
+    completes, because `metadata[shipping_quote_id]` and `[shipping_quoted_amount]` are stamped at
+    session creation.
+    """
+
+    import pathlib as _p
+
+    UPSELL = (_p.Path(__file__).resolve().parents[1]
+              / "src/handlers/upsell.py").read_text(encoding="utf-8")
+
+    def test_the_baseline_is_read_from_stripe_not_the_orders_table(self):
+        block = self.UPSELL.split("def session_shipping_baseline", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("/checkout/sessions/", block)
+        self.assertIn('meta.get("shipping_quote_id")', block)
+        self.assertIn('meta.get("shipping_quoted_amount")', block)
+
+    def test_the_order_based_lookup_is_gone(self):
+        self.assertNotIn("original_shipping_baseline", self.UPSELL)
+
+    def test_checkout_stamps_what_it_reads(self):
+        import pathlib as _p
+
+        checkout = (_p.Path(__file__).resolve().parents[1]
+                    / "src/handlers/checkout.py").read_text(encoding="utf-8")
+        self.assertIn('payload["metadata[shipping_quote_id]"]', checkout)
+        self.assertIn('payload["metadata[shipping_quoted_amount]"]', checkout)
+
+    def test_an_unreachable_session_falls_back_rather_than_failing(self):
+        block = self.UPSELL.split("def session_shipping_baseline", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("return {}", block)

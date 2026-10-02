@@ -77,6 +77,9 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
     # The offer the page is ABOUT, so its postage can be disclosed on the accept button. Optional: a page
     # that does not send it simply gets no shipping figure, which is what every page did until now.
     offer_id = str(params.get("offer") or params.get("offer_id") or "").strip()
+    # WHICH product this upsell sells. The offer is the funnel's SOURCE offer, so its items are the
+    # original bundle -- quoting those would disclose the wrong parcel entirely.
+    product_id = str(params.get("product_id") or "").strip()
     mode = "live" if str(params.get("mode") or "").strip() == "live" else "test"
 
     if not tenant_id:
@@ -131,15 +134,28 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
         # misstatement to a buyer, not a rounding detail. The page is a published artifact and the
         # destination is only known per-session, so the figure has to arrive here rather than be baked in
         # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
-        **({"shipping": _session_shipping_quote(event, tenant_id, offer_id, shipping_details)}
-           if offer_id else {}),
+        **({"shipping": _session_shipping_quote(
+               event, tenant_id, offer_id, product_id, shipping_details,
+               # The SAME baseline the charge will use, so the button and the card cannot disagree.
+               baseline=session_shipping_baseline(session_id, api_key=api_key,
+                                                  stripe_account=stripe_account, opener=opener))}
+           if offer_id and product_id else {}),
     })
 
 
-def _session_shipping_quote(event, tenant_id, offer_id, shipping_details):
+def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_details, baseline=None):
     """The postage the accept button must disclose. `{amount, service_token, reason}`; zeros on any failure.
 
-    Best-effort by the same argument as the charge itself: a quote that cannot be had means no postage is
+    **It must quote exactly what the charge will quote**, or the button states one price and the card takes
+    another. Two things made it disagree, and both are fixed here (author, 2026-10-02):
+
+    - It rated `offer.items` -- the SOURCE offer's landing items, i.e. the whole bundle -- because an
+      upsell page's CTA carries the offer the funnel derives from. The upsell is ONE product, named by
+      `product_id`, and that is what gets charged.
+    - It passed no `baseline`, so it priced a standalone parcel while the charge priced the delta. The
+      button said "+ $6.11" for an item the charge added for $0.08.
+
+    Best-effort by the same argument as the charge: a quote that cannot be had means no postage is
     charged, so a page that cannot show one is still telling the truth.
     """
     from stripe_link.repositories.documents import offers_repository, products_repository
@@ -149,13 +165,17 @@ def _session_shipping_quote(event, tenant_id, offer_id, shipping_details):
         offer = offers_repository(mode=mode).get(tenant_id, offer_id)
         if not offer:
             return {"amount": 0, "service_token": "", "reason": "offer_not_found"}
-        products_by_id = load_offer_products(tenant_id, offer, products_repository(mode=mode))
-        items = [{"product_id": str(item.get("product_id") or ""),
-                  "quantity": max(1, int(item.get("quantity") or 1))}
-                 for item in (offer.get("items") or []) if item.get("product_id")]
-        return quote_upsell_shipping(tenant_id, items, products_by_id,
+        products_repo = products_repository(mode=mode)
+        wanted = str(product_id or "").strip()
+        if not wanted:
+            return {"amount": 0, "service_token": "", "reason": "no_product"}
+        product = products_repo.get(tenant_id, wanted)
+        if not product:
+            return {"amount": 0, "service_token": "", "reason": "product_not_found"}
+        return quote_upsell_shipping(tenant_id, [{"product_id": wanted, "quantity": 1}],
+                                     {wanted: product},
                                      destination=(shipping_details or {}).get("address") or {},
-                                     mode=mode)
+                                     mode=mode, baseline=baseline)
     except Exception as exc:  # noqa: BLE001 - a disclosure that failed must not break the page
         print(f"[upsell] shipping disclosure unavailable: {type(exc).__name__}: {exc}")
         return {"amount": 0, "service_token": "", "reason": "unavailable"}
@@ -187,6 +207,45 @@ def upsell_destination(session_id, *, api_key, stripe_account, opener):
     except Exception:  # noqa: BLE001 - see docstring: never fail an order that is already paid for
         return {}
     return destination_address_from_session(session)
+
+
+def session_shipping_baseline(session_id, *, api_key, stripe_account, opener):
+    """What the first sale already paid to post, read off the CHECKOUT SESSION. `{}` when unknown.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1. It used to read the ORDER, which the webhook writes -- and
+    a buyer reaches the first upsell within seconds of paying, so the order was sometimes not there yet.
+    The first upsell then fell back to a full standalone parcel while the second got the delta: in one real
+    run, $6.27 and then $0.08 for comparable items (author, 2026-10-02).
+
+    The SESSION carries the same facts the moment checkout completes -- `metadata[shipping_quote_id]` and
+    `metadata[shipping_quoted_amount]` are stamped there at session creation -- so there is no window to
+    lose. `{}` on any failure, and the caller then rates the upsell on its own.
+    """
+    try:
+        session = stripe_request(
+            "GET", f"/checkout/sessions/{session_id}",
+            api_key=api_key, stripe_account=stripe_account, opener=opener)
+    except Exception:  # noqa: BLE001 - not knowing is a fallback, never a failed sale
+        return {}
+    meta = session.get("metadata") or {}
+    quote_id = str(meta.get("shipping_quote_id") or "")
+    paid = int(meta.get("shipping_quoted_amount") or 0)
+    if not quote_id or not paid:
+        return {}
+    mode = "live" if session.get("livemode") else "test"
+    try:
+        from stripe_link.repositories.documents import shipping_quotes_repository
+
+        tenant_id = str(meta.get("tenant_id") or "")
+        quote = shipping_quotes_repository(mode=mode).get(tenant_id, quote_id) or {}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[upsell] shipping baseline quote unreadable: {type(exc).__name__}: {exc}")
+        return {}
+    lines = [{"product_id": str(line.get("product_id") or ""),
+              "price_id": str(line.get("price_id") or ""),
+              "quantity": max(1, int(line.get("quantity") or 1))}
+             for line in (quote.get("items") or []) if line.get("product_id")]
+    return {"items": lines, "amount": paid} if lines else {}
 
 
 def process_upsell(
@@ -313,7 +372,8 @@ def process_upsell(
         tenant_id, resolved.get("items") or [], products_by_id,
         destination=shipping_address, mode=mode, secret_cipher=secret_cipher,
         # What is already going, so this charges only what the extra item ADDS.
-        baseline=original_shipping_baseline(tenant_id, session_id, mode, orders_repo=orders_repo))
+        baseline=session_shipping_baseline(session_id, api_key=api_key, stripe_account=stripe_account,
+                                           opener=opener))
     shipping_amount = int(upsell_shipping.get("amount") or 0)
     charged = subtotal + shipping_amount
 
@@ -436,37 +496,6 @@ def process_upsell(
             "status": payment_intent.get("status", ""),
         }
     }, status_code=201)
-
-
-def original_shipping_baseline(tenant_id, session_id, mode, orders_repo=None):
-    """What the buyer already bought and already paid to post it. `{}` when it cannot be established.
-
-    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1. The lines come from the SHIPPING QUOTE the first sale
-    transacted on, not from the order's `line_items` -- those arrive from Stripe carrying names and
-    amounts and no `product_id`, so they cannot be re-packed.
-
-    Best-effort at every step: a missing order, a missing quote block, an expired quote row all mean "we
-    do not know what was already going", and the caller then rates the upsell on its own.
-    """
-    try:
-        repo = orders_repo or orders_repository(mode=mode)
-        order = repo.get(tenant_id, f"order_{session_id}") or {}
-        agreed = order.get("shipping_quote") or {}
-        quote_id = str(agreed.get("quote_id") or "")
-        paid = int(agreed.get("quoted_amount") or 0)
-        if not quote_id or not paid:
-            return {}
-        from stripe_link.repositories.documents import shipping_quotes_repository
-
-        quote = shipping_quotes_repository(mode=mode).get(tenant_id, quote_id) or {}
-        lines = [{"product_id": str(line.get("product_id") or ""),
-                  "price_id": str(line.get("price_id") or ""),
-                  "quantity": max(1, int(line.get("quantity") or 1))}
-                 for line in (quote.get("items") or []) if line.get("product_id")]
-        return {"items": lines, "amount": paid} if lines else {}
-    except Exception as exc:  # noqa: BLE001 - not knowing is a fallback, never a failed sale
-        print(f"[upsell] shipping baseline unavailable: {type(exc).__name__}: {exc}")
-        return {}
 
 
 def record_upsell_ledger_entry(order_record, ledger_repo=None):
