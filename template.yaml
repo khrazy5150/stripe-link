@@ -1599,6 +1599,12 @@ Resources:
             TableName: !Ref CartsTable
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
+        # A cart checkout charges postage like a single-offer one does, which means reading the tenant's
+        # zones and services -- and the quote the buyer chose, which shares CartsTable (already granted).
+        # Without this a cart collected an address and charged nothing, however many physical items it
+        # held (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md).
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:

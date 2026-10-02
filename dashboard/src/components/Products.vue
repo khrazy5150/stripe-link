@@ -1024,10 +1024,15 @@ function defaultProductForm() {
     color_enabled: false,
     sizes: [],
     colors: [],
-    length_in: 10,
-    width_in: 8,
-    height_in: 4,
-    weight_lb: 1,
+    // NO DEFAULT, for the box either. 10x8x4 @ 1 lb has been pre-filled here since the legacy app, and
+    // the reasoning below -- a guessed size picks a box for contents nobody measured -- applies to the
+    // BOX just as much: the same four numbers were sitting on a paint set, a shaker bottle and whey
+    // protein in real data, and until 2026-10-01 they were rated and charged for (P0a). A prefilled
+    // number a tenant did not type reads as a measurement they made.
+    length_in: null,
+    width_in: null,
+    height_in: null,
+    weight_lb: null,
     // No default: 10x8x4 is a reasonable guess at a BOX and a meaningless guess at a product's own size,
     // and a guessed item size would pick a box for contents nobody measured.
     item_length_in: null,

@@ -10,7 +10,9 @@ from urllib.request import urlopen
 
 from handlers.checkout import (
     CouponUnavailable,
+    _tenant_shipping_config,
     build_checkout_payload,
+    collect_shipping_for,
     create_checkout_session_with_bnpl_fallback,
     stripe_discount_materializer,
 )
@@ -171,6 +173,16 @@ def handler(
             coupons_repo=coupons_repo,
             grants_repo=grants_repo,
             discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
+            # SHIPPING. This handler passed none of it, so `shipping_config` defaulted to None, zones
+            # could not be read, and a cart collected an address and charged NOTHING for postage however
+            # many physical items it held -- while the single-offer path beside it quoted and charged
+            # correctly (author, 2026-10-01). The four parameters are the same four `/checkout` takes.
+            shipping_config=_tenant_shipping_config(tenant_id) if collect_shipping_for(
+                offer, products_by_id) else None,
+            ship_to_country=str(body.get("ship_to_country") or "").strip().upper()[:2],
+            shipping_quote_id=str(body.get("shipping_quote") or "").strip()[:64],
+            shipping_service=str(body.get("shipping_service") or "").strip()[:64],
+            secret_cipher=secret_cipher,
         )
         payload["metadata[cart_id]"] = cart_id  # tie the resulting order back to the cart (attribution)
 

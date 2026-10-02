@@ -281,6 +281,8 @@ def handler(
             # rules, and guessing them in two places is how they drift.
             postal_code=str(params.get("postal_code") or "").strip()[:12],
             region=str(params.get("region") or "").strip()[:3],
+            # The server cart, when the page keeps one. It describes what is actually being posted.
+            cart_id=str(params.get("cart_id") or "").strip()[:64],
             mode=resolve_stripe_mode(event),
             offers_repo=offers_repo, products_repo=products_repo,
         )
@@ -646,8 +648,8 @@ def _flatten_params(value, prefix: str = "") -> dict[str, str]:
 
 
 def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, country, mode,
-                   postal_code="", region="", offers_repo=None, products_repo=None,
-                   quotes_repo=None, secret_cipher=None):
+                   postal_code="", region="", cart_id="", offers_repo=None, products_repo=None,
+                   quotes_repo=None, carts_repo=None, secret_cipher=None):
     """What shipping would cost this cart, and where it may be sent.
 
     Answers the two questions a page element needs and nothing else: which countries this tenant ships to, and
@@ -690,22 +692,32 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
     config = _tenant_shipping_config(tenant_id)
     countries = zone_countries(config)
 
-    # The cart, as a single line unless the page said otherwise. A quote is per-cart because a by-box price
-    # depends on what is being packed.
+    # THE REAL CART when there is one. A listicle page keeps a server-side cart, and quoting the selected
+    # price card instead of the cart meant a buyer with three things in their basket was shown one item's
+    # postage -- and the number never moved as they added more (author, 2026-10-01). Same reasoning as the
+    # tenant-facing estimator in P0e: the thing being shipped is the cart, not a card.
     try:
         units = max(1, int(str(quantity or "1").strip() or "1"))
     except ValueError:
         units = 1
-    chosen_product = product_id or next((str(i.get("product_id") or "")
-                                         for i in (offer.get("items") or []) if i.get("product_id")), "")
-    items = [{"product_id": chosen_product, "price_id": price_id, "quantity": units}]
+    items = _cart_lines(tenant_id, cart_id, mode, carts_repo=carts_repo) if cart_id else []
+    from_cart = bool(items)
+    if not from_cart:
+        chosen_product = product_id or next((str(i.get("product_id") or "")
+                                             for i in (offer.get("items") or []) if i.get("product_id")), "")
+        items = [{"product_id": chosen_product, "price_id": price_id, "quantity": units}]
 
+    # What the goods come to, which is what a free-above threshold is measured against -- so on a cart page
+    # it has to be the WHOLE cart, not the card the buyer happens to have selected. Summed over the same
+    # lines being packed, so the two can never disagree about what is in the basket.
     merchandise = 0
-    product = products_by_id.get(chosen_product) or {}
-    for price in product.get("prices") or []:
-        if not price_id or str(price.get("price_id") or "") == price_id:
-            merchandise = int(price.get("unit_amount") or 0) * units
-            break
+    for line in items:
+        product = products_by_id.get(line.get("product_id")) or {}
+        wanted = str(line.get("price_id") or "")
+        for price in product.get("prices") or []:
+            if not wanted or str(price.get("price_id") or "") == wanted:
+                merchandise += int(price.get("unit_amount") or 0) * int(line.get("quantity") or 1)
+                break
 
     target = country if country in countries else ""
     payload = {"ships": True, "countries": countries, "country": target,
@@ -815,6 +827,34 @@ def _unmeasured_free(tenant_id, offer_id, country):
     return {"options": [{"label": "Shipping", "amount": 0, "service_token": "",
                          "carrier": "", "transit_days_min": None, "transit_days_max": None}],
             "mode": "free", "needs": "", "source": "unmeasured", "unmeasured": True}
+
+
+def _cart_lines(tenant_id, cart_id, mode, carts_repo=None):
+    """A server cart's lines, shaped for the packer. `[]` on any failure, which falls back to the card.
+
+    Only product lines: a service has no parcel, and `resolved_items_for_checkout` refuses them for cart
+    checkout anyway. Deliberately does NOT re-resolve prices -- a quote needs quantities and products, and
+    reaching for the pricing path here would make a shipping question depend on a billing one.
+    """
+    try:
+        from stripe_link.repositories.documents import carts_repository
+
+        repo = carts_repo or carts_repository(mode=mode)
+        cart = repo.get(tenant_id, cart_id) or {}
+    except Exception as exc:  # noqa: BLE001 - a cart that will not read costs a better quote, not the page
+        logger.warning("shipping quote: cart unreadable",
+                       extra={"tenant_id": tenant_id, "cart_id": cart_id,
+                              "error": f"{type(exc).__name__}: {exc}"})
+        return []
+    lines = []
+    for line in cart.get("line_items") or []:
+        product_id = str((line or {}).get("product_id") or "").strip()
+        if not product_id:
+            continue
+        lines.append({"product_id": product_id,
+                      "price_id": str(line.get("price_id") or ""),
+                      "quantity": max(1, int(line.get("quantity") or 1))})
+    return lines
 
 
 def _quote_parcels(items, products_by_id, config):

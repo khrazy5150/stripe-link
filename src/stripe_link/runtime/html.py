@@ -3858,7 +3858,10 @@ def render_shipping_selector_script() -> str:
         "        + '&quantity=' + encodeURIComponent(c.quantity)",
         "        + (country ? '&country=' + encodeURIComponent(country) : '')",
         "        + (postal.value ? '&postal_code=' + encodeURIComponent(postal.value.trim()) : '')",
-        "        + (region.value ? '&region=' + encodeURIComponent(region.value.trim()) : '');",
+        "        + (region.value ? '&region=' + encodeURIComponent(region.value.trim()) : '')",
+        # The server cart wins over the selected card: it IS what is being posted. Absent on a plain
+        # buy-now page, where the card is the only cart there is.
+        "        + (window.__jbCartId ? '&cart_id=' + encodeURIComponent(window.__jbCartId) : '');",
         "      var mine = ++seq;",
         "      return fetch(url).then(function(r){ return r.ok ? r.json() : null; })",
         # A slow first answer must never overwrite a fast second one: the buyer has typed since.
@@ -3947,6 +3950,9 @@ def render_shipping_selector_script() -> str:
         "    postal.addEventListener('input', runSoon);",
         "    region.addEventListener('input', runSoon);",
         "    retry.addEventListener('click', run);",
+        # Adding or removing a cart line changes the parcel, so it changes the price. Without this the
+        # quote stayed on whatever the cart held when the page loaded.
+        "    document.addEventListener('sl:cart-changed', function(){ if (select.value) run(); });",
         # A tier change changes the parcel, so it changes the price -- AND it rebuilds the CTA href from
         # scratch, dropping the shipping params. Re-quoting puts them back, but asynchronously.
         "    document.addEventListener('click', function(event){",
@@ -8063,7 +8069,14 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              });",
         "            }",
         "          };",
-        "          const applyServerCart = (data) => { if (data && data.cart) { serverCart = data.cart; if (data.cart_id) setCartId(data.cart_id); } renderMinicart(); };",
+        "          const applyServerCart = (data) => { if (data && data.cart) { serverCart = data.cart; if (data.cart_id) setCartId(data.cart_id); } renderMinicart(); publishCart(); };",
+        # The shipping element quotes the CART when there is one, so it has to know the cart exists and
+        # when it changes. A buyer with three things in their basket was being shown one item's postage,
+        # and the number never moved as they added more (author, 2026-10-01).
+        "          const publishCart = () => {",
+        "            window.__jbCartId = getCartId();",
+        "            try { document.dispatchEvent(new CustomEvent('sl:cart-changed')); } catch (e) {}",
+        "          };",
         "          const addFallback = (t) => { const cart = readFallback(); const existing = cart.find((i) => i.price_id === t.price_id); if (existing) existing.qty = (existing.qty||1) + 1; else cart.push({ product_id: t.product_id, price_id: t.price_id, name: t.headline, amount: Number(t.amount||0), currency: t.currency, qty: 1 }); writeFallback(cart); renderMinicart(); };",
         "          const removeFallback = (idx) => { const cart = readFallback(); if (idx >= 0 && idx < cart.length) { cart.splice(idx, 1); writeFallback(cart); } renderMinicart(); };",
         "          const removeLine = (lineId) => {",
@@ -8122,7 +8135,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # A coupon the visitor applied on the page rides along with the CART too, not just the single-offer
         # CTA. Until 2026-09-23 the cart body carried no coupon at all and the handler never looked for one,
         # so a cart paid full price however the buyer arrived.
-        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, mode: cartMode, page_id: cartPageId, coupon: window.__jbCoupon || '', success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
+        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, mode: cartMode, page_id: cartPageId, coupon: window.__jbCoupon || '', ship_to_country: window.__jbShipTo || '', shipping_quote: window.__jbShipQuote || '', shipping_service: window.__jbShipService || '', success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
         # Clear the LOCAL cart ONLY once Stripe hands off (we have a redirect url) so returning to the page shows
         # an empty cart, not the just-purchased items. The .catch keeps it on failure (retry still works). The
         # SERVER cart persists — the webhook marks it converted on payment via metadata[cart_id], or it stays
