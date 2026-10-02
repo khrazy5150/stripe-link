@@ -420,18 +420,38 @@
           you can type from memory.</p>
       </header>
       <div class="dashboard-card-body">
-        <div class="carrier-chips">
-          <button v-for="product in previewProducts" :key="product.product_id" class="carrier-chip"
-                  type="button" @click="togglePreviewProduct(product.product_id)">
-            {{ product.name }} <span aria-hidden="true">×</span>
-          </button>
-          <span v-if="!previewProducts.length" class="field-hint">No products chosen yet.</span>
-        </div>
-        <select class="carrier-add" :value="''" @change="togglePreviewProduct($event.target.value)">
-          <option value="">Add a product…</option>
-          <option v-for="product in unselectedPreviewProducts" :key="product.product_id"
-                  :value="product.product_id">{{ product.name }}</option>
-        </select>
+        <!-- AN OFFER IS THE SUBJECT, because an offer IS the cart a buyer gets -- its items, its
+             quantities, its bump. Hand-picking products rated a basket nobody would ever buy: one product
+             showed $6.57 while the three-item bundle shipped for $19
+             (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0e). -->
+        <label class="offer-field">
+          <span>Offer</span>
+          <select v-model="preview.offer_id" @change="preview.product_ids = []">
+            <option value="">Choose an offer…</option>
+            <option v-for="offer in offers" :key="offer.offer_id" :value="offer.offer_id">
+              {{ offer.name || offer.offer_id }}
+            </option>
+          </select>
+        </label>
+
+        <!-- The SECONDARY path, kept because measuring a new product before it belongs to any offer is a
+             real case. Making it the only case was the mistake. -->
+        <details class="preview-adhoc" :open="!preview.offer_id && preview.product_ids.length > 0">
+          <summary>Or rate individual products</summary>
+          <div class="carrier-chips">
+            <button v-for="product in previewProducts" :key="product.product_id" class="carrier-chip"
+                    type="button" @click="togglePreviewProduct(product.product_id)">
+              {{ product.name }} <span aria-hidden="true">×</span>
+            </button>
+            <span v-if="!previewProducts.length" class="field-hint">No products chosen yet.</span>
+          </div>
+          <select class="carrier-add" :value="''"
+                  @change="preview.offer_id = ''; togglePreviewProduct($event.target.value)">
+            <option value="">Add a product…</option>
+            <option v-for="product in unselectedPreviewProducts" :key="product.product_id"
+                    :value="product.product_id">{{ product.name }}</option>
+          </select>
+        </details>
 
         <div class="offer-three-column">
           <label class="offer-field">
@@ -454,16 +474,31 @@
         </div>
         <p class="field-hint">Leave the destination blank to rate against your own ship-from address.</p>
 
-        <button class="secondary-action" type="button" :disabled="previewBusy || !preview.product_ids.length"
+        <button class="secondary-action" type="button"
+                :disabled="previewBusy || (!preview.offer_id && !preview.product_ids.length)"
                 @click="runRatePreview">
           {{ previewBusy ? "Asking the carriers…" : "Get rates" }}
         </button>
 
         <p v-if="previewError" class="keys-status-banner warning">{{ previewError }}</p>
-        <p v-if="previewParcel" class="field-hint">
-          Rated as one <strong>{{ previewParcel.box || "custom parcel" }}</strong>
-          <span v-if="previewParcelCount > 1"> — this order would actually need
-            {{ previewParcelCount }} parcels, so the real cost is higher.</span>
+        <!-- Nothing measurable means nothing to charge (P0a), said here in the estimator's own terms
+             rather than refused as a malformed request. -->
+        <p v-if="previewShipsFree" class="keys-status-banner warning">
+          <strong>This ships free.</strong>
+          {{ previewUnmeasured.join(", ") }} {{ previewUnmeasured.length === 1 ? "has" : "have" }} no size
+          and weight, so there is no parcel to rate and buyers are charged nothing for postage.
+        </p>
+        <!-- THE BREAKDOWN, not just a price: it shows the consequence of unmeasured goods far more
+             plainly than a readiness list does. -->
+        <p v-else-if="previewParcels.length" class="field-hint">
+          Rated as <strong>{{ previewParcelSummary }}</strong>.
+        </p>
+        <p v-if="previewBumpDelta > 0" class="keys-status-banner warning">
+          <strong>Your order bump adds {{ previewBumpDelta }}
+            {{ previewBumpDelta === 1 ? "parcel" : "parcels" }}.</strong>
+          A buyer who adds {{ previewBumpProducts.join(", ") }} on the payment page is not charged for it —
+          Stripe fixes shipping when checkout opens and cannot reprice it after. Build it into the bump's
+          price, make the bump digital, or take it as a cost of conversion.
         </p>
 
         <div v-for="rate in previewRates" :key="rate.rate_id || rate.service_token" class="offer-item-editor">
@@ -640,10 +675,38 @@ function toggleAllowedCarrier(code) {
 // service token; the amount is context for setting a flat rate, never written into a zone, because a rate is
 // destination-specific and stale within days while the token is stable (plans/SHIPPING_ELEMENT.md).
 const catalogue = ref([]);
-const preview = reactive({ product_ids: [], box: "", country: "", postal_code: "" });
+const preview = reactive({ offer_id: "", product_ids: [], box: "", country: "", postal_code: "" });
 const previewRates = ref([]);
 const previewParcel = ref(null);
 const previewParcelCount = ref(0);
+const previewParcels = ref([]);
+const previewShipsFree = ref(false);
+const previewUnmeasured = ref([]);
+const previewBumpDelta = ref(0);
+const previewBumpProducts = ref([]);
+const offers = ref([]);
+
+/** "3 parcels: Small x2, Medium x1" -- the consequence, in the form a tenant can act on. */
+const previewParcelSummary = computed(() => {
+  const counts = {};
+  previewParcels.value.forEach((parcel) => {
+    const name = parcel.box_name || "custom parcel";
+    counts[name] = (counts[name] || 0) + 1;
+  });
+  const parts = Object.entries(counts).map(([name, n]) => (n > 1 ? `${name} x${n}` : name));
+  const total = previewParcels.value.length;
+  return `${total} ${total === 1 ? "parcel" : "parcels"}: ${parts.join(", ")}`;
+});
+
+/** Offers the estimator can rate. Silent on failure -- the ad-hoc product path still works without them. */
+async function loadOffers() {
+  try {
+    const body = await apiRequest("/offers");
+    offers.value = (body?.offers || []).filter((offer) => (offer.items || []).length);
+  } catch {
+    offers.value = [];
+  }
+}
 const previewError = ref("");
 const previewBusy = ref(false);
 
@@ -690,6 +753,11 @@ async function runRatePreview() {
   previewError.value = "";
   previewRates.value = [];
   previewParcel.value = null;
+  previewParcels.value = [];
+  previewShipsFree.value = false;
+  previewUnmeasured.value = [];
+  previewBumpDelta.value = 0;
+  previewBumpProducts.value = [];
   try {
     const to = {};
     if (preview.country) to.country = preview.country.toUpperCase();
@@ -697,15 +765,23 @@ async function runRatePreview() {
     const body = await apiRequest("/shipping/rate-preview", {
       method: "POST",
       body: {
-        product_ids: preview.product_ids,
+        // The offer wins when one is chosen; products are the fallback for something not yet in an offer.
+        offer_id: preview.offer_id || undefined,
+        product_ids: preview.offer_id ? undefined : preview.product_ids,
         box: preview.box || undefined,
         to_address: Object.keys(to).length ? to : undefined,
       },
     });
     previewRates.value = body.rates || [];
     previewParcel.value = body.parcel || null;
+    previewParcels.value = body.parcels || [];
     previewParcelCount.value = body.parcel_count || 0;
-    if (!previewRates.value.length) {
+    previewShipsFree.value = !!body.ships_free;
+    previewUnmeasured.value = body.unmeasured || [];
+    previewBumpDelta.value = body.bump_parcel_delta || 0;
+    previewBumpProducts.value = body.bump_products || [];
+    // "Ships free" is an ANSWER, not a failure -- the banner says it, so the error line must not.
+    if (!previewRates.value.length && !previewShipsFree.value) {
       previewError.value = "The carrier returned no rates for this parcel.";
     }
   } catch (err) {
@@ -1295,5 +1371,6 @@ async function save() {
 load();
 loadCarriers();
 loadParcelTemplates();
+loadOffers();
 loadCatalogue();
 </script>

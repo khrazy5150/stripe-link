@@ -3056,6 +3056,10 @@ Resources:
         # Rating a label needs the ORDER it ships: its destination and its lines.
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
+        # The rate estimator rates an OFFER -- its items are the cart a buyer actually gets, which a
+        # hand-picked product list is not (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0e). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
         # Buying one claims a shipment row BEFORE the money is spent, then records what was bought.
         - DynamoDBCrudPolicy:
             TableName: !Ref ShipmentsTable

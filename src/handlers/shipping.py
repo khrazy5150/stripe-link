@@ -27,12 +27,15 @@ from stripe_link.domain.shipping import (
     tenant_boxes,
 )
 from stripe_link.domain.shipping_packing import pack
+from stripe_link.domain.shipping_rating import rate_parcels
+from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.repositories.documents import (
     RepositoryError,
+    offers_repository,
     orders_repository,
     products_repository,
     refund_requests_repository,
@@ -57,7 +60,7 @@ def _action(event) -> str:
 
 def handler(event, context, repository=None, secret_cipher=None, products_repo=None, orders_repo=None,
             shipments_repo=None, user_profiles_repo=None, mailer_send=None,
-            refund_requests_repo=None, now_fn=lambda: int(time.time())):
+            refund_requests_repo=None, offers_repo=None, now_fn=lambda: int(time.time())):
     repository = repository or shipping_config_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     method = (event or {}).get("httpMethod", "").upper()
@@ -80,7 +83,8 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
                          orders_repo=orders_repo, shipments_repo=shipments_repo,
                          user_profiles_repo=user_profiles_repo, mailer_send=mailer_send, now_fn=now_fn)
     if _action(event) == "rate-preview" and method == "POST":
-        return preview_rates(event, repository, secret_cipher, products_repo=products_repo)
+        return preview_rates(event, repository, secret_cipher, products_repo=products_repo,
+                             offers_repo=offers_repo)
     if _action(event) == "carriers" and method == "GET":
         return list_carriers(event, repository, secret_cipher)
     if _action(event) == "parcel-templates" and method == "GET":
@@ -426,7 +430,7 @@ def live_rates_for(config, tenant_id, *, parcels, destination, secret_cipher):
                         to_address=destination, parcels=parcels)
 
 
-def preview_rates(event, repository, secret_cipher, *, products_repo=None):
+def preview_rates(event, repository, secret_cipher, *, products_repo=None, offers_repo=None):
     """What the carriers would charge for a sample parcel, so a tenant can DISCOVER real services.
 
     plans/SHIPPING_ELEMENT.md. The author, 2026-09-30: let a tenant pick products and a box, ask for rates, and
@@ -446,9 +450,10 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     body = parse_json_body(event)
+    offer_id = str(body.get("offer_id") or "").strip()
     product_ids = [str(pid).strip() for pid in (body.get("product_ids") or []) if str(pid).strip()]
-    if not product_ids:
-        return error_response("Choose at least one product to rate.", code="missing_products")
+    if not offer_id and not product_ids:
+        return error_response("Choose an offer or at least one product to rate.", code="missing_subject")
 
     config = repository.get(tenant_id) or {}
     from_address = config.get("ship_from_address") or {}
@@ -460,25 +465,50 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
     mode = resolve_stripe_mode(event)
     products_repo = products_repo or products_repository(mode=mode)
     quantities = body.get("quantities") or {}
-    lines, products = [], []
-    for product_id in product_ids:
-        product = products_repo.get(tenant_id, product_id)
+
+    if offer_id:
+        offer = (offers_repo or offers_repository(mode=mode)).get(tenant_id, offer_id)
+        if not offer:
+            return error_response("Offer not found.", status_code=404, code="offer_not_found")
+        lines = [{"product_id": str(item.get("product_id") or ""),
+                  "quantity": max(1, int(item.get("quantity") or 1))}
+                 for item in (offer.get("items") or []) if item.get("product_id")]
+        bump_lines = [{"product_id": str(bump.get("product_id") or ""), "quantity": 1}
+                      for bump in stage_opportunities(offer, STAGE_CHECKOUT) if bump.get("product_id")]
+    else:
+        lines = [{"product_id": pid, "quantity": max(1, int(quantities.get(pid) or 1))}
+                 for pid in product_ids]
+        bump_lines = []
+    if not lines:
+        return error_response("That offer has nothing to ship.", code="nothing_to_ship")
+
+    products = {}
+    for line in lines + bump_lines:
+        pid = line["product_id"]
+        if pid in products:
+            continue
+        product = products_repo.get(tenant_id, pid)
         if not product:
-            return error_response(f"Product '{product_id}' was not found.", status_code=404,
+            return error_response(f"Product '{pid}' was not found.", status_code=404,
                                   code="product_not_found")
-        products.append(product)
-        lines.append({"product_id": product_id, "quantity": max(1, int(quantities.get(product_id) or 1))})
+        products[pid] = product
 
     boxes = tenant_boxes(config)
     wanted_box = str(body.get("box") or "").strip()
     if wanted_box:
         # A tenant comparing boxes wants THIS box rated, not the one the packer prefers.
         boxes = [box for box in boxes if str(box.get("name") or "") == wanted_box] or boxes
-    parcels = pack(packable_items(lines, {str(p.get("product_id") or ""): p for p in products}), boxes)
+    parcels = pack(packable_items(lines, products), boxes)
     if not parcels:
-        return error_response(
-            "These products have no dimensions yet, so there is nothing to put in a box. Add sizes in "
-            "Products first.", code="no_dimensions")
+        # NOT an error. This is the P0a answer said in the estimator's own terms: nothing measurable, so
+        # nothing to charge, so the offer ships free. Refusing with a 400 told a tenant their request was
+        # malformed when the truth was that their catalogue is.
+        return json_response({
+            "rates": [], "parcels": [], "parcel_count": 0, "ships_free": True,
+            "unmeasured": _unmeasured_names(lines, products),
+            "destination": {"country": destination.get("country", ""),
+                            "postal_code": destination.get("postal_code", "")},
+        })
 
     provider_config = dict(config.get("provider") or {})
     name = str(provider_config.get("name") or "")
@@ -490,10 +520,15 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
         api_key = secret_cipher.decrypt(
             secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
         )
-        # The FIRST parcel only. A multi-box order is several labels, and showing one parcel's rate as if it
-        # were the order's would understate it -- the count is reported so the tenant can see why.
-        rates = provider_for(name, api_key).rates(
-            from_address=from_address, to_address=destination, parcel=parcels[0])
+        provider = provider_for(name, api_key)
+        # EVERY parcel, summed -- the same `rate_parcels` a buyer's quote runs, so the preview cannot
+        # disagree with checkout. It used to rate `parcels[0]` only, which is right when a tenant is
+        # comparing boxes and wrong the moment the subject is an ORDER: a three-parcel bundle was shown one
+        # parcel's price (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0e).
+        rated = rate_parcels(provider, from_address=from_address, to_address=destination, parcels=parcels)
+        if rated["error"]:
+            raise ProviderError(rated["error"])
+        rates = rated["options"]
     except ProviderError as exc:
         message = str(exc)
         if "identical" in message.lower():
@@ -509,10 +544,49 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
     return json_response({
         "rates": sorted(rates, key=lambda rate: int(rate.get("amount") or 0)),
         "parcel": parcels[0],
+        # THE BREAKDOWN, not just a price. "3 parcels: Small x2, Medium x1" tells a tenant their products
+        # are unmeasured far more plainly than a readiness list does, because it shows the consequence.
+        "parcels": [{"box_name": pp.get("box_name") or pp.get("box") or "",
+                     "length": pp.get("length"), "width": pp.get("width"), "height": pp.get("height"),
+                     "weight": pp.get("weight"), "strategy": pp.get("strategy")} for pp in parcels],
         "parcel_count": len(parcels),
+        "ships_free": False,
+        "unmeasured": _unmeasured_names(lines, products),
+        # WHAT AN ORDER BUMP WOULD ADD. Computed here because this is where a tenant is already looking at
+        # shipping, and because a bump taken on Stripe's hosted page can never be priced at checkout --
+        # `optional_items` are chosen after `shipping_options` is fixed. Disclosure is the whole remedy
+        # available (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P2).
+        **_bump_exposure(lines, bump_lines, products, boxes),
         "destination": {"country": destination.get("country", ""),
                         "postal_code": destination.get("postal_code", "")},
     })
+
+
+def _unmeasured_names(lines, products):
+    """Which of these products have no size of their own -- named, because "2 of 3" is not actionable."""
+    names = []
+    for line in lines or []:
+        product = (products or {}).get(line.get("product_id")) or {}
+        own = ((product.get("fulfillment") or {}).get("item_dimensions") or {})
+        if not all(float(own.get(f) or 0) > 0 for f in ("length_in", "width_in", "height_in")):
+            names.append(str(product.get("name") or line.get("product_id") or "a product"))
+    return names
+
+
+def _bump_exposure(lines, bump_lines, products, boxes):
+    """How many extra parcels an order bump adds, which is postage the tenant will never be paid for.
+
+    Returns `{}` when the offer has no bump. Parcel COUNT rather than a price: pricing it would mean a
+    second carrier call for a figure whose point is "this is not free", and the count is what a tenant can
+    act on -- a bump that adds no parcel is genuinely free to ship.
+    """
+    if not bump_lines:
+        return {}
+    base = len(pack(packable_items(lines, products), boxes))
+    withbump = len(pack(packable_items(list(lines) + list(bump_lines), products), boxes))
+    return {"bump_parcel_delta": max(0, withbump - base),
+            "bump_products": [str((products.get(b["product_id"]) or {}).get("name") or b["product_id"])
+                              for b in bump_lines]}
 
 
 def pack_preview(event, repository):

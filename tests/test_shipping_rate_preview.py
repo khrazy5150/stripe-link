@@ -150,15 +150,20 @@ class WhatItRates(unittest.TestCase):
         _, body, _ = call({"product_ids": ["p1"], "box": "Medium"})
         self.assertEqual(body["parcel"]["box"], "Medium")
 
-    def test_products_with_no_dimensions_are_refused_with_the_fix(self):
+    def test_products_with_no_dimensions_report_free_shipping_rather_than_refusing(self):
+        """Changed 2026-10-01 (P0a/P0e). Refusing with a 400 told a tenant their REQUEST was malformed
+        when the truth is that their catalogue is: unmeasured goods have no parcel, so there is nothing
+        to charge and the offer ships free. The answer now says that, and names which products caused it.
+        """
         response, body, _ = call({"product_ids": ["p2"]})
-        self.assertEqual(response["statusCode"], 400)
-        self.assertEqual(body["error"], "no_dimensions")
-        self.assertIn("Products", body["message"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(body["ships_free"])
+        self.assertEqual(body["rates"], [])
+        self.assertTrue(body["unmeasured"])
 
     def test_no_products_is_refused(self):
         response, body, _ = call({"product_ids": []})
-        self.assertEqual(body["error"], "missing_products")
+        self.assertEqual(body["error"], "missing_subject")
 
     def test_an_unknown_product_is_a_404(self):
         response, _, _ = call({"product_ids": ["nope"]})
