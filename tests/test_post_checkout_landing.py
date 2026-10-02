@@ -27,8 +27,9 @@ SITE = {
     "hosting": {"platform_hostname": "shop.jbay.be", "type": "platform"},
     "pages": {
         "/dietary-supplement-bundle": {"page_id": "page_src", "page_type": "landing", "enabled": True},
-        "/thank-you": {"page_id": "page_ty", "page_type": "thank_you", "funnel_role": "thank_you",
-                       "enabled": True},
+        # A page the TENANT attached, at its own address. A funnel-derived `/thank-you` carries the base
+        # sales page's id and a `funnel_role`; this is the other kind, and it has no role.
+        "/thank-you": {"page_id": "page_ty", "page_type": "thank_you", "enabled": True},
     },
 }
 WITH_UPSELL = {**SITE, "pages": {**SITE["pages"],

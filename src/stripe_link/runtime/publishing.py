@@ -143,11 +143,24 @@ def page_has_own_social_links(page: dict[str, Any]) -> bool:
 
 
 def site_page_slug(site: dict[str, Any] | None, page_id: str) -> str:
-    """The Site route slug (map key) this page serves at — "/" for the homepage, "/upsell-1" for a funnel
-    step. "" when the page isn't attached to the Site (so it isn't served on the custom domain)."""
+    """The Site route slug this page serves AT — its own address. "/" for the homepage, "" when the page
+    is not attached to the Site (so it is not served on the custom domain).
+
+    **Reserved funnel slugs are not a page's address.** `/upsell` and `/thank-you` carry the base sales
+    page's id because that is what their synthetic artifact derives from, not because the page lives
+    there — the Workout Bundle lives at `/dietary-supplement-bundle` and `/thank-you` is a step in its
+    funnel. This returned whichever route matched FIRST, so once a page owned funnel slugs as well as its
+    own, the Landing Pages card advertised the page's public URL as `…/thank-you` (author, 2026-10-02).
+
+    It also made the root unrecognisable to `attach_funnel_slugs`, which asks whether this slug is "/":
+    a homepage that owned `/thank-you` could answer "/thank-you" and stop being treated as the root.
+    """
     for slug, entry in ((site or {}).get("pages") or {}).items():
-        if isinstance(entry, dict) and entry.get("page_id") == page_id:
-            return str(slug)
+        if not isinstance(entry, dict) or entry.get("page_id") != page_id:
+            continue
+        if entry.get("funnel_role"):
+            continue  # a derived funnel route, not this page's own address
+        return str(slug)
     return ""
 
 
