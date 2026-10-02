@@ -12,7 +12,7 @@ Meanwhile `post_checkout` has sent `funnel_page` on every funnel redirect since 
 import unittest
 
 from handlers.custom_domains_resolve import _resolve_slug, _site_page_ids
-from stripe_link.runtime.publishing import attach_funnel_slugs
+from stripe_link.runtime.publishing import attach_funnel_slugs, site_page_slug
 
 ROUTES = {
     "/": {"page_id": "page_home", "enabled": True},
@@ -214,8 +214,6 @@ class APagesPublicUrlIsItsOwnSlugTests(unittest.TestCase):
     field said `/dietary-supplement-bundle` (author, 2026-10-02).
     """
 
-    from stripe_link.runtime.publishing import site_page_slug as _slug
-
     SITE = {"pages": {
         "/thank-you": {"page_id": "page_b", "funnel_role": "thank_you"},
         "/upsell": {"page_id": "page_b", "funnel_role": "upsell"},
@@ -223,23 +221,23 @@ class APagesPublicUrlIsItsOwnSlugTests(unittest.TestCase):
     }}
 
     def test_the_pages_own_slug_wins_over_its_funnel_routes(self):
-        self.assertEqual(self._slug(self.SITE, "page_b"), "/dietary-supplement-bundle")
+        self.assertEqual(site_page_slug(self.SITE, "page_b"), "/dietary-supplement-bundle")
 
     def test_order_in_the_map_does_not_decide_it(self):
         reordered = {"pages": dict(reversed(list(self.SITE["pages"].items())))}
-        self.assertEqual(self._slug(reordered, "page_b"), "/dietary-supplement-bundle")
+        self.assertEqual(site_page_slug(reordered, "page_b"), "/dietary-supplement-bundle")
 
     def test_a_homepage_that_owns_funnel_slugs_is_still_the_root(self):
         # `attach_funnel_slugs` asks whether this slug is "/" -- a root page owning `/thank-you` could
         # answer "/thank-you" and stop being treated as the root.
         root = {"pages": {"/thank-you": {"page_id": "page_h", "funnel_role": "thank_you"},
                           "/": {"page_id": "page_h"}}}
-        self.assertEqual(self._slug(root, "page_h"), "/")
+        self.assertEqual(site_page_slug(root, "page_h"), "/")
 
     def test_a_page_attached_ONLY_as_a_funnel_route_has_no_address(self):
         # It is not served at an address of its own, so there is no public URL to advertise.
         only = {"pages": {"/upsell": {"page_id": "page_x", "funnel_role": "upsell"}}}
-        self.assertEqual(self._slug(only, "page_x"), "")
+        self.assertEqual(site_page_slug(only, "page_x"), "")
 
     def test_an_unattached_page_still_has_none(self):
-        self.assertEqual(self._slug(self.SITE, "page_missing"), "")
+        self.assertEqual(site_page_slug(self.SITE, "page_missing"), "")
