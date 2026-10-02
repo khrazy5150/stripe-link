@@ -92,27 +92,121 @@ Three things follow, and all three are gaps today:
 
 ## 5. What to build
 
-### P0 — Product dimensions (prerequisite)
+### P0 — Honest inputs, and no price without them
 
-Nothing below is accurate without them, and the gap is **not** a missing warning — `product_readiness`
-already names it on the Shipping screen, added 2026-09-24 when the item/box inversion was fixed
-(`plans/TODO.md`). The gap is that the data still is not there. Measured 2026-10-01:
+Revised 2026-10-01 after the author reviewed the product modal. Three parts, and the first is a live
+correctness bug rather than a UX improvement.
+
+#### P0a — A parcel nobody measured must not produce a price
+
+The author: *"Right now the shipping calculator invents charges without dimensions. I don't want the
+estimator to show any shipping charges without dimensions and weight. In those cases the software must
+assume free shipping and be done with it."*
+
+It does not invent from nothing — which is worse, because the result looks legitimate. `shipping_packing`'s
+`declared` strategy fires as a **silent fallback** whenever item dimensions are missing, using
+`fulfillment.dimensions` even when `ships_alone` is unchecked. Stored dev data has the identical
+`10×8×4 @ 1 lb` on a paint set, a shaker bottle and whey protein — a leftover default, not a measurement —
+and a real buyer was quoted and charged **$6.57** rated from it.
+
+**The rule:** a parcel may only be built from data a tenant actually supplied about THIS product —
+item dimensions plus a weight, or a box they explicitly declared by ticking *"always ships in its own
+box"*. Absent that, there is no parcel, and therefore **no shipping charge**: the offer quotes free and
+the order ships free.
+
+That requires one behaviour change: **drop the declared-box silent fallback.** A declared box applies when
+`ships_alone` is set and not otherwise. `plans/SHIPPING_PROVIDERS.md` already calls the declared box *"an
+EXCEPTION, not the default route"*; this finishes that inversion instead of leaving a path that quietly
+contradicts it.
+
+**This refines the "never render an unknown as free" rule rather than breaking it.** Two different
+unknowns:
+
+| Unknown | Who can fix it | What the buyer sees |
+| --- | --- | --- |
+| Carrier unreachable, rate call failed | us, by retrying | *"We could not get shipping rates"* + retry |
+| Tenant supplied no dimensions | the tenant, later | **free shipping** — quietly, and the sale completes |
+
+A buyer cannot act on a missing measurement, and showing them an error over it costs the tenant the order.
+The tenant is the one who must hear about it, which is P0b.
+
+#### P0b — Tell the tenant the truth, which depends on their zones
+
+The proposed warning — *"leaving this blank will prevent you from charging shipping"* — is true for two of
+the four zone rules and false for the other two:
+
+| Zone rule | Works with no dimensions? |
+| --- | --- |
+| `free` | yes |
+| `flat` | **yes** — $7 is $7 |
+| `flat_rate_box` | no — nothing to match to a box |
+| `live` | no — nothing to rate |
+
+A tenant on flat zones told they cannot charge shipping, who then finds they can, stops believing every
+other warning the product shows. So the message is **derived from their own configuration**: live zones get
+*"orders containing this product will ship free"*; by-box gets *"cannot be matched to a box"*; flat and free
+get the milder truth, *"you will not be able to buy labels for this"*; a tenant with no shipping configured
+at all gets nothing, because at step 2 of 5 they have not made that decision yet.
+
+Same for the `optional` badge: optional to **save**, required to **quote**, and which applies depends on
+configuration.
+
+#### P0c — Remove what does not help, and show what was worked out
+
+The **Shipping Box** section collects four numbers that, in the common case, are read by nothing. Verified
+against the author's own screenshot — item `3.3×5×1.8 @ 2.5 lb`, declared box `10×8×4`, *ships alone*
+unchecked:
 
 ```
-dev    2 of 15 shippable products carry item dimensions
-prod   0 of 4
+chosen parcel -> Small (6x4x4) | 2.65 lb | strategy: packed
+declared box 10x8x4 used? NO - item dimensions won
 ```
 
-Thirteen months of warnings nobody acted on is a different problem from no warning. So P0 is about making
-the fill-in cheap rather than making the gap louder:
+- **Reveal the box fields only when they are read**: when *"always ships in its own box"* is ticked. Once
+  P0a lands that is their only remaining use.
+- **Show the derived parcel instead**, because the section's own copy already promises it (*"Normally we
+  work the box out from the sizes above"*): *"This ships in your Small box (6×4×4), 2.65 lb — about $6.57
+  to Denver."* Both halves exist and are deployed (`pack` + `shipping_rating.rate_parcels`). An override
+  you can see the baseline for is a decision; one you cannot is a guess.
+- **Reject impossible values.** The same screenshot has a packed weight of 1 lb on an item weighing 2.5 lb.
 
-- **A carrier parcel template or a box as a one-click default.** Most products are posted in one of a
-  handful of shapes the tenant already listed in their box catalog.
-- **Carry dimensions forward** from the last product in the same category, pre-filled and editable.
-- **Block nothing.** Item dimensions are optional to create a product, and the shipping module must not
-  become compulsory sideways — the existing readiness copy is already careful about this.
+#### P0d — Make the filling-in cheap
 
-A fourteenth product typed by hand is not the obstacle; fourteen empty forms is.
+`product_readiness` has warned since 2026-09-24 and the numbers have not moved: **2 of 15 dev and 0 of 4
+prod** shippable products carry item dimensions. A better warning will not move them either.
+
+- A one-click default from the tenant's own box catalog or a carrier parcel template.
+- Carry forward from the last product in the same category, pre-filled and editable.
+- Block nothing — dimensions stay optional to create a product.
+
+### P0e — The rate estimator rates OFFERS, not hand-picked products
+
+The author, 2026-10-01: *"The estimator should use offers instead. Offers contain bundles which give a more
+accurate estimate of order packing. There is no point in forcing tenants to select products one by one when
+the offer already presents this for free."*
+
+Correct, and the gain is larger than the convenience. `handlers/shipping.preview_rates` takes
+`product_ids[]` and quantities the tenant assembles by hand, which means **the preview rates a cart no
+buyer will ever have**. A tenant checks one product, sees $6.57, and ships a three-item bundle for $19.
+The offer is the real cart: its items, its quantities, its bumps.
+
+Changing the input makes the preview **authoritative instead of indicative** — the same offer, the same
+packer, the same rater, the same code path a buyer's `/shipping-quote` runs. A preview that cannot disagree
+with checkout is worth more than one that is merely easier to drive.
+
+- **Primary input: an offer picker.** Pack `offer.items` exactly as checkout does, through `_quote_parcels`.
+- **Show the parcel breakdown, not just a price** — *"3 parcels: Small ×2, Medium ×1"* is what tells a
+  tenant their products are unmeasured, far more plainly than a readiness list does.
+- **Show the order bump line too**, when the offer has one: this is where P2's exposure number comes from,
+  computed in the place a tenant is already looking at shipping.
+- **Keep an ad-hoc product picker as the secondary path**, not the default. Measuring a new product before
+  it belongs to any offer is a real case; making it the only case was the mistake.
+- **Offers with unmeasured products say so in those words** — *"2 of 3 products have no size, so this offer
+  ships free"* — rather than returning a rated parcel built from a default (P0a).
+
+`preview_rates` also rates **`parcels[0]` only**, by design, because a tenant comparing boxes wanted one
+box's price. An offer-shaped estimator wants the whole order, which `shipping_rating.rate_parcels` already
+does for buyers. The two should converge on that function.
 
 ### P1 — Shipping on upsells and downsells
 
@@ -178,13 +272,18 @@ instead of hiding it. The failure today is not that extras ship free; it is that
 ## 7. Sequencing
 
 ```
-P0 product dimensions        prerequisite; cheapest win; unblocks every number here
-P1 upsell / downsell shipping the big one, and unconstrained
-P3 invariant + threshold UI   small, and stops a double charge reaching a buyer
-P2 bump exposure warning      needs P0 to be meaningful
-P4 derived cost line          needs the Smart Pricing panel (SMART_PRICING.md step 3)
-P5 combined-shipping policy   last; it is a policy over machinery that must exist first
+P0a no price without real dimensions   LIVE BUG: buyers are charged from an unmeasured box
+P0b config-driven warning              small; stops the warning being wrong for flat-rate tenants
+P0c trim the box fields, show the derived parcel
+P0e estimator takes an OFFER           makes the preview authoritative, not indicative
+P0d cheap fill-in                      the thing that actually moves 2-of-15 to 15-of-15
+P1  upsell / downsell shipping         the big one, and unconstrained
+P3  invariant + threshold UI           hours of work; stops a buyer being charged twice for postage
+P2  bump exposure warning              needs P0 to be meaningful
+P4  derived cost line                  needs the Smart Pricing panel (SMART_PRICING.md step 3)
+P5  combined-shipping policy           last; a policy over machinery that must exist first
 ```
 
-P3 is out of order deliberately: it is hours of work and the failure it prevents is a buyer charged twice
-for postage.
+**P0a first, and on its own if nothing else follows.** Every other item here improves something; P0a stops
+real buyers being charged a real amount computed from a box nobody measured. P3 is out of order for the
+same reason — the failure it prevents is a buyer charged twice for postage.
