@@ -255,11 +255,19 @@ def attach_funnel_slugs(
     sequence/carousel `strategy`; the resolver derives the synthetic funnel artifact (`{page_id}__upsell_N`,
     `__upsell_carousel`, `__downsell_carousel`, `__thank_you`) from those + the request's funnel_step.
 
-    Only the page at the Site's "/" owns them, and only when the offer actually has a post-purchase funnel
-    (resolvable upsells). `/downsell` gets its own slug ONLY in carousel mode — in sequence mode the downsell is
-    an in-place swap on the upsell page, not a separate artifact. Returns (site, changed)."""
+    ANY page with a post-purchase funnel owns them, and only when the offer actually has one (resolvable
+    upsells). `/downsell` gets its own slug ONLY in carousel mode — in sequence mode the downsell is an
+    in-place swap on the upsell page, not a separate artifact. Returns (site, changed).
+
+    **It used to be only the page at the Site's "/".** That confined post-purchase funnels to one landing
+    page per Site, and left a Site with no homepage unable to run one at all — which is most of them, since
+    a landing page needs no homepage (author, 2026-10-02). The reserved slug is still one per Site, so the
+    `page_id` stored on it is just the DEFAULT for a bare `/upsell`; `post_checkout` sends `funnel_page` on
+    every real funnel redirect and `custom_domains_resolve` now honours it, so whichever page the buyer
+    actually bought from is the funnel they get. The root page keeps the default when there is one, so a
+    Site that worked before behaves identically."""
     page_id = str(page.get("page_id") or "")
-    if str(site_page_slug(site, page_id)) != "/":
+    if not page_id:
         return site, False
     plan = post_purchase_plan(offer, products_by_id)
     upsells = plan.get("upsells") or []
@@ -271,6 +279,12 @@ def attach_funnel_slugs(
             desired["/downsell"] = {"page_id": page_id, "page_type": "funnel_step", "funnel_role": "downsell", "strategy": strategy, "enabled": True}
         desired["/thank-you"] = {"page_id": page_id, "page_type": "thank_you", "funnel_role": "thank_you", "strategy": strategy, "enabled": True}
     pages = dict(site.get("pages") or {})
+    # The ROOT page keeps the default when there is one, so a Site that worked before is unchanged. Any
+    # other page only claims a slug nobody holds yet -- it must not steal the default from the root.
+    is_root = str(site_page_slug(site, page_id)) == "/"
+    if not is_root:
+        desired = {slug: entry for slug, entry in desired.items()
+                   if not isinstance(pages.get(slug), dict) or not pages[slug].get("funnel_role")}
     changed = False
     for slug, entry in desired.items():
         if pages.get(slug) != entry:
@@ -278,9 +292,18 @@ def attach_funnel_slugs(
             changed = True
     # Retire any of OUR funnel slugs (identified by funnel_role) no longer desired — e.g. upsells removed, or a
     # carousel→sequence change that drops /downsell. Never touch a tenant's own same-named page (no funnel_role).
+    #
+    # And never touch ANOTHER PAGE'S funnel slug. Only the page at "/" used to reach this code, so the entry
+    # found here was always its own; now that any page with a funnel can claim one, a second page publishing
+    # would otherwise delete the first page's `/upsell` on its way past — silently breaking a working funnel
+    # every time an unrelated page was republished.
     for slug in ("/upsell", "/downsell", "/thank-you"):
         existing = pages.get(slug)
-        if slug not in desired and isinstance(existing, dict) and existing.get("funnel_role"):
+        if not isinstance(existing, dict) or not existing.get("funnel_role"):
+            continue
+        if str(existing.get("page_id") or "") != page_id:
+            continue
+        if slug not in desired:
             del pages[slug]
             changed = True
     return ({**site, "pages": pages}, True) if changed else (site, False)

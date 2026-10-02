@@ -125,8 +125,23 @@ async function handleSiteHost(request, hostname, waitUntil) {
   if (hostname === CREATOR_HOST && path.replace(/\/+$/, "") === "") {
     return Response.redirect("https://juniorbay.com/", 302);
   }
-  const resolveUrl = `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}&path=${encodeURIComponent(path)}`;
-  const resolved = await resolveJson("custom-domain-router", `${hostname}${path}`, resolveUrl);
+  // A reserved funnel slug resolves to a DIFFERENT artifact per request: `funnel_step` picks which upsell
+  // in the sequence, and `funnel_page` says whose funnel it is (one `/upsell` slug serves every page on the
+  // Site, so a funnel no longer has to belong to the page at "/"). The resolver has read `funnel_step` since
+  // reserved slugs shipped and this Worker never sent it, so a sequence past step 1 could not resolve at the
+  // edge at all; `funnel_page` is new with the same journey (2026-10-02).
+  //
+  // They are part of the CACHE KEY, not just the query. Caching `/upsell` by host+path alone would pin the
+  // first buyer's step and serve it to everyone after -- upsell 2 answering with upsell 1, or one page's
+  // funnel answering for another's.
+  const funnelParams = new URL(request.url).searchParams;
+  const funnelStep = funnelParams.get("funnel_step") || "";
+  const funnelPage = funnelParams.get("funnel_page") || "";
+  const funnelQuery = (funnelStep ? `&funnel_step=${encodeURIComponent(funnelStep)}` : "")
+    + (funnelPage ? `&funnel_page=${encodeURIComponent(funnelPage)}` : "");
+  const resolveUrl = `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}&path=${encodeURIComponent(path)}${funnelQuery}`;
+  const resolved = await resolveJson(
+    "custom-domain-router", `${hostname}${path}${funnelQuery}`, resolveUrl);
   const route = resolved && resolved.route;
   // Two kinds of 301, and they differ in whether the path comes along. A HOST-level move (www→apex) carries
   // it, so /a/b lands on /a/b at the new host. A per-path target names its exact destination, and appending

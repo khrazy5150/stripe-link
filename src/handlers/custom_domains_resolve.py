@@ -39,7 +39,24 @@ def _funnel_artifact_page_id(base_page_id, entry, funnel_step):
     return base_page_id
 
 
-def _resolve_slug(slug, routes, homepage_page_id, funnel_step=""):
+def _site_page_ids(routes):
+    """Every page_id this Site actually routes. The allow-list a buyer-supplied `funnel_page` must be in.
+
+    A funnel redirect names which page's funnel it is, and that name arrives in a query string a buyer can
+    edit. Serving whatever page_id it asks for would turn one tenant's host into a viewer for anyone's
+    unpublished artifact, so it is only honoured when this Site already routes it.
+    """
+    found = set()
+    for entry in (routes or {}).values():
+        if not isinstance(entry, dict) or entry.get("enabled", True) is False:
+            continue
+        target = route_target(entry)
+        if isinstance(target, dict) and target.get("kind") == "page" and target.get("page_id"):
+            found.add(str(target["page_id"]))
+    return found
+
+
+def _resolve_slug(slug, routes, homepage_page_id, funnel_step="", funnel_page=""):
     """Map a normalized request slug to the (page_id, price_context) that serves it, reading only the
     denormalized route table on the domain-index record (plans/SITE_OBJECT.md §2.6). A Sale/Flash-Sale context
     view (plans/SALES_FUNNELS.md P1c) carries a `price_context` so it serves the base page's sibling artifact.
@@ -57,6 +74,18 @@ def _resolve_slug(slug, routes, homepage_page_id, funnel_step=""):
         if target and target.get("kind") == "page":
             base_page_id = str(target.get("page_id") or "")
             if entry.get("funnel_role"):  # a reserved funnel slug serves a synthetic artifact (P2b)
+                # WHICH page's funnel, when the redirect said so. One reserved `/upsell` slug can serve
+                # every page on the Site this way, so a funnel no longer has to belong to the page at "/"
+                # -- which is what confined post-purchase funnels to one landing page per Site, and left
+                # Sites with no homepage unable to run one at all (author, 2026-10-02).
+                #
+                # `post_checkout` has sent `funnel_page` on every funnel redirect since it was written;
+                # nothing read it. Honoured only for a page this Site already routes (see
+                # `_site_page_ids`), so an edited query string cannot borrow the host to serve someone
+                # else's artifact.
+                requested = str(funnel_page or "").strip()
+                if requested and requested != base_page_id and requested in _site_page_ids(routes):
+                    base_page_id = requested
                 return {"kind": "page", "page_id": _funnel_artifact_page_id(base_page_id, entry, funnel_step)}, ""
             return {"kind": "page", "page_id": base_page_id}, str(entry.get("price_context") or "")
         return target, ""  # redirect / external / collection RouteTarget
@@ -192,7 +221,11 @@ def handler(event, context, *, index_repo=None, pages_domain=None, experiments_r
         # funnel_step selects which sequential upsell a reserved /upsell slug serves (P2b); the Worker forwards
         # the buyer's query string, so it arrives here alongside path.
         funnel_step = str(qp.get("funnel_step") or "")
-        target, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id, funnel_step)
+        # WHOSE funnel. Forwarded by the Worker alongside funnel_step; validated against this Site's own
+        # routes before it is believed.
+        funnel_page = str(qp.get("funnel_page") or "")
+        target, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"),
+                                              homepage_page_id, funnel_step, funnel_page)
         if not target:
             return error_response("No page is published at this path.", status_code=404, code="no_route")
         kind = str(target.get("kind") or "")
