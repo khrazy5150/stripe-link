@@ -2793,6 +2793,22 @@ def validate_enabled_services(services: Any) -> None:
             require_enum(service, "source", {"rate", "manual"}, f"enabled_services[{index}].source")
 
 
+def validate_combined_shipping(block: Any) -> None:
+    """Whether extras (bumps, upsells) ride free with the original order.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P5. One flag, because it is one decision -- and a decision
+    rather than a default: the ledger records the real carrier cost either way, so `shipping_margin`
+    reports what the policy costs instead of hiding it.
+    """
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise DocumentValidationError("Shipping config combined_shipping must be an object.")
+    if block.get("extras_ship_free") is not None and not isinstance(block.get("extras_ship_free"), bool):
+        raise DocumentValidationError(
+            "Shipping config combined_shipping.extras_ship_free must be true or false.")
+
+
 def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
     """Ordered destination zones -- what buyers pay, by where they are (plans/SHIPPING_ELEMENT.md).
 
@@ -2879,6 +2895,7 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider"])
     validate_enabled_services(document.get("enabled_services"))
     validate_shipping_zones(document.get("zones"), document.get("boxes"))
+    validate_combined_shipping(document.get("combined_shipping"))
     if document.get("document_type") != "shipping_config":
         raise DocumentValidationError("Shipping config document_type must be 'shipping_config'.")
     provider = document.get("provider")

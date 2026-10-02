@@ -213,7 +213,7 @@ with checkout is worth more than one that is merely easier to drive.
 box's price. An offer-shaped estimator wants the whole order, which `shipping_rating.rate_parcels` already
 does for buyers. The two should converge on that function.
 
-### P1 — Shipping on upsells and downsells
+### P1 — Shipping on upsells and downsells ✅ (shipped 2026-10-01)
 
 At upsell time: pack the upsell's items, rate to the stored destination, add the amount to the
 PaymentIntent, and **show it on the upsell page before the buyer clicks**. Record it exactly as the first
@@ -249,21 +249,37 @@ Deferred alternative, worth revisiting: move **physical** bumps pre-checkout ont
 shipping element already re-quotes on cart change. Correct shipping — at the cost of the payment-step
 placement that makes bumps convert.
 
-### P3 — Enforce the invariant, and give the threshold a control
+### P3 — Enforce the invariant, and give the threshold a control ✅ (shipped 2026-10-01)
 
 - Call `smart_pricing_conflict` where offers are saved and published, and surface it as a blocking
   validation: `charged + cost line` is a double charge to a real buyer.
 - A `free_above_amount` control in the offer builder, shown with what it implies: *"Free shipping over $50
   — your cost profile needs a shipping line, or this comes out of your margin."*
 
-### P4 — Derive the shipping cost line from a real rate
+### P4 — Derive the shipping cost line from a real rate ⛔ BLOCKED
+
+> **Not built, 2026-10-01, and deliberately not faked.** It needs somewhere to put the number, and there
+> is none: `cost_profile` is not a stored field anywhere in `src/`, `schemas/` or the dashboard
+> (`plans/SMART_PRICING.md` build order **step 1** is unbuilt), and there is no pricing panel (**step 3**).
+>
+> The derivation half could be written today -- `shipping_rating.rate_parcels` already rates a real parcel
+> to a real destination, which is exactly what SMART_PRICING.md §10 said was missing. But a function no
+> caller can reach is the pattern this session has now removed three times: `fees.fee_base` let the
+> platform charge a fee on postage in the books for weeks, `ledger` `cogs` still reports profit without
+> goods, and `smart_pricing_conflict` would have let a buyer be charged twice. Adding a fourth to look
+> finished would be worse than leaving it clearly unfinished.
+>
+> **Unblocked by:** SMART_PRICING.md step 1 (`cost_profile` on the Price + `domain/smart_pricing.py`),
+> then step 3 (the panel). The work itself is then small -- one action on the shipping cost line that
+> packs the product, rates it to a representative destination, and stamps the figure with its date and
+> destination so staleness stays visible (§6).
 
 In the Smart Pricing panel, a **"Get this from my carrier"** action on the "Shipping to customer" line:
 pack this product, rate it to a representative destination, fill the number, stamp it with the date and
 destination so staleness is visible (`plans/SMART_PRICING.md §6`). Typed stays allowed — a tenant with no
 carrier connected still needs a number.
 
-### P5 — A stated combined-shipping policy
+### P5 — A stated combined-shipping policy ✅ (shipped 2026-10-01)
 
 One tenant-level choice: *additional items (bumps, upsells) ship free with the original order.* For many
 sellers that is both true and a selling point. The point is that it becomes **a decision with a number

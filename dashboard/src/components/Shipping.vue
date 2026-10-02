@@ -440,6 +440,20 @@
           </p>
         </div>
         <button class="secondary-action" type="button" @click="addZone">Add zone</button>
+
+        <!-- P5: ONE DECISION, stated. Most sellers reward a bigger order with free shipping, which is
+             only coherent if the cost was recovered in the price -- and adding one item to a parcel that
+             is already going often costs little. The ledger records the real carrier cost either way, so
+             `shipping_margin` reports what this costs rather than hiding it. -->
+        <label class="switch-row">
+          <input v-model="form.combined_shipping.extras_ship_free" type="checkbox" />
+          <span>
+            <strong>Extras ship free with the original order</strong>
+            <small>Order bumps and post-purchase upsells are not charged postage. Often true — a second
+              item in a parcel that is already going costs little — and it makes the offer stronger. Your
+              shipping margin on the Ledger shows what it actually costs you.</small>
+          </span>
+        </label>
       </div>
     </section>
 
@@ -659,6 +673,7 @@ function defaultForm() {
     label_options: { format: "pdf", size: "4x6" },
     boxes: [],
     enabled_services: [],
+    combined_shipping: { extras_ship_free: false },
     // The catch-all is structural, not a choice: without it a buyer from an unlisted country reaches
     // undefined behaviour at the moment of purchase, and the validator refuses the save. So the UI always
     // keeps one last and does not let it be removed or renamed.
@@ -1107,6 +1122,9 @@ function applyConfig(config) {
   form.boxes = Array.isArray(config.boxes)
     ? config.boxes.map((box) => ({ ...boxFormFromDocument(box), max_weight: box.max_weight ?? "" }))
     : [];
+  form.combined_shipping = {
+    extras_ship_free: !!(config.combined_shipping || {}).extras_ship_free,
+  };
   form.enabled_services = Array.isArray(config.enabled_services)
     ? config.enabled_services.map((service) => ({
         ...emptyService(), ...service,
@@ -1326,6 +1344,11 @@ function buildPayload() {
       return entry;
     });
 
+  // Only sent when ON: a stored `false` and an absent block mean the same thing, and writing the default
+  // into every tenant's document makes a decision look taken when it was not.
+  if (form.combined_shipping.extras_ship_free) {
+    doc.combined_shipping = { extras_ship_free: true };
+  }
   doc.ship_from_address = cleanAddress(form.ship_from_address);
   doc.return_address = cleanAddress(form.return_address);
   // default_parcel is deliberately NOT sent: it is read by nothing. A parcel comes from a box the items

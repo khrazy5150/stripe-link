@@ -462,6 +462,14 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
         print(f"[upsell] shipping config unreadable: {type(exc).__name__}: {exc}")
         return dict(blank, reason="config_unreadable")
 
+    # THE TENANT'S STATED POLICY (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P5). For many sellers "add it,
+    # it ships with your order" is both true and a selling point, and adding one item to a parcel that is
+    # already going often costs little. The point is that it is a DECISION with a number attached rather
+    # than a default: the ledger records the real carrier cost either way, so `shipping_margin` reports
+    # what the policy costs instead of hiding it.
+    if (config.get("combined_shipping") or {}).get("extras_ship_free"):
+        return dict(blank, reason="combined_shipping")
+
     offer = {"shipping": {"eligible": True}, "items": items}
     live_options = None
     if zone_rule_for(config, country).get("type") == "live":
