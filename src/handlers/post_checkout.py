@@ -75,7 +75,8 @@ def _redirect_base(site, origin_host):
     return allowed[0] if allowed else ""
 
 
-def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None, mode="live"):
+def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None, mode="live",
+                   source_page_id=""):
     """The buyer-facing URL for the funnel's next page. Keep the buyer on the host they entered on (validated
     custom domain or platform host) so they never leave mid-funnel (plans/SITE_OBJECT.md §2.6): a synthetic
     funnel artifact serves at its reserved slug (/upsell //downsell //thank-you, P2b) when that slug is attached;
@@ -94,9 +95,19 @@ def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None
         # The Site is served, but this page has no route on it. Funnel attachment is best-effort by design --
         # "a failure here must never block publishing the artifact itself" -- so a real buyer can reach here
         # mid-funnel, and the old answer was the raw artifact URL, which stops existing the moment the artifact
-        # route closes (plans/ARTIFACT_ACCESS_BOUNDARY.md P0). Send them to the Site root instead: a host we
-        # govern, which always works, rather than a 404 after payment. This is the same trade the dangling
-        # thank-you page already makes above -- a working page in place of the exact intended one.
+        # route closes (plans/ARTIFACT_ACCESS_BOUNDARY.md P0).
+        #
+        # **The Site root is NOT "a host we govern, which always works".** That was the assumption and it is
+        # false: a Site with no page attached at "/" 404s there, and a buyer who had just paid landed on it
+        # (author, 2026-10-02). It happens routinely, because `attach_funnel_slugs` only lets the page at "/"
+        # own `/upsell` -- so every funnel on a Site whose landing pages live at real slugs falls through here.
+        #
+        # Send them BACK TO THE PAGE THEY BOUGHT FROM instead. It is published and routed by definition --
+        # checkout refuses an unpublished page -- so unlike the root it is guaranteed to exist. The upsell is
+        # lost either way; a 404 after payment loses the buyer's trust as well.
+        source_slug = site_page_slug(site, source_page_id) if source_page_id else ""
+        if source_slug:
+            return f"{base}/{'' if source_slug == '/' else source_slug.lstrip('/')}"
         return base
     # LAST artifact-URL producer on a buyer-facing path, and the one thing still standing between here and
     # closing the route (plans/ARTIFACT_ACCESS_BOUNDARY.md P1). Reached only when the page belongs to no
@@ -171,7 +182,8 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
         def _funnel_redirect(next_page_id, extra_query=None):
             """Redirect to a funnel artifact ({page_id}__…), carrying funnel_page/session so the next screen's
             island keeps the funnel context. Returns a 500 when the pages domain isn't configured."""
-            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode)
+            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode,
+                                 source_page_id=page_id)
             if not url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
             query = dict(extra_query or {})
@@ -234,7 +246,8 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
             separator = "&" if "?" in entry_url else "?"
             return redirect_response(f"{entry_url}{separator}checkout=success")
 
-    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode)
+    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode,
+                         source_page_id=page_id)
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 
