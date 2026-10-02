@@ -320,6 +320,62 @@ def return_address(config: dict[str, Any] | None) -> dict[str, Any]:
     return dict(ship_from) if isinstance(ship_from, dict) else {}
 
 
+def unmeasured_products(products: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Every shippable product with no size of its own, and a SUGGESTION where one can be had.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0d. `product_readiness` already names them in prose; this
+    returns them in a shape a screen can edit, because the obstacle was never the warning. Measured
+    2026-10-01: 2 of 15 dev and 0 of 4 prod shippable products carry dimensions, and
+    `product_readiness` has said so since 2026-09-24.
+
+    **The suggestion is a suggestion, never a pre-fill.** Copying a similar product's measurements into a
+    form the tenant then saves without looking would manufacture data that reads as measured and is not --
+    which is precisely what P0a exists to stop. It is offered with the name of the product it came from, so
+    accepting it is a decision: *"Beta Alanine was 4x3x2, 1 lb -- use those?"*
+    """
+    shippable, measured = [], {}
+    for product in products or []:
+        fulfillment = (product or {}).get("fulfillment") or {}
+        if fulfillment.get("requires_shipping") is False:
+            continue
+        if str(product.get("product_type") or "") not in ("physical", ""):
+            continue
+        own = fulfillment.get("item_dimensions") or {}
+        complete = all(_positive(own.get(field)) for field in ("length_in", "width_in", "height_in")) \
+            and _positive(own.get("weight_lb") or fulfillment.get("weight_lb"))
+        category = str(product.get("category") or "").strip().lower()
+        if complete:
+            # The most recent measured product per category becomes that category's suggestion.
+            measured.setdefault(category, product)
+            continue
+        shippable.append(product)
+
+    out = []
+    for product in shippable:
+        category = str(product.get("category") or "").strip().lower()
+        like = measured.get(category)
+        row = {"product_id": str(product.get("product_id") or ""),
+               "name": str(product.get("name") or product.get("product_id") or "a product"),
+               "category": str(product.get("category") or "")}
+        if like:
+            own = (like.get("fulfillment") or {}).get("item_dimensions") or {}
+            row["suggestion"] = {
+                "from_name": str(like.get("name") or ""),
+                "length_in": own.get("length_in"), "width_in": own.get("width_in"),
+                "height_in": own.get("height_in"),
+                "weight_lb": own.get("weight_lb") or (like.get("fulfillment") or {}).get("weight_lb"),
+            }
+        out.append(row)
+    return out
+
+
+def _positive(value: Any) -> bool:
+    try:
+        return float(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def dimensions_consequence(config: dict[str, Any] | None) -> dict[str, str]:
     """What leaving a product unmeasured actually COSTS this tenant, given the zones they configured.
 

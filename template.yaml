@@ -3051,7 +3051,10 @@ Resources:
         # containing an unmeasured product ship one parcel per item, which costs more
         # (plans/SHIPPING_PROVIDERS.md). Read-only, and best-effort: a products table that will
         # not read must never cost the tenant the shipping config they came here to save.
-        - DynamoDBReadPolicy:
+        # CRUD, not Read: /shipping/measure writes item dimensions back onto the product so a tenant can
+        # fix the whole catalogue from the screen that reports the gap (P0d). It touches
+        # `fulfillment.item_dimensions` only.
+        - DynamoDBCrudPolicy:
             TableName: !Ref ProductsTable
         # Rating a label needs the ORDER it ships: its destination and its lines.
         - DynamoDBReadPolicy:
@@ -3155,6 +3158,15 @@ Resources:
             # Which of the tenant's boxes a product ships in, from dimensions typed INLINE -- the product
             # wizard asks before anything is saved (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0c).
             Path: /shipping/pack-preview
+            Method: POST
+        ShippingMeasure:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # Measure several products at once, from the screen already telling the tenant they are
+            # unmeasured. Fourteen empty forms was the obstacle, not one form
+            # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0d).
+            Path: /shipping/measure
             Method: POST
         ShippingRates:
           Type: Api

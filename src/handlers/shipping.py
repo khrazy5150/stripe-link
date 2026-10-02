@@ -23,6 +23,7 @@ from stripe_link.domain.shipping import (
     packable_items,
     product_readiness,
     return_address,
+    unmeasured_products,
     shipment_id_for,
     tenant_boxes,
 )
@@ -91,6 +92,8 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
         return list_parcel_templates(event, repository, secret_cipher)
     if _action(event) == "pack-preview" and method == "POST":
         return pack_preview(event, repository)
+    if _action(event) == "measure" and method == "POST":
+        return measure_products(event, repository, products_repo=products_repo)
     if _action(event) == "rates" and method == "POST":
         return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
                            orders_repo=orders_repo)
@@ -114,8 +117,21 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
             # so the product form can say something true rather than one sentence that fits every case
             # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0b).
             "dimensions_consequence": dimensions_consequence(config),
+            # The same gap `product_readiness` states in prose, in a shape a screen can EDIT. The warning
+            # becomes the fix (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0d).
+            "unmeasured_products": _unmeasured_catalogue(tenant_id, products_repo,
+                                                         resolve_stripe_mode(event)),
         })
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
+
+
+def _unmeasured_catalogue(tenant_id: str, products_repo=None, mode: str = "test") -> list[dict]:
+    """`unmeasured_products` over the tenant's catalogue. Best-effort, like its prose sibling."""
+    try:
+        repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
+        return unmeasured_products(repo.list_for_tenant(tenant_id)) if repo else []
+    except Exception:  # noqa: BLE001 - advice must never cost the tenant their save
+        return []
 
 
 def catalogue_readiness(tenant_id: str, products_repo=None, mode: str = "test") -> list[str]:
@@ -587,6 +603,70 @@ def _bump_exposure(lines, bump_lines, products, boxes):
     return {"bump_parcel_delta": max(0, withbump - base),
             "bump_products": [str((products.get(b["product_id"]) or {}).get("name") or b["product_id"])
                               for b in bump_lines]}
+
+
+def measure_products(event, repository, *, products_repo=None):
+    """Write item dimensions for several products at once.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0d. `product_readiness` has named the unmeasured products
+    since 2026-09-24 and the count has not moved: 2 of 15 dev, 0 of 4 prod. A better warning will not move
+    it either -- **fourteen empty forms is the obstacle, not one form**. So the warning becomes the fix:
+    the tenant measures everything from the screen already telling them it is missing, instead of opening
+    a modal per product.
+
+    It lives on the shipping handler rather than the products one because there is no general product
+    update endpoint, and adding one to write four fields would be a much larger door than the job needs.
+    Writes ONLY `fulfillment.item_dimensions` and the bare weight; everything else on the product is
+    carried through untouched.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    rows = parse_json_body(event).get("measurements") or []
+    if not rows:
+        return error_response("Nothing to measure.", code="missing_measurements")
+
+    repo = products_repo or products_repository(mode=resolve_stripe_mode(event))
+    saved, skipped = [], []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        product_id = str(row.get("product_id") or "").strip()
+        dims = {field: row.get(field) for field in ("length_in", "width_in", "height_in", "weight_lb")}
+        if not product_id or not all(_positive_number(dims[f])
+                                     for f in ("length_in", "width_in", "height_in", "weight_lb")):
+            # A partial row is not a measurement. Writing three of four sides would produce a product that
+            # still cannot be rated while looking like it can -- worse than leaving it blank.
+            skipped.append(product_id or "(no id)")
+            continue
+        product = repo.get(tenant_id, product_id)
+        if not product:
+            skipped.append(product_id)
+            continue
+        fulfillment = dict(product.get("fulfillment") or {})
+        fulfillment["item_dimensions"] = {
+            "length_in": float(dims["length_in"]), "width_in": float(dims["width_in"]),
+            "height_in": float(dims["height_in"]), "weight_lb": float(dims["weight_lb"]),
+        }
+        try:
+            repo.put({**product, "fulfillment": fulfillment})
+            saved.append(product_id)
+        except RepositoryError:
+            skipped.append(product_id)
+
+    products = repo.list_for_tenant(tenant_id) or []
+    return json_response({
+        "saved": saved, "skipped": skipped,
+        "product_readiness": product_readiness(products),
+        "unmeasured_products": unmeasured_products(products),
+    })
+
+
+def _positive_number(value) -> bool:
+    try:
+        return float(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def pack_preview(event, repository):

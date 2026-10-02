@@ -155,10 +155,41 @@
         <!-- Boxes only help once the ITEMS have sizes of their own: the packer cannot choose a shared box
              for things whose dimensions it does not know. Advisory, never a blocker -- item dimensions are
              optional to create a product and the shipping module must not become compulsory sideways. -->
-        <div v-if="productReadiness.length" class="keys-status-banner warning">
-          <strong>Boxes can only be shared once items are measured:</strong>
-          <ul><li v-for="item in productReadiness" :key="item">{{ item }}</li></ul>
+        <!-- THE WARNING IS THE FIX. `product_readiness` has named these products since 2026-09-24 and the
+             count has not moved (2 of 15 dev, 0 of 4 prod measured). Fourteen empty forms was the
+             obstacle, not one form -- so they are measurable here, where the gap is reported
+             (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0d). -->
+        <div v-if="unmeasuredProducts.length" class="keys-status-banner warning">
+          <strong>Boxes can only be shared once items are measured.</strong>
+          Measure them here — the product itself, out of any packaging.
         </div>
+        <div v-for="row in unmeasuredProducts" :key="row.product_id" class="offer-item-editor">
+          <header>
+            <strong>{{ row.name }}</strong>
+            <!-- A SUGGESTION, never a pre-fill: silently copying another product's measurements would
+                 manufacture data that reads as measured and is not, which is what P0a exists to stop.
+                 Accepting it is one click, and a deliberate one. -->
+            <button v-if="row.suggestion" class="link-action" type="button" @click="useSuggestion(row)">
+              Same as {{ row.suggestion.from_name }} ({{ row.suggestion.length_in }}×{{ row.suggestion.width_in }}×{{ row.suggestion.height_in }} in, {{ row.suggestion.weight_lb }} lb)
+            </button>
+          </header>
+          <div class="modal-dimensions-grid">
+            <label>Length (in)<input v-model.number="measurements[row.product_id].length_in" type="number" min="0" step="0.1" placeholder="—" /></label>
+            <label>Width (in)<input v-model.number="measurements[row.product_id].width_in" type="number" min="0" step="0.1" placeholder="—" /></label>
+            <label>Height (in)<input v-model.number="measurements[row.product_id].height_in" type="number" min="0" step="0.1" placeholder="—" /></label>
+            <label>Weight (lb)<input v-model.number="measurements[row.product_id].weight_lb" type="number" min="0" step="0.1" placeholder="—" /></label>
+          </div>
+        </div>
+        <button v-if="unmeasuredProducts.length" class="secondary-action" type="button"
+                :disabled="measuringBusy || !completeMeasurements.length" @click="saveMeasurements">
+          {{ measuringBusy ? "Saving…"
+             : `Save ${completeMeasurements.length} measurement${completeMeasurements.length === 1 ? "" : "s"}` }}
+        </button>
+        <!-- All four or none. Three sides still cannot be rated, and a product that looks measured and
+             is not is worse than one that is plainly blank. -->
+        <p v-if="unmeasuredProducts.length" class="field-hint">
+          All four are needed before a product can be rated. Leave a row blank to come back to it.
+        </p>
         <p v-if="!form.boxes.length" class="field-hint">
           No boxes yet.
           <button class="link-action" type="button" @click="useStarterBoxes">Start with common sizes</button>
@@ -576,7 +607,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { apiRequest, getTenantId } from "../api/client";
 import { statusLabel } from "../utils/format";
 import AddressFields from "./AddressFields.vue";
@@ -1162,6 +1193,51 @@ const readiness = ref([]);
 // label, this one only costs postage. Merging them would put "add a weight" under "before you can buy
 // labels", which is untrue and would send tenants looking for a tape measure they do not need.
 const productReadiness = ref([]);
+const unmeasuredProducts = ref([]);
+const measurements = reactive({});
+const measuringBusy = ref(false);
+
+/** One editable row per unmeasured product, kept in step as the list shrinks. */
+watch(unmeasuredProducts, (rows) => {
+  (rows || []).forEach((row) => {
+    if (!measurements[row.product_id]) {
+      measurements[row.product_id] = { length_in: "", width_in: "", height_in: "", weight_lb: "" };
+    }
+  });
+}, { immediate: true });
+
+/** Only rows with ALL FOUR. Three sides cannot be rated, and a half-measured product that looks
+ *  measured is worse than one that is plainly blank. */
+const completeMeasurements = computed(() => unmeasuredProducts.value
+  .map((row) => ({ product_id: row.product_id, ...(measurements[row.product_id] || {}) }))
+  .filter((row) => ["length_in", "width_in", "height_in", "weight_lb"]
+    .every((field) => Number(row[field]) > 0)));
+
+function useSuggestion(row) {
+  const target = measurements[row.product_id];
+  if (!target || !row.suggestion) return;
+  ["length_in", "width_in", "height_in", "weight_lb"].forEach((field) => {
+    target[field] = row.suggestion[field];
+  });
+}
+
+async function saveMeasurements() {
+  measuringBusy.value = true;
+  error.value = "";
+  try {
+    const body = await apiRequest("/shipping/measure", {
+      method: "POST",
+      body: { measurements: completeMeasurements.value },
+    });
+    productReadiness.value = body.product_readiness || [];
+    unmeasuredProducts.value = body.unmeasured_products || [];
+    message.value = `Measured ${(body.saved || []).length} product${(body.saved || []).length === 1 ? "" : "s"}.`;
+  } catch (err) {
+    error.value = err.message || "Could not save measurements.";
+  } finally {
+    measuringBusy.value = false;
+  }
+}
 
 // Whether the server has told us yet. An empty `readiness` means ready; an ABSENT one means unknown --
 // the state of a tenant whose GET 404'd because they have saved nothing. Those must not look alike.
@@ -1173,6 +1249,7 @@ function applyReadiness(body) {
     readinessKnown.value = true;
   }
   if (Array.isArray(body?.product_readiness)) productReadiness.value = body.product_readiness;
+  if (Array.isArray(body?.unmeasured_products)) unmeasuredProducts.value = body.unmeasured_products;
 }
 
 async function load() {
