@@ -739,9 +739,7 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
             return json_response(payload)
         parcels = _quote_parcels(items, products_by_id, config)
         if not parcels:
-            payload["needs"] = "carrier"
-            payload["rate_error"] = "no_dimensions"
-            return json_response(payload)
+            return json_response({**payload, **_unmeasured_free(tenant_id, offer_id, target)})
 
         fingerprint = quote_fingerprint(offer_id=offer_id, items=items, parcels=parcels,
                                         destination=destination)
@@ -785,10 +783,38 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
             destination=destination, options=result["options"], source=result["source"],
             existing=quote, currency="usd"))
 
+    # A by-box zone whose cart cannot be packed at all is the SAME unmeasured case as a live one: there is
+    # no parcel, so there is no price, so it ships free rather than erroring at the buyer.
+    if result["needs"] == "box_price" and priced["reason"] == "no_dimensions":
+        return json_response({**payload, **_unmeasured_free(tenant_id, offer_id, target)})
+
     # Why it could not be priced, for the element to show something truthful instead of a blank.
     if result["needs"] == "box_price" and priced["reason"]:
         payload["box_reason"] = priced["reason"]
     return json_response(payload)
+
+
+def _unmeasured_free(tenant_id, offer_id, country):
+    """What a buyer is told when the TENANT has not measured the goods: nothing, and no charge.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0a. This looks like it contradicts "never render an unknown as
+    free", and it refines it instead. Two different unknowns:
+
+    - **The carrier could not be reached.** Ours, transient, fixable by retrying -- the buyer gets an error
+      and a retry button, because a second attempt may well work.
+    - **The tenant supplied no dimensions.** Theirs, not transient, and *a buyer cannot act on it at all*.
+      Showing them an error over a measurement they have never heard of costs the tenant the sale for no
+      possible benefit.
+
+    So the buyer ships free and the TENANT is the one told -- loudly, on the Shipping and Products screens,
+    and in this log line. `unmeasured` rides in the response so the dashboard's own preview can say why a
+    price it expected is missing.
+    """
+    logger.info("shipping free: products are unmeasured", extra={
+        "tenant_id": tenant_id, "offer_id": offer_id, "country": country})
+    return {"options": [{"label": "Shipping", "amount": 0, "service_token": "",
+                         "carrier": "", "transit_days_min": None, "transit_days_max": None}],
+            "mode": "free", "needs": "", "source": "unmeasured", "unmeasured": True}
 
 
 def _quote_parcels(items, products_by_id, config):

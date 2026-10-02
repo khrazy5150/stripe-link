@@ -104,12 +104,21 @@ class PackablesTests(unittest.TestCase):
         self.assertEqual(parcels[0]["strategy"], "declared")
         self.assertEqual((parcels[0]["length"], parcels[0]["width"], parcels[0]["height"]), (10.0, 8.0, 4.0))
 
-    def test_an_UNMEASURED_product_still_ships_exactly_as_it_did(self):
-        """The migration promise, pinned: a product stored before item dimensions existed has no size of
-        its own, falls back to its declared box, and nothing about its parcel changes."""
+    def test_an_UNMEASURED_product_now_yields_NO_parcel(self):
+        """**The migration promise was withdrawn on 2026-10-01, deliberately.**
+
+        It used to read: *a product stored before item dimensions existed falls back to its declared box
+        and nothing about its parcel changes.* That quietness was the bug. The declared box was a leftover
+        default -- dev data carried the identical 10x8x4 @ 1 lb on a paint set, a shaker bottle and whey
+        protein -- and it was being rated and charged: a real buyer paid $6.57 for a parcel nobody had
+        measured.
+
+        No measurements now means no parcel, which callers turn into free shipping rather than a price
+        nobody can stand behind (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0a).
+        """
         parcels = pack(packable_items([{"product_id": "unmeasured", "quantity": 1}], self.PRODUCTS), BOXES)
 
-        self.assertEqual(parcels[0]["strategy"], "declared")
+        self.assertEqual(parcels, [])
 
     def test_several_items_pack_into_one_box_now_that_sizes_exist(self):
         parcels = pack(packable_items([{"product_id": "jar", "quantity": 3}], self.PRODUCTS), BOXES)

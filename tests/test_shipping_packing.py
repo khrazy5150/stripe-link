@@ -83,14 +83,18 @@ class SingleItemTests(unittest.TestCase):
 
         self.assertEqual(parcel["weight"], 1.0)
 
-    def test_a_product_with_NO_size_of_its_own_still_uses_its_declared_box(self):
-        """The migration promise: every product stored before item dimensions existed has no size of its
-        own, takes this branch, and ships exactly as it did yesterday."""
-        no_size = {"product_id": "legacy", "quantity": 1, "weight": 1.4, "package": self.DECLARED}
-        parcel = pack([no_size], BOXES)[0]
+    def test_a_declared_box_is_only_used_when_the_tenant_SAID_it_ships_alone(self):
+        """A declared box is an EXCEPTION the tenant declares, not a silent fallback (P0a, 2026-10-01).
 
-        self.assertEqual(parcel["strategy"], "declared")
-        self.assertEqual((parcel["length"], parcel["width"], parcel["height"]), (10.0, 8.0, 4.0))
+        Used as a fallback it turned a leftover default into a priced parcel. The same four numbers sat on
+        three unrelated dev products and were being charged for.
+        """
+        no_size = {"product_id": "legacy", "quantity": 1, "weight": 1.4, "package": self.DECLARED}
+        self.assertEqual(pack([no_size], BOXES), [])
+
+        declared = pack([{**no_size, "ships_alone": True}], BOXES)[0]
+        self.assertEqual(declared["strategy"], "declared")
+        self.assertEqual((declared["length"], declared["width"], declared["height"]), (10.0, 8.0, 4.0))
 
     def test_with_no_declared_package_a_box_is_chosen(self):
         parcel = pack([JAR], BOXES)[0]
@@ -140,12 +144,19 @@ class FallbackTests(unittest.TestCase):
         self.assertEqual(len(parcels), 2)
         self.assertEqual({p["strategy"] for p in parcels}, {"per_item"})
 
-    def test_an_item_with_no_dimensions_of_its_own_uses_its_declared_package(self):
+    def test_an_unmeasured_item_is_DROPPED_rather_than_packed_from_its_declared_box(self):
+        """The per-item fallback preferred the declared package OVER the item's own size -- the inversion
+        backwards, and the same unmeasured-default charge (P0a). The measured item still ships."""
         parcels = pack([{"product_id": "x", "quantity": 1, "weight": 2,
                          "package": {"length": 10, "width": 8, "height": 4}},
                         JAR], BOXES)
-        self.assertEqual(len(parcels), 2)
-        self.assertEqual(parcels[0]["length"], 10.0)
+        self.assertEqual(len(parcels), 1)
+        self.assertEqual(parcels[0]["packed_from"], [JAR["product_id"]])
+
+    def test_a_measured_item_uses_its_OWN_size_not_a_declared_box(self):
+        # Belt and braces on the direction of the inversion: both are present, the item wins.
+        parcel = pack([{**JAR, "package": {"length": 24, "width": 24, "height": 24}}], [])[0]
+        self.assertLess(parcel["length"], 24)
 
     def test_nothing_known_invents_nothing(self):
         """A made-up box buys a label at the wrong postage, which the carrier bills for or the parcel

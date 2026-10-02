@@ -152,7 +152,11 @@ def _per_item(units, *, distance_unit, mass_unit) -> list[dict[str, Any]]:
     nothing else is known. Over-estimates rather than under-estimates."""
     parcels = []
     for unit in units:
-        dimensions = _dims(unit.get("package")) or _dims(unit)
+        # The ITEM's own size, never the declared package. A `ships_alone` unit with a declared box has
+        # already been taken by strategy 0; anything still here reaching for `package` would be the same
+        # unmeasured-default charge strategy 1 was removed for -- and this one preferred the declared box
+        # over the item's real dimensions, which is the inversion backwards.
+        dimensions = _dims(unit)
         if dimensions is None:
             continue
         parcels.append(_parcel(
@@ -291,22 +295,19 @@ def pack(
     if not units:
         return parcels
 
-    # 1. One thing left, the tenant said what it ships in, and there is nothing better to go on.
+    # 1. REMOVED 2026-10-01 -- the declared-box fallback for a lone unmeasured item.
     #
-    #    The "nothing better" clause is the inversion (plans/SHIPPING_PROVIDERS.md). A declared box used
-    #    to win outright for a lone item, which made the box the primary fact and left the catalog
-    #    unreachable for most orders -- a pouch with a 10x8x4 declared on it shipped in a carton even
-    #    when the tenant stocked a mailer it fits. Now the box is DERIVED whenever the item's own size is
-    #    known, and the declared one is what we fall back on when it is not.
+    #    It read `fulfillment.dimensions` whenever an item had no size of its own, whether or not the
+    #    tenant had ticked "always ships in its own box". That turned a leftover default into a priced
+    #    parcel: dev data carried the identical 10x8x4 @ 1 lb on a paint set, a shaker bottle and whey
+    #    protein, and a real buyer was quoted and charged $6.57 rated from it. The number looked
+    #    legitimate, which is why nobody questioned it.
     #
-    #    That is also why the migration is quiet: every product stored before item dimensions existed has
-    #    no size of its own, takes this branch, and ships exactly as it did yesterday.
-    if len(units) == 1 and not _dims(units[0]):
-        declared = _dims(units[0].get("package"))
-        if declared:
-            return parcels + [
-                _parcel(declared, _weight(units[0]), distance_unit=distance_unit, mass_unit=mass_unit,
-                        packed_from=[units[0].get("product_id", "")], strategy="declared")]
+    #    A declared box is now what strategy 0 says it is and nothing else: an EXCEPTION the tenant
+    #    declares by ticking `ships_alone`. An item with no measurements yields NO parcel, which the
+    #    callers turn into free shipping rather than a price nobody can stand behind
+    #    (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0a). This finishes the inversion
+    #    plans/SHIPPING_PROVIDERS.md already describes rather than leaving a path that contradicts it.
 
     catalog = [box for box in (boxes or []) if _dims(box)]
     item_dims = [_dims(unit) for unit in units]
