@@ -8551,7 +8551,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        cta.setAttribute('aria-disabled', 'true');",
         "        cta.dataset.ctaDefaultLabel = cta.textContent;",
         "        cta.textContent = 'Loading...';",
-        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}&mode=${encodeURIComponent(cta.dataset.checkoutMode || 'test')}`)",
+        # `&offer=` so the response can carry the postage this upsell will add. The accept label states a
+        # price, and charging more than it says is a misstatement to a buyer
+        # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
+        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}&offer=${encodeURIComponent(cta.dataset.checkoutOfferId || '')}&mode=${encodeURIComponent(cta.dataset.checkoutMode || 'test')}`)",
         "          .then((response) => response.json())",
         "          .then((body) => {",
         "            const session = (body && body.session) || {};",
@@ -8563,6 +8566,16 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            };",
         "            cta.removeAttribute('aria-disabled');",
         "            cta.textContent = cta.dataset.ctaDefaultLabel || 'Add to my order';",
+        # Said out loud, beside the button, rather than folded into its number: the label is the tenant's
+        # own words and rewriting their price inside it would be a different kind of lie.
+        "            const ship = (body && body.shipping) || {};",
+        "            if (ship.amount > 0) {",
+        "              const line = document.createElement('p');",
+        "              line.className = 'sl-upsell-shipping';",
+        "              try { line.textContent = '+ ' + (ship.amount/100).toLocaleString(undefined,{style:'currency',currency:'USD'}) + ' shipping'; }",
+        "              catch (e) { line.textContent = '+ $' + (ship.amount/100).toFixed(2) + ' shipping'; }",
+        "              if (!cta.parentNode.querySelector('.sl-upsell-shipping')) cta.parentNode.insertBefore(line, cta.nextSibling);",
+        "            }",
         "          })",
         "          .catch(() => { cta.textContent = 'Unavailable'; });",
         "        cta.addEventListener('click', (event) => {",

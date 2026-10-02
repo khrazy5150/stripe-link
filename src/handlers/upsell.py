@@ -72,6 +72,9 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
     params = query_params(event)
     tenant_id = tenant_id_from_event(event) or str(params.get("clientID") or "").strip()
     session_id = str(params.get("session_id") or "").strip()
+    # The offer the page is ABOUT, so its postage can be disclosed on the accept button. Optional: a page
+    # that does not send it simply gets no shipping figure, which is what every page did until now.
+    offer_id = str(params.get("offer") or params.get("offer_id") or "").strip()
     mode = "live" if str(params.get("mode") or "").strip() == "live" else "test"
 
     if not tenant_id:
@@ -120,8 +123,40 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
             "customer_name": customer_details.get("name") or "",
             "customer_phone": customer_details.get("phone") or "",
             "shipping_address": shipping_details.get("address"),
-        }
+        },
+        # WHAT POSTAGE WILL BE ADDED, so the button can say so BEFORE the buyer clicks. The accept label
+        # states a price ("Yes, I'll Take This Deal for $29"); charging more than it says is a
+        # misstatement to a buyer, not a rounding detail. The page is a published artifact and the
+        # destination is only known per-session, so the figure has to arrive here rather than be baked in
+        # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
+        **({"shipping": _session_shipping_quote(event, tenant_id, offer_id, shipping_details)}
+           if offer_id else {}),
     })
+
+
+def _session_shipping_quote(event, tenant_id, offer_id, shipping_details):
+    """The postage the accept button must disclose. `{amount, service_token, reason}`; zeros on any failure.
+
+    Best-effort by the same argument as the charge itself: a quote that cannot be had means no postage is
+    charged, so a page that cannot show one is still telling the truth.
+    """
+    from stripe_link.repositories.documents import offers_repository, products_repository
+
+    try:
+        mode = resolve_stripe_mode(event)
+        offer = offers_repository(mode=mode).get(tenant_id, offer_id)
+        if not offer:
+            return {"amount": 0, "service_token": "", "reason": "offer_not_found"}
+        products_by_id = load_offer_products(tenant_id, offer, products_repository(mode=mode))
+        items = [{"product_id": str(item.get("product_id") or ""),
+                  "quantity": max(1, int(item.get("quantity") or 1))}
+                 for item in (offer.get("items") or []) if item.get("product_id")]
+        return quote_upsell_shipping(tenant_id, items, products_by_id,
+                                     destination=(shipping_details or {}).get("address") or {},
+                                     mode=mode)
+    except Exception as exc:  # noqa: BLE001 - a disclosure that failed must not break the page
+        print(f"[upsell] shipping disclosure unavailable: {type(exc).__name__}: {exc}")
+        return {"amount": 0, "service_token": "", "reason": "unavailable"}
 
 
 def upsell_destination(session_id, *, api_key, stripe_account, opener):
@@ -259,8 +294,27 @@ def process_upsell(
     currency = resolved.get("currency") or "usd"
     idempotency_key = f"upsell:{tenant_id}:{session_id}:{offer_id}:{sequence}"
 
+    # WHERE IT GOES, looked up before the charge -- it was already fetched here for the order record, and
+    # a shipping quote needs it too (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
+    shipping_address = upsell_destination(
+        session_id, api_key=api_key, stripe_account=stripe_account, opener=opener)
+
+    # WHAT POSTAGE COSTS ON AN UPSELL. Until now an upsell shipped for nothing: a tenant selling a second
+    # physical item post-purchase paid to post it and was never paid for it, which is why the author
+    # feared having to build shipping into every price.
+    #
+    # Unlike an order bump, this is NOT constrained. An upsell is a PaymentIntent we build ourselves, so
+    # there is no fixed `shipping_options` and no session to reopen -- the destination is already known
+    # and the packer and rater are already deployed. The assumption that it shared the bump's limitation
+    # came from treating the two as one problem.
+    upsell_shipping = quote_upsell_shipping(
+        tenant_id, resolved.get("items") or [], products_by_id,
+        destination=shipping_address, mode=mode, secret_cipher=secret_cipher)
+    shipping_amount = int(upsell_shipping.get("amount") or 0)
+    charged = subtotal + shipping_amount
+
     pi_params = {
-        "amount": str(subtotal),
+        "amount": str(charged),
         "currency": currency,
         "customer": customer_id,
         "payment_method": payment_method_id,
@@ -282,13 +336,13 @@ def process_upsell(
     }
     platform_fee = int(fee_context.get("platform_fee") or 0)
     if stripe_account and subtotal > 0 and platform_fee > 0:
+        # MERCHANDISE ONLY, and correct here by construction: `fee_context` was computed from the
+        # subtotal, so adding postage to the charge above does not grow the platform's cut
+        # (domain/fees.FEE_APPLIES_TO_SHIPPING).
         pi_params["application_fee_amount"] = str(platform_fee)
-
-    # Looked up BEFORE the charge, deliberately. It is best-effort either way, but doing a network call
-    # between "the money moved" and "the order is written" widens the window in which a tenant has been
-    # paid and nothing records it.
-    shipping_address = upsell_destination(
-        session_id, api_key=api_key, stripe_account=stripe_account, opener=opener)
+    if shipping_amount:
+        pi_params["metadata[shipping_amount]"] = str(shipping_amount)
+        pi_params["metadata[shipping_service]"] = str(upsell_shipping.get("service_token") or "")
 
     try:
         payment_intent = stripe_request(
@@ -319,7 +373,12 @@ def process_upsell(
         "session_id": session_id,
         "line_item_type": "upsell",
         "status": "paid" if payment_intent.get("status") == "succeeded" else payment_intent.get("status", "pending"),
-        "amount_total": subtotal,
+        # What the buyer was CHARGED, postage included -- the order's total must be the amount that left
+        # their card, or every downstream reconciliation disagrees with Stripe.
+        "amount_total": charged,
+        # ...and postage separated out beside it, so the ledger can partition it from merchandise exactly
+        # as a first sale does (domain/ledger.BREAKDOWN_COMPONENTS).
+        **({"shipping_amount": shipping_amount} if shipping_amount else {}),
         "currency": currency,
         "customer": {
             "name": customer_info.get("name", ""),
@@ -355,7 +414,7 @@ def process_upsell(
         customers_repo,
         tenant_id=tenant_id,
         customer_id=customer_id,
-        amount=subtotal,
+        amount=charged,
         currency=currency,
         product_name=product_name,
         order_id=order_id,
@@ -369,6 +428,71 @@ def process_upsell(
             "status": payment_intent.get("status", ""),
         }
     }, status_code=201)
+
+
+def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode, secret_cipher=None):
+    """What postage costs on a post-purchase upsell. Returns `{amount, service_token, reason}`.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1. Every failure is a zero with a reason, never an exception:
+    the buyer has already clicked, and refusing a sale because a carrier was slow is a worse outcome than
+    posting one parcel unpaid.
+
+    **The tenant's own zones decide**, exactly as they do for a first sale -- a `free` offer's upsells stay
+    free, a `flat` zone charges its amount, a `live` zone is rated. That is the whole point of routing this
+    through `resolve_options` rather than inventing an upsell-specific rule: a second pricing path would
+    drift from the first within a release.
+
+    **Combined shipment is deliberately not assumed.** Whether the upsell rides in the original parcel
+    depends on whether that parcel has already gone, which this request cannot know. Charging a full
+    second parcel is the safe direction -- a tenant who wants bundling can set a `free` zone or the P5
+    policy, and over-charging a tenant's own postage is recoverable where under-charging silently is not.
+    """
+    from stripe_link.domain.shipping_charges import resolve_options
+    from stripe_link.domain.shipping_zones import rule_for as zone_rule_for
+
+    blank = {"amount": 0, "service_token": "", "reason": ""}
+    country = str((destination or {}).get("country") or "").strip().upper()
+    if not country:
+        return dict(blank, reason="no_destination")
+    try:
+        from stripe_link.repositories.documents import shipping_config_repository
+
+        config = shipping_config_repository().get(tenant_id) or {}
+    except Exception as exc:  # noqa: BLE001 - a settings read must never cost a sale
+        print(f"[upsell] shipping config unreadable: {type(exc).__name__}: {exc}")
+        return dict(blank, reason="config_unreadable")
+
+    offer = {"shipping": {"eligible": True}, "items": items}
+    live_options = None
+    if zone_rule_for(config, country).get("type") == "live":
+        from handlers.checkout import _quote_parcels
+        from handlers.shipping import live_rates_for
+
+        parcels = _quote_parcels(items, products_by_id, config)
+        if not parcels:
+            # P0a, and it applies to upsells for the same reason: a parcel nobody measured must not
+            # produce a price.
+            return dict(blank, reason="unmeasured")
+        rated = live_rates_for(config, tenant_id, parcels=parcels, destination=destination,
+                               secret_cipher=secret_cipher or KmsSecretCipher())
+        if rated["error"]:
+            print(f"[upsell] shipping not charged, carrier said: {rated['error']}")
+            return dict(blank, reason="carrier_error")
+        live_options = rated["options"]
+
+    from stripe_link.domain.shipping_charges import packed_box_price
+
+    priced = packed_box_price(items, products_by_id, config, country)
+    result = resolve_options(offer, config, country=country,
+                             item_count=max(1, len(items or [])),
+                             box_amount=priced["amount"], live_options=live_options)
+    if not result["options"]:
+        return dict(blank, reason=result["needs"] or "no_options")
+    # The CHEAPEST, because nobody is there to choose. An upsell is one click by design; interrupting it
+    # with a service picker would cost more sales than the difference between ground and overnight.
+    chosen = min(result["options"], key=lambda option: int(option.get("amount") or 0))
+    return {"amount": int(chosen.get("amount") or 0),
+            "service_token": str(chosen.get("service_token") or ""), "reason": ""}
 
 
 def resolve_customer_payment_method(customer_id, *, api_key, stripe_account, opener):

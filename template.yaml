@@ -2067,6 +2067,11 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
+        # An upsell now charges postage, which means reading the tenant's zones and services -- the same
+        # rules a first sale obeys, so a `free` offer's upsells stay free
+        # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
