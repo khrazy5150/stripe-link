@@ -2078,6 +2078,15 @@ Resources:
         # (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1). Read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref ShippingConfigTable
+        # An upsell is a PaymentIntent we create directly, so no checkout.session.completed fires and the
+        # webhook never appends its sale -- the upsell writes its own ledger entry instead, or its revenue,
+        # fees and postage are absent from every report (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LedgerTable
+        # The shipping quote the FIRST sale transacted on, so an upsell charges only what it adds rather
+        # than a whole second parcel. Shares CartsTable with the carts and tokens.
+        - DynamoDBReadPolicy:
+            TableName: !Ref CartsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:

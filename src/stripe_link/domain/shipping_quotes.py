@@ -150,6 +150,12 @@ def build_quote(*, quote_id: str, tenant_id: str, mode: str, offer_id: str,
              "box_name": _text(p.get("box_name") or p.get("name")), "template": _text(p.get("template"))}
             for p in (parcels or [])
         ],
+        # The LINES this was quoted for, not just the parcels they packed into. A post-purchase upsell has
+        # to re-pack the original order WITH the extra item to know what it really adds, and parcels cannot
+        # be unpacked back into items (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1, revised 2026-10-02).
+        "items": [{"product_id": _text(i.get("product_id")), "price_id": _text(i.get("price_id")),
+                   "quantity": max(1, _whole(i.get("quantity") or 1))}
+                  for i in (items or []) if _text(i.get("product_id"))],
         "options": clean,
         "source": _text(source),
         "currency": _text(currency).lower() or "usd",

@@ -37,7 +37,7 @@ class Cipher:
         return "mock_key"
 
 
-def quote(cfg, products=None, destination=TO):
+def quote(cfg, products=None, destination=TO, baseline=None):
     import handlers.upsell as module
     import stripe_link.repositories.documents as docs
 
@@ -49,7 +49,8 @@ def quote(cfg, products=None, destination=TO):
     docs.shipping_config_repository = lambda *a, **k: Repo()
     try:
         return quote_upsell_shipping("t1", ITEMS, products or {"p1": MEASURED},
-                                     destination=destination, mode="test", secret_cipher=Cipher())
+                                     destination=destination, mode="test", secret_cipher=Cipher(),
+                                     baseline=baseline)
     finally:
         docs.shipping_config_repository = real
 
@@ -179,3 +180,106 @@ class TheButtonTellsTheBuyerTests(unittest.TestCase):
     def test_zero_postage_shows_no_line_at_all(self):
         block = self.HTML.split("const ship = (body && body.shipping)", 1)[1][:200]
         self.assertIn("if (ship.amount > 0)", block)
+
+
+class TheDeltaNotASecondParcelTests(unittest.TestCase):
+    """The author, 2026-10-02, shown "+ $6.11" for one supplement added to an order already paying $6.11:
+    *"the complete bundle costs $6.11, so there should be no additional shipping charge."*
+
+    An item that rides in a parcel already going costs close to nothing to add. Billing a full second
+    parcel for it is an overcharge dressed up as a quote.
+    """
+
+    BASELINE = {"items": [{"product_id": "p1", "quantity": 1}], "amount": 611}
+
+    def test_an_item_that_fits_the_same_box_adds_nothing(self):
+        result = quote(config({"type": "flat", "amount": 611}), baseline=self.BASELINE)
+        self.assertEqual(result["amount"], 0)
+        self.assertEqual(result["reason"], "combined_delta")
+
+    def test_the_buyer_pays_only_the_difference(self):
+        # A flat zone cannot grow, so a baseline that paid LESS than the flat rate shows the delta plainly.
+        result = quote(config({"type": "flat", "amount": 700}), baseline={**self.BASELINE, "amount": 500})
+        self.assertEqual(result["amount"], 200)
+
+    def test_it_never_goes_negative(self):
+        result = quote(config({"type": "flat", "amount": 400}), baseline={**self.BASELINE, "amount": 900})
+        self.assertEqual(result["amount"], 0)
+
+    def test_without_a_baseline_it_falls_back_to_a_full_rate(self):
+        # An older order, an expired quote row. Over-charging a tenant's own postage is recoverable where
+        # under-charging silently is not, so this stays the safe direction when nothing better is known.
+        result = quote(config({"type": "flat", "amount": 700}))
+        self.assertEqual((result["amount"], result["reason"]), (700, "standalone"))
+
+    def test_a_baseline_with_no_recorded_payment_is_not_used(self):
+        result = quote(config({"type": "flat", "amount": 700}), baseline={**self.BASELINE, "amount": 0})
+        self.assertEqual(result["reason"], "standalone")
+
+    def test_the_distinct_failure_reasons_survive(self):
+        # `unmeasured`, `carrier_error` and `no_options` are three different problems with three different
+        # fixes; collapsing them would make a silent zero unexplainable.
+        self.assertEqual(quote(config({"type": "live"}), products={"p1": UNMEASURED})["reason"],
+                         "unmeasured")
+        self.assertEqual(
+            quote(config({"type": "live"}, provider={"name": "mock", "api_key_ref": ""}))["reason"],
+            "carrier_error")
+
+
+class TheUpsellReachesTheLedgerTests(unittest.TestCase):
+    """An upsell wrote an ORDER and nothing else. It is a PaymentIntent we create directly, so no
+    `checkout.session.completed` fires and the webhook -- which appends every other sale -- never hears
+    about it. Two upsell orders were on the books with neither in the ledger (2026-10-02)."""
+
+    ORDER = {"tenant_id": "t1", "order_id": "order_up_1", "payment_intent_id": "pi_up_1",
+             "amount_total": 2013, "currency": "usd", "mode": "test", "shipping_amount": 568,
+             "line_item_type": "upsell", "fees": {"stripe_fee": 72, "platform_fee": 72}}
+
+    def test_the_sale_is_appended(self):
+        from handlers.upsell import record_upsell_ledger_entry
+
+        class Repo:
+            def __init__(self):
+                self.rows = []
+
+            def append(self, entry):
+                self.rows.append(entry)
+
+        repo = Repo()
+        self.assertTrue(record_upsell_ledger_entry(self.ORDER, ledger_repo=repo))
+        amounts = repo.rows[0]["amounts"]
+        self.assertEqual(amounts["gross"], 2013)
+        self.assertEqual(amounts["shipping_revenue"], 568)
+        self.assertEqual(amounts["platform_fee"], -72)
+
+    def test_its_postage_is_partitioned_like_any_other_sale(self):
+        from handlers.upsell import record_upsell_ledger_entry
+        from stripe_link.domain.ledger import summarize
+
+        captured = []
+
+        class Repo:
+            def append(self, entry):
+                captured.append(entry)
+
+        record_upsell_ledger_entry(self.ORDER, ledger_repo=Repo())
+        summary = summarize(captured)
+        self.assertEqual(summary["merchandise_revenue"], 1445)
+        self.assertEqual(summary["shipping_revenue"], 568)
+
+    def test_a_ledger_outage_never_undoes_a_charge(self):
+        from handlers.upsell import record_upsell_ledger_entry
+
+        class Broken:
+            def append(self, entry):
+                raise RuntimeError("dynamo down")
+
+        self.assertFalse(record_upsell_ledger_entry(self.ORDER, ledger_repo=Broken()))
+
+    def test_the_function_may_write_the_ledger(self):
+        import pathlib
+
+        template = (pathlib.Path(__file__).resolve().parents[1]
+                    / "template.yaml").read_text(encoding="utf-8")
+        block = template.split("  UpsellFunction:", 1)[1].split("      Events:", 1)[0]
+        self.assertIn("!Ref LedgerTable", block)

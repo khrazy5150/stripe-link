@@ -7,10 +7,12 @@ from stripe_link.domain.billing_status import BillingStatusError, assert_billing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.pricing import PricingError, load_offer_products, resolve_offer
 from stripe_link.domain.shipping import destination_address_from_session
+from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     customers_repository,
     offers_repository,
+    ledger_repository,
     orders_repository,
     products_repository,
     stripe_keys_repository,
@@ -309,7 +311,9 @@ def process_upsell(
     # came from treating the two as one problem.
     upsell_shipping = quote_upsell_shipping(
         tenant_id, resolved.get("items") or [], products_by_id,
-        destination=shipping_address, mode=mode, secret_cipher=secret_cipher)
+        destination=shipping_address, mode=mode, secret_cipher=secret_cipher,
+        # What is already going, so this charges only what the extra item ADDS.
+        baseline=original_shipping_baseline(tenant_id, session_id, mode, orders_repo=orders_repo))
     shipping_amount = int(upsell_shipping.get("amount") or 0)
     charged = subtotal + shipping_amount
 
@@ -409,6 +413,10 @@ def process_upsell(
         "updated_at": now,
     }
     orders_repo.put(order_record)
+    # ...and the LEDGER, which never heard about upsells at all: they are PaymentIntents we create
+    # directly, so no checkout.session.completed fires and the webhook that appends every other sale is
+    # never invoked. Their revenue, fees and postage were missing from every report.
+    record_upsell_ledger_entry(order_record)
 
     update_customer_after_upsell(
         customers_repo,
@@ -430,7 +438,63 @@ def process_upsell(
     }, status_code=201)
 
 
-def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode, secret_cipher=None):
+def original_shipping_baseline(tenant_id, session_id, mode, orders_repo=None):
+    """What the buyer already bought and already paid to post it. `{}` when it cannot be established.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1. The lines come from the SHIPPING QUOTE the first sale
+    transacted on, not from the order's `line_items` -- those arrive from Stripe carrying names and
+    amounts and no `product_id`, so they cannot be re-packed.
+
+    Best-effort at every step: a missing order, a missing quote block, an expired quote row all mean "we
+    do not know what was already going", and the caller then rates the upsell on its own.
+    """
+    try:
+        repo = orders_repo or orders_repository(mode=mode)
+        order = repo.get(tenant_id, f"order_{session_id}") or {}
+        agreed = order.get("shipping_quote") or {}
+        quote_id = str(agreed.get("quote_id") or "")
+        paid = int(agreed.get("quoted_amount") or 0)
+        if not quote_id or not paid:
+            return {}
+        from stripe_link.repositories.documents import shipping_quotes_repository
+
+        quote = shipping_quotes_repository(mode=mode).get(tenant_id, quote_id) or {}
+        lines = [{"product_id": str(line.get("product_id") or ""),
+                  "price_id": str(line.get("price_id") or ""),
+                  "quantity": max(1, int(line.get("quantity") or 1))}
+                 for line in (quote.get("items") or []) if line.get("product_id")]
+        return {"items": lines, "amount": paid} if lines else {}
+    except Exception as exc:  # noqa: BLE001 - not knowing is a fallback, never a failed sale
+        print(f"[upsell] shipping baseline unavailable: {type(exc).__name__}: {exc}")
+        return {}
+
+
+def record_upsell_ledger_entry(order_record, ledger_repo=None):
+    """Append the upsell's sale to the transaction ledger.
+
+    An upsell wrote an ORDER and nothing else: it is a PaymentIntent we create directly, so no
+    `checkout.session.completed` ever fires for it and the webhook -- which is what appends every other
+    sale -- never hears about it. Real revenue, real fees and real postage were absent from every report
+    (found 2026-10-02: two upsell orders on the books, neither in the ledger).
+
+    Best-effort. The money has moved and the order is written; a bookkeeping append must not undo that.
+    """
+    try:
+        repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+        if repo is None:
+            return False
+        entry = sale_entry_from_order(order_record, now_epoch=int(time.time()))
+        if not entry:
+            return False
+        repo.append(entry)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[upsell] ledger entry not recorded: {type(exc).__name__}: {exc}")
+        return False
+
+
+def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode, secret_cipher=None,
+                          baseline=None):
     """What postage costs on a post-purchase upsell. Returns `{amount, service_token, reason}`.
 
     plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1. Every failure is a zero with a reason, never an exception:
@@ -442,10 +506,16 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
     through `resolve_options` rather than inventing an upsell-specific rule: a second pricing path would
     drift from the first within a release.
 
-    **Combined shipment is deliberately not assumed.** Whether the upsell rides in the original parcel
-    depends on whether that parcel has already gone, which this request cannot know. Charging a full
-    second parcel is the safe direction -- a tenant who wants bundling can set a `free` zone or the P5
-    policy, and over-charging a tenant's own postage is recoverable where under-charging silently is not.
+    **It charges the DELTA, not a second parcel.** The author, 2026-10-02, on being shown "+ $6.11" for a
+    single supplement added to an order already paying $6.11: *"the complete bundle costs $6.11, so there
+    should be no additional shipping charge."* Right -- an item that rides in a parcel already going costs
+    close to nothing to add, and billing a full second parcel for it is an overcharge dressed up as a
+    quote. The original order's own lines are re-packed WITH the upsell, re-rated, and the buyer pays the
+    difference; when it still fits the same box that difference is zero.
+
+    A full standalone rate is the FALLBACK, for when the original quote cannot be found -- an older order,
+    an expired row. Over-charging a tenant's own postage is recoverable where under-charging silently is
+    not, so that remains the safe direction when nothing better is known.
     """
     from stripe_link.domain.shipping_charges import resolve_options
     from stripe_link.domain.shipping_zones import rule_for as zone_rule_for
@@ -470,37 +540,55 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
     if (config.get("combined_shipping") or {}).get("extras_ship_free"):
         return dict(blank, reason="combined_shipping")
 
-    offer = {"shipping": {"eligible": True}, "items": items}
-    live_options = None
-    if zone_rule_for(config, country).get("type") == "live":
-        from handlers.checkout import _quote_parcels
-        from handlers.shipping import live_rates_for
-
-        parcels = _quote_parcels(items, products_by_id, config)
-        if not parcels:
-            # P0a, and it applies to upsells for the same reason: a parcel nobody measured must not
-            # produce a price.
-            return dict(blank, reason="unmeasured")
-        rated = live_rates_for(config, tenant_id, parcels=parcels, destination=destination,
-                               secret_cipher=secret_cipher or KmsSecretCipher())
-        if rated["error"]:
-            print(f"[upsell] shipping not charged, carrier said: {rated['error']}")
-            return dict(blank, reason="carrier_error")
-        live_options = rated["options"]
-
     from stripe_link.domain.shipping_charges import packed_box_price
 
-    priced = packed_box_price(items, products_by_id, config, country)
-    result = resolve_options(offer, config, country=country,
-                             item_count=max(1, len(items or [])),
-                             box_amount=priced["amount"], live_options=live_options)
-    if not result["options"]:
-        return dict(blank, reason=result["needs"] or "no_options")
-    # The CHEAPEST, because nobody is there to choose. An upsell is one click by design; interrupting it
-    # with a service picker would cost more sales than the difference between ground and overnight.
-    chosen = min(result["options"], key=lambda option: int(option.get("amount") or 0))
+    def rate_for(lines):
+        """`(cheapest option, reason)`. The option is None when these lines cannot be priced, and the
+        reason says WHY -- `unmeasured`, `carrier_error` and `no_options` are three different problems
+        with three different fixes, and collapsing them would make a silent zero unexplainable."""
+        live = None
+        if zone_rule_for(config, country).get("type") == "live":
+            from handlers.checkout import _quote_parcels
+            from handlers.shipping import live_rates_for
+
+            parcels = _quote_parcels(lines, products_by_id, config)
+            if not parcels:
+                # P0a, and it applies to upsells for the same reason: a parcel nobody measured must not
+                # produce a price.
+                return None, "unmeasured"
+            rated = live_rates_for(config, tenant_id, parcels=parcels, destination=destination,
+                                   secret_cipher=secret_cipher or KmsSecretCipher())
+            if rated["error"]:
+                print(f"[upsell] shipping not charged, carrier said: {rated['error']}")
+                return None, "carrier_error"
+            live = rated["options"]
+        priced = packed_box_price(lines, products_by_id, config, country)
+        out = resolve_options({"shipping": {"eligible": True}, "items": lines}, config, country=country,
+                              item_count=max(1, len(lines or [])),
+                              box_amount=priced["amount"], live_options=live)
+        if not out["options"]:
+            return None, (out["needs"] or "no_options")
+        # The CHEAPEST, because nobody is there to choose. An upsell is one click by design; interrupting
+        # it with a service picker would cost more sales than ground-versus-overnight.
+        return min(out["options"], key=lambda option: int(option.get("amount") or 0)), ""
+
+    # THE DELTA. Re-pack what the buyer already bought together WITH this item, and charge the difference.
+    # When it still fits the same box that difference is zero, which is the honest answer and the one the
+    # author expected to see.
+    base_lines = list((baseline or {}).get("items") or [])
+    base_paid = int((baseline or {}).get("amount") or 0)
+    if base_lines and base_paid:
+        combined, _ = rate_for(base_lines + list(items or []))
+        if combined is not None:
+            delta = max(0, int(combined.get("amount") or 0) - base_paid)
+            return {"amount": delta, "service_token": str(combined.get("service_token") or ""),
+                    "reason": "combined_delta"}
+
+    chosen, reason = rate_for(items)
+    if chosen is None:
+        return dict(blank, reason=reason or "no_options")
     return {"amount": int(chosen.get("amount") or 0),
-            "service_token": str(chosen.get("service_token") or ""), "reason": ""}
+            "service_token": str(chosen.get("service_token") or ""), "reason": "standalone"}
 
 
 def resolve_customer_payment_method(customer_id, *, api_key, stripe_account, opener):
