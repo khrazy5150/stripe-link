@@ -94,6 +94,11 @@ Three things follow, and all three are gaps today:
 
 ### P0 — Honest inputs, and no price without them
 
+> **✅ BUILT and deployed to dev, 2026-10-01.** P0a–P0e all shipped. **P2 shipped with P0e** rather than
+> separately: the order-bump exposure is computed in the rate estimator, which is where a tenant is already
+> looking at shipping, so it needed no second surface. Remaining: P1 (upsell shipping), P3 (the
+> double-count invariant and the `free_above_amount` control), P4, P5.
+
 Revised 2026-10-01 after the author reviewed the product modal. Three parts, and the first is a live
 correctness bug rather than a UX improvement.
 
@@ -224,7 +229,12 @@ Two cases, and the tenant chooses which applies:
 
 The tenant's existing `shipping.mode` applies unchanged — a `free` offer's upsells stay free.
 
-### P2 — Order-bump exposure, measured at authoring time
+### P2 — Order-bump exposure ✅ (shipped with P0e)
+
+> Built as part of the rate estimator rather than the offer builder: the estimator already packs the
+> offer's items, so adding the bump and re-packing is the same computation. "Your order bump adds 1
+> parcel. A buyer who adds it on the payment page is not charged for it." The builder-side warning below
+> remains worth having if tenants do not visit the estimator.
 
 Since it cannot be priced at checkout, it must be **visible before publish**. The builder runs the §3
 computation and states the number:
