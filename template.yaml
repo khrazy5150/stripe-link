@@ -3144,6 +3144,14 @@ Resources:
             # feature unreachable (plans/LIVE_SHIPPING_RATES.md phase 7).
             Path: /shipping/parcel-templates
             Method: GET
+        ShippingPackPreview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            # Which of the tenant's boxes a product ships in, from dimensions typed INLINE -- the product
+            # wizard asks before anything is saved (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0c).
+            Path: /shipping/pack-preview
+            Method: POST
         ShippingRates:
           Type: Api
           Properties:

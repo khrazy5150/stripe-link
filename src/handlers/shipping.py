@@ -85,6 +85,8 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
         return list_carriers(event, repository, secret_cipher)
     if _action(event) == "parcel-templates" and method == "GET":
         return list_parcel_templates(event, repository, secret_cipher)
+    if _action(event) == "pack-preview" and method == "POST":
+        return pack_preview(event, repository)
     if _action(event) == "rates" and method == "POST":
         return quote_rates(event, repository, secret_cipher, products_repo=products_repo,
                            orders_repo=orders_repo)
@@ -510,6 +512,58 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None):
         "parcel_count": len(parcels),
         "destination": {"country": destination.get("country", ""),
                         "postal_code": destination.get("postal_code", "")},
+    })
+
+
+def pack_preview(event, repository):
+    """Which of the tenant's own boxes this product ships in, and what the parcel weighs. No carrier call.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0c. The product form's own copy already promises this --
+    *"Normally we work the box out from the sizes above"* -- and then never showed what was worked out, so
+    a tenant overriding it was guessing against an answer they could not see.
+
+    Takes dimensions INLINE rather than a product id, because the wizard asks before anything is saved: a
+    preview that only worked for existing products would be absent exactly where the decision is made.
+
+    Deliberately no rating. A price needs a destination this form has no business asking for, and the BOX
+    is the answer that matters here -- it is what tells a tenant their override is unnecessary, or that
+    three unmeasured items are about to ship as three parcels.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    body = parse_json_body(event)
+    items = []
+    for index, raw in enumerate(body.get("items") or []):
+        if not isinstance(raw, dict):
+            continue
+        item = {"product_id": str(raw.get("product_id") or f"item_{index}"),
+                "quantity": max(1, int(raw.get("quantity") or 1)),
+                "weight": raw.get("weight"), "item_weight": raw.get("weight"),
+                "compressible": bool(raw.get("compressible")),
+                "ships_alone": bool(raw.get("ships_alone"))}
+        for field in ("length", "width", "height"):
+            if raw.get(field):
+                item[field] = raw[field]
+        package = raw.get("package") or {}
+        if all(package.get(f) for f in ("length", "width", "height")):
+            item["package"] = {f: package[f] for f in ("length", "width", "height")}
+            item["package"]["weight"] = package.get("weight") or raw.get("weight")
+        items.append(item)
+    if not items:
+        return json_response({"parcels": [], "reason": "no_items"})
+
+    config = repository.get(tenant_id) or {}
+    parcels = pack(items, tenant_boxes(config))
+    return json_response({
+        "parcels": [{"box_name": p.get("box_name") or p.get("box") or "",
+                     "length": p.get("length"), "width": p.get("width"), "height": p.get("height"),
+                     "weight": p.get("weight"), "strategy": p.get("strategy")}
+                    for p in parcels],
+        # Empty parcels is the P0a case, said in the form's own terms: nothing to pack, so nothing to
+        # charge. The consequence banner beside it already explains what that costs this tenant.
+        "reason": "" if parcels else "no_dimensions",
+        "box_count": len(tenant_boxes(config)),
     })
 
 

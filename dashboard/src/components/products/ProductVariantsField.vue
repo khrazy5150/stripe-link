@@ -70,6 +70,11 @@
         that would be wrong — something fragile needing extra padding, an awkward shape, or anything you
         ship in the manufacturer's packaging.
       </p>
+      <!-- WHAT WE WORKED OUT, which the paragraph above has always promised and never shown. A tenant
+           overriding an answer they cannot see is guessing; one who can see it is deciding. -->
+      <p v-if="derivedParcel" class="field-hint derived-parcel">
+        <strong>This ships in {{ derivedParcel }}.</strong>
+      </p>
       <label class="switch-row variant-toggle">
         <input v-model="form.ships_alone" type="checkbox" />
         <span>
@@ -77,19 +82,31 @@
           <small>Never shares a parcel, even when bought with something else.</small>
         </span>
       </label>
-      <div class="modal-dimensions-grid">
-        <label>Length (inches)<input v-model.number="form.length_in" type="number" min="0" step="0.1" /></label>
-        <label>Width (inches)<input v-model.number="form.width_in" type="number" min="0" step="0.1" /></label>
-        <label>Height (inches)<input v-model.number="form.height_in" type="number" min="0" step="0.1" /></label>
-        <label>Packed weight (pounds)<input v-model.number="form.weight_lb" type="number" min="0" step="0.1" /></label>
-      </div>
-      <p class="field-hint">Packed weight is the whole thing as it ships — box included.</p>
+      <!-- Revealed ONLY when it is ticked, because that is now the only case these four numbers are read
+           in. They used to double as a silent fallback for unmeasured products, which charged buyers for
+           a box nobody measured (P0a); with that path gone, showing them unticked collects four numbers
+           that go nowhere. -->
+      <template v-if="form.ships_alone">
+        <div class="modal-dimensions-grid">
+          <label>Length (inches)<input v-model.number="form.length_in" type="number" min="0" step="0.1" /></label>
+          <label>Width (inches)<input v-model.number="form.width_in" type="number" min="0" step="0.1" /></label>
+          <label>Height (inches)<input v-model.number="form.height_in" type="number" min="0" step="0.1" /></label>
+          <label>Packed weight (pounds)<input v-model.number="form.weight_lb" type="number" min="0" step="0.1" /></label>
+        </div>
+        <p class="field-hint">Packed weight is the whole thing as it ships — box included.</p>
+        <!-- A parcel cannot weigh less than what is inside it. Seen in real data: 1 lb packed on an item
+             weighing 2.5 lb, which nothing rejected. -->
+        <p v-if="packedWeightTooLight" class="keys-status-banner warning">
+          Packed weight ({{ form.weight_lb }} lb) is less than the item itself ({{ form.item_weight_lb }} lb).
+          The box cannot weigh less than what goes in it.
+        </p>
+      </template>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 /**
  * Size and colour variants, and how the thing ships.
  *
@@ -106,6 +123,7 @@ import { computed } from "vue";
  * Turning a toggle on with no rows would show an empty list and read as broken, so each `ensure` seeds the
  * first row; removing the last row turns the toggle back off, so the two can never disagree.
  */
+import { apiRequest } from "../../api/client";
 import { defaultColorVariant, defaultSizeVariant } from "../../utils/productVariants";
 
 const props = defineProps({
@@ -119,6 +137,56 @@ const props = defineProps({
 /** Blank means ANY of the four is missing: a parcel needs all three sides and a weight to be rated. */
 const unmeasured = computed(() => ["item_length_in", "item_width_in", "item_height_in", "item_weight_lb"]
   .some((field) => !(Number(props.form[field]) > 0)));
+
+// WHICH BOX this product ships in, answered by the packer rather than guessed at here. Debounced,
+// because the fields fire per keystroke and the answer only changes when a measurement does.
+const derivedParcel = ref("");
+let packTimer = null;
+
+async function refreshDerivedParcel() {
+  if (unmeasured.value) {
+    derivedParcel.value = "";
+    return;
+  }
+  try {
+    const body = await apiRequest("/shipping/pack-preview", {
+      method: "POST",
+      body: JSON.stringify({ items: [{
+        length: props.form.item_length_in, width: props.form.item_width_in,
+        height: props.form.item_height_in, weight: props.form.item_weight_lb,
+        compressible: !!props.form.compressible,
+      }] }),
+    });
+    const parcel = (body?.parcels || [])[0];
+    // No box named means the catalog held nothing it fits, so it would post on its own. Say that rather
+    // than naming a box the tenant does not have.
+    derivedParcel.value = parcel
+      ? (parcel.box_name
+          ? `your ${parcel.box_name}, ${parcel.weight} lb`
+          : `its own parcel, ${parcel.length}x${parcel.width}x${parcel.height} in, ${parcel.weight} lb`)
+      : "";
+  } catch {
+    // Silence. A derived figure this form could not verify is worse than no figure.
+    derivedParcel.value = "";
+  }
+}
+
+watch(
+  () => [props.form.item_length_in, props.form.item_width_in, props.form.item_height_in,
+         props.form.item_weight_lb, props.form.compressible],
+  () => {
+    clearTimeout(packTimer);
+    packTimer = setTimeout(refreshDerivedParcel, 400);
+  },
+  { immediate: true },
+);
+
+/** A parcel cannot weigh less than its contents. Only meaningful once both numbers exist. */
+const packedWeightTooLight = computed(() => {
+  const packed = Number(props.form.weight_lb);
+  const item = Number(props.form.item_weight_lb);
+  return packed > 0 && item > 0 && packed < item;
+});
 
 /** Optional to SAVE, required to QUOTE -- and which applies depends on the tenant's zones. */
 const sizeBadge = computed(() => (props.consequence.severity === "warning" ? "needed to charge shipping"
