@@ -36,40 +36,51 @@ WITH_UPSELL = {**SITE, "pages": {**SITE["pages"],
                                              "enabled": True}}}
 
 
-def url(site, next_page_id, source="page_src"):
+def url(site, next_page_id):
     return _next_page_url(site, "t1", next_page_id, "pages.example.com",
-                          origin_host="https://shop.jbay.be", mode="test", source_page_id=source)
+                          origin_host="https://shop.jbay.be", mode="test")
 
 
 class WhenTheFunnelIsRoutedTests(unittest.TestCase):
     def test_an_attached_upsell_slug_wins(self):
+        # Best case: the funnel stays on the tenant's own host.
         self.assertEqual(url(WITH_UPSELL, "page_src__upsell_1"), "https://shop.jbay.be/upsell")
 
     def test_a_real_page_goes_to_its_own_slug(self):
         self.assertEqual(url(SITE, "page_ty"), "https://shop.jbay.be/thank-you")
 
 
-class WhenItIsNotRoutedTests(unittest.TestCase):
-    def test_the_buyer_goes_back_to_the_page_they_BOUGHT_FROM(self):
-        # Published and routed by definition -- checkout refuses an unpublished page -- so unlike the root
-        # it is guaranteed to exist. The upsell is lost either way; a 404 loses the buyer's trust as well.
-        self.assertEqual(url(SITE, "page_src__upsell_1"),
-                         "https://shop.jbay.be/dietary-supplement-bundle")
+class WhenTheFunnelHasNoSiteRouteTests(unittest.TestCase):
+    """A landing page does not need a homepage, and funnels never used to want one.
 
-    def test_it_no_longer_assumes_a_root_page_exists(self):
-        # The old answer, and the bug: this Site has nothing at "/".
+    They ran off the ARTIFACT url -- no Site, no slug, no homepage -- and that url still serves. What
+    broke them was `PLATFORM_SERVING_ENABLED`: once the platform host counted as a redirect target,
+    `_redirect_base` stopped being empty, the slug branch started running, and the artifact fallback
+    became unreachable for every page not at "/".
+    """
+
+    def test_the_funnel_still_runs_from_its_artifact(self):
+        self.assertIn("page_src__upsell_1", url(SITE, "page_src__upsell_1"))
+
+    def test_it_does_not_dump_the_buyer_on_the_site_root(self):
+        # The root 404s on a Site with nothing attached at "/", which is how the author found this.
         self.assertNotEqual(url(SITE, "page_src__upsell_1"), "https://shop.jbay.be")
 
-    def test_a_site_WITH_a_root_page_still_works(self):
+    def test_it_does_not_silently_throw_the_upsell_away(self):
+        # An earlier fix sent the buyer back to the page they bought from. That stops the 404 and loses
+        # the upsell, when the upsell was sitting there serving.
+        self.assertNotIn("/dietary-supplement-bundle", url(SITE, "page_src__upsell_1"))
+
+    def test_a_NON_funnel_orphan_still_goes_to_the_root(self):
+        # The case the root fallback was written for, and it keeps it: a page with no route has nowhere
+        # better to go. A funnel artifact is different -- it exists, it serves, and the buyer is mid-flow
+        # towards it.
+        rooted = {**SITE, "pages": {**SITE["pages"], "/": {"page_id": "page_home", "enabled": True}}}
+        self.assertEqual(url(rooted, "page_orphan"), "https://shop.jbay.be")
+
+    def test_a_site_with_a_root_page_still_routes_normally(self):
         rooted = {**SITE, "pages": {**SITE["pages"], "/": {"page_id": "page_home", "enabled": True}}}
         self.assertEqual(url(rooted, "page_home"), "https://shop.jbay.be/")
-
-    def test_an_unknown_source_falls_back_to_the_root_as_before(self):
-        # Nothing better to offer; the previous behaviour is still the last resort rather than an error.
-        self.assertEqual(url(SITE, "page_src__upsell_1", source="page_gone"), "https://shop.jbay.be")
-
-    def test_no_source_at_all_falls_back_to_the_root(self):
-        self.assertEqual(url(SITE, "page_src__upsell_1", source=""), "https://shop.jbay.be")
 
 
 class TheDesignLimitIsRealTests(unittest.TestCase):

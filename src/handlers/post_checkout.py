@@ -75,8 +75,7 @@ def _redirect_base(site, origin_host):
     return allowed[0] if allowed else ""
 
 
-def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None, mode="live",
-                   source_page_id=""):
+def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None, mode="live"):
     """The buyer-facing URL for the funnel's next page. Keep the buyer on the host they entered on (validated
     custom domain or platform host) so they never leave mid-funnel (plans/SITE_OBJECT.md §2.6): a synthetic
     funnel artifact serves at its reserved slug (/upsell //downsell //thank-you, P2b) when that slug is attached;
@@ -99,24 +98,46 @@ def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None
         #
         # **The Site root is NOT "a host we govern, which always works".** That was the assumption and it is
         # false: a Site with no page attached at "/" 404s there, and a buyer who had just paid landed on it
-        # (author, 2026-10-02). It happens routinely, because `attach_funnel_slugs` only lets the page at "/"
-        # own `/upsell` -- so every funnel on a Site whose landing pages live at real slugs falls through here.
+        # (author, 2026-10-02).
         #
-        # Send them BACK TO THE PAGE THEY BOUGHT FROM instead. It is published and routed by definition --
-        # checkout refuses an unpublished page -- so unlike the root it is guaranteed to exist. The upsell is
-        # lost either way; a 404 after payment loses the buyer's trust as well.
-        source_slug = site_page_slug(site, source_page_id) if source_page_id else ""
-        if source_slug:
-            return f"{base}/{'' if source_slug == '/' else source_slug.lstrip('/')}"
+        # And it happens to EVERY funnel on a Site whose landing pages live at real slugs, because
+        # `attach_funnel_slugs` only lets the page at "/" own `/upsell`. A landing page does not need a
+        # homepage -- the author's point, and the history agrees: funnels ran off the ARTIFACT URL, which
+        # needs no Site, no slug and no homepage, and still serves today.
+        #
+        # What changed is `PLATFORM_SERVING_ENABLED`. Once the platform host counted as a legitimate
+        # redirect target, `_redirect_base` stopped being empty, this branch started running, and the
+        # artifact fallback below became unreachable -- so switching platform serving on silently broke
+        # funnels for every page not at "/".
+        #
+        # A FUNNEL ARTIFACT is not an orphan page. It exists, it serves, and it is the thing the buyer is
+        # mid-flow towards -- so send them to it. A non-funnel page with no route genuinely has nowhere
+        # better to go than the Site root, which is the case the root fallback was written for and keeps.
+        if reserved:
+            return _artifact_url(tenant_id, next_page_id, pages_domain, mode, site,
+                                 reason="no_site_route")
         return base
-    # LAST artifact-URL producer on a buyer-facing path, and the one thing still standing between here and
-    # closing the route (plans/ARTIFACT_ACCESS_BOUNDARY.md P1). Reached only when the page belongs to no
-    # served Site at all -- no verified custom domain AND no platform hostname -- which post-payment should be
-    # unreachable, since checkout requires a published page. Logged rather than assumed: P1 must not deny
-    # until this line has been observed to be dead in real traffic, and a silent fallback proves nothing.
+    return _artifact_url(tenant_id, next_page_id, pages_domain, mode, site, reason="no_served_site")
+
+
+def _artifact_url(tenant_id, next_page_id, pages_domain, mode, site, *, reason):
+    """The funnel artifact's own URL — no Site, no slug, no homepage required.
+
+    The LAST artifact-URL producer on a buyer-facing path, and the one thing still standing between here
+    and closing the route (plans/ARTIFACT_ACCESS_BOUNDARY.md P1). Logged rather than assumed, because P1
+    must not deny until this line is observed dead in real traffic and a silent fallback proves nothing --
+    and `reason` says WHICH gap kept it alive, since the two are different work:
+
+    - `no_served_site`  the page belongs to no served Site at all. Post-payment this should be
+      unreachable, since checkout requires a published page.
+    - `no_site_route`   the Site is served but the funnel artifact has no route on it. Reached by every
+      funnel whose landing page is not at "/", which is most of them (2026-10-02). Closing the artifact
+      route before this is fixed would break those funnels outright, so the count here is the gate.
+    """
     print(json.dumps({"artifact_fallback": {
-        "phase": "P0", "path": "post_checkout", "tenant": tenant_id, "page_id": next_page_id,
-        "stripe_mode": mode, "has_site": bool(site), "served": bool(_site_allowed_origins(site)),
+        "phase": "P0", "path": "post_checkout", "reason": reason, "tenant": tenant_id,
+        "page_id": next_page_id, "stripe_mode": mode, "has_site": bool(site),
+        "served": bool(_site_allowed_origins(site)),
     }}))
     return public_url(pages_domain, artifact_paths(tenant_id, next_page_id, mode=mode)["published"])
 
@@ -182,8 +203,7 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
         def _funnel_redirect(next_page_id, extra_query=None):
             """Redirect to a funnel artifact ({page_id}__…), carrying funnel_page/session so the next screen's
             island keeps the funnel context. Returns a 500 when the pages domain isn't configured."""
-            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode,
-                                 source_page_id=page_id)
+            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode)
             if not url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
             query = dict(extra_query or {})
@@ -246,8 +266,7 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
             separator = "&" if "?" in entry_url else "?"
             return redirect_response(f"{entry_url}{separator}checkout=success")
 
-    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode,
-                         source_page_id=page_id)
+    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode)
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 
