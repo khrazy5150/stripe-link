@@ -175,7 +175,7 @@ def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_det
         return quote_upsell_shipping(tenant_id, [{"product_id": wanted, "quantity": 1}],
                                      {wanted: product},
                                      destination=(shipping_details or {}).get("address") or {},
-                                     mode=mode, baseline=baseline)
+                                     mode=mode, baseline=baseline, products_repo=products_repo)
     except Exception as exc:  # noqa: BLE001 - a disclosure that failed must not break the page
         print(f"[upsell] shipping disclosure unavailable: {type(exc).__name__}: {exc}")
         return {"amount": 0, "service_token": "", "reason": "unavailable"}
@@ -373,7 +373,9 @@ def process_upsell(
         destination=shipping_address, mode=mode, secret_cipher=secret_cipher,
         # What is already going, so this charges only what the extra item ADDS.
         baseline=session_shipping_baseline(session_id, api_key=api_key, stripe_account=stripe_account,
-                                           opener=opener))
+                                           opener=opener),
+        # So the delta can measure what is ALREADY in the box: `products_by_id` holds only the upsell.
+        products_repo=products_repo)
     shipping_amount = int(upsell_shipping.get("amount") or 0)
     charged = subtotal + shipping_amount
 
@@ -522,8 +524,45 @@ def record_upsell_ledger_entry(order_record, ledger_repo=None):
         return False
 
 
+def _rating_products(products_by_id, base_lines, *, tenant_id, products_repo):
+    """`products_by_id` plus every baseline product missing from it; None when one cannot be loaded.
+
+    The delta re-packs the FIRST sale's lines together with the upsell, so it needs the dimensions of
+    things the upsell handler was never asked about: both call sites build their map from the ONE product
+    being sold. Handing that map to the packer does not fail -- the three items already in the buyer's box
+    arrive as products the map has never heard of, and each becomes a parcel of its own.
+
+    That is the whole of the "+ $6.27 shipping" the author was shown on 2026-10-02 for a supplement riding
+    in a box already posted: the combined rate was three phantom parcels plus the real one, so the
+    difference against what was paid came out positive. Rated with a complete map the same order's
+    combined rate is identical to its baseline, and the delta is zero -- which is what he expected to see.
+
+    None rather than a partial map, because a combined rate short one product is not a conservative
+    estimate, it is a wrong number with the authority of a carrier quote behind it. The caller falls back
+    to a standalone rate, which over-charges in a direction a tenant can refund.
+    """
+    missing = {str(line.get("product_id") or "") for line in base_lines or []} - set(products_by_id)
+    missing.discard("")
+    if not missing:
+        return dict(products_by_id)
+    if products_repo is None:
+        return None
+    merged = dict(products_by_id)
+    for product_id in missing:
+        try:
+            product = products_repo.get(tenant_id, product_id)
+        except Exception as exc:  # noqa: BLE001 - an unreadable product means fall back, not fail
+            print(f"[upsell] baseline product {product_id} unreadable: {type(exc).__name__}: {exc}")
+            return None
+        if not product:
+            print(f"[upsell] baseline product {product_id} is gone; rating the upsell on its own")
+            return None
+        merged[product_id] = product
+    return merged
+
+
 def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode, secret_cipher=None,
-                          baseline=None):
+                          baseline=None, products_repo=None):
     """What postage costs on a post-purchase upsell. Returns `{amount, service_token, reason}`.
 
     plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1. Every failure is a zero with a reason, never an exception:
@@ -571,16 +610,23 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
 
     from stripe_link.domain.shipping_charges import packed_box_price
 
-    def rate_for(lines):
+    def rate_for(lines, pmap=None):
         """`(cheapest option, reason)`. The option is None when these lines cannot be priced, and the
         reason says WHY -- `unmeasured`, `carrier_error` and `no_options` are three different problems
         with three different fixes, and collapsing them would make a silent zero unexplainable."""
+        pmap = products_by_id if pmap is None else pmap
+        # A LINE WHOSE PRODUCT IS NOT IN THE MAP IS NOT A PARCEL. `packable_items` does not reject one --
+        # an absent product document reads as a shippable thing of unknown size, and the packer duly
+        # invents a box for it. That silence is what produced "+ $6.27" for an item the carrier carries
+        # for nothing (author, 2026-10-02), so refuse to rate lines we cannot measure at all.
+        if any(str(line.get("product_id") or "") not in pmap for line in lines or []):
+            return None, "unknown_product"
         live = None
         if zone_rule_for(config, country).get("type") == "live":
             from handlers.checkout import _quote_parcels
             from handlers.shipping import live_rates_for
 
-            parcels = _quote_parcels(lines, products_by_id, config)
+            parcels = _quote_parcels(lines, pmap, config)
             if not parcels:
                 # P0a, and it applies to upsells for the same reason: a parcel nobody measured must not
                 # produce a price.
@@ -591,7 +637,7 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
                 print(f"[upsell] shipping not charged, carrier said: {rated['error']}")
                 return None, "carrier_error"
             live = rated["options"]
-        priced = packed_box_price(lines, products_by_id, config, country)
+        priced = packed_box_price(lines, pmap, config, country)
         out = resolve_options({"shipping": {"eligible": True}, "items": lines}, config, country=country,
                               item_count=max(1, len(lines or [])),
                               box_amount=priced["amount"], live_options=live)
@@ -606,8 +652,10 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
     # author expected to see.
     base_lines = list((baseline or {}).get("items") or [])
     base_paid = int((baseline or {}).get("amount") or 0)
-    if base_lines and base_paid:
-        combined, _ = rate_for(base_lines + list(items or []))
+    rating_map = _rating_products(products_by_id, base_lines, tenant_id=tenant_id,
+                                  products_repo=products_repo)
+    if base_lines and base_paid and rating_map is not None:
+        combined, _ = rate_for(base_lines + list(items or []), rating_map)
         if combined is not None:
             delta = max(0, int(combined.get("amount") or 0) - base_paid)
             return {"amount": delta, "service_token": str(combined.get("service_token") or ""),

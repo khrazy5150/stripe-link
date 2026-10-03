@@ -229,6 +229,20 @@ Two cases, and the tenant chooses which applies:
 
 The tenant's existing `shipping.mode` applies unchanged — a `free` offer's upsells stay free.
 
+**The delta needs the whole box measured** (fixed 2026-10-02). Both call sites — the button's disclosure
+and the charge — build `products_by_id` from the ONE product being sold, which is all either needs to
+price the item. The delta needs more than that: it re-packs the *first sale's* lines together with the
+upsell, so it needs the dimensions of things the upsell handler was never asked about. Handing it the
+one-product map did not fail. `packable_items` reads an absent product document as a shippable thing of
+unknown size and the packer gives each one a parcel, so the "combined" rate came back as three phantom
+parcels plus the real one — larger than the baseline, and the difference looked like a quote. Live test:
+**+ $6.27** on the first upsell of an order already paying $6.11, **+ $0.37** on the second. Rated with a
+complete map, both are **$0.00** — the author's own bundle rates identically at 3.55 lb and 3.85 lb, so
+nothing is owed. Two changes: `quote_upsell_shipping` takes a `products_repo` and loads the baseline's
+missing products, and it refuses outright to rate a line whose product is not in the map rather than
+letting the packer invent a box for it. A map it cannot complete falls back to the standalone rate,
+which over-charges in the one direction a tenant can refund.
+
 ### P2 — Order-bump exposure ✅ (shipped with P0e)
 
 > Built as part of the rate estimator rather than the offer builder: the estimator already packs the

@@ -37,7 +37,7 @@ class Cipher:
         return "mock_key"
 
 
-def quote(cfg, products=None, destination=TO, baseline=None):
+def quote(cfg, products=None, destination=TO, baseline=None, products_repo=None):
     import handlers.upsell as module
     import stripe_link.repositories.documents as docs
 
@@ -50,7 +50,7 @@ def quote(cfg, products=None, destination=TO, baseline=None):
     try:
         return quote_upsell_shipping("t1", ITEMS, products or {"p1": MEASURED},
                                      destination=destination, mode="test", secret_cipher=Cipher(),
-                                     baseline=baseline)
+                                     baseline=baseline, products_repo=products_repo)
     finally:
         docs.shipping_config_repository = real
 
@@ -340,3 +340,122 @@ class TheBaselineComesFromTheSessionTests(unittest.TestCase):
     def test_an_unreachable_session_falls_back_rather_than_failing(self):
         block = self.UPSELL.split("def session_shipping_baseline", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("return {}", block)
+
+
+# A baseline whose products the upsell handler has never loaded. The bug lived here precisely because
+# every earlier test re-used `p1` as the baseline product: the map already had it, so the combined
+# re-pack measured everything and the delta came out right in tests and wrong in production.
+TINY = {"length_in": 2, "width_in": 2, "height_in": 1, "weight_lb": 0.2}
+
+
+def tiny(product_id):
+    return {"product_id": product_id, "name": product_id, "product_type": "physical",
+            "fulfillment": {"requires_shipping": True, "weight_lb": 0.3, "item_dimensions": TINY}}
+
+
+class TheDeltaMustMeasureWhatIsAlreadyInTheBoxTests(unittest.TestCase):
+    """The author, 2026-10-02, shown "+ $6.27" on the first upsell of an order already paying $6.11, and
+    "+ $0.37" on the second: *"Very bad! It should be $0"* and *"better but it should really be $0."*
+
+    He was right about both, and the cause was not the delta arithmetic -- it was the map the arithmetic
+    was handed. Both call sites build `products_by_id` from the ONE product being sold, so the three items
+    already in the buyer's box arrived as products the map had never heard of. `packable_items` does not
+    reject those: an absent product document reads as a shippable thing of unknown size, and the packer
+    gives each one a parcel. The "combined" rate was therefore three phantom parcels plus the real one,
+    which is larger than the baseline, so the difference came out positive and looked like a quote.
+
+    Rated with a complete map the same order's combined rate matched its baseline to the cent and the
+    delta was zero, verified against live Shippo rates for the author's own bundle.
+    """
+
+    BASELINE = {"items": [{"product_id": "b1", "quantity": 1},
+                          {"product_id": "b2", "quantity": 1},
+                          {"product_id": "b3", "quantity": 1}], "amount": 0}
+
+    def setUp(self):
+        self.catalog = {"b1": tiny("b1"), "b2": tiny("b2"), "b3": tiny("b3")}
+        outer = self
+
+        class Repo:
+            def get(self, tenant_id, product_id):
+                return outer.catalog.get(product_id)
+
+        self.repo = Repo()
+        self.live = config({"type": "live"})
+
+    def _rate(self, lines, catalog):
+        """What these lines rate at with nothing riding on a baseline -- a plain carrier quote."""
+        import stripe_link.repositories.documents as docs
+
+        from handlers.upsell import quote_upsell_shipping
+
+        cfg = self.live
+
+        class CfgRepo:
+            def get(self, *_a, **_k):
+                return cfg
+
+        real = docs.shipping_config_repository
+        docs.shipping_config_repository = lambda *a, **k: CfgRepo()
+        try:
+            return quote_upsell_shipping("t1", lines, catalog, destination=TO, mode="test",
+                                         secret_cipher=Cipher())["amount"]
+        finally:
+            docs.shipping_config_repository = real
+
+    def _baseline_rate(self):
+        """What the first sale's own three lines rate at -- the amount it would have paid."""
+        return self._rate(self.BASELINE["items"], self.catalog)
+
+    def test_the_base_fare_is_not_charged_twice(self):
+        # The mock carrier prices a parcel at $6.50 plus its weight, so what an extra item costs depends
+        # entirely on whether it needs a parcel of its own. Riding along, it costs its weight; posted
+        # separately it costs the fare again -- which is what the author was being quoted.
+        paid = self._baseline_rate()
+        alone = quote(self.live)["amount"]
+        delta = quote(self.live, baseline={**self.BASELINE, "amount": paid}, products_repo=self.repo)
+        self.assertEqual(delta["reason"], "combined_delta")
+        self.assertLess(delta["amount"], alone - 600)
+
+    def test_the_delta_is_exactly_the_combined_rate_less_what_was_paid(self):
+        # No separate upsell pricing path: the combined lines go through the same rater the first sale
+        # used, and the difference is arithmetic on two rates rather than an estimate of one.
+        paid = self._baseline_rate()
+        combined = self._rate(self.BASELINE["items"] + ITEMS, {**self.catalog, "p1": MEASURED})
+        delta = quote(self.live, baseline={**self.BASELINE, "amount": paid}, products_repo=self.repo)
+        self.assertEqual(delta["amount"], combined - paid)
+
+    def test_a_map_it_cannot_complete_falls_back_instead_of_guessing(self):
+        # None rather than a partial map: a combined rate short one product is not a conservative
+        # estimate, it is a wrong number with a carrier quote's authority behind it.
+        result = quote(self.live, baseline={**self.BASELINE, "amount": 725})
+        self.assertEqual(result["reason"], "standalone")
+
+    def test_a_baseline_product_that_no_longer_exists_falls_back(self):
+        del self.catalog["b2"]
+        result = quote(self.live, baseline={**self.BASELINE, "amount": 725}, products_repo=self.repo)
+        self.assertEqual(result["reason"], "standalone")
+
+    def test_a_line_whose_product_is_unknown_is_never_rated(self):
+        # `packable_items` would hand the packer a dimensionless mystery and the packer would invent a
+        # box for it. Refuse at the rating boundary instead.
+        result = quote(self.live, baseline={"items": [{"product_id": "ghost", "quantity": 1}],
+                                            "amount": 725},
+                       products_repo=type("Empty", (), {"get": lambda *_a: None})())
+        self.assertEqual(result["reason"], "standalone")
+
+
+class BothCallSitesMustPassTheRepoTests(unittest.TestCase):
+    """The disclosure and the charge have to rate identically or the button states one price and the card
+    takes another -- the same failure mode as the missing `baseline`, one layer down."""
+
+    UPSELL = (__import__("pathlib").Path(__file__).resolve().parents[1]
+              / "src" / "handlers" / "upsell.py").read_text()
+
+    def test_the_disclosure_passes_it(self):
+        block = self.UPSELL.split("def _session_shipping_quote", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("products_repo=products_repo", block)
+
+    def test_the_charge_passes_it(self):
+        block = self.UPSELL.split("upsell_shipping = quote_upsell_shipping", 1)[1][:600]
+        self.assertIn("products_repo=products_repo", block)
