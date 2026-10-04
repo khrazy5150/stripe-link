@@ -550,7 +550,7 @@ class TheGateIsSetByMeasurementTests(unittest.TestCase):
         """A 5-minute cadence with a 180s gate corrects within ~3-8 minutes. A 15-minute cadence made the
         schedule the bottleneck rather than settlement, which is the wrong thing to be waiting on."""
         template = (__import__("pathlib").Path(__file__).resolve().parents[1] / "template.yaml").read_text()
-        block = template.split("FeeReconciliationSweep:", 1)[1][:400]
+        block = template.split("FeeReconciliationSweep:", 1)[1][:900]
         self.assertIn("rate(5 minutes)", block)
 
 

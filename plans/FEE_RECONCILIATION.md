@@ -158,7 +158,34 @@ Consequences, all applied:
   which is why the UNSETTLED case is logged too, since an order unreadable at N seconds is the only
   direct evidence of a floor the sweep ever produces. To tighten to 120 honestly, drop the gate below the
   suspected delay for a while and read those lines; each costs a single Stripe call.
-- **120s is the next step, gated on production data.** These were two test-mode charges; 180 is the
+### The experiment, and why 120s was NOT taken (2026-10-04)
+
+Ran at a 60s gate and a 1-minute cadence to catch the floor. Both upsell charges came back readable on
+their **first** probe:
+
+    fee settle: order=…_upsell_1 age=84s readable drift=+22c
+    fee settle: order=…_upsell_2 age=76s readable drift=+31c
+
+Not a single `NOT YET readable` line. So the experiment produced **two more ceilings and no floor** — the
+one thing it was run to get. Across all four charges ever measured (76s, 84s, 92s, 101s) every one was
+settled by the first look, and nothing has ever been observed *unsettled* at any age.
+
+**The data weakly supports 120s and the change is still not worth making,** because the gate is not what
+holds the window open. With a 5-minute cadence the correction lands anywhere in `[gate, gate+300]`:
+
+    gate 180, cadence 5m   ->  3-8 minutes     (today)
+    gate 120, cadence 5m   ->  2-7 minutes     (saves 60s on a multi-minute window)
+    gate  90, cadence 1m   ->  ~1.5-2 minutes  (what the experiment actually ran at)
+
+The experiment corrected both upsells **within 90 seconds of the charge** — a 5x improvement, and all of
+it came from the cadence. Tightening the gate alone is the option that sounds like progress and buys
+almost nothing, on four test-mode samples of one card type with no floor evidence behind it.
+
+So 180/5m stands. If the window ever needs to be short, the lever is the cadence, and the cost is a
+full table scan every minute — which is trivial today and is what the `fees_source` GSI in **Open** is
+for when it stops being.
+
+- **120s remains available**, via `FEE_SETTLE_MIN_AGE_SECONDS`, with no deploy of this plan's code. These were two test-mode charges; 180 is the
   measurement plus room for a slower day. Asking early costs a wasted Stripe call and the next pass is
   only five minutes behind, so the conservative direction is the cheap one.
 

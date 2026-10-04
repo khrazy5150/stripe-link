@@ -2437,11 +2437,6 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "${ProjectPrefix}-stripe-webhook-${Environment}"
-      # >>> TEMPORARY EXPERIMENT 2026-10-04 — DELETE THIS Environment BLOCK TO RESTORE THE 180s GATE <<<
-      # Merged with the Globals environment, not replacing it. See the sweep schedule below.
-      Environment:
-        Variables:
-          FEE_SETTLE_MIN_AGE_SECONDS: "60"
       CodeUri: src/
       Handler: handlers.stripe_webhook.handler
       Description: Receives Stripe Connect webhook events.
@@ -2547,16 +2542,14 @@ Resources:
         FeeReconciliationSweep:
           Type: Schedule
           Properties:
-            # Five, not fifteen: the balance transaction becomes readable ~90-100s after the charge
-            # (measured), so a quarter-hour cadence left an order showing the wrong fee for up to 14
-            # minutes to correct something that was ready in under two.
+            # Five, not fifteen: every charge measured was readable within 76-101s of the charge, so a
+            # quarter-hour cadence left an order showing the wrong fee for up to 14 minutes to correct
+            # something ready in under two.
             #
-            # >>> TEMPORARY EXPERIMENT 2026-10-04 — REVERT TO rate(5 minutes) <<<
-            # Paired with FEE_SETTLE_MIN_AGE_SECONDS=60 below. One minute probes each charge at ~60s,
-            # ~120s, ~180s, so the `NOT YET readable` lines bound the real settle time to within a
-            # minute. That is the only way to earn the 120s gate: the normal 180s setting cannot observe
-            # anything settling earlier than itself.
-            Schedule: rate(1 minute)
+            # The experiment that set these ran 2026-10-04 at a 60s gate and a 1-minute cadence. Both
+            # probes came back readable on their FIRST look -- 76s and 84s -- so it produced ceilings and
+            # no floor, and the cadence rather than the gate turned out to be what moves the window.
+            Schedule: rate(5 minutes)
             Description: Replace estimated Stripe fees with the charge's actual balance transaction.
 
   # Platform-account Stripe Billing webhook (the tenant's SaaS subscription). Separate endpoint from the Connect
