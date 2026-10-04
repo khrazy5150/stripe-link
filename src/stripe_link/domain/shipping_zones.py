@@ -115,9 +115,16 @@ def allowed_countries(config: dict[str, Any] | None) -> list[str]:
     who adds a zone still cannot receive that order -- a rule the tenant wrote and the platform ignored
     (plans/SHIPPING_ELEMENT.md).
 
-    A catch-all contributes NOTHING here, and that is the honest answer rather than a gap: Stripe wants an
-    explicit list and "everywhere" is not one. A tenant who genuinely ships worldwide has to say which countries
-    they accept, because Checkout has to render a dropdown.
+    A catch-all contributes NOTHING HERE, and that is about Stripe rather than about the tenant. The list
+    Stripe is given is fixed BEFORE the buyer picks a country, and it is handed the same `shipping_options`
+    whichever they pick -- so a list spanning destinations that disagree on price has no correct option in
+    it, and `checkout_shipping` rightly charges nothing. Widening this list to the whole world would
+    therefore not open up international selling; it would turn every catch-all tenant's domestic postage
+    into zero (found by the unanimity tests, 2026-10-04).
+
+    `offerable_countries` is the expanded list, and the distinction between the two is where the buyer is:
+    choosing on OUR page, where every country can be re-quoted, or choosing on Stripe's, where one set of
+    options has to serve all of them.
     """
     out: list[str] = []
     for zone in zones_of(config):
@@ -125,6 +132,30 @@ def allowed_countries(config: dict[str, Any] | None) -> list[str]:
             if code != ANYWHERE and code not in out:
                 out.append(code)
     return out
+
+
+def offerable_countries(config: dict[str, Any] | None) -> list[str]:
+    """Every country this tenant will ship to, catch-all EXPANDED. What the page's dropdown offers.
+
+    `allowed_countries` dropped the catch-all, documented as the honest answer: Stripe wants an explicit
+    list and "everywhere" is not one. For Stripe that is still true. For the BUYER it was not -- a tenant
+    whose zones read "United States" and "Everywhere else" was shown a dropdown holding only the United
+    States, the platform silently refusing a rule the tenant wrote (author, 2026-10-04: *"someone in
+    Mexico, Canada, or the European Union cannot purchase the item when the system says that they can"*).
+
+    The page can honour the whole list where Stripe cannot, because it re-quotes on every change: the
+    buyer names a country, that country alone is rated, and checkout is then told that one country. Named
+    countries keep their place at the front, since the tenant's order is a statement about where they
+    mainly sell. A country the CARRIER cannot reach is answered a step later, by the element failing to
+    quote it, rather than by this list guessing at coverage it does not know.
+    """
+    out = allowed_countries(config)
+    if not any(is_catch_all(zone) for zone in zones_of(config)):
+        return out
+    from stripe_link.domain.shipping_countries import shippable_countries
+
+    seen = set(out)
+    return out + [code for code in shippable_countries() if code not in seen]
 
 
 def services_for(config: dict[str, Any] | None, country: Any) -> list[dict[str, Any]]:

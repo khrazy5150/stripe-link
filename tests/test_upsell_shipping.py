@@ -503,3 +503,67 @@ class BothCallSitesMustPassTheRepoTests(unittest.TestCase):
     def test_the_charge_passes_it(self):
         block = self.UPSELL.split("upsell_shipping = quote_upsell_shipping", 1)[1][:600]
         self.assertIn("products_repo=products_repo", block)
+
+
+class TheUpsellRecordsWhatStripeActuallyTookTests(unittest.TestCase):
+    """Every other sale has been trued against the charge's balance transaction since the ledger shipped.
+    An upsell kept the estimate, because it is the one sale path the webhook never sees -- and the
+    estimate rounds UP where Stripe rounds down, so an upsell's payout was systematically a cent or two
+    light. Small, one-directional, and exactly the drift that makes a tenant stop trusting a report.
+    """
+
+    def test_the_estimate_is_replaced_by_the_balance_transaction(self):
+        from handlers.stripe_webhook import true_up_fees
+
+        estimated = {"tenant_keyed_amount": 1786, "stripe_fee": 82, "platform_fee": 89, "net_payout": 1615}
+        trued = true_up_fees(estimated, {"stripe_fee": 81})
+        self.assertEqual(trued["stripe_fee"], 81)
+        self.assertEqual(trued["fees_source"], "balance_transaction")
+        # The platform's cut is exact already -- checkout chose it and Stripe applied it -- so only the
+        # payout moves with the corrected Stripe fee.
+        self.assertEqual(trued["platform_fee"], 89)
+        self.assertEqual(trued["net_payout"], 1786 - 81 - 89)
+
+    def test_an_unsettled_charge_leaves_the_estimate_standing(self):
+        # Best-effort by the same rule as everywhere else: replacing a usable number with nothing is worse
+        # than carrying an estimate for a few minutes.
+        from handlers.stripe_webhook import true_up_fees
+
+        estimated = {"tenant_keyed_amount": 1786, "stripe_fee": 82, "platform_fee": 89, "net_payout": 1615}
+        self.assertEqual(true_up_fees(estimated, {}), estimated)
+        self.assertNotIn("fees_source", true_up_fees(estimated, {}))
+
+    def test_the_handler_actually_trues_the_fees_it_stores(self):
+        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
+                  / "src" / "handlers" / "upsell.py").read_text()
+        self.assertIn("upsell_fees = true_up_fees(", source)
+        self.assertIn('"fees": upsell_fees,', source)
+        self.assertNotIn('"fees": fee_context["fees"],', source)
+
+
+class TheLedgerSaysWhereARowCameFromTests(unittest.TestCase):
+    """`source` is the ledger's provenance field and it defaulted to "webhook" -- the one thing an upsell
+    is not. No `checkout.session.completed` fires for a PaymentIntent we create ourselves, which is the
+    entire reason the upsell writes its own entry. Reading the ledger to find out where a row came from is
+    the only purpose the field has, so a wrong answer is worse than none."""
+
+    ORDER = {"tenant_id": "t1", "order_id": "order_up_1", "payment_intent_id": "pi_up_1",
+             "amount_total": 1786, "currency": "usd", "mode": "test",
+             "fees": {"stripe_fee": 82, "platform_fee": 89}}
+
+    def test_an_upsell_entry_is_labelled_upsell(self):
+        from handlers.upsell import record_upsell_ledger_entry
+
+        rows = []
+
+        class Repo:
+            def append(self, entry):
+                rows.append(entry)
+
+        record_upsell_ledger_entry(self.ORDER, ledger_repo=Repo())
+        self.assertEqual(rows[0]["source"], "upsell")
+
+    def test_a_webhook_sale_is_still_labelled_webhook(self):
+        from stripe_link.domain.ledger import sale_entry_from_order
+
+        self.assertEqual(sale_entry_from_order(self.ORDER, now_epoch=1)["source"], "webhook")

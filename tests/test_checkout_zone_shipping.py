@@ -150,10 +150,22 @@ class ADeclaredDestinationLiftsTheUnanimityLimit(unittest.TestCase):
 
     def test_a_country_the_tenant_does_not_ship_to_is_IGNORED(self):
         """A country typed into a URL is not a zone. It falls back to the undeclared behaviour rather than
-        inventing a destination."""
-        built = payload(MIXED, ship_to_country="GB")
+        inventing a destination.
+
+        MIXED carries a catch-all, so GB IS a zone to it -- that is what "everywhere else" means, and
+        honouring it is the point of `offerable_countries`. The rule still has to hold for a tenant who
+        named their countries and stopped there, so this asks it of one."""
+        named_only = dict(MIXED, zones=MIXED["zones"][:2])
+        built = payload(named_only, ship_to_country="GB")
         self.assertEqual(countries(built), ["US", "CA"])
         self.assertEqual(amounts(built), [])
+
+    def test_a_catch_all_zone_DOES_honour_a_country_it_never_named(self):
+        """The other side of it: the buyer picked GB from the element's dropdown, the element rated GB, and
+        the tenant wrote a zone that serves GB. Collecting that declaration and then ignoring it is how a
+        buyer in Mexico was told they could buy and then could not (author, 2026-10-04)."""
+        built = payload(MIXED, ship_to_country="GB")
+        self.assertEqual(countries(built), ["GB"])
 
     def test_lowercase_and_overlong_input_is_normalised(self):
         for given in ("us", " us ", "usa"):

@@ -206,3 +206,40 @@ class UpsellTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AndAPhoneNumberForTheCarrierTests(unittest.TestCase):
+    """The destination plumbing has carried `customer.phone` since it was written -- 
+    `destination_address_from_session` reads it, and the label buyer sends it to the carrier, because a
+    courier may need to call the recipient for a failed delivery, a gate code or a signature.
+
+    Hosted Checkout never asked for it, so it was always empty (author, 2026-10-04). Nothing downstream
+    needed changing; the field simply had to be collected.
+    """
+
+    SOURCE = (ROOT / "src" / "handlers" / "checkout.py").read_text()
+
+    def test_the_session_asks_for_one(self):
+        self.assertIn('payload["phone_number_collection[enabled]"] = "true"', self.SOURCE)
+
+    def test_it_is_asked_for_ONLY_where_there_is_a_parcel(self):
+        """Stripe's hosted Checkout has no optional mode for this field: when collection is on, the buyer
+        must fill it in. Enabling it unconditionally would put a required field in front of every download
+        and every tip, for a delivery that can never happen."""
+        block = self.SOURCE.split("shipping_address_collection[allowed_countries]", 1)[1][:900]
+        self.assertIn("phone_number_collection", block)
+        # Inside the shipping branch: the collection line and the allowed-countries loop share a parent.
+        countries_indent = self._indent_of('            payload[f"shipping_address_collection[allowed_countries]')
+        phone_indent = self._indent_of('        payload["phone_number_collection[enabled]"]')
+        self.assertLess(phone_indent, countries_indent)
+        self.assertGreater(phone_indent, 4, "must be nested inside the shipping guard, not at handler scope")
+
+    def _indent_of(self, prefix):
+        for line in self.SOURCE.splitlines():
+            if line.startswith(prefix):
+                return len(line) - len(line.lstrip())
+        raise AssertionError(f"no line starting {prefix!r}")
+
+    def test_a_collected_phone_still_reaches_the_destination(self):
+        # The half that already worked, asserted so the two cannot drift apart again.
+        self.assertEqual(destination_address_from_session(SESSION)["phone"], "+13035551212")

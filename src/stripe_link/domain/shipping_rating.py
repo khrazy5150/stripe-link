@@ -82,6 +82,39 @@ def rate_parcels(provider: Any, *, from_address: dict[str, Any], to_address: dic
     return {"options": options, "error": ""}
 
 
+def carrier_menu(options: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """The carrier's own services, unnarrowed, wearing the carrier's own names.
+
+    What a zone falls back to when the tenant has adopted no service the carrier offers for this
+    destination. That is not the tenant declining those services -- it is the tenant never having been
+    shown them. `enabled_services` is populated by adopting rows from the Shipping screen's rate preview,
+    and a tenant previews the address they ship to most, so a US seller's adopted list is US-domestic by
+    construction. Narrowing an INTERNATIONAL quote by it leaves nothing, every time, for every tenant
+    (author, 2026-10-04, on a catch-all zone that could price no country on earth).
+
+    The author's narrowing rule is untouched, because it answers a different question: *"the customer
+    shouldn't be able to arbitrarily ask for overnight shipping if the tenant hasn't enabled overnight
+    shipping"* protects a choice the tenant MADE. Where they made none, the carrier's menu is the honest
+    answer, and the alternative is refusing a sale the tenant asked for.
+
+    Labelled from the carrier's own words, then the service name, then the raw token -- `normalize_option`
+    drops a nameless option, and a dropped option is a service the buyer is never offered.
+    """
+    out = []
+    for option in options or []:
+        if not isinstance(option, dict):
+            continue
+        merged = dict(option)
+        merged["label"] = (_text(option.get("label")) or _text(option.get("service"))
+                           or _text(option.get("service_token")))
+        days = merged.pop("estimated_days", None)
+        if days is not None:
+            merged["transit_days_min"] = int(days)
+            merged["transit_days_max"] = int(days)
+        out.append(merged)
+    return out
+
+
 def apply_tenant_services(options: list[dict[str, Any]] | None,
                           services: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """The carrier's menu, narrowed to what the tenant actually sells, wearing the tenant's own words.

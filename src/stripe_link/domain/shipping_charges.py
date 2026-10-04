@@ -382,8 +382,10 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
         FLAT_RATE_BOX,
         FREE as ZONE_FREE,
         LIVE,
+        is_catch_all,
         rule_for,
         services_for,
+        zone_for,
     )
 
     override = offer_override(offer)
@@ -425,11 +427,25 @@ def resolve_options(offer: dict[str, Any] | None, tenant_config: dict[str, Any] 
         # it returns here instead of falling through to the shared-amount builder below. Narrowing stays
         # the zone's job either way: `services` is the same list the flat path uses, applied as a filter.
         if live_options:
-            from stripe_link.domain.shipping_rating import apply_tenant_services
+            from stripe_link.domain.shipping_rating import apply_tenant_services, carrier_menu
 
             offered = [normalize_option(opt) for opt in apply_tenant_services(live_options, services)]
             offered = [opt for opt in offered if opt]
+            # NOTHING SURVIVED, AND THE ZONE IS THE CATCH-ALL. The tenant adopted no service the carrier
+            # offers here, which for a catch-all is near-certain rather than exceptional: adopted services
+            # come from the Shipping screen's rate preview, a tenant previews where they mainly ship, and
+            # an international quote returns entirely different service tokens. Narrowing by a list they
+            # were never given the chance to populate is not their rule being honoured, it is their zone
+            # being ignored -- so offer what the carrier offers (author's call, 2026-10-04).
+            #
+            # A NAMED zone still gets `needs: services`. There the tenant chose the countries and had every
+            # chance to adopt services for them, so an empty result is a real settings gap with a real
+            # answer in the Shipping screen, and quietly widening it would be the overnight-shipping
+            # problem the narrowing rule exists to stop.
+            if not offered and is_catch_all(zone_for(tenant_config, country)):
+                offered = [opt for opt in (normalize_option(o) for o in carrier_menu(live_options)) if opt]
             if offered:
+                offered.sort(key=lambda option: int(option.get("amount") or 0))
                 return {"options": offered[:MAX_OPTIONS],
                         "mode": CHARGED if any(o["amount"] for o in offered) else FREE,
                         "source": source, "needs": ""}

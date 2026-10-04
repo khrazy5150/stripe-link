@@ -3774,7 +3774,12 @@ def render_shipping_selector_script() -> str:
         "    var summary = box.querySelector('.sl-shipping-summary');",
         # Carriers insist on a subdivision in these and quote without one everywhere else. Asking for a
         # state a country does not use is friction bought for nothing.
-        "    var REGION_REQUIRED = { US:'State', CA:'Province', AU:'State', BR:'State', IN:'State', MX:'State' };",
+        #
+        # THE US IS NOT ONE OF THEM, whatever the postal convention suggests: a US ZIP already determines
+        # the state, and both carriers rate on it alone. Verified against live Shippo rather than assumed --
+        # the same eleven services at the same eleven prices come back for 80204 with the state and without
+        # it. So the field bought nothing and cost every US buyer a keystroke (author, 2026-10-04).
+        "    var REGION_REQUIRED = { CA:'Province', AU:'State', BR:'State', IN:'State', MX:'State' };",
         "    var POSTAL_LABEL = { US:'ZIP code', GB:'Postcode', AU:'Postcode', NZ:'Postcode', IE:'Eircode' };",
         "    var seq = 0, lastData = null;",
         "    var cart = function(){",
@@ -3908,10 +3913,35 @@ def render_shipping_selector_script() -> str:
         "      if (!data.ships) return;",                          # nothing physical: stay hidden
         "      if (data.needs === 'zones') return;",               # the tenant has configured nowhere to ship
         "      if (!select.options.length) {",
-        "        (data.countries || []).forEach(function(code){",
-        "          var opt = document.createElement('option'); opt.value = code; opt.textContent = code;",
+        # NAMES, NOT CODES. Two countries could wear their codes; a catch-all zone expands to 233, and
+        # "AD / AE / AF" is not a list anyone can shop from. `Intl.DisplayNames` resolves them in the
+        # BUYER's language with nothing shipped in the page -- the same call `dashboard/src/utils/
+        # countries.js` makes, for the same reason: ~250 label strings nobody should hand-maintain.
+        "        var NAMES = null;",
+        "        try { NAMES = new Intl.DisplayNames(undefined, { type: 'region' }); } catch (e) { NAMES = null; }",
+        "        var nameOf = function(code){",
+        "          try { return (NAMES && NAMES.of(code)) || code; } catch (e) { return code; }",
+        "        };",
+        "        var add = function(code){",
+        "          var opt = document.createElement('option');",
+        "          opt.value = code; opt.textContent = nameOf(code);",
         "          select.appendChild(opt);",
-        "        });",
+        "        };",
+        # The tenant's OWN destinations first, in the order they wrote them -- that order is a statement
+        # about where they mainly sell, and burying the United States between Ukraine and Uruguay throws
+        # it away. The catch-all's expansion follows, alphabetical by the name actually displayed, which
+        # is why it is sorted here and not on the server: the server has codes and no locale.
+        "        var all = data.countries || [];",
+        "        var primary = (data.primary_countries || []).filter(function(c){ return all.indexOf(c) >= 0; });",
+        "        primary.forEach(add);",
+        "        var rest = all.filter(function(c){ return primary.indexOf(c) < 0; });",
+        "        rest.sort(function(a, b){ return nameOf(a).localeCompare(nameOf(b)); });",
+        "        if (primary.length && rest.length) {",
+        "          var sep = document.createElement('option');",
+        "          sep.disabled = true; sep.textContent = '\u2500\u2500\u2500';",
+        "          select.appendChild(sep);",
+        "        }",
+        "        rest.forEach(add);",
         "        if (!select.options.length) return;",
         "      }",
         "      box.hidden = false;",

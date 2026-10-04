@@ -814,6 +814,59 @@ safety gain.
 and nothing enforced it. It refuses a duplicate service code (the second is dead configuration the tenant
 believes is live), a missing code, an inverted transit window, and an unknown `source`.
 
+## "Everywhere else" has to reach somewhere else — ✅ SHIPPED 2026-10-04
+
+The author's zones read "United States" and "Everywhere else", both rating live. Nobody outside the US
+could buy: *"someone in Mexico, Canada, or the European Union cannot purchase the item when the system
+says that they can."* Two layers, and fixing only the first moves the lie later rather than removing it.
+
+**1. The dropdown.** `allowed_countries` dropped the catch-all, documented as the honest answer: Stripe
+wants an explicit list and "everywhere" is not one. For STRIPE that is still true and the list stays
+narrow — Stripe is handed one set of `shipping_options` before the buyer picks a country, so widening it
+to 233 destinations that disagree on price would leave no correct option in it and turn every catch-all
+tenant's domestic postage into zero. (The unanimity tests caught exactly that on the first attempt.)
+
+So the two lists split by WHERE THE BUYER IS CHOOSING:
+
+    allowed_countries()    named zones only     -> Stripe's address form, one fixed set of options
+    offerable_countries()  catch-all expanded   -> our page, which re-quotes on every change
+
+A declared country is tested against the OFFERABLE list and then narrows Stripe's to that one country, so
+the unanimity problem never arises on the path the element drives. The expansion is ISO 3166-1 alpha-2
+minus the sixteen codes Stripe refuses (`domain/shipping_countries.py`, mirroring
+`dashboard/src/utils/countries.js`; a test asserts the two agree). A country the CARRIER cannot reach is
+answered a step later, by the element failing to quote it, rather than by this list guessing at coverage.
+
+**2. The services.** Reaching the carrier was not enough: every international service was filtered out.
+`enabled_services` is populated by adopting rows from the rate preview, a tenant previews the address they
+ship to most, so a US seller's adopted list is US-domestic by construction — and an international quote
+returns entirely different tokens. Measured against live Shippo: 11 services for Denver of which 4
+survived narrowing; 3 each for Toronto, Mexico City and Berlin, of which **0** survived.
+
+A catch-all zone therefore falls back to the carrier's own menu, in the carrier's own words. The author's
+narrowing rule is untouched because it answers a different question — *"the customer shouldn't be able to
+arbitrarily ask for overnight shipping if the tenant hasn't enabled overnight shipping"* protects a choice
+the tenant MADE. Where they made none, the carrier's menu is the honest answer. A NAMED zone still reports
+`needs: services`: there the tenant chose the country and had every chance to adopt services for it.
+
+Verified end to end against live Shippo — US $6.11 (tenant's own labels), Toronto $39.59, Mexico City
+$42.42, Berlin $54.10 (carrier labels).
+
+**Still to do:** let the tenant adopt and relabel international services, so the fallback becomes their
+choice rather than the carrier's default. The per-zone `rule.services` field already exists to narrow
+them; what is missing is a Shipping screen that previews a foreign address and offers them for adoption.
+
+### Two smaller things shipped with it
+
+- **No State field for US buyers.** A ZIP already determines the state and both carriers rate on it alone
+  — verified, not assumed: the same eleven services at the same eleven prices come back for 80204 with
+  the state and without it. The countries where a carrier genuinely insists on a subdivision keep it.
+- **A phone number is collected where there is a parcel.** Couriers call the recipient for a failed
+  delivery, a gate code or a signature. `destination_address_from_session` and the label buyer have both
+  carried `customer.phone` since they were written; hosted Checkout was simply never asked to collect it.
+  Only where an address is collected — Stripe has no optional mode for the field, so enabling it
+  everywhere would put a required question in front of every download and every tip.
+
 ## Open
 
 - **Does a full address get collected on the page, or country + postcode?** Recommended the latter, but a

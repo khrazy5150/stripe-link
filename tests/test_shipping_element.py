@@ -425,3 +425,34 @@ class TheChosenServiceReachesTheLink(unittest.TestCase):
 
     def test_it_never_writes_an_amount_onto_the_link(self):
         self.assertNotIn("shipping_amount", self.js)
+
+
+class TheUSDoesNotNeedAStateTests(unittest.TestCase):
+    """A US ZIP already determines the state, and both carriers rate on it alone.
+
+    Verified against live Shippo rather than assumed: the same eleven services come back at the same
+    eleven prices for 80204 with the state and without it. So the field bought nothing and cost every US
+    buyer a keystroke (author, 2026-10-04). The countries left in the map are the ones where a carrier
+    genuinely insists on a subdivision.
+    """
+
+    SOURCE = (__import__("pathlib").Path(__file__).resolve().parents[1]
+              / "src" / "stripe_link" / "runtime" / "html.py").read_text()
+
+    def _region_map(self):
+        for line in self.SOURCE.splitlines():
+            if "var REGION_REQUIRED" in line:
+                return line
+        raise AssertionError("REGION_REQUIRED is gone")
+
+    def test_the_us_is_not_asked_for_a_state(self):
+        self.assertNotIn("US:'State'", self._region_map())
+
+    def test_the_countries_that_do_need_one_still_get_asked(self):
+        line = self._region_map()
+        for code in ("CA", "AU", "BR", "IN", "MX"):
+            self.assertIn(f"{code}:'", line, f"{code} still needs a subdivision")
+
+    def test_the_us_postal_label_is_untouched(self):
+        # Dropping the state does not make the ZIP generic -- it is still the one field US buyers fill in.
+        self.assertIn("US:'ZIP code'", self.SOURCE)

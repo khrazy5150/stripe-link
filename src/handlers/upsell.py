@@ -428,6 +428,23 @@ def process_upsell(
 
     now = int(now_fn())
     order_id = f"order_{session_id}_upsell_{sequence}"
+    # WHAT STRIPE ACTUALLY TOOK, not what we estimated it would. The webhook has trued every other sale
+    # against the charge's balance transaction since the ledger shipped; an upsell kept the estimate,
+    # because it is the one sale path the webhook never sees. The estimate rounds UP where Stripe rounds
+    # down, so an upsell's recorded payout was systematically a cent or two light -- small, one-directional
+    # and exactly the drift that makes a tenant stop trusting a report. Best-effort by the same rule as
+    # everywhere else: an unsettled balance transaction leaves the estimate standing rather than replacing
+    # a usable number with nothing.
+    #
+    # Imported HERE rather than at module scope: `stripe_webhook` is the largest handler in the tree and
+    # the upsell Lambda has no other reason to load it. Same lazy-import shape this file already uses for
+    # `handlers.checkout._quote_parcels`.
+    from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
+
+    upsell_fees = true_up_fees(
+        fee_context["fees"],
+        fetch_actual_fees(str(payment_intent.get("id") or ""), api_key=api_key,
+                          stripe_account=stripe_account, opener=opener))
     primary_item = (resolved.get("items") or [{}])[0]
     product = products_by_id.get(primary_item.get("product_id")) or {}
     product_name = product.get("name") or primary_item.get("product_name") or "Upsell"
@@ -458,7 +475,7 @@ def process_upsell(
             "price_id": primary_item.get("price_id", ""),
             "name": product_name,
         },
-        "fees": fee_context["fees"],
+        "fees": upsell_fees,
         "attribution": {
             "offer_id": offer_id,
             "page_id": "",
@@ -515,7 +532,11 @@ def record_upsell_ledger_entry(order_record, ledger_repo=None):
         repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
         if repo is None:
             return False
-        entry = sale_entry_from_order(order_record, now_epoch=int(time.time()))
+        # `source` is the ledger's provenance field and it defaults to "webhook", which is the one thing
+        # an upsell is not: no `checkout.session.completed` fires for a PaymentIntent we create ourselves,
+        # which is the entire reason this function exists. Reading the ledger to find out where a row came
+        # from is the only purpose the field has, so a wrong answer is worse than none.
+        entry = sale_entry_from_order(order_record, now_epoch=int(time.time()), source="upsell")
         if not entry:
             return False
         repo.append(entry)

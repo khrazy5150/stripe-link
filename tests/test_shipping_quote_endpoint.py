@@ -57,6 +57,15 @@ class QuoteTests(unittest.TestCase):
         return json.loads(response["body"])
 
     def test_it_lists_the_countries_the_tenant_ships_to(self):
+        # Named zones first, in the tenant's order; the catch-all expands in behind them, because
+        # "Everywhere else" that reaches nowhere else is a rule the platform ignored.
+        countries = self.quote()["countries"]
+        self.assertEqual(countries[:2], ["US", "CA"])
+        for code in ("MX", "DE", "GB"):
+            self.assertIn(code, countries)
+
+    def test_without_a_catch_all_it_lists_only_what_was_named(self):
+        self.config = dict(CONFIG, zones=CONFIG["zones"][:2])
         self.assertEqual(self.quote()["countries"], ["US", "CA"])
 
     def test_without_a_country_it_prices_nothing_and_says_why(self):
@@ -89,9 +98,19 @@ class QuoteTests(unittest.TestCase):
         self.assertEqual((option["transit_days_min"], option["transit_days_max"]), (5, 7))
 
     def test_a_country_the_tenant_does_not_serve_is_not_honoured(self):
+        # Needs a config with NO catch-all to mean anything: with one, GB is served by definition, and
+        # that is the whole point of the zone the tenant wrote.
+        self.config = dict(CONFIG, zones=CONFIG["zones"][:2])
         body = self.quote("GB")
         self.assertEqual(body["needs"], "country")
+        # The element must not pretend GB was accepted: the country it settles on stays empty.
         self.assertEqual(body["country"], "")
+
+    def test_a_catch_all_DOES_serve_a_country_it_never_named(self):
+        # The zone said "everywhere else" and GB is everywhere else.
+        body = self.quote("GB")
+        self.assertEqual(body["needs"], "")
+        self.assertEqual(body["country"], "GB")
 
     def test_a_DIGITAL_offer_does_not_ship_even_with_no_eligibility_flag(self):
         """Found on the deployed endpoint: a link-in-bio offer answered `ships: True`, because the check read

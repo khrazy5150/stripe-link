@@ -16,6 +16,7 @@ from stripe_link.domain.documents import (
     validate_shipping_zones,
 )
 from stripe_link.domain.shipping_zones import (
+    offerable_countries,
     ANYWHERE,
     allowed_countries,
     flat_rate_for_box,
@@ -145,15 +146,55 @@ class AllowedCountriesComeFromTheZones(unittest.TestCase):
     rule the tenant wrote and the platform ignored."""
 
     def test_it_lists_every_named_country(self):
-        self.assertEqual(allowed_countries(CONFIG), ["US", "CA"])
+        self.assertEqual(allowed_countries({"zones": [US, CA]}), ["US", "CA"])
 
-    def test_the_catch_all_contributes_nothing(self):
-        """Stripe wants an explicit list and 'everywhere' is not one. A tenant who ships worldwide must say
-        which countries they accept, because Checkout has to render a dropdown."""
+    def test_the_catch_all_contributes_nothing_to_STRIPES_list(self):
+        """Stripe is handed one set of `shipping_options` BEFORE the buyer picks a country, so a list
+        spanning destinations that disagree on price has no correct option in it. Widening this one would
+        not open up international selling -- it would turn every catch-all tenant's domestic postage into
+        zero, which the unanimity tests caught on the first attempt (2026-10-04)."""
         self.assertEqual(allowed_countries({"zones": [ELSEWHERE]}), [])
 
     def test_no_zones_means_no_countries(self):
         self.assertEqual(allowed_countries({}), [])
+
+
+class OfferableCountriesAreWhatTheBUYERSees(unittest.TestCase):
+    """The page can honour the whole world where Stripe cannot, because it re-quotes on every change: the
+    buyer names a country, that country alone is rated, and checkout is then told that one country.
+
+    A tenant whose zones read "United States" and "Everywhere else" was shown a dropdown holding only the
+    United States -- the platform silently refusing a rule the tenant wrote (author, 2026-10-04: *"someone
+    in Mexico, Canada, or the European Union cannot purchase the item when the system says that they
+    can"*)."""
+
+    def test_a_catch_all_expands(self):
+        out = offerable_countries({"zones": [ELSEWHERE]})
+        self.assertGreater(len(out), 200)
+        for code in ("US", "CA", "MX", "DE", "GB", "JP", "AU"):
+            self.assertIn(code, out)
+
+    def test_named_countries_keep_their_place_at_the_front(self):
+        """Their order is the tenant's statement about where they mainly sell; the expansion fills in
+        behind it rather than burying them alphabetically."""
+        out = offerable_countries(CONFIG)
+        self.assertEqual(out[:2], ["US", "CA"])
+        self.assertGreater(len(out), 200)
+        self.assertEqual(len(out), len(set(out)), "a named country must not appear twice")
+
+    def test_it_never_offers_a_country_stripe_will_reject(self):
+        # The buyer picks here and pays at Stripe, so an offerable country must also be one Stripe accepts.
+        # Sending a rejected code is a 400 that takes checkout down for EVERY buyer, not just that one.
+        out = set(offerable_countries({"zones": [ELSEWHERE]}))
+        for code in ("CU", "IR", "KP", "SY", "VI", "MP"):
+            self.assertNotIn(code, out)
+
+    def test_without_a_catch_all_it_matches_the_stripe_list_exactly(self):
+        # The expansion is the CATCH-ALL's doing. A tenant who named two countries ships to two, and the
+        # buyer's dropdown and Stripe's address form then agree by construction.
+        named = {"zones": [US, CA]}
+        self.assertEqual(offerable_countries(named), allowed_countries(named))
+        self.assertEqual(offerable_countries(named), ["US", "CA"])
 
 
 class Validation(unittest.TestCase):

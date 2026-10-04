@@ -297,7 +297,8 @@ def _fee_of(order: dict[str, Any], key: str) -> int:
     return int(order.get(key) or 0)
 
 
-def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int) -> dict[str, Any] | None:
+def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
+                          source: str = "webhook") -> dict[str, Any] | None:
     """Build a sale entry from a checkout order document. Returns None if there is no
     payable amount or identity to key on. The entry_id is deterministic (le_sale_<pi/order>)
     so a duplicate webhook overwrites the same row — idempotent by primary key."""
@@ -336,6 +337,10 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int) -> dict[str,
         product_id=str(order.get("product_id") or "") or None,
         customer=customer,
         stripe={"payment_intent_id": payment_intent} if payment_intent else None,
+        # Defaults to "webhook" because that is how nearly every sale arrives. An upsell does not: it is a
+        # PaymentIntent the upsell handler creates and records itself, and labelling those rows "webhook"
+        # made the ledger's one provenance field state the opposite of the truth.
+        source=source,
         now_epoch=now_epoch,
     )
 

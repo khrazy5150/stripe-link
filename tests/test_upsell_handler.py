@@ -127,6 +127,14 @@ class UpsellSessionTests(unittest.TestCase):
         self.assertEqual(body["session"]["shipping_address"]["city"], "Austin")
 
 
+
+def _pi_create(opener):
+    """The POST that created the PaymentIntent, out of every Stripe call the handler made."""
+    for request in reversed(opener.requests):
+        if request.full_url.endswith("/payment_intents") and request.data:
+            return request
+    raise AssertionError("no PaymentIntent create in " + repr([r.full_url for r in opener.requests]))
+
 class ProcessUpsellTests(unittest.TestCase):
     def setUp(self):
         self.offer = load_fixture("offer-creatine-upsell.json")
@@ -220,7 +228,9 @@ class ProcessUpsellTests(unittest.TestCase):
             "net_payout": 2456,
         })
 
-        pi_request = opener.requests[-1]
+        # The PI CREATE, found by what it is rather than by being last: the upsell now makes a
+        # further GET afterwards to true its Stripe fee against the charge's balance transaction.
+        pi_request = _pi_create(opener)
         pi_payload = parse_qs(pi_request.data.decode("utf-8"))
         self.assertEqual(pi_payload["payment_method"], ["pm_123"])
         self.assertEqual(pi_payload["off_session"], ["true"])
@@ -310,7 +320,9 @@ class ProcessUpsellTests(unittest.TestCase):
             response = self.handle(self.base_event(), opener, stripe_repo=FakeStripeKeysRepository(connect_account_id="acct_connected_123"))
         self.assertEqual(response["statusCode"], 201)
 
-        pi_request = opener.requests[-1]
+        # The PI CREATE, found by what it is rather than by being last: the upsell now makes a
+        # further GET afterwards to true its Stripe fee against the charge's balance transaction.
+        pi_request = _pi_create(opener)
         pi_payload = parse_qs(pi_request.data.decode("utf-8"))
         self.assertEqual(pi_payload["application_fee_amount"], ["135"])
         self.assertEqual(pi_request.headers.get("Stripe-account"), "acct_connected_123")
@@ -324,7 +336,9 @@ class ProcessUpsellTests(unittest.TestCase):
 
         response = self.handle(self.base_event(), opener)
         self.assertEqual(response["statusCode"], 201)
-        pi_request = opener.requests[-1]
+        # The PI CREATE, found by what it is rather than by being last: the upsell now makes a
+        # further GET afterwards to true its Stripe fee against the charge's balance transaction.
+        pi_request = _pi_create(opener)
         pi_payload = parse_qs(pi_request.data.decode("utf-8"))
         self.assertEqual(pi_payload["payment_method"], ["pm_fallback"])
 

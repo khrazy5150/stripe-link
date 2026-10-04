@@ -26,6 +26,7 @@ from stripe_link.domain.fees import (application_fee_percent, build_fee_context,
                                      calculate_price, normalize_tier_id)
 from stripe_link.domain.shipping_charges import checkout_shipping, stripe_option_payload
 from stripe_link.domain.shipping_zones import allowed_countries as zone_allowed_countries
+from stripe_link.domain.shipping_zones import offerable_countries as zone_offerable_countries
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
@@ -666,7 +667,8 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
         is_expired as quote_expired,
         normalize_destination,
     )
-    from stripe_link.domain.shipping_zones import allowed_countries as zone_countries
+    from stripe_link.domain.shipping_zones import allowed_countries as zone_primary_countries
+    from stripe_link.domain.shipping_zones import offerable_countries as zone_countries
     from stripe_link.domain.shipping_zones import rule_for as zone_rule_for
 
     offers_repo = offers_repo or offers_repository(mode=mode)
@@ -721,6 +723,12 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
 
     target = country if country in countries else ""
     payload = {"ships": True, "countries": countries, "country": target,
+               # WHICH OF THEM THE TENANT NAMED. With a catch-all the list runs to 233 entries, and the
+               # element has to tell the tenant's own destinations apart from the expansion behind them:
+               # the named ones keep the tenant's order at the top, the rest get sorted by the buyer's
+               # own language. The server cannot do that sorting -- it does not know the buyer's locale,
+               # and these are codes, not names.
+               "primary_countries": zone_primary_countries(config),
                "options": [], "needs": "", "mode": "", "source": ""}
     if not countries:
         # The offer ships, but the TENANT has configured no zones -- so there is nowhere to offer and nothing
@@ -1294,10 +1302,26 @@ def build_checkout_payload(
         # so the rest of the address cannot move the number.
         #
         # Ignored unless the tenant actually ships there: a country typed into a URL is not a zone.
-        if ship_to_country and ship_to_country in destinations:
+        #
+        # Tested against EVERYTHING the tenant ships to, catch-all included -- not against `destinations`,
+        # which is deliberately the narrow Stripe-safe list. A buyer who picked Mexico from the element's
+        # dropdown has named a country the tenant's "Everywhere else" zone really does serve, and the
+        # element has already rated it; refusing it here would collect the declaration and then ignore it.
+        # Once declared there is one destination, so the unanimity problem that keeps the undeclared list
+        # narrow does not arise.
+        if ship_to_country and ship_to_country in zone_offerable_countries(shipping_config or {}):
             destinations = [ship_to_country]
         for index, country in enumerate(destinations):
             payload[f"shipping_address_collection[allowed_countries][{index}]"] = country
+        # A PHONE NUMBER, because a carrier may need one to deliver. Couriers call the recipient for a
+        # failed delivery, a gate code or a signature, and the number has to have been collected by then --
+        # `destination_address_from_session` and the label buyer have both carried `customer.phone` since
+        # they were written, but hosted Checkout never asked for it, so it was always empty.
+        #
+        # ONLY where there is a parcel. Stripe's hosted Checkout has no optional mode for this field: when
+        # collection is on the buyer must fill it in, so enabling it everywhere would put a required field
+        # in front of every download and tip for no delivery that could ever need it.
+        payload["phone_number_collection[enabled]"] = "true"
 
     # What shipping COSTS the buyer (plans/SHIPPING_CHARGES.md phase 6). The last thing wired, deliberately:
     # Checkout is the one consumer that cannot be corrected after the fact, because a session that quoted the
