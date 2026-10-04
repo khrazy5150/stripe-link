@@ -241,3 +241,40 @@ class APagesPublicUrlIsItsOwnSlugTests(unittest.TestCase):
 
     def test_an_unattached_page_still_has_none(self):
         self.assertEqual(site_page_slug(self.SITE, "page_missing"), "")
+
+
+class TheDashboardObeysTheSameRuleTests(unittest.TestCase):
+    """Fixing the server did not fix the card, because the card never asked the server.
+
+    `sitePublicUrl` walks the Site's own route map in the browser and returns the first entry carrying
+    this page's id -- the exact scan `site_page_slug` does, written a second time and never taught the
+    rule. So the advertised URL moved from `…/thank-you` to `…/upsell` when the funnel gained a step and
+    the map's order changed, while the card's own Slug field read `/dietary-supplement-bundle` the whole
+    time (author, 2026-10-03). Both slugs serve correctly; only the URL on the card was wrong.
+
+    `pageSlug` in the A/B store runs the same scan for a sharper purpose -- it is how a page is judged to
+    have "no public address of its own", which is what makes it eligible to be a variant. A page owning
+    only funnel routes answered with one.
+    """
+
+    DASHBOARD = __import__("pathlib").Path(__file__).resolve().parents[1] / "dashboard" / "src"
+
+    def _body(self, path, marker, length=2200):
+        source = (self.DASHBOARD / path).read_text()
+        self.assertIn(marker, source, f"{path} no longer contains {marker}")
+        return source.split(marker, 1)[1][:length]
+
+    def test_the_landing_page_card_skips_funnel_routes(self):
+        body = self._body("components/LandingPages.vue", "function sitePublicUrl(page) {")
+        self.assertIn("if (entry?.funnel_role) continue;", body)
+
+    def test_it_skips_them_BEFORE_returning_a_url(self):
+        # The guard has to precede both returns, or it decides nothing.
+        body = self._body("components/LandingPages.vue", "function sitePublicUrl(page) {")
+        self.assertLess(body.index("funnel_role"), body.index("return `https://${host}"))
+
+    def test_the_ab_variant_eligibility_scan_skips_them_too(self):
+        source = (self.DASHBOARD / "stores" / "abTesting.js").read_text()
+        scans = source.count("Object.entries(site.pages || {})")
+        self.assertEqual(scans, source.count("!entry.funnel_role"),
+                         f"{scans} route scans in abTesting.js, not all of them skip funnel routes")

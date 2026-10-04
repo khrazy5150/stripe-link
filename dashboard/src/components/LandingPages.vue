@@ -4097,6 +4097,13 @@ function sitePublicUrl(page) {
     if (!host) continue;
     for (const [slug, entry] of Object.entries(s.pages || {})) {
       if (entry?.page_id !== page.page_id) continue;
+      // A RESERVED FUNNEL SLUG IS NOT THE PAGE'S ADDRESS. /upsell and /thank-you carry the base sales
+      // page's id because their synthetic artifacts derive from it, not because the page lives there —
+      // the Workout Bundle lives at /dietary-supplement-bundle and /thank-you is a step in its funnel.
+      // This took whichever route matched first, so once a page owned funnel slugs as well as its own
+      // the card advertised its public URL as …/thank-you, then …/upsell (author, 2026-10-02/03).
+      // `site_page_slug` already skips these server-side; this is the same rule, client-side.
+      if (entry?.funnel_role) continue;
       // A LINK HUB's public URL is its creator URL, and it is the username rather than the page's own slug:
       // jbay.page/maria IS the page. Shown only once the server says this environment serves them, so a
       // tenant is never handed a URL that does not resolve. The hub stays reachable on the Site's host too —

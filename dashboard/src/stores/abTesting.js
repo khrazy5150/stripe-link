@@ -67,7 +67,11 @@ export const useAbTestingStore = defineStore("abTesting", {
       const byPage = {};
       for (const site of state.sites || []) {
         for (const [slug, entry] of Object.entries(site.pages || {})) {
-          if (entry && entry.page_id) byPage[entry.page_id] = slug;
+          // A reserved funnel slug (/upsell, /thank-you) carries the base sales page's id without being
+          // its address, so it must not answer "where is this page served?" — and here that question
+          // doubles as "does this page have a public address at all?", which decides whether it can be a
+          // variant. Same rule as `site_page_slug` server-side.
+          if (entry && entry.page_id && !entry.funnel_role) byPage[entry.page_id] = slug;
         }
       }
       return (pageId) => byPage[pageId] || "";
@@ -79,7 +83,11 @@ export const useAbTestingStore = defineStore("abTesting", {
       const byPage = {};
       for (const site of state.sites || []) {
         for (const [slug, entry] of Object.entries(site.pages || {})) {
-          if (entry && entry.page_id) byPage[entry.page_id] = slug;
+          // A reserved funnel slug (/upsell, /thank-you) carries the base sales page's id without being
+          // its address, so it must not answer "where is this page served?" — and here that question
+          // doubles as "does this page have a public address at all?", which decides whether it can be a
+          // variant. Same rule as `site_page_slug` server-side.
+          if (entry && entry.page_id && !entry.funnel_role) byPage[entry.page_id] = slug;
         }
       }
       return (pageId) => {
