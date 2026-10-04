@@ -448,13 +448,24 @@ def process_upsell(
     from handlers.stripe_webhook import fees_from_payment_intent, fetch_actual_fees, true_up_fees
 
     actual = fees_from_payment_intent(payment_intent)
-    if not actual:
-        # The expansion came back without a settled transaction. Worth one retry over the wire, because a
-        # few hundred milliseconds of handler time is sometimes all it needed -- and worth no more than
-        # one, because the buyer is waiting on this response.
+    # `"stripe_fee" not in actual`, NOT `not actual`. A balance transaction exists from the moment the
+    # charge does, but it arrives `pending` and its `fee_details` fill in a beat later -- so the create
+    # response carries `{"net": ...}` and nothing else. Testing the dict's truthiness read that as
+    # success, skipped the retry, and handed `true_up_fees` a dict with no `stripe_fee` in it, which it
+    # correctly declined. The estimate stood, nothing was logged, and the only visible symptom was an
+    # order still marked an estimate (2026-10-04, second attempt at this).
+    #
+    # Worth exactly one retry over the wire: a few hundred milliseconds is sometimes all it needed, and
+    # the buyer is waiting on this response.
+    if "stripe_fee" not in actual:
         actual = fetch_actual_fees(str(payment_intent.get("id") or ""), api_key=api_key,
                                    stripe_account=stripe_account, opener=opener)
     upsell_fees = true_up_fees(fee_context["fees"], actual)
+    if upsell_fees.get("fees_source") != "balance_transaction":
+        # SAY SO. An estimate is a correct outcome and an indistinguishable one -- the order records, the
+        # ledger records, and the numbers look right because an estimate is plausible. Naming what came
+        # back is what turns the next occurrence into evidence instead of another guess.
+        print(f"[fees] upsell {order_id} kept its estimate; stripe returned {sorted(actual)}")
     primary_item = (resolved.get("items") or [{}])[0]
     product = products_by_id.get(primary_item.get("product_id")) or {}
     product_name = product.get("name") or primary_item.get("product_name") or "Upsell"

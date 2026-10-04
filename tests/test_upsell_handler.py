@@ -226,6 +226,8 @@ class ProcessUpsellTests(unittest.TestCase):
             "stripe_fee": 109,
             "platform_fee": 135,
             "net_payout": 2456,
+            # The fake Stripe returns no balance transaction, so the estimate stands -- and now says so.
+            "fees_source": "estimate",
         })
 
         # The PI CREATE, found by what it is rather than by being last: the upsell now makes a

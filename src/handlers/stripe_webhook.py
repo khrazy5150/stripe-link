@@ -1847,10 +1847,17 @@ def true_up_fees(fees: dict[str, Any], actual: dict[str, int] | None) -> dict[st
 
     `platform_fee` is left ALONE -- it is exact already, because checkout chose the number and Stripe
     applied it. Only Stripe's own fee was ever an estimate.
+
+    **Every result says which it is.** `fees_source` used to appear only on success, so an estimate was
+    marked by the ABSENCE of a field -- indistinguishable from an order written before the field existed,
+    and from one where nobody tried. An estimate is a correct outcome and a plausible-looking one: the
+    numbers land within a cent or two of Stripe's on a standard card, so the only thing that ever reveals
+    one is a report that can name it. Stamping both outcomes is what lets a tenant's accounting say
+    "these fees are Stripe's, those are ours" instead of implying the first about all of them.
     """
     actual = actual or {}
     if "stripe_fee" not in actual:
-        return fees
+        return dict(fees, fees_source="estimate")
     trued = dict(fees)
     trued["stripe_fee"] = int(actual["stripe_fee"])
     gross = int(fees.get("tenant_keyed_amount") or 0)

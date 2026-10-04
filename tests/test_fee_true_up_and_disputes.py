@@ -62,9 +62,23 @@ class TrueUpTests(unittest.TestCase):
         # It was exact already: checkout chose the number and Stripe applied it.
         self.assertEqual(true_up_fees(ESTIMATE, {"stripe_fee": 212})["platform_fee"], 284)
 
-    def test_no_actual_leaves_the_estimate_alone(self):
-        self.assertEqual(true_up_fees(ESTIMATE, {}), ESTIMATE)
-        self.assertEqual(true_up_fees(ESTIMATE, None), ESTIMATE)
+    def test_no_actual_leaves_the_estimate_alone_but_SAYS_it_is_one(self):
+        """The numbers are untouched; only the provenance is added.
+
+        `fees_source` used to appear on success alone, so an estimate was marked by the ABSENCE of a
+        field -- indistinguishable from an order written before the field existed, and from one where
+        nobody tried. An estimate lands within a cent or two of Stripe's on a standard card, so the only
+        thing that ever reveals one is a report that can name it (author, 2026-10-04)."""
+        for actual in ({}, None):
+            trued = true_up_fees(ESTIMATE, actual)
+            self.assertEqual(trued["fees_source"], "estimate")
+            self.assertEqual({k: v for k, v in trued.items() if k != "fees_source"}, ESTIMATE)
+
+    def test_the_estimate_is_not_mutated_in_place(self):
+        # It is the caller's dict and often the one they go on to store.
+        before = dict(ESTIMATE)
+        true_up_fees(ESTIMATE, {})
+        self.assertEqual(ESTIMATE, before)
 
     def test_an_unsettled_charge_is_not_an_error(self):
         # Some payment methods settle later. Not a reason to overwrite a usable estimate with nothing.

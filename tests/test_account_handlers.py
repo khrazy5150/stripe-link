@@ -631,6 +631,8 @@ class AccountHandlerTests(unittest.TestCase):
             "stripe_fee": 138,
             "platform_fee": 185,
             "net_payout": 3386,
+            # An estimate now says so, rather than being marked by a missing field.
+            "fees_source": "estimate",
         })
         self.assertEqual(invoices_repo.documents[0]["amounts"]["stripe_fee"], 138)
         self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 185)
