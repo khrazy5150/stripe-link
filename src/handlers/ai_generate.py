@@ -66,7 +66,8 @@ from stripe_link.domain.documents import validate_product_ai_context
 from stripe_link.domain.product_brief import brief_from_product
 from stripe_link.domain.page_brief import BriefError, grounding_text, validate as validate_brief
 from stripe_link.domain.page_brief import withheld
-from stripe_link.repositories.documents import (RepositoryError, ai_jobs_repository,
+from stripe_link.repositories.documents import (RepositoryError,
+                                                ai_generation_events_repository, ai_jobs_repository,
                                                 ai_provider_config_repository, ai_usage_repository,
                                                 offers_repository, pages_repository,
                                                 platform_config_repository, products_repository,

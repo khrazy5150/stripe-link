@@ -287,6 +287,50 @@ class TheUpsellReachesTheLedgerTests(unittest.TestCase):
         self.assertEqual(summary["merchandise_revenue"], 1445)
         self.assertEqual(summary["shipping_revenue"], 568)
 
+    def test_it_resolves_its_OWN_repo_when_the_caller_gives_none(self):
+        """The branch production takes, and the one no test took.
+
+        `record_upsell_ledger_entry(order_record)` is called with one argument; every test called it with
+        two. So `ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)` ran
+        only in production -- where `os` was never imported, and the best-effort `except` printed the
+        NameError and returned False. Eight days of upsell revenue reached Orders and not the Ledger.
+        """
+        import os
+
+        import handlers.upsell as module
+        from handlers.upsell import record_upsell_ledger_entry
+
+        rows = []
+
+        class Repo:
+            def append(self, entry):
+                rows.append(entry)
+
+        real_factory, real_table = module.ledger_repository, os.environ.get("LEDGER_TABLE")
+        module.ledger_repository = lambda *a, **k: Repo()
+        os.environ["LEDGER_TABLE"] = "jb-ledger-test"
+        try:
+            self.assertTrue(record_upsell_ledger_entry(self.ORDER))
+        finally:
+            module.ledger_repository = real_factory
+            if real_table is None:
+                os.environ.pop("LEDGER_TABLE", None)
+            else:
+                os.environ["LEDGER_TABLE"] = real_table
+        self.assertEqual(rows[0]["amounts"]["gross"], 2013)
+
+    def test_no_ledger_table_is_a_quiet_no_op_not_a_crash(self):
+        import os
+
+        from handlers.upsell import record_upsell_ledger_entry
+
+        real = os.environ.pop("LEDGER_TABLE", None)
+        try:
+            self.assertFalse(record_upsell_ledger_entry(self.ORDER))
+        finally:
+            if real is not None:
+                os.environ["LEDGER_TABLE"] = real
+
     def test_a_ledger_outage_never_undoes_a_charge(self):
         from handlers.upsell import record_upsell_ledger_entry
 
