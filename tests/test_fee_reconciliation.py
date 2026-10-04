@@ -304,3 +304,58 @@ class TheSweepDrivesTheGENUINERepositoryTests(unittest.TestCase):
 
         params = list(inspect.signature(TenantRangeRepository.put).parameters)
         self.assertEqual(params, ["self", "document"])
+
+
+class TheScheduleReachesTheSweepTests(unittest.TestCase):
+    """The sweep shares the webhook's Lambda rather than owning one, for two reasons: the stack is at
+    CloudFormation's 1MB SAM-transform limit and a new function does not fit, and this is the right home
+    anyway -- the sweep does exactly what that handler does to every other sale, for the one sale path no
+    webhook follows. It also means the webhook already holds every permission the sweep needs.
+
+    The cost of sharing is a dispatch, and a dispatch is a thing that can silently stop working: an
+    EventBridge event has no `httpMethod`, so a webhook handler that reads one first answers 405 to the
+    schedule and the sweep simply never runs. Nothing would fail; it would just stop reconciling.
+    """
+
+    SOURCE = (__import__("pathlib").Path(__file__).resolve().parents[1]
+              / "src" / "handlers" / "stripe_webhook.py").read_text()
+    TEMPLATE = (__import__("pathlib").Path(__file__).resolve().parents[1] / "template.yaml").read_text()
+
+    def test_a_scheduled_event_is_answered_before_any_http_check(self):
+        body = self.SOURCE.split("\ndef handler(", 1)[1]
+        self.assertLess(body.index('"aws.events"'), body.index('event.get("httpMethod"'),
+                        "an EventBridge event has no httpMethod; reading one first answers it 405")
+
+    def test_it_dispatches_to_the_sweep(self):
+        block = self.SOURCE.split('"aws.events"', 1)[1][:400]
+        self.assertIn("from handlers.fee_reconciliation import handler as reconcile_fees", block)
+        self.assertIn("return reconcile_fees(event, context)", block)
+
+    def test_a_scheduled_event_really_routes_through(self):
+        import handlers.stripe_webhook as webhook_module
+
+        called = {}
+
+        import handlers.fee_reconciliation as sweep_module
+
+        def fake(event, context, **_kwargs):
+            called["event"] = event
+            return {"ok": 1}
+
+        real = sweep_module.handler
+        sweep_module.handler = fake
+        try:
+            out = webhook_module.handler({"source": "aws.events", "detail-type": "Scheduled Event"}, None)
+        finally:
+            sweep_module.handler = real
+        self.assertEqual(called["event"]["detail-type"], "Scheduled Event")
+        self.assertEqual(out, {"ok": 1})
+
+    def test_the_schedule_is_declared_on_that_function(self):
+        block = self.TEMPLATE.split("StripeWebhookFunction:", 1)[1].split("\n  PlatformBillingWebhook", 1)[0]
+        self.assertIn("FeeReconciliationSweep:", block)
+        self.assertIn("rate(15 minutes)", block)
+
+    def test_the_sweep_has_no_function_of_its_own(self):
+        # If one is ever added back, this test is the reminder that the transform limit is why.
+        self.assertNotIn("FeeReconciliationFunction", self.TEMPLATE)

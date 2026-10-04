@@ -46,6 +46,18 @@ indistinguishable from an order written before the field existed, and from one w
 `handlers/fee_reconciliation.py`, on a 15-minute schedule. The authoritative reconciliation pass, and the
 one that needs no Stripe configuration.
 
+**It shares the webhook's Lambda rather than owning one.** The first attempt added a function and the
+deploy failed: `Transform AWS::Serverless-2016-10-31 returned fragment exceeding 1000000 bytes` — this
+stack is at CloudFormation's SAM-transform limit, and a new function no longer fits. Sharing turned out to
+be the better home anyway: the sweep does exactly what the webhook does to every other sale, for the one
+sale path no webhook follows, and that function already holds every permission it needs (Orders, Ledger,
+StripeKeys, KMS, the platform secret). `stripe_webhook.handler` dispatches on `source == "aws.events"`,
+**before** reading `httpMethod` — an EventBridge event has none, so a handler that checks HTTP first
+answers the schedule 405 and the sweep silently never runs.
+
+> **The stack is full.** This is the first thing that did not fit, and it will not be the last. Splitting
+> the stack is now a real piece of work on the horizon, not a tidy-up.
+
 For each order that says it is an estimate: ask Stripe for the charge's balance transaction, and if it has
 settled, correct **the order and its ledger entry together**. Correcting one without the other leaves the
 two disagreeing, which is worse than correcting neither — every report a tenant reads is built from the

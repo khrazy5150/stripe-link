@@ -2533,6 +2533,17 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /webhook/stripe
             Method: POST
+        # Fee reconciliation runs HERE rather than as its own function, for two reasons. The stack is at
+        # CloudFormation's 1MB transform limit and a new function does not fit; and this is the right home
+        # anyway -- the sweep does exactly what this handler already does to every other sale (read the
+        # charge's balance transaction, replace the estimate), for the one sale path no webhook follows.
+        # It needs Orders, Ledger, StripeKeys, KMS and the platform secret, all of which are above.
+        # plans/FEE_RECONCILIATION.md Phase 1; handlers/stripe_webhook dispatches on the event shape.
+        FeeReconciliationSweep:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Description: Replace estimated Stripe fees with the charge's actual balance transaction.
 
   # Platform-account Stripe Billing webhook (the tenant's SaaS subscription). Separate endpoint from the Connect
   # webhook: these are the PLATFORM account's OWN events ("Your account" scope), with their own signing secret.
@@ -3739,50 +3750,6 @@ Resources:
           Properties:
             Schedule: rate(15 minutes)
             Description: Trigger the post-purchase review invitation sweep.
-
-  FeeReconciliationFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${ProjectPrefix}-fee-reconciliation-sweep-${Environment}"
-      CodeUri: src/
-      Handler: handlers.fee_reconciliation.handler
-      # Upsells are PaymentIntents we create ourselves, so no webhook follows them and the balance
-      # transaction is not attached yet when the handler asks. Without this their recorded fee stays an
-      # estimate, which understates the tenant's cost on any foreign-issued card -- measured at 40c across
-      # two upsells paid with a Canadian Visa (plans/FEE_RECONCILIATION.md Phase 1).
-      Description: >-
-        Scheduled sweep replacing estimated Stripe fees with the charge's actual balance transaction, on
-        the order and its ledger entry together.
-      Timeout: 300
-      Policies:
-        # WRITE: the correction lands on the order it is about.
-        - DynamoDBCrudPolicy:
-            TableName: !Ref OrdersTable
-        # ...and on its ledger entry, which is what every report is actually built from. Correcting one
-        # without the other would leave the two disagreeing, which is worse than correcting neither.
-        - DynamoDBCrudPolicy:
-            TableName: !Ref LedgerTable
-        # Asking Stripe what it really charged needs the tenant's credentials: the platform key scoped to
-        # their connected account, or their own KMS-wrapped key. Read-only, same as every other caller.
-        - DynamoDBReadPolicy:
-            TableName: !Ref StripeKeysTable
-        - Statement:
-            Effect: Allow
-            Action:
-              - kms:Decrypt
-              - kms:DescribeKey
-            Resource: !GetAtt StripeKeysEncryptionKey.Arn
-        - Statement:
-            Effect: Allow
-            Action:
-              - secretsmanager:GetSecretValue
-            Resource: "*"
-      Events:
-        FeeReconciliationSweep:
-          Type: Schedule
-          Properties:
-            Schedule: rate(15 minutes)
-            Description: Trigger the estimated-fee reconciliation sweep.
 
   OrdersFunction:
     Type: AWS::Serverless::Function

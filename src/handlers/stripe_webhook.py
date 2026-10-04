@@ -193,6 +193,17 @@ def handler(
     secret_cipher=None,
     line_items_fetcher: Callable[..., list[dict[str, Any]]] | None = None,
 ):
+    # THE SCHEDULED SWEEP, not a webhook. EventBridge delivers a bare event with no httpMethod, so this
+    # must be answered before anything reads one -- and it shares this function rather than owning one
+    # because the stack is at CloudFormation's 1MB transform limit, and because this IS the right home:
+    # the sweep does exactly what this handler does to every other sale (read the charge's balance
+    # transaction, replace the estimate), for the one sale path no webhook ever follows.
+    # plans/FEE_RECONCILIATION.md Phase 1.
+    if str((event or {}).get("source") or "") == "aws.events":
+        from handlers.fee_reconciliation import handler as reconcile_fees
+
+        return reconcile_fees(event, context)
+
     method = event.get("httpMethod", "")
     if method == "OPTIONS":
         return json_response({})
