@@ -2,7 +2,7 @@
   <main class="auth-page">
     <section class="auth-card">
       <header class="auth-header">
-        <img :src="assetUrl('/icon/favicon.png')" alt="" />
+        <img v-if="logoUrl" :src="logoUrl" alt="" />
         <h1>{{ store.activeTab === 'register' ? 'Start your free trial'
           : store.activeTab === 'forgot' ? 'Forgot Password'
           : 'User Login' }}</h1>
@@ -71,9 +71,12 @@
 </template>
 
 <script setup>
-import { assetUrl } from "../api/client";
+import { useBrandLogo } from "../composables/useBrandLogo";
 import { useAuthStore } from "../stores/auth";
 import PhoneInput from "./PhoneInput.vue";
 
 const store = useAuthStore();
+// Not `assetUrl()` inline: it returns "" until app_config loads, and `<img src="">` draws the browser's
+// broken-image icon rather than nothing. See the composable.
+const { logoUrl } = useBrandLogo();
 </script>

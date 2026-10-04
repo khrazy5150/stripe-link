@@ -373,8 +373,9 @@
       <header class="dashboard-card-header">
         <h2>What buyers pay</h2>
         <p>Shipping charges by destination, checked <strong>in order</strong> — the first zone that matches a
-          buyer's country decides. The last zone catches everywhere you have not listed, so every buyer has an
-          answer. Amounts are in your store's default currency.</p>
+          buyer's country decides. An &ldquo;Everywhere else&rdquo; zone at the end covers the countries you
+          have not listed; remove it and you ship only where you said. Amounts are in your store's default
+          currency.</p>
       </header>
       <div class="dashboard-card-body">
         <div v-for="(zone, index) in form.zones" :key="index" class="offer-item-editor">
@@ -388,7 +389,7 @@
                       title="Move up" @click="moveZone(index, -1)">↑</button>
               <button v-if="!isCatchAllZone(zone) && index < form.zones.length - 2" class="secondary-action compact"
                       type="button" title="Move down" @click="moveZone(index, 1)">↓</button>
-              <button v-if="!isCatchAllZone(zone)" class="secondary-action compact" type="button"
+              <button class="secondary-action compact" type="button"
                       @click="form.zones.splice(index, 1)">Remove</button>
             </div>
           </header>
@@ -440,6 +441,13 @@
           </p>
         </div>
         <button class="secondary-action" type="button" @click="addZone">Add zone</button>
+        <button v-if="!hasCatchAll" class="secondary-action" type="button" @click="addCatchAll">
+          Add &ldquo;Everywhere else&rdquo;
+        </button>
+        <p v-if="!hasCatchAll" class="field-hint">
+          You ship only to the countries listed above. A buyer anywhere else is not offered shipping and
+          cannot check out &mdash; which is the point of removing it, but it is worth being sure.
+        </p>
 
         <!-- P5: ONE DECISION, stated. Most sellers reward a bigger order with free shipping, which is
              only coherent if the cost was recovered in the price -- and adding one item to a parcel that
@@ -869,6 +877,8 @@ function useStarterServices() {
   form.enabled_services = STARTER_SERVICES.map((service) => ({ ...service }));
 }
 
+const hasCatchAll = computed(() => form.zones.some(isCatchAllZone));
+
 function emptyZone() {
   return { name: "", countries_text: "", rule: { type: "flat", amount_text: "" } };
 }
@@ -882,8 +892,16 @@ function isCatchAllZone(zone) {
 }
 
 function addZone() {
-  // Inserted BEFORE the catch-all, because a zone after it would never be reached.
-  form.zones.splice(Math.max(0, form.zones.length - 1), 0, emptyZone());
+  // Inserted BEFORE the catch-all, because a zone after it would never be reached -- but only when there
+  // IS one. A tenant who removed it ships only where they listed, and a new zone belongs at the end.
+  const last = form.zones[form.zones.length - 1];
+  const before = isCatchAllZone(last) ? form.zones.length - 1 : form.zones.length;
+  form.zones.splice(Math.max(0, before), 0, emptyZone());
+}
+
+function addCatchAll() {
+  // Always last: every zone after a catch-all is unreachable, and the document validator refuses it.
+  if (!hasCatchAll.value) form.zones.push(catchAllZone());
 }
 
 function moveZone(index, delta) {
@@ -1103,9 +1121,14 @@ function zonesFromDocument(zones) {
     .filter((row) => row.countries_text);
   const catchAll = rows.filter(isCatchAllZone);
   const specific = rows.filter((row) => !isCatchAllZone(row));
-  // Exactly one, always last. A stored document with none (or several) is normalised rather than refused --
-  // the tenant sees a complete, valid set instead of an error about a shape they never typed.
-  return [...specific, catchAll[0] || catchAllZone()];
+  // At most one, always last. Several are normalised to the first rather than refused -- the tenant sees a
+  // valid set instead of an error about a shape they never typed.
+  //
+  // NONE is now a real answer rather than a gap to fill. It used to append one here, which made the
+  // catch-all structurally mandatory: a tenant could remove it, save, and find it back on the next load
+  // with nothing to explain why. Removing it is how a seller says "I ship to these countries and no
+  // others", which the shipping element and Stripe's address form both honour (author, 2026-10-04).
+  return catchAll.length ? [...specific, catchAll[0]] : specific;
 }
 
 function applyConfig(config) {

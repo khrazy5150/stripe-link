@@ -2880,11 +2880,22 @@ def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
         # reported where it matters -- `shipping_charges.resolve_options` answers `needs: box_price`, the
         # quote endpoint relays it, and the screen says "No box has a price for US yet" while they work.
 
-    if zones and ANYWHERE not in zone_countries(zones[-1]):
-        # Without one, a buyer from an unlisted country reaches undefined behaviour at the moment of purchase.
-        raise DocumentValidationError(
-            "Shipping config zones must end with a catch-all zone (country '*') so 'everywhere else' has an "
-            "answer.")
+    # NOT validated: whether a catch-all zone exists at all.
+    #
+    # It was, on the reasoning that without one "a buyer from an unlisted country reaches undefined
+    # behaviour at the moment of purchase". That premise turned out to be false. A country no zone claims
+    # is not undefined, it is UNSERVED, and every layer already answers it that way: `rule_for` returns
+    # {}, `ships_to` says False, `resolve_options` reports `source: unserved` with an empty `mode`
+    # specifically so a caller cannot read it as "free", `allowed_countries` omits it so Stripe never
+    # offers the address, and the shipping element never lists it.
+    #
+    # What the rule actually did was make the catch-all mandatory, and a seller who ships domestically
+    # only has no way to say so -- the one thing they most need to say (author, 2026-10-04: *"so that
+    # tenants can force the shipping element to ship within the United States only"*). Refusing that is
+    # the validator deciding a commercial policy, which is not its job.
+    #
+    # A catch-all in the WRONG PLACE is still refused above: every zone after it is unreachable, which is
+    # incoherent data rather than an incomplete configuration.
 
 
 def validate_shipping_config(document: dict[str, Any]) -> None:

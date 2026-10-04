@@ -216,10 +216,23 @@ class Validation(unittest.TestCase):
             validate_shipping_zones([ELSEWHERE, US])
         self.assertIn("unreachable", str(caught.exception))
 
-    def test_a_missing_catch_all_is_refused(self):
-        with self.assertRaises(DocumentValidationError) as caught:
-            validate_shipping_zones([US])
-        self.assertIn("everywhere else", str(caught.exception))
+    def test_a_missing_catch_all_is_ALLOWED(self):
+        """It used to be refused, on the reasoning that without one "a buyer from an unlisted country
+        reaches undefined behaviour at the moment of purchase". The premise was false: a country no zone
+        claims is not undefined, it is UNSERVED, and every layer already says so -- `rule_for` returns {},
+        `ships_to` is False, `resolve_options` reports `source: unserved` with an empty `mode` precisely so
+        nobody reads it as free, and `allowed_countries` omits it so Stripe never offers the address.
+
+        What the rule actually did was make the catch-all mandatory, leaving a seller who ships
+        domestically only with no way to say so -- the one thing they most need to say (author,
+        2026-10-04)."""
+        validate_shipping_zones([US])
+        validate_shipping_zones([US, CA])
+
+    def test_a_catch_all_in_the_wrong_place_is_STILL_refused(self):
+        # Incoherent data rather than incomplete configuration: every zone after it is unreachable.
+        with self.assertRaises(DocumentValidationError):
+            validate_shipping_zones([ELSEWHERE, US])
 
     def test_flat_without_an_amount_is_refused(self):
         with self.assertRaises(DocumentValidationError):
@@ -274,10 +287,13 @@ class Validation(unittest.TestCase):
 
     def test_it_runs_as_part_of_the_config_validator(self):
         document = {"schema_version": "2026-05-29", "document_type": "shipping_config", "tenant_id": "t1",
-                    "provider": {"name": "shippo"}, "zones": [US]}
+                    "provider": {"name": "shippo"},
+                    "zones": [{"destinations": [{"country": "CA"}], "rule": {"type": "flat"}}]}
         with self.assertRaises(DocumentValidationError):
-            validate_shipping_config(document)
+            validate_shipping_config(document)      # a flat rate with no amount prices nothing
         document["zones"] = [US, ELSEWHERE]
+        validate_shipping_config(document)
+        document["zones"] = [US]                    # domestic only, which is a policy and not an error
         validate_shipping_config(document)
 
 

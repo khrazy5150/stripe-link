@@ -2,7 +2,7 @@
   <div v-if="store.connectIntro" class="modal-backdrop" @click.self="store.dismissConnectIntro()">
     <section class="modal-card connect-intro-card" role="dialog" aria-modal="true" aria-labelledby="connect-intro-title">
       <div class="ci-brandline">
-        <img :src="assetUrl('/icon/favicon.png')" alt="" width="34" height="34" />
+        <img v-if="logoUrl" :src="logoUrl" alt="" width="34" height="34" />
         <span class="ci-handshake">🤝</span>
         <span class="ci-stripe">stripe</span>
       </div>
@@ -53,7 +53,7 @@
 // onboarding, so the win is a friendly, expectation-setting wrapper — plans/TODO.md "Branded Connect
 // onboarding intro"). Mounted ONCE in App.vue; every startConnect() entry point opens it.
 import { ref, computed } from "vue";
-import { assetUrl } from "../../api/client";
+import { useBrandLogo } from "../../composables/useBrandLogo";
 import { useStripeKeysStore } from "../../stores/stripeKeys";
 
 const store = useStripeKeysStore();
@@ -96,6 +96,9 @@ function go() {
   const args = store.connectIntro || {};
   store.launchConnect({ ...args, country: country.value });
 }
+// See useBrandLogo: an empty asset base renders the browser's broken-image icon.
+const { logoUrl } = useBrandLogo();
+
 </script>
 
 <style scoped>

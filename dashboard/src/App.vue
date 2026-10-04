@@ -8,7 +8,7 @@
   >
     <aside class="sidebar">
       <div class="brand">
-        <img :src="assetUrl('/icon/favicon.png')" alt="" />
+        <img v-if="logoUrl" :src="logoUrl" alt="" />
         <strong><span class="wm-junior">Junior</span> <span class="wm-bay">Bay</span></strong>
       </div>
       <nav>
@@ -224,7 +224,8 @@ import StripeKeys from "./components/StripeKeys.vue";
 import AiProvider from "./components/AiProvider.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
-import { assetUrl, getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
+import { getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
+import { useBrandLogo } from "./composables/useBrandLogo";
 import { useAuthStore } from "./stores/auth";
 import { useProfileStore } from "./stores/profile";
 import { useCollectionsStore } from "./stores/collections";
@@ -489,6 +490,9 @@ function handleKeydown(event) {
     userMenuOpen.value = false;
   }
 }
+
+// `assetUrl()` inline returns "" until app_config loads, and `<img src="">` draws a broken-image icon.
+const { logoUrl } = useBrandLogo();
 
 onMounted(() => {
   document.addEventListener("mousedown", handleDocumentClick);
