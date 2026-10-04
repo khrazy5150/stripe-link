@@ -322,6 +322,11 @@ DEFAULT_THANK_YOU = {
     "subheadline": "Your order is confirmed — a receipt is on its way to your inbox.",
     "message": "We're getting your order ready. You'll get an email with the details shortly.",
     "enable_celebration": True,
+    # ON by default and harmless when there is nothing to ship: the island removes the element for an
+    # order with no parcel rather than the page guessing in advance (plans/THANK_YOU_PAGE.md P2).
+    "enable_shipping_eta": True,
+    "shipping_eta_icon": "📦",
+    "shipping_eta_title": "Shipping",
     "enable_next_steps": True,
     "next_steps_title": "What's Next?",
     "next_steps": [
@@ -381,6 +386,15 @@ def synthesize_thank_you_page(
     headline_text = f"{icon} {config['headline']}".strip() if icon and icon != "—" else config["headline"]
     sections.append({"id": "headline", "type": "headline", "text": headline_text})
     sections.append({"id": "subheadline", "type": "subheadline", "text": config["subheadline"]})
+    # FIRST, before the message (author, 2026-10-04: *"the shipping element for physical products must be
+    # the very first thing that appears after the headline and subheadline"*). It is the one thing a buyer
+    # opened this page to find out, and burying it under a paragraph of reassurance is how it ends up
+    # unread. The element is emitted for every page; the island removes it when the order turns out to
+    # have no parcel, because only the ORDER knows that and this page is one artifact serving everyone.
+    if config.get("enable_shipping_eta", True):
+        sections.append({"id": "shipping-eta", "type": "shipping_eta",
+                         "icon": config.get("shipping_eta_icon") or "📦",
+                         "title": config.get("shipping_eta_title") or "Shipping"})
     if config.get("message"):
         sections.append({"id": "content", "type": "content_block", "blocks": [{"title": "", "text": config["message"]}]})
     if config.get("enable_next_steps"):

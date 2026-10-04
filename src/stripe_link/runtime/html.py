@@ -2464,6 +2464,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "content_block": {"render": lambda c: render_content_blocks(c.section), "version": 1},
     # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2) — emitted by synthesize_thank_you_page only.
     "celebration": {"render": lambda c: render_celebration(c.section), "version": 1},
+    "shipping_eta": {"render": lambda c: render_shipping_eta(c.section), "version": 1},
     "next_steps": {"render": lambda c: render_next_steps(c.section), "version": 1},
     "thank_you_footer": {"render": lambda c: render_thank_you_footer(c.section), "version": 1},
     "testimonials": {"render": lambda c: render_testimonials(c.section), "version": 1},
@@ -5447,6 +5448,102 @@ def render_celebration(section: dict[str, Any]) -> str:
         "<svg viewBox=\"0 0 52 52\"><circle class=\"sl-celebration-ring\" cx=\"26\" cy=\"26\" r=\"24\"/>"
         "<path class=\"sl-celebration-check\" d=\"M14 27l7 7 16-16\"/></svg></div>",
         "    </section>",
+    ])
+
+
+def render_shipping_eta(section: dict[str, Any]) -> str:
+    """When the parcel is due — the first thing after the headline on a physical order's thank-you page.
+
+    plans/THANK_YOU_PAGE.md P2. The page is a static artifact serving every buyer, so the DATE cannot be
+    baked in: the shell renders with a neutral line and an island fills it from the order behind the
+    `session_id` already in the URL.
+
+    That shell is deliberately truthful on its own. A buyer whose JavaScript never runs reads "we'll email
+    tracking details" — not a date nobody computed for them, and not the "Free Shipping / arrives within
+    5–7 business days" that this element exists to delete.
+
+    The tenant owns the icon and the title. The body is generated, which is the point: a sentence nobody
+    can type is a sentence that cannot claim free shipping on an order that paid $39.59.
+    """
+    title = str(section.get("title") or "Shipping").strip()
+    icon = str(section.get("icon") or "").strip()
+    icon_html = f'<span class="sl-ship-eta-icon">{escape(icon)}</span>' if icon and icon != "\u2014" else ""
+    # What a BUILDER PREVIEW shows, where there is no order to ask about. Marked as an example, or the
+    # first thing every tenant does is report the page as broken.
+    example = str(section.get("example") or "").strip()
+    sentence = example or "We'll email tracking details as soon as it ships."
+    section_id = escape(str(section.get("id", "shipping-eta")))
+    api_base = escape(str(_RENDER_STATE.get("api_base_url") or ""))
+    tenant_id = escape(str(_RENDER_STATE.get("tenant_id") or ""))
+    parts = [
+        f'    <section class="sl-ship-eta" data-section-id="{section_id}" data-section-type="shipping_eta"'
+        f' data-api-base-url="{api_base}" data-tenant-id="{tenant_id}">',
+        '      <div class="sl-ship-eta-card">',
+        f"        {icon_html}" if icon_html else "",
+        f"        <strong>{escape(title)}</strong>",
+        f'        <p class="sl-ship-eta-line">{escape(sentence)}</p>',
+        ('        <p class="sl-ship-eta-note">Example &mdash; your buyers see their own date.</p>'
+         if example else ""),
+        "      </div>",
+        "    </section>",
+        _shipping_eta_island() if not example else "",
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def _shipping_eta_island() -> str:
+    """Fill the element, and any `{{arrival}}` in the cards below it, from the order behind `session_id`.
+
+    **One fetch, two consumers.** The element's sentence and the token in a tenant's own card are the same
+    promise worded differently, so they must come from the same response -- two requests could disagree,
+    and a date that disagrees with itself on one page is worse than no date.
+
+    **Removes the element when there is no parcel.** Only the ORDER knows whether anything ships, and this
+    page is one artifact serving every buyer, so the decision cannot be made at render time. A digital
+    order gets `{}` back and the element deletes itself rather than reassuring someone about a delivery
+    they are not expecting.
+
+    Silent on failure: the shell's own line already says tracking is coming, which is true whatever
+    happened to the request.
+    """
+    return "\n".join([
+        "    <script>",
+        "    (function(){",
+        "      var box = document.querySelector('.sl-ship-eta');",
+        "      if (!box) return;",
+        "      var api = box.dataset.apiBaseUrl || '';",
+        "      var tenant = box.dataset.tenantId || '';",
+        "      var session = new URLSearchParams(window.location.search).get('session_id') || '';",
+        # No session means a preview or a direct visit: leave the honest shell alone rather than asking
+        # about an order that does not exist.
+        "      if (!api || !tenant || !session) return;",
+        "      var tokens = function(text, phrase){ return String(text).split('{{arrival}}').join(phrase); };",
+        "      fetch(api.replace(/\\/$/, '') + '/upsell/session?session_id=' + encodeURIComponent(session)",
+        "            + '&clientID=' + encodeURIComponent(tenant))",
+        "        .then(function(r){ return r.json(); })",
+        "        .then(function(body){",
+        "          var promise = (body && body.delivery) || null;",
+        # `{}` is a real answer: this order has no parcel, so the element must go rather than linger.
+        "          if (!promise || !Object.keys(promise).length) { box.remove(); return; }",
+        "          var line = box.querySelector('.sl-ship-eta-line');",
+        "          if (line && promise.sentence) { line.textContent = promise.sentence; }",
+        "          if (promise.service) {",
+        "            var svc = document.createElement('p');",
+        "            svc.className = 'sl-ship-eta-service';",
+        "            svc.textContent = promise.service;",
+        "            box.querySelector('.sl-ship-eta-card').appendChild(svc);",
+        "          }",
+        # The SAME promise, worded by the tenant. Substituted after the element so both land together or
+        # neither does.
+        "          var phrase = promise.arrival_phrase || '';",
+        "          if (!phrase) return;",
+        "          Array.prototype.forEach.call(document.querySelectorAll('.sl-next-step p'), function(el){",
+        "            if (el.textContent.indexOf('{{arrival}}') >= 0) el.textContent = tokens(el.textContent, phrase);",
+        "          });",
+        "        })",
+        "        .catch(function(){});",
+        "    })();",
+        "    </script>",
     ])
 
 

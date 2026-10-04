@@ -135,8 +135,15 @@ first thing every tenant does is report the thank-you page as broken.
    — order time, cutoff, timezone and transit days in; a date or a date range out, `{}` when it cannot be
    known. `domain/store_timezone.py` suggests from the address and never insists. The open question below
    was settled by measurement before either was written.
-2. **The element.** Endpoint, island, renderer, placement after the subheadline, and the three sentences
-   above.
+2. **The element** ✅ *shipped 2026-10-04.* `shipping_promise.py` builds the promise and is the only
+   place that words it; the webhook computes it once at order time and stores `delivery_estimate` on the
+   order; `render_shipping_eta` emits a shell that is true without JavaScript, placed between the
+   subheadline and the message; an island fills it and substitutes `{{arrival}}` from one fetch.
+
+   Served from the existing `/upsell/session` rather than a new route: the thank-you screen is a funnel
+   step, it already calls that endpoint with the same `session_id`, and the stack sits at 94.8% of
+   CloudFormation's transform limit — a route costs bytes that should be kept for something which cannot
+   be answered anywhere else.
 3. **The builder.** Defaults, icon picker, preview example, cutoff field.
 
 ## Open

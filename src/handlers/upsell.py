@@ -141,7 +141,47 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
                baseline=session_shipping_baseline(session_id, api_key=api_key,
                                                   stripe_account=stripe_account, opener=opener))}
            if offer_id and product_id else {}),
+        # WHEN THE PARCEL IS DUE, for the thank-you page's shipping element and the `{{arrival}}` token in
+        # its cards (plans/THANK_YOU_PAGE.md P2). Read from the ORDER rather than recomputed: the promise
+        # was settled when the order was written, and a date that moves on a page refresh is not a
+        # promise. `{}` means no parcel, and the island then removes the element entirely.
+        #
+        # Served from this endpoint rather than a new route because the thank-you screen is a funnel step
+        # like any other, it already calls this with the same `session_id`, and the stack is at 94.8% of
+        # CloudFormation's transform limit -- a route costs template bytes we may need for something that
+        # cannot be answered anywhere else.
+        "delivery": _delivery_promise(tenant_id, session_id, mode=resolve_stripe_mode(event)),
     })
+
+
+def _delivery_promise(tenant_id, session_id, *, mode, orders_repo=None):
+    """The stored `delivery_estimate` for this checkout, or `{}`.
+
+    Best-effort and read-only. A thank-you page that cannot reach the order shows the shell's own honest
+    line ("we'll email tracking details") rather than an error, which is why every failure here is an
+    empty dict and not an exception.
+    """
+    try:
+        if not tenant_id or not session_id:
+            return {}
+        repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
+        if repo is None:
+            return {}
+        # Deterministic: a checkout order is keyed `order_{session_id}` (`order_record_from_session`), so
+        # this is one `get` rather than a scan.
+        order = repo.get(tenant_id, f"order_{session_id}") or {}
+        promise = order.get("delivery_estimate")
+        if not isinstance(promise, dict) or not promise:
+            return {}
+        # WORDED HERE, not in the browser. `promise_sentence` and `arrival_phrase` are the one formatter;
+        # a JS copy would be a second way to say the same date, and the element and the `{{arrival}}` token
+        # in a tenant's card would start disagreeing on a page that shows both.
+        from stripe_link.domain.shipping_promise import arrival_phrase, promise_sentence
+
+        return dict(promise, sentence=promise_sentence(promise), arrival_phrase=arrival_phrase(promise))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[delivery] promise unavailable for {session_id}: {type(exc).__name__}: {exc}")
+        return {}
 
 
 def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_details, baseline=None):
