@@ -180,10 +180,42 @@ So P4 closes the loop rather than building another email:
    rather than asserting something is already on its way.
 3. **Nudge after N days** of an unshipped physical order, as the last resort before the buyer notices.
 
-Worth deciding first, because it shapes the rest: whether the ETA itself should be *revised* when the
-parcel actually ships. The buyer was promised a date computed from an assumed ship day; if the tenant
-ships three days late, the honest thing is a second email with the real date, and the shipment notice is
-already the place that would carry it.
+### The shipment notice revises the date (author, 2026-10-04)
+
+**Yes** — and the delay case is what makes it worth building. *"It may be possible that a tenant who has
+run out of inventory had their shipment delayed. So a revised date with a possible tenant explanation
+should work."*
+
+The buyer was promised a date computed from an **assumed** ship day. The moment a parcel actually ships,
+that assumption is replaced by a fact, and the arrival is recomputed from it:
+
+    revised arrival = actual ship date + transit days of the service ACTUALLY used
+
+Note the second half. The tenant picks a carrier and service on the mark-shipped form, and it need not be
+the one the buyer chose and paid for — an upgrade to get a late parcel there on time is exactly the kind
+of thing a tenant does. The honest date uses what actually shipped, not what was sold.
+
+**Only call it revised when it changed.** A date that still matches the original is just stated; an
+apology for nothing teaches buyers to expect one, and the next real apology is worth less. The same logic
+means an EARLIER date is worth sending too — arriving sooner than promised is good news nobody currently
+hears.
+
+**The tenant's explanation is optional free text**, carried to the buyer in their own words. "We ran out
+of stock and restocked Tuesday" is a sentence only they can write, and it does more than any wording we
+could ship.
+
+**A discount coupon is OFFERED, not applied.** Reusing the coupon system that already exists rather than
+minting a parallel one — but suggested only when the date actually slipped, and never automatic. A
+goodwill gesture attached to every shipment stops being a gesture, and a tenant who ships late routinely
+would bleed margin without ever being asked whether they meant to.
+
+**What the order keeps.** `delivery_estimate` holds what the buyer was ORIGINALLY told; the revision
+lives beside it rather than overwriting it. Support answering "you said the 12th" needs to see both the
+promise and the correction, and a field that quietly becomes the new truth loses the thing that was
+actually promised.
+
+**Where it stops.** Once a parcel is with the carrier, tracking is the source of truth and we do not chase
+it with further revisions. One correction, at the moment the assumption became a fact.
 
 ## Open
 
