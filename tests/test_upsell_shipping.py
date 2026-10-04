@@ -608,77 +608,41 @@ class TheUpsellMustRecordWhichChargeItWasTests(unittest.TestCase):
         self.assertNotIn("stripe", sale_entry_from_order(order, now_epoch=1, source="upsell"))
 
 
-class TheTrueUpHasOneChanceAndMustTakeItTests(unittest.TestCase):
-    """Every other sale is trued up by the webhook, which runs seconds after the charge and finds the
-    balance transaction waiting. An upsell has no webhook: it asks the instant it charges.
+class TheUpsellDoesNotAskForWhatIsNotThereYetTests(unittest.TestCase):
+    """Three versions of this tried to read the real fee at charge time: a follow-up GET, then `expand[]`
+    on the create, then both with the guard fixed. All three failed for one reason nobody had measured --
+    the balance transaction does not become readable for ~90-100 seconds (two charges polled at 92s and
+    101s, 2026-10-04).
 
-    A follow-up GET sent milliseconds later found nothing settled, and both upsells of a real funnel kept
-    their estimate while reporting no error at all -- `fetch_actual_fees` swallowed everything and
-    returned `{}`, which is indistinguishable from "not settled yet" (2026-10-04). Confirmed against
-    Stripe afterwards: the transactions existed by the time anyone looked, and the fees were 72 and 82.
+    Nothing asked inside the buyer's request can win that, so asking at all was two Stripe calls spent to
+    learn nothing, on the one path where the buyer is waiting. They were removed once the number existed.
+
+    What remains is the one line that matters: `true_up_fees` with nothing NAMES the estimate, and that
+    mark is what the sweep selects on. This is the handoff to the thing that can actually correct it.
     """
 
-    def test_the_create_asks_for_the_expansion(self):
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "upsell.py").read_text()
-        self.assertIn('pi_params["expand[]"] = "latest_charge.balance_transaction"', source)
+    SOURCE = (__import__("pathlib").Path(__file__).resolve().parents[1]
+              / "src" / "handlers" / "upsell.py").read_text()
 
-    def test_an_expanded_create_response_needs_no_second_call(self):
-        from handlers.stripe_webhook import fees_from_payment_intent
+    def test_it_makes_no_stripe_call_to_read_the_fee(self):
+        self.assertNotIn("fetch_actual_fees", self.SOURCE)
+        self.assertNotIn("fees_from_payment_intent", self.SOURCE)
 
-        created = {"id": "pi_1", "latest_charge": {"balance_transaction": {
-            "net": 1615, "fee_details": [{"type": "stripe_fee", "amount": 82},
-                                         {"type": "application_fee", "amount": 89}]}}}
-        # The application fee is NOT Stripe's -- counting it would double-count the platform's cut
-        # against the tenant.
-        self.assertEqual(fees_from_payment_intent(created), {"stripe_fee": 82, "net": 1615})
+    def test_it_does_not_expand_a_balance_transaction_that_is_not_there(self):
+        self.assertNotIn("latest_charge.balance_transaction", self.SOURCE)
 
-    def test_an_unsettled_transaction_is_empty_not_wrong(self):
-        from handlers.stripe_webhook import fees_from_payment_intent
+    def test_the_estimate_is_still_NAMED(self):
+        # Without this the order carries no `fees_source`, the sweep never selects it, and the fee stays
+        # wrong forever -- which is worse than the three failed attempts were.
+        self.assertIn('upsell_fees = true_up_fees(fee_context["fees"], {})', self.SOURCE)
+        self.assertIn('"fees": upsell_fees,', self.SOURCE)
 
-        self.assertEqual(fees_from_payment_intent({"id": "pi_1", "latest_charge": "ch_1"}), {})
-        self.assertEqual(fees_from_payment_intent({"id": "pi_1"}), {})
-        self.assertEqual(fees_from_payment_intent(None), {})
+    def test_the_order_still_records_the_charge_the_sweep_will_look_up(self):
+        self.assertIn('"payment_intent_id": str(payment_intent.get("id") or "")', self.SOURCE)
 
-    def test_a_transaction_with_no_fees_yet_is_NOT_mistaken_for_success(self):
-        """The bug the second attempt made. A balance transaction exists from the moment the charge does,
-        but it arrives `pending` and its `fee_details` fill in a beat later -- so the create response
-        carries `{"net": ...}` and nothing else.
+    def test_an_upsell_order_is_born_marked_as_an_estimate(self):
+        from handlers.stripe_webhook import true_up_fees
 
-        `fees_from_payment_intent` is right to return that: it is what Stripe said. The caller was wrong
-        to test the dict's truthiness, which read it as success, skipped the retry, and handed
-        `true_up_fees` a dict with no `stripe_fee` in it. `true_up_fees` correctly declined, the estimate
-        stood, nothing was logged, and the order was still marked an estimate."""
-        from handlers.stripe_webhook import fees_from_payment_intent, true_up_fees
-
-        pending = {"id": "pi_1", "latest_charge": {"balance_transaction": {"net": 1615,
-                                                                           "fee_details": []}}}
-        partial = fees_from_payment_intent(pending)
-        self.assertEqual(partial, {"net": 1615})
-        self.assertTrue(partial, "truthy, which is exactly why `not actual` was the wrong guard")
-        self.assertNotIn("stripe_fee", partial)
-        estimated = {"tenant_keyed_amount": 1786, "stripe_fee": 82, "platform_fee": 89,
-                     "net_payout": 1615}
-        self.assertEqual(true_up_fees(estimated, partial), dict(estimated, fees_source="estimate"))
-
-    def test_the_handler_retries_on_a_MISSING_FEE_not_an_empty_dict(self):
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "upsell.py").read_text()
-        block = source.split("actual = fees_from_payment_intent(payment_intent)", 1)[1][:1400]
-        self.assertIn('if "stripe_fee" not in actual:', block)
-        self.assertNotIn("if not actual:", block)
-
-    def test_keeping_the_estimate_is_recorded(self):
-        # An estimate is a correct outcome and an indistinguishable one. Naming what came back is what
-        # turns the next occurrence into evidence instead of another guess.
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "upsell.py").read_text()
-        self.assertIn("kept its estimate; stripe returned", source)
-
-    def test_a_failed_true_up_is_no_longer_silent(self):
-        # The estimate standing is the correct outcome either way, which is exactly why a broken call was
-        # invisible: the order records, the ledger records, and an estimate looks plausible.
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "stripe_webhook.py").read_text()
-        block = source.split("def fetch_actual_fees", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("[fees] true-up unavailable", block)
+        fees = true_up_fees({"tenant_keyed_amount": 1786, "stripe_fee": 82, "platform_fee": 89,
+                             "net_payout": 1615}, {})
+        self.assertEqual(fees["fees_source"], "estimate")

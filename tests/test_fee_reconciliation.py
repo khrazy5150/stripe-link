@@ -552,3 +552,67 @@ class TheGateIsSetByMeasurementTests(unittest.TestCase):
         template = (__import__("pathlib").Path(__file__).resolve().parents[1] / "template.yaml").read_text()
         block = template.split("FeeReconciliationSweep:", 1)[1][:400]
         self.assertIn("rate(5 minutes)", block)
+
+
+class TheSweepRecordsHowLongSettlementTookTests(unittest.TestCase):
+    """Evidence for tightening the 180s gate to 120, which the author wants argued from production rather
+    than from two test-mode charges.
+
+    **The data is censored, and we are the ones censoring it.** The sweep only looks at orders older than
+    `MIN_AGE_SECONDS`, so a charge that settled at 95s is first observed at 180s and recorded as 180.
+    These lines prove "settled by N" and never "settled at N" -- they can justify LOOSENING the gate and
+    cannot, on their own, justify tightening it.
+
+    Which is why the unsettled case is logged too. An order still unreadable at N seconds is the only
+    direct evidence of a FLOOR the sweep ever produces, and it is the opposite of the instinct to log
+    successes.
+    """
+
+    def _logs(self, rows, actual, now):
+        import logging
+
+        from handlers import fee_reconciliation as module
+
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        handler_ = Capture()
+        module.logger.addHandler(handler_)
+        try:
+            tally = module.handler({}, None, orders_repo=OrdersRepo(rows), ledger_repo=LedgerRepo(),
+                                   stripe_repo=StripeRepo(), secret_cipher=Cipher(),
+                                   fetch_fees=lambda pi, **kw: dict(actual.get(pi) or {}),
+                                   now_fn=lambda: now, modes=("test",))
+        finally:
+            module.logger.removeHandler(handler_)
+        return tally["test"], records
+
+    def test_a_correction_records_the_age_at_which_it_proved_readable(self):
+        tally, logs = self._logs([order("a", pi="pi_a", created=1_000_000)],
+                                 {"pi_a": {"stripe_fee": 109}}, 1_000_400)
+        self.assertIn("fee settle: order=a age=400s readable drift=+27c", logs)
+        self.assertEqual((tally["settled_age_min"], tally["settled_age_max"]), (400, 400))
+
+    def test_an_unsettled_charge_records_a_FLOOR(self):
+        # The only direct evidence the sweep produces about how long settlement really takes.
+        _, logs = self._logs([order("b", pi="pi_b", created=1_000_000)], {}, 1_000_400)
+        self.assertIn("fee settle: order=b age=400s NOT YET readable", logs)
+
+    def test_the_tally_spans_the_ages_it_saw(self):
+        rows = [order("a", pi="pi_a", created=1_000_000), order("c", pi="pi_c", created=1_000_200)]
+        tally, _ = self._logs(rows, {"pi_a": {"stripe_fee": 109}, "pi_c": {"stripe_fee": 95}}, 1_000_400)
+        self.assertEqual((tally["settled_age_min"], tally["settled_age_max"]), (200, 400))
+
+    def test_a_pass_that_corrected_nothing_claims_no_ages(self):
+        tally, _ = self._logs([order("b", pi="pi_b", created=1_000_000)], {}, 1_000_400)
+        self.assertNotIn("settled_age_min", tally)
+
+    def test_the_censoring_is_written_down_where_a_reader_lands(self):
+        # A number that cannot mean what it looks like needs its caveat in the module, not in a plan.
+        from handlers.fee_reconciliation import _settle_evidence
+
+        self.assertIn("censored", _settle_evidence.__doc__)
+        self.assertIn("MIN_AGE_SECONDS", _settle_evidence.__doc__)

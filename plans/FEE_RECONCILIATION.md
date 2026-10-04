@@ -146,6 +146,18 @@ Consequences, all applied:
 - **The gate dropped 300s → 180s**, and the schedule **15 min → 5 min**. The cadence, not the gate, was
   the real latency: a quarter-hour pass left an order wrong for up to fourteen minutes to correct
   something ready in under two. Now ~3–8 minutes.
+- **The upsell's synchronous attempts were deleted.** All three of them — the follow-up GET, the
+  `expand[]` on the create, and both together with the guard fixed — were two Stripe calls spent to learn
+  nothing, on the one path where the buyer is waiting. What remains is `true_up_fees(fees, {})`, which
+  NAMES the estimate; that mark is what the sweep selects on, so it is the handoff rather than an attempt.
+  The `checkout.session.completed` true-up is **kept**: unlike the upsell's, it demonstrably works, on 7
+  of the last 8 main orders.
+- **The sweep now logs settle ages** (`fee settle: order=… age=…s readable|NOT YET readable`). Read the
+  caveat on `_settle_evidence` first: the data is censored by our own gate, so it proves "settled by N"
+  and never "settled at N". It can justify loosening the gate and cannot, alone, justify tightening it —
+  which is why the UNSETTLED case is logged too, since an order unreadable at N seconds is the only
+  direct evidence of a floor the sweep ever produces. To tighten to 120 honestly, drop the gate below the
+  suspected delay for a while and read those lines; each costs a single Stripe call.
 - **120s is the next step, gated on production data.** These were two test-mode charges; 180 is the
   measurement plus room for a slower day. Asking early costs a wasted Stripe call and the next pass is
   only five minutes behind, so the conservative direction is the cheap one.

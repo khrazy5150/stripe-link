@@ -19,7 +19,7 @@ import logging
 import os
 import time
 
-from stripe_link.domain.fee_reconciliation import drift, due, fees_of, settled
+from stripe_link.domain.fee_reconciliation import _whole, drift, due, fees_of, settled
 from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import ledger_repository, orders_repository, stripe_keys_repository
@@ -56,6 +56,10 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
 
 def _reconcile_mode(mode, now, *, orders_repo, ledger_repo, stripe_repo, secret_cipher, fetch_fees, true_up):
     out = {"examined": 0, "corrected": 0, "unsettled": 0, "failed": 0, "drift_cents": 0}
+    # SETTLE AGES, so the 180s gate can one day be argued from production rather than from two test-mode
+    # charges. Read the caveat on `_settle_evidence` before trusting these: the sweep cannot observe a
+    # charge settling EARLIER than the gate that let it look.
+    ages: list[int] = []
     try:
         orders = orders_repo.scan_type()
     except Exception as exc:  # noqa: BLE001 - one mode's table problem is not the other's
@@ -78,20 +82,33 @@ def _reconcile_mode(mode, now, *, orders_repo, ledger_repo, stripe_repo, secret_
             if not api_key:
                 out["failed"] += 1
                 continue
+            age = now - _whole(order.get("created_at"))
             moved = reconcile_order(order, api_key=api_key, stripe_account=account, now=now,
                                     orders_repo=orders_repo, ledger_repo=ledger_repo,
                                     fetch_fees=fetch_fees, true_up=true_up)
             if moved is None:
                 # Still not attached. Not a failure -- `fees_source` still says `estimate`, so the next
                 # pass will ask again until the order ages out of the window.
+                #
+                # Logged with its age because this is the ONLY direct evidence the sweep produces about
+                # how long settlement really takes: a charge that was still unsettled at N seconds puts a
+                # hard floor under the delay. A success only puts a ceiling on it.
                 out["unsettled"] += 1
+                logger.info("fee settle: order=%s age=%ds NOT YET readable",
+                            order.get("order_id"), age)
                 continue
             out["corrected"] += 1
             out["drift_cents"] += moved
+            ages.append(age)
+            logger.info("fee settle: order=%s age=%ds readable drift=%+dc",
+                        order.get("order_id"), age, moved)
         except Exception as exc:  # noqa: BLE001 - one bad order never stops the pass
             out["failed"] += 1
             logger.warning("fee reconciliation failed for %s: %s: %s",
                            order.get("order_id"), type(exc).__name__, exc)
+    if ages:
+        out["settled_age_min"] = min(ages)
+        out["settled_age_max"] = max(ages)
     return out
 
 
@@ -125,6 +142,27 @@ def reconcile_order(order, *, api_key, stripe_account, now, orders_repo, ledger_
         logger.info("fee reconciliation corrected %s by %+d cents (%s -> %s)",
                     order.get("order_id"), moved, before.get("stripe_fee"), after.get("stripe_fee"))
     return moved
+
+
+def _settle_evidence() -> str:
+    """What the `fee settle:` log lines can and cannot tell you. Documentation, deliberately a function so
+    it sits in the module a reader lands in rather than in a plan nobody opens.
+
+    They record, per correction, how old the order was when its balance transaction proved readable. Over
+    weeks that is a real production distribution, which is what the author asked for before tightening the
+    180s gate to 120 (2026-10-04).
+
+    **But it is censored data, and the censoring is ours.** The sweep only looks at orders older than
+    `MIN_AGE_SECONDS`, so a charge that settled at 95s is first observed at 180s and recorded as 180.
+    These lines can therefore prove "settled by N" and never "settled at N" -- they can justify LOOSENING
+    the gate and can never, on their own, justify tightening it.
+
+    To tighten it honestly, lower the gate below the suspected delay for a while and read the
+    `NOT YET readable` lines instead: an order unsettled at 90s is direct evidence of a floor, and each
+    one costs a single Stripe call. That is the experiment, and it is the opposite of the instinct to
+    only log successes.
+    """
+    return __doc__ or ""
 
 
 def _restate_ledger(ledger_repo, order, now):

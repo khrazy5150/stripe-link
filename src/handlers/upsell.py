@@ -413,12 +413,6 @@ def process_upsell(
     if shipping_amount:
         pi_params["metadata[shipping_amount]"] = str(shipping_amount)
         pi_params["metadata[shipping_service]"] = str(upsell_shipping.get("service_token") or "")
-    # THE REAL FEE, ASKED FOR AT THE ONLY MOMENT WE CAN. Every other sale is trued up by the webhook,
-    # which runs seconds after the charge and finds the balance transaction waiting. An upsell has no
-    # webhook -- it must ask itself, the instant it charges, and a follow-up GET sent milliseconds later
-    # found nothing settled yet: both upsells of a real funnel kept their estimate (2026-10-04).
-    # Expanding on the CREATE costs no extra call and catches the charges whose transaction is ready.
-    pi_params["expand[]"] = "latest_charge.balance_transaction"
     # WHICH ORDER THIS CHARGE IS, so `payment_intent.succeeded` can correct it without hunting for it
     # (plans/FEE_RECONCILIATION.md Phase 2). `tenant_id` is already here; together they are the order's
     # full primary key, which turns the webhook's job into one `get` instead of a scan or a second index.
@@ -447,31 +441,19 @@ def process_upsell(
     # and exactly the drift that makes a tenant stop trusting a report. Best-effort by the same rule as
     # everywhere else: an unsettled balance transaction leaves the estimate standing rather than replacing
     # a usable number with nothing.
+    # MARKED AN ESTIMATE, AND NOT ASKED ABOUT. Three versions of this tried to read the real fee here --
+    # a follow-up GET, then `expand[]` on the create, then both with the guard fixed -- and all three
+    # failed for one reason nobody had measured: the balance transaction does not become readable for
+    # ~90-100 seconds (two charges polled at 92s and 101s, 2026-10-04). Nothing asked inside the buyer's
+    # request can win that, so asking at all was two Stripe calls spent to learn nothing, on the one path
+    # where the buyer is waiting.
     #
-    # Imported HERE rather than at module scope: `stripe_webhook` is the largest handler in the tree and
-    # the upsell Lambda has no other reason to load it. Same lazy-import shape this file already uses for
-    # `handlers.checkout._quote_parcels`.
-    from handlers.stripe_webhook import fees_from_payment_intent, fetch_actual_fees, true_up_fees
+    # `true_up_fees` with nothing is how the estimate gets NAMED rather than left unmarked, and that mark
+    # is what the sweep selects on -- so this line is what hands the order to the thing that can actually
+    # correct it (plans/FEE_RECONCILIATION.md).
+    from handlers.stripe_webhook import true_up_fees
 
-    actual = fees_from_payment_intent(payment_intent)
-    # `"stripe_fee" not in actual`, NOT `not actual`. A balance transaction exists from the moment the
-    # charge does, but it arrives `pending` and its `fee_details` fill in a beat later -- so the create
-    # response carries `{"net": ...}` and nothing else. Testing the dict's truthiness read that as
-    # success, skipped the retry, and handed `true_up_fees` a dict with no `stripe_fee` in it, which it
-    # correctly declined. The estimate stood, nothing was logged, and the only visible symptom was an
-    # order still marked an estimate (2026-10-04, second attempt at this).
-    #
-    # Worth exactly one retry over the wire: a few hundred milliseconds is sometimes all it needed, and
-    # the buyer is waiting on this response.
-    if "stripe_fee" not in actual:
-        actual = fetch_actual_fees(str(payment_intent.get("id") or ""), api_key=api_key,
-                                   stripe_account=stripe_account, opener=opener)
-    upsell_fees = true_up_fees(fee_context["fees"], actual)
-    if upsell_fees.get("fees_source") != "balance_transaction":
-        # SAY SO. An estimate is a correct outcome and an indistinguishable one -- the order records, the
-        # ledger records, and the numbers look right because an estimate is plausible. Naming what came
-        # back is what turns the next occurrence into evidence instead of another guess.
-        print(f"[fees] upsell {order_id} kept its estimate; stripe returned {sorted(actual)}")
+    upsell_fees = true_up_fees(fee_context["fees"], {})
     primary_item = (resolved.get("items") or [{}])[0]
     product = products_by_id.get(primary_item.get("product_id")) or {}
     product_name = product.get("name") or primary_item.get("product_name") or "Upsell"
