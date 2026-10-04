@@ -30,6 +30,7 @@ just the honest consequence of only correcting what announced itself as uncorrec
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 ESTIMATE = "estimate"
@@ -44,7 +45,13 @@ SETTLED = "balance_transaction"
 # 180 is that measurement plus room for a slower day. The author's call, deliberately above the evidence:
 # tightening to 120 waits on production measurements rather than two test-mode charges. Asking early costs
 # a wasted Stripe call and the next pass gets it anyway, so the conservative direction is the cheap one.
-MIN_AGE_SECONDS = 180
+#
+# OVERRIDABLE, because the honest way to tighten it is an experiment rather than an argument: drop the
+# gate below the suspected delay for a while and read the `NOT YET readable` lines, which are the only
+# direct evidence of a FLOOR the sweep can produce. A code constant would make that a commit-deploy-revert
+# cycle with a test to loosen; an env var makes it a setting, and the DEFAULT is still the committed 180
+# that every test asserts.
+MIN_AGE_SECONDS = int(os.environ.get("FEE_SETTLE_MIN_AGE_SECONDS") or 180)
 # ...and far enough back to cover a weekend of failed sweeps, but not so far that a permanently unsettled
 # charge is re-asked forever. A charge still estimated after a week is a thing to look at, not to retry.
 MAX_AGE_SECONDS = 7 * 24 * 60 * 60
