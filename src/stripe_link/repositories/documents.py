@@ -1034,6 +1034,28 @@ class TenantRangeRepository:
             kwargs["FilterExpression"] = Attr("stripe_mode").eq(self.mode)
         return _query_all_pages(self.table, **kwargs)
 
+    def scan_type(self) -> list[dict[str, Any]]:
+        """Cross-tenant scan of every document in this table, in this repo's mode. For periodic sweeps
+        only -- it reads the whole table, and a request path must never call it.
+
+        The mode filter is NOT optional here, and the constructor already refuses a repo without one: an
+        unfiltered scan does not fail quietly, it returns test money alongside real money. Same reasoning
+        as `list_for_tenant`, and more important on a sweep, which writes."""
+        from boto3.dynamodb.conditions import Attr
+
+        items: list[dict[str, Any]] = []
+        request: dict[str, Any] = {}
+        if self.mode is not None:
+            request["FilterExpression"] = Attr("stripe_mode").eq(self.mode)
+        while True:
+            response = self.table.scan(**request)
+            items.extend(response.get("Items", []))
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+            request["ExclusiveStartKey"] = last_evaluated_key
+        return items
+
     def find_by_payment_intent(self, payment_intent_id: str) -> dict[str, Any] | None:
         """Resolve an order from a Stripe PaymentIntent via the PaymentIntentIndex GSI."""
         from boto3.dynamodb.conditions import Key
