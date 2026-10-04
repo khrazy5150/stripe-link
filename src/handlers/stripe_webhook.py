@@ -78,6 +78,7 @@ from stripe_link.repositories.documents import (
     sites_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
+    shipping_quotes_repository,
     user_profiles_repository,
     webhook_events_repository,
 )
@@ -336,7 +337,8 @@ def handler(
                 invoices_repo=invoices_repo,
                 notifications_repo=notifications_repo,
                 products_repo=products_repo,
-                now_fn=now_fn,
+                user_profiles_repo=user_profiles_repo,
+            now_fn=now_fn,
                 billing_config_loader=billing_config_loader,
                 receipt_mailer=receipt_mailer,
                 email_context_loader=email_context_loader,
@@ -686,6 +688,9 @@ def persist_checkout_session_completed(
     invites_repo=None,
     carts_repo=None,
     tip_tokens_repo=None,
+    # The owner's profile carries the business identity -- the timezone and shipping cutoff the delivery
+    # estimate is computed in (plans/THANK_YOU_PAGE.md P2).
+    user_profiles_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -715,6 +720,12 @@ def persist_checkout_session_completed(
     fees = true_up_fees(fee_breakdown_from_session(session, billing_config_loader), actual_fees)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
     order_record = order_record_from_session(session, tenant_id, now, fees, line_items=line_items)
+    # THE DELIVERY PROMISE, computed once and stored on the order (plans/THANK_YOU_PAGE.md P2). Not
+    # recomputed when the thank-you page is viewed: the buyer was told a date, and that date must not
+    # quietly change because the tenant edited their cutoff next week. Best-effort -- a thank-you page
+    # with no estimate is a page that says less, while a failed sale is a failed sale.
+    attach_delivery_promise(order_record, tenant_id=tenant_id, mode=mode,
+                            user_profiles_repo=user_profiles_repo)
     invoice_record = invoice_record_from_session(session, tenant_id, now, fees)
     customer_record = customer_record_from_session(session, tenant_id, now)
     notification_record = notification_record_from_session(session, tenant_id, order_record, invoice_record, now)
@@ -2277,6 +2288,45 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
     if payment_intent:
         record["payment_intent_id"] = payment_intent
     return record
+
+
+def attach_delivery_promise(order_record, *, tenant_id, mode, user_profiles_repo=None,
+                            quotes_repo=None) -> None:
+    """Put `delivery_estimate` on the order, in place. Silent when it cannot be known.
+
+    Three reads, none of which may cost a sale: the stored quote for the transit days of the service the
+    buyer chose, and the tenant's business identity for whose afternoon the cutoff falls in. An order that
+    shipped nothing, or one whose quote has expired, simply carries no estimate -- and the renderer then
+    shows no element, which is the honest outcome rather than a gap to fill.
+    """
+    try:
+        from stripe_link.domain.shipping_promise import promise_for
+        from stripe_link.domain.store_timezone import store_cutoff_hour, store_timezone
+
+        quote_ref = order_record.get("shipping_quote")
+        if not isinstance(quote_ref, dict) or not order_record.get("shipping_address"):
+            return                      # nothing shipped: no parcel, no promise, no element
+        quote = {}
+        quote_id = str(quote_ref.get("quote_id") or "")
+        if quote_id:
+            repo = quotes_repo or (shipping_quotes_repository(mode=mode)
+                                   if os.environ.get("CARTS_TABLE") else None)
+            if repo is not None:
+                quote = repo.get(tenant_id, quote_id) or {}
+        # The OWNER's profile carries the business identity, and `_owner_user_profile` already knows how
+        # to find it (and when not to guess). An absent profile means the defaults -- UTC and 15:00 -- so
+        # the estimate is still made, just in a day that may not be the tenant's.
+        repo = user_profiles_repo or (user_profiles_repository()
+                                      if os.environ.get("USER_PROFILES_TABLE") else None)
+        owner = (_owner_user_profile(repo, tenant_id) or {}) if repo is not None else {}
+        business = owner.get("business") or {}
+        promise = promise_for(order_record, quote, tz_name=store_timezone(business),
+                              cutoff_hour=store_cutoff_hour(business))
+        if promise:
+            order_record["delivery_estimate"] = promise
+    except Exception as exc:  # noqa: BLE001 - a missing estimate must never cost a sale
+        print(f"[delivery] estimate not attached for {order_record.get('order_id')}: "
+              f"{type(exc).__name__}: {exc}")
 
 
 def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any], line_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:

@@ -151,6 +151,20 @@ def suggest_timezone(address: Any) -> str:
     return _COUNTRY_ZONES.get(country, FALLBACK)
 
 
+def store_cutoff_hour(business: Any) -> int:
+    """When the store's shipping day ends. The default is a suggestion, not a rule."""
+    from stripe_link.domain.delivery_estimate import DEFAULT_CUTOFF_HOUR
+
+    raw = (business or {}).get("shipping_cutoff_hour") if isinstance(business, dict) else None
+    if raw is None or isinstance(raw, bool):
+        return DEFAULT_CUTOFF_HOUR
+    try:
+        hour = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_CUTOFF_HOUR
+    return hour if 0 <= hour <= 23 else DEFAULT_CUTOFF_HOUR
+
+
 def store_timezone(business: Any) -> str:
     """The tenant's own answer when they gave one, else the suggestion. What every caller should use."""
     chosen = _text((business or {}).get("timezone")) if isinstance(business, dict) else ""

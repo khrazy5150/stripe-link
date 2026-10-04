@@ -2229,6 +2229,14 @@ def validate_business_identity(business: Any) -> None:
     # for a name it cannot load, and refusing a save because a tz database somewhere disagrees would lock
     # a tenant out of their own profile over a timezone.
     optional_string(business, "timezone", "business.timezone", max_length=64)
+    # ...and when that working day ENDS for shipping. Stored beside the timezone because they answer one
+    # question together -- "an order after 3pm ships tomorrow" is meaningless without knowing whose 3pm.
+    # Absent means the default (15:00), which is a suggestion rather than a rule: a tenant who quietly
+    # ships same-day then beats their own estimate, which is the point of showing a date at all.
+    if business.get("shipping_cutoff_hour") is not None:
+        optional_non_negative_int(business, "shipping_cutoff_hour", "business.shipping_cutoff_hour")
+        if int(business["shipping_cutoff_hour"]) > 23:
+            raise DocumentValidationError("business.shipping_cutoff_hour must be an hour of the day (0-23).")
     # Per-field provenance (source: stripe|manual|gbp|derived) so an auto-seed (Stripe Connect, later GBP)
     # never clobbers a tenant's own value. Fill-empty-only is the guarantee; this records where a value came
     # from (plans/BUSINESS_PROFILE_AND_GBP.md).
