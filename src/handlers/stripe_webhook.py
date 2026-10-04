@@ -1776,6 +1776,34 @@ def fetch_session_line_items(session_id: str, *, api_key: str, stripe_account: s
 STRIPE_PAYMENT_INTENT_URL = "https://api.stripe.com/v1/payment_intents/{}"
 
 
+def fees_from_payment_intent(payment_intent: Any) -> dict[str, int]:
+    """`{stripe_fee, net}` off an ALREADY-EXPANDED PaymentIntent, or `{}` when it does not carry one.
+
+    Split out of `fetch_actual_fees` so a caller that has just created the PaymentIntent and expanded
+    `latest_charge.balance_transaction` on the create call can read the real fee without a second round
+    trip -- which is also the only chance an upsell gets, since it asks the instant the charge is made.
+    """
+    if not isinstance(payment_intent, dict):
+        return {}
+    charge = payment_intent.get("latest_charge")
+    txn = charge.get("balance_transaction") if isinstance(charge, dict) else None
+    if not isinstance(txn, dict):
+        # A charge whose balance transaction has not settled yet. Not an error, and not a reason to
+        # overwrite a usable estimate with nothing.
+        return {}
+    # Only Stripe's OWN processing fee. `fee` on the transaction also contains the application fee, and
+    # counting that as a Stripe fee would double-count the platform's cut against the tenant.
+    stripe_fee = sum(abs(int(d.get("amount") or 0))
+                     for d in txn.get("fee_details") or []
+                     if str(d.get("type") or "") == "stripe_fee")
+    out: dict[str, int] = {}
+    if stripe_fee:
+        out["stripe_fee"] = stripe_fee
+    if txn.get("net") is not None:
+        out["net"] = int(txn.get("net") or 0)
+    return out
+
+
 def fetch_actual_fees(payment_intent_id: str, *, api_key: str, stripe_account: str = "",
                       opener=None) -> dict[str, int]:
     """What Stripe ACTUALLY charged, off the charge's balance transaction.
@@ -1804,24 +1832,13 @@ def fetch_actual_fees(payment_intent_id: str, *, api_key: str, stripe_account: s
         request = Request(url, headers=headers, method="GET")
         with opener(request, timeout=15) as response:
             data = json.loads(response.read().decode("utf-8"))
-        charge = data.get("latest_charge")
-        txn = charge.get("balance_transaction") if isinstance(charge, dict) else None
-        if not isinstance(txn, dict):
-            # A charge whose balance transaction has not settled yet. Not an error, and not a reason to
-            # overwrite a usable estimate with nothing.
-            return {}
-        # Only Stripe's OWN processing fee. `fee` on the transaction also contains the application fee,
-        # and counting that as a Stripe fee would double-count the platform's cut against the tenant.
-        stripe_fee = sum(abs(int(d.get("amount") or 0))
-                         for d in txn.get("fee_details") or []
-                         if str(d.get("type") or "") == "stripe_fee")
-        out: dict[str, int] = {}
-        if stripe_fee:
-            out["stripe_fee"] = stripe_fee
-        if txn.get("net") is not None:
-            out["net"] = int(txn.get("net") or 0)
-        return out
-    except Exception:  # noqa: BLE001 - the estimate stands; a true-up is an improvement, not a dependency
+        return fees_from_payment_intent(data)
+    except Exception as exc:  # noqa: BLE001 - the estimate stands; a true-up is an improvement
+        # LOGGED, not merely swallowed. The estimate standing is the correct outcome either way, which is
+        # exactly why a broken call here is invisible: the order records, the ledger records, and the
+        # numbers look plausible because an estimate IS plausible. A bare `return {}` meant nobody could
+        # tell a settling delay from a 401 (2026-10-04).
+        print(f"[fees] true-up unavailable for {payment_intent_id}: {type(exc).__name__}: {exc}")
         return {}
 
 

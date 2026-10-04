@@ -567,3 +567,80 @@ class TheLedgerSaysWhereARowCameFromTests(unittest.TestCase):
         from stripe_link.domain.ledger import sale_entry_from_order
 
         self.assertEqual(sale_entry_from_order(self.ORDER, now_epoch=1)["source"], "webhook")
+
+
+class TheUpsellMustRecordWhichChargeItWasTests(unittest.TestCase):
+    """`payment_intent_id` was absent from the upsell order since upsells were written, and every
+    consequence was a thing nobody could do rather than a visible error.
+
+    `sale_entry_from_order` falls back to keying on the order id when there is no PaymentIntent, so the
+    row looked fine -- it just carried no `stripe` block, and an upsell could not be reconciled against
+    Stripe at all. A refund had no charge to reverse. And a fee true-up had nothing to look up, which is
+    how it was found: the true-up was wired, the suite was green, and the order said `pi = None`.
+    """
+
+    SOURCE = (__import__("pathlib").Path(__file__).resolve().parents[1]
+              / "src" / "handlers" / "upsell.py").read_text()
+
+    def test_the_order_record_carries_it(self):
+        block = self.SOURCE.split("order_record = {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn('"payment_intent_id": str(payment_intent.get("id") or "")', block)
+
+    def test_the_ledger_row_then_keys_on_the_charge(self):
+        from stripe_link.domain.ledger import sale_entry_from_order
+
+        order = {"tenant_id": "t1", "order_id": "order_up_1", "payment_intent_id": "pi_up_1",
+                 "amount_total": 1786, "currency": "usd", "mode": "test",
+                 "fees": {"stripe_fee": 82, "platform_fee": 89}}
+        entry = sale_entry_from_order(order, now_epoch=1, source="upsell")
+        self.assertEqual(entry["entry_id"], "le_sale_pi_up_1")
+        self.assertEqual(entry["stripe"], {"payment_intent_id": "pi_up_1"})
+
+    def test_without_it_the_row_has_no_stripe_block_at_all(self):
+        # The old shape, kept as the reason this matters rather than as a thing to preserve.
+        from stripe_link.domain.ledger import sale_entry_from_order
+
+        order = {"tenant_id": "t1", "order_id": "order_up_1", "amount_total": 1786,
+                 "currency": "usd", "mode": "test", "fees": {"stripe_fee": 82}}
+        self.assertNotIn("stripe", sale_entry_from_order(order, now_epoch=1, source="upsell"))
+
+
+class TheTrueUpHasOneChanceAndMustTakeItTests(unittest.TestCase):
+    """Every other sale is trued up by the webhook, which runs seconds after the charge and finds the
+    balance transaction waiting. An upsell has no webhook: it asks the instant it charges.
+
+    A follow-up GET sent milliseconds later found nothing settled, and both upsells of a real funnel kept
+    their estimate while reporting no error at all -- `fetch_actual_fees` swallowed everything and
+    returned `{}`, which is indistinguishable from "not settled yet" (2026-10-04). Confirmed against
+    Stripe afterwards: the transactions existed by the time anyone looked, and the fees were 72 and 82.
+    """
+
+    def test_the_create_asks_for_the_expansion(self):
+        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
+                  / "src" / "handlers" / "upsell.py").read_text()
+        self.assertIn('pi_params["expand[]"] = "latest_charge.balance_transaction"', source)
+
+    def test_an_expanded_create_response_needs_no_second_call(self):
+        from handlers.stripe_webhook import fees_from_payment_intent
+
+        created = {"id": "pi_1", "latest_charge": {"balance_transaction": {
+            "net": 1615, "fee_details": [{"type": "stripe_fee", "amount": 82},
+                                         {"type": "application_fee", "amount": 89}]}}}
+        # The application fee is NOT Stripe's -- counting it would double-count the platform's cut
+        # against the tenant.
+        self.assertEqual(fees_from_payment_intent(created), {"stripe_fee": 82, "net": 1615})
+
+    def test_an_unsettled_transaction_is_empty_not_wrong(self):
+        from handlers.stripe_webhook import fees_from_payment_intent
+
+        self.assertEqual(fees_from_payment_intent({"id": "pi_1", "latest_charge": "ch_1"}), {})
+        self.assertEqual(fees_from_payment_intent({"id": "pi_1"}), {})
+        self.assertEqual(fees_from_payment_intent(None), {})
+
+    def test_a_failed_true_up_is_no_longer_silent(self):
+        # The estimate standing is the correct outcome either way, which is exactly why a broken call was
+        # invisible: the order records, the ledger records, and an estimate looks plausible.
+        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
+                  / "src" / "handlers" / "stripe_webhook.py").read_text()
+        block = source.split("def fetch_actual_fees", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("[fees] true-up unavailable", block)

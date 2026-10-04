@@ -410,6 +410,12 @@ def process_upsell(
     if shipping_amount:
         pi_params["metadata[shipping_amount]"] = str(shipping_amount)
         pi_params["metadata[shipping_service]"] = str(upsell_shipping.get("service_token") or "")
+    # THE REAL FEE, ASKED FOR AT THE ONLY MOMENT WE CAN. Every other sale is trued up by the webhook,
+    # which runs seconds after the charge and finds the balance transaction waiting. An upsell has no
+    # webhook -- it must ask itself, the instant it charges, and a follow-up GET sent milliseconds later
+    # found nothing settled yet: both upsells of a real funnel kept their estimate (2026-10-04).
+    # Expanding on the CREATE costs no extra call and catches the charges whose transaction is ready.
+    pi_params["expand[]"] = "latest_charge.balance_transaction"
 
     try:
         payment_intent = stripe_request(
@@ -439,12 +445,16 @@ def process_upsell(
     # Imported HERE rather than at module scope: `stripe_webhook` is the largest handler in the tree and
     # the upsell Lambda has no other reason to load it. Same lazy-import shape this file already uses for
     # `handlers.checkout._quote_parcels`.
-    from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
+    from handlers.stripe_webhook import fees_from_payment_intent, fetch_actual_fees, true_up_fees
 
-    upsell_fees = true_up_fees(
-        fee_context["fees"],
-        fetch_actual_fees(str(payment_intent.get("id") or ""), api_key=api_key,
-                          stripe_account=stripe_account, opener=opener))
+    actual = fees_from_payment_intent(payment_intent)
+    if not actual:
+        # The expansion came back without a settled transaction. Worth one retry over the wire, because a
+        # few hundred milliseconds of handler time is sometimes all it needed -- and worth no more than
+        # one, because the buyer is waiting on this response.
+        actual = fetch_actual_fees(str(payment_intent.get("id") or ""), api_key=api_key,
+                                   stripe_account=stripe_account, opener=opener)
+    upsell_fees = true_up_fees(fee_context["fees"], actual)
     primary_item = (resolved.get("items") or [{}])[0]
     product = products_by_id.get(primary_item.get("product_id")) or {}
     product_name = product.get("name") or primary_item.get("product_name") or "Upsell"
@@ -455,6 +465,12 @@ def process_upsell(
         "schema_version": "2026-05-29",
         "document_type": "order",
         "session_id": session_id,
+        # WHICH CHARGE THIS WAS. Absent since upsells were written, and every consequence of that is a
+        # thing nobody could do: `sale_entry_from_order` fell back to keying the ledger row on the order
+        # id and left its `stripe` block empty, so an upsell row could not be reconciled against Stripe
+        # at all; a refund had no charge to reverse; and a later fee true-up had nothing to look up.
+        # Found 2026-10-04 by asking why the true-up never fired and finding `pi = None` on the order.
+        "payment_intent_id": str(payment_intent.get("id") or ""),
         "line_item_type": "upsell",
         "status": "paid" if payment_intent.get("status") == "succeeded" else payment_intent.get("status", "pending"),
         # What the buyer was CHARGED, postage included -- the order's total must be the amount that left
