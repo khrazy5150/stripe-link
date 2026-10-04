@@ -142,12 +142,20 @@
             <input v-model.trim="form.page_defaults.thank_you.next_steps_title" type="text" placeholder="What's Next?" /></label>
           <div v-for="(card, i) in form.page_defaults.thank_you.next_steps" :key="i" class="ty-card-editor">
             <div class="ty-field-row">
-              <label class="offer-field ty-emoji"><span>Icon</span><input v-model.trim="card.icon" type="text" maxlength="4" placeholder="📧" /></label>
-              <label class="offer-field"><span>Card title</span><input v-model.trim="card.title" type="text" placeholder="Check Your Email" /></label>
+              <label class="offer-field ty-emoji"><span>Icon</span>
+                <!-- The SAME picker the page builder and the countdown icons use. -->
+                <button type="button" class="badge-icon-picker-btn" aria-label="Card icon"
+                        @click.stop="showIconPicker(card.icon, (emoji) => { card.icon = emoji; }, 'Choose an Icon')"
+                >{{ card.icon || '—' }}</button>
+              </label>
+              <label class="offer-field"><span>Card title</span><input v-model.trim="card.title" type="text" placeholder="Look for an Email" /></label>
               <button type="button" class="ty-card-remove" title="Remove card" @click="removeThankYouCard(i)">✕</button>
             </div>
-            <label class="offer-field"><span>Card text</span><input v-model.trim="card.desc" type="text" placeholder="Confirmation and tracking details…" /></label>
+            <label class="offer-field"><span>Card text</span><input v-model.trim="card.desc" type="text" placeholder="Your receipt is on its way…" /></label>
           </div>
+          <p class="field-hint">
+            Write <code>{{ '\u007b\u007barrival\u007d\u007d' }}</code> in any card and it becomes that buyer's own delivery date.
+          </p>
           <button v-if="form.page_defaults.thank_you.next_steps.length < 6" type="button" class="secondary-action compact" @click="addThankYouCard">+ Add card</button>
         </template>
 
@@ -343,6 +351,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import { apiRequest, getApiBase, getStripeMode, getTenantId } from "../api/client";
+import { showIconPicker } from "../icon-picker.js";
 import { useRefundPolicyStore } from "../stores/refundPolicy";
 import PhoneInput from "./PhoneInput.vue";
 
@@ -357,9 +366,9 @@ const rawConfig = ref({});
 // The platform's default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps). Declared
 // BEFORE `form` because defaultForm() reads it — a const referenced before its line throws a TDZ error.
 const CONFIG_THANK_YOU_CARDS = [
-  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
-  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
-  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
+  { icon: "📧", title: "Look for an Email", desc: "Your receipt and tracking details are on the way to your inbox." },
+  { icon: "📦", title: "Wait for Your Package", desc: "Your order is expected to arrive {{arrival}}." },
+  { icon: "💬", title: "Tell Us if Anything's Wrong", desc: "Get in touch if you find any issues with your purchase." },
 ];
 // Vocabulary and generated sentences come from the SERVER via one shared store, because the product form
 // needs the same tables and the two must not disagree. Composing the sentence in JavaScript is precisely the

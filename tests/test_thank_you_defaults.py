@@ -21,11 +21,32 @@ import unittest
 from stripe_link.runtime.upsell_pages import DEFAULT_THANK_YOU
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LANDING_VUE = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text()
+DASH = ROOT / "dashboard" / "src"
+LANDING_VUE = (DASH / "components" / "LandingPages.vue").read_text()
+
+# EVERY copy of the defaults, found rather than listed. The first version of this test checked one file
+# and the deployed bundle still carried "Start Your Journey" -- from a THIRD copy in the tenant-level
+# page-defaults screen that nobody had thought to look for (2026-10-04). A test that knows the names of
+# the copies it checks cannot catch the copy you forgot.
+_CARD_LISTS = ("const THANK_YOU_DEFAULT_CARDS = [", "const CONFIG_THANK_YOU_CARDS = [")
+
+
+def _every_vue_copy():
+    """`{path: cards}` for every default-card list anywhere in the dashboard source."""
+    out = {}
+    for path in sorted(DASH.rglob("*.vue")) + sorted(DASH.rglob("*.js")):
+        source = path.read_text()
+        for marker in _CARD_LISTS:
+            if marker in source:
+                out[str(path.relative_to(ROOT))] = _parse_cards(source.split(marker, 1)[1].split("];", 1)[0])
+    return out
 
 
 def _vue_default_cards():
-    block = LANDING_VUE.split("const THANK_YOU_DEFAULT_CARDS = [", 1)[1].split("];", 1)[0]
+    return _parse_cards(LANDING_VUE.split("const THANK_YOU_DEFAULT_CARDS = [", 1)[1].split("];", 1)[0])
+
+
+def _parse_cards(block):
     cards = []
     # One card per line. Not a brace-matching regex: `{{arrival}}` lives inside a value and would end the
     # match early, which is exactly how this parser failed first time round.
@@ -39,10 +60,21 @@ def _vue_default_cards():
     return cards
 
 
-class TheTwoCopiesMustAgreeTests(unittest.TestCase):
-    def test_the_dashboard_mirrors_the_runtime_defaults(self):
-        """A drift of one character and every page stores its cards forever after."""
-        self.assertEqual(_vue_default_cards(), DEFAULT_THANK_YOU["next_steps"])
+class EveryCopyMustAgreeTests(unittest.TestCase):
+    def test_every_dashboard_copy_mirrors_the_runtime_defaults(self):
+        """A drift of one character and every page stores its cards forever after.
+
+        Checked across ALL of them, because there turned out to be three: the page builder, the
+        tenant-level page defaults, and the runtime. The deployed bundle still carried "Start Your
+        Journey" after P3 shipped, from the copy nobody had looked for."""
+        for path, cards in _every_vue_copy().items():
+            self.assertEqual(cards, DEFAULT_THANK_YOU["next_steps"], f"{path} has drifted")
+
+    def test_there_is_more_than_one_and_the_test_found_them(self):
+        # Guards the finder itself: if a refactor renames a list, this fails loudly rather than passing
+        # vacuously over an empty set.
+        found = _every_vue_copy()
+        self.assertGreaterEqual(len(found), 2, f"only found {sorted(found)}")
 
     def test_the_comparison_that_depends_on_it_still_exists(self):
         self.assertIn("JSON.stringify(cards) !== JSON.stringify(THANK_YOU_DEFAULT_CARDS)", LANDING_VUE)
