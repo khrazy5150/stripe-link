@@ -355,6 +355,9 @@ def process_upsell(
     subtotal = int(resolved.get("subtotal") or 0)
     currency = resolved.get("currency") or "usd"
     idempotency_key = f"upsell:{tenant_id}:{session_id}:{offer_id}:{sequence}"
+    # Derived BEFORE the charge, because the PaymentIntent is going to carry it: it depends only on
+    # the session and the sequence, both of which are already known.
+    order_id = f"order_{session_id}_upsell_{sequence}"
 
     # WHERE IT GOES, looked up before the charge -- it was already fetched here for the order record, and
     # a shipping quote needs it too (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P1).
@@ -416,6 +419,10 @@ def process_upsell(
     # found nothing settled yet: both upsells of a real funnel kept their estimate (2026-10-04).
     # Expanding on the CREATE costs no extra call and catches the charges whose transaction is ready.
     pi_params["expand[]"] = "latest_charge.balance_transaction"
+    # WHICH ORDER THIS CHARGE IS, so `payment_intent.succeeded` can correct it without hunting for it
+    # (plans/FEE_RECONCILIATION.md Phase 2). `tenant_id` is already here; together they are the order's
+    # full primary key, which turns the webhook's job into one `get` instead of a scan or a second index.
+    pi_params["metadata[order_id]"] = order_id
 
     try:
         payment_intent = stripe_request(
@@ -433,7 +440,6 @@ def process_upsell(
         return error_response(exc.message, status_code=status_code, code=code)
 
     now = int(now_fn())
-    order_id = f"order_{session_id}_upsell_{sequence}"
     # WHAT STRIPE ACTUALLY TOOK, not what we estimated it would. The webhook has trued every other sale
     # against the charge's balance transaction since the ledger shipped; an upsell kept the estimate,
     # because it is the one sale path the webhook never sees. The estimate rounds UP where Stripe rounds

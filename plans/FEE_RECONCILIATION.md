@@ -89,13 +89,41 @@ announced itself as uncorrected.
 - Credentials resolve **once per tenant** — a Secrets Manager read plus a KMS decrypt per order is waste.
 - An unsettled charge is deliberately left marked `estimate`. That is what makes the next pass retry it.
 
-## Phase 2 — `charge.updated` (not built)
+## Phase 2 — `payment_intent.succeeded` ✅ SHIPPED 2026-10-04
 
-Subscribe the platform webhook to `charge.updated` and true up the mapped order immediately, to narrow
-the window from ~15 minutes to seconds. Needs a new event subscription, which is why it is second.
+Correct the fee the moment Stripe says the charge succeeded, narrowing the window from ~15 minutes to
+seconds.
+
+**Not `charge.updated`, which is what this was scoped as.** The Connect endpoint is already subscribed to
+`payment_intent.succeeded` in both test and live, so there is no Stripe configuration to add and get
+wrong — and it fires for **both** sale paths. That second property mattered more than expected: this was
+built for upsells, but the first drift it was pointed at in the wild was a main checkout understated by
+$2.78, where `checkout.session.completed` had lost the same settlement race. `charge.updated` would also
+have fired for metadata edits and other noise unrelated to settlement.
+
+**Finding the order costs nothing on an upsell and one call on a checkout.** An upsell's PaymentIntent now
+carries `metadata[order_id]` alongside `metadata[tenant_id]` — the order's full primary key, stamped at
+creation for exactly this, so the webhook does one `get` rather than a scan or a second index. A Checkout
+Session's PaymentIntent carries no reference back to the session, and cannot: the order is keyed on the
+session id, which Stripe assigns after we build the payload. That path therefore asks Stripe which session
+owns the charge, once.
+
+**One implementation, two callers.** The correcting itself is `fee_reconciliation.reconcile_order`, which
+the sweep also calls. The sweep and the webhook decide WHICH order — by age, or because Stripe just said
+so — and neither decides what correcting one means. A second implementation would drift from the first
+within a release; this codebase relearned that when an upsell grew its own shipping-quote logic.
+
+The webhook passes `min_age_seconds=0`, because the sweep's five-minute wait is a guess at settlement and
+this is not a guess. Every other condition in `due` still applies, so an order that never marked itself an
+estimate is left alone here exactly as it is there.
 
 **The sweep stays underneath it, permanently.** An event that never arrives leaves no trace; a sweep that
-finds nothing costs one scan. The webhook is an accelerator, not a replacement.
+finds nothing costs one scan. Every failure in the webhook path — an early event, a missing order, a dead
+table — leaves the order marked `estimate`, which is precisely what the sweep selects on. The accelerator
+failing costs fifteen minutes, not a correction.
+
+> **The live Connect endpoint is currently `disabled`.** Phase 2 is inert there until it is enabled, as is
+> every other webhook including the `checkout.session.completed` true-up. Not something Phase 2 introduced.
 
 ## Open
 

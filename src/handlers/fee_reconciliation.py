@@ -78,30 +78,53 @@ def _reconcile_mode(mode, now, *, orders_repo, ledger_repo, stripe_repo, secret_
             if not api_key:
                 out["failed"] += 1
                 continue
-            before = fees_of(order)
-            after = true_up(before, fetch_fees(str(order.get("payment_intent_id") or ""),
-                                               api_key=api_key, stripe_account=account))
-            if not settled(after):
+            moved = reconcile_order(order, api_key=api_key, stripe_account=account, now=now,
+                                    orders_repo=orders_repo, ledger_repo=ledger_repo,
+                                    fetch_fees=fetch_fees, true_up=true_up)
+            if moved is None:
                 # Still not attached. Not a failure -- `fees_source` still says `estimate`, so the next
                 # pass will ask again until the order ages out of the window.
                 out["unsettled"] += 1
                 continue
-            moved = drift(before, after)
-            order["fees"] = after
-            order["updated_at"] = now
-            orders_repo.put(order)
-            _restate_ledger(ledger_repo, order, now)
             out["corrected"] += 1
             out["drift_cents"] += moved
-            if moved:
-                logger.info("fee reconciliation corrected %s by %+d cents (%s -> %s)",
-                            order.get("order_id"), moved,
-                            before.get("stripe_fee"), after.get("stripe_fee"))
         except Exception as exc:  # noqa: BLE001 - one bad order never stops the pass
             out["failed"] += 1
             logger.warning("fee reconciliation failed for %s: %s: %s",
                            order.get("order_id"), type(exc).__name__, exc)
     return out
+
+
+def reconcile_order(order, *, api_key, stripe_account, now, orders_repo, ledger_repo,
+                    fetch_fees=None, true_up=None):
+    """Replace ONE order's estimated Stripe fee with the real one. Returns the drift in cents, or None
+    when the balance transaction still is not there.
+
+    The single-order primitive, so the 15-minute sweep and the `payment_intent.succeeded` webhook do the
+    same thing rather than two things that drift apart -- the rule this codebase keeps relearning, most
+    recently when an upsell grew a second shipping-pricing path.
+
+    The caller decides WHICH orders to offer: the sweep by age, the webhook because Stripe just said this
+    charge succeeded. Neither decides what correcting means.
+    """
+    from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
+
+    fetch_fees = fetch_fees or fetch_actual_fees
+    true_up = true_up or true_up_fees
+    before = fees_of(order)
+    after = true_up(before, fetch_fees(str(order.get("payment_intent_id") or ""),
+                                       api_key=api_key, stripe_account=stripe_account))
+    if not settled(after):
+        return None
+    moved = drift(before, after)
+    order["fees"] = after
+    order["updated_at"] = now
+    orders_repo.put(order)
+    _restate_ledger(ledger_repo, order, now)
+    if moved:
+        logger.info("fee reconciliation corrected %s by %+d cents (%s -> %s)",
+                    order.get("order_id"), moved, before.get("stripe_fee"), after.get("stripe_fee"))
+    return moved
 
 
 def _restate_ledger(ledger_repo, order, now):
