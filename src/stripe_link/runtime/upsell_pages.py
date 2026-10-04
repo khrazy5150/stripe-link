@@ -329,10 +329,21 @@ DEFAULT_THANK_YOU = {
     "shipping_eta_title": "Shipping",
     "enable_next_steps": True,
     "next_steps_title": "What's Next?",
+    # A BRIEF SUMMARY of the same story the element above tells (author, 2026-10-04). Repeating the
+    # arrival date here is deliberate, not redundant: it is the line a buyer scans for, and one who
+    # scrolled past the element should still meet it.
+    #
+    # `{{arrival}}` is substituted from the SAME promise the element shows, so the two cannot disagree.
+    # It carries its own preposition, and resolves to "soon — we'll email tracking when it ships" when
+    # there is no date, so a tenant's sentence never ends mid-clause.
+    #
+    # "Start Your Journey" is GONE. It was written as inspiration -- a worked example for tenants selling
+    # courses, to be edited or deleted -- and was being left exactly as shipped. Whatever a default says is
+    # what most stores will say, so a default cannot be a suggestion.
     "next_steps": [
-        {"icon": "📧", "title": "Check Your Email", "desc": "Confirmation and tracking details are on the way to your inbox."},
-        {"icon": "📦", "title": "Free Shipping", "desc": "Your order will arrive within 5–7 business days."},
-        {"icon": "🚀", "title": "Start Your Journey", "desc": "Begin your routine as soon as it arrives."},
+        {"icon": "📧", "title": "Look for an Email", "desc": "Your receipt and tracking details are on the way to your inbox."},
+        {"icon": "📦", "title": "Wait for Your Package", "desc": "Your order is expected to arrive {{arrival}}."},
+        {"icon": "💬", "title": "Tell Us if Anything's Wrong", "desc": "Get in touch if you find any issues with your purchase."},
     ],
     "enable_footer": False,
     "footer_headline": "The Ball Is in Our Court",
@@ -355,8 +366,33 @@ def thank_you_config(page: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def _preview_arrival_example() -> str:
+    """A realistic date for the builder's Live Preview, worded by the same formatter buyers see.
+
+    Four business days out from today, so a tenant reads a real sentence rather than a placeholder — and
+    the element labels it as an example, because without that the first thing they do is report the page
+    as broken (plans/THANK_YOU_PAGE.md P2).
+    """
+    import time
+
+    from stripe_link.domain.shipping_promise import promise_sentence
+
+    return promise_sentence({"has_date": True,
+                             "arrives_on": _business_days_from_now(4),
+                             "arrives_through": None})
+
+
+def _business_days_from_now(count: int) -> str:
+    import time
+    from datetime import date
+
+    from stripe_link.domain.delivery_estimate import add_business_days
+
+    return add_business_days(date.fromtimestamp(time.time()), count).isoformat()
+
+
 def synthesize_thank_you_page(
-    source_page: dict[str, Any], source_offer: dict[str, Any]
+    source_page: dict[str, Any], source_offer: dict[str, Any], *, preview: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (page, offer): the funnel's terminal thank-you screen on the Universal Bundle template, inheriting
     the source page's theme. It sells nothing (no price/CTA), so its offer carries no items — render_page only
@@ -394,7 +430,9 @@ def synthesize_thank_you_page(
     if config.get("enable_shipping_eta", True):
         sections.append({"id": "shipping-eta", "type": "shipping_eta",
                          "icon": config.get("shipping_eta_icon") or "📦",
-                         "title": config.get("shipping_eta_title") or "Shipping"})
+                         "title": config.get("shipping_eta_title") or "Shipping",
+                         # Only in the builder, where there is no order behind a session_id to ask about.
+                         **({"example": _preview_arrival_example()} if preview else {})})
     if config.get("message"):
         sections.append({"id": "content", "type": "content_block", "blocks": [{"title": "", "text": config["message"]}]})
     if config.get("enable_next_steps"):

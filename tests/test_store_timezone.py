@@ -140,3 +140,47 @@ class TheScreenCanActuallySaveItTests(unittest.TestCase):
                   / "src" / "handlers" / "profile.py").read_text()
         self.assertIn("timezone_suggested", source)
         self.assertIn("suggest_timezone(", source)
+
+
+class TheCutoffHourIsTheTenantsTooTests(unittest.TestCase):
+    """15:00 is a suggestion. Some stores cut off at noon, and the point of the buffer is that a tenant
+    who quietly ships same-day then beats their own estimate."""
+
+    def test_the_default_is_three_pm(self):
+        from stripe_link.domain.store_timezone import store_cutoff_hour
+
+        self.assertEqual(store_cutoff_hour({}), 15)
+        self.assertEqual(store_cutoff_hour(None), 15)
+
+    def test_a_tenants_hour_is_used(self):
+        from stripe_link.domain.store_timezone import store_cutoff_hour
+
+        self.assertEqual(store_cutoff_hour({"shipping_cutoff_hour": 12}), 12)
+
+    def test_midnight_is_a_real_answer_not_a_missing_one(self):
+        from stripe_link.domain.store_timezone import store_cutoff_hour
+
+        self.assertEqual(store_cutoff_hour({"shipping_cutoff_hour": 0}), 0)
+
+    def test_nonsense_falls_back_rather_than_raising(self):
+        from stripe_link.domain.store_timezone import store_cutoff_hour
+
+        for bad in (99, -1, "noon", True, None):
+            self.assertEqual(store_cutoff_hour({"shipping_cutoff_hour": bad}), 15)
+
+    def test_the_validator_refuses_an_hour_that_is_not_one(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_business_identity
+
+        validate_business_identity({"shipping_cutoff_hour": 23})
+        with self.assertRaises(DocumentValidationError):
+            validate_business_identity({"shipping_cutoff_hour": 24})
+
+    def test_the_screen_saves_it_only_when_chosen(self):
+        """`null` means "use the suggested 3pm" and must stay absent, for the same reason a blank timezone
+        does: a default nobody chose should not look like a decision."""
+        source = (self._pathlib.Path(__file__).resolve().parents[1]
+                  / "dashboard" / "src" / "components" / "Profile.vue").read_text()
+        self.assertIn("Number.isInteger(business.shipping_cutoff_hour)", source)
+        self.assertIn("result.shipping_cutoff_hour = business.shipping_cutoff_hour", source)
+
+    _pathlib = __import__("pathlib")

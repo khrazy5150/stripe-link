@@ -344,12 +344,35 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
             render_funnel_step_html("nope", self.page, self.offer, self.products_by_id)
 
     def test_preview_matches_published_bytes_for_thank_you(self):
-        # The preview IS the published renderer: the thank-you step equals what publish would synthesize+render.
+        """The preview IS the published renderer — one synthesis, one render, no second code path.
+
+        With ONE deliberate exception, which is why this compares the preview against a preview rather
+        than relaxing to a substring check: the shipping element has no order behind it in the builder, so
+        a preview carries a marked EXAMPLE date and the published page carries an island that fetches the
+        buyer's own. Everything else must still match byte for byte.
+        """
         from stripe_link.runtime.upsell_pages import synthesize_thank_you_page
-        ty_page, ty_offer = synthesize_thank_you_page(self.page, self.offer)
+
+        ty_page, ty_offer = synthesize_thank_you_page(self.page, self.offer, preview=True)
         published = render_page(ty_page, ty_offer, {}, robots="noindex,nofollow", page_type="thank_you")
         preview = render_funnel_step_html("thank_you", self.page, self.offer, self.products_by_id)
         self.assertEqual(preview, published)
+
+    def test_and_the_published_page_differs_ONLY_in_that_element(self):
+        from stripe_link.runtime.upsell_pages import synthesize_thank_you_page
+
+        live_page, live_offer = synthesize_thank_you_page(self.page, self.offer)
+        live = render_page(live_page, live_offer, {}, robots="noindex,nofollow", page_type="thank_you")
+        preview = render_funnel_step_html("thank_you", self.page, self.offer, self.products_by_id)
+        self.assertNotEqual(preview, live)
+        # The published page fetches a real date; the preview shows a labelled sample and never asks.
+        self.assertIn("sl-ship-eta", live)
+        self.assertIn("your buyers see their own date", preview)
+        self.assertNotIn("your buyers see their own date", live)
+        strip = lambda html: "\n".join(
+            line for line in html.splitlines()
+            if "sl-ship-eta" not in line and "arrival" not in line and "session_id" not in line)
+        self.assertEqual(strip(preview).count("<section"), strip(live).count("<section"))
 
 
 class ThankYouExtrasTests(unittest.TestCase):
@@ -369,7 +392,7 @@ class ThankYouExtrasTests(unittest.TestCase):
         html = self._render({})
         self.assertIn('data-section-type="celebration"', html)
         self.assertIn('data-section-type="next_steps"', html)
-        self.assertIn("Check Your Email", html)      # default card
+        self.assertIn("Look for an Email", html)     # default card
         self.assertIn("🎉", html)                     # default headline icon
 
     def test_toggles_off_remove_sections(self):

@@ -1568,7 +1568,9 @@ def render_funnel_step_html(
     # so render_reviews_block shows only the upsell product's; the thank-you page (no product) ignores it.
     common = dict(checkout_url=checkout_url, api_base_url=api_base_url, robots=NOINDEX_ROBOTS, site=site, reviews=reviews)
     if step == "thank_you":
-        ty_page, ty_offer = synthesize_thank_you_page(page, offer)
+        # `preview=True`: the Live Preview has no order behind a session_id, so the shipping element shows
+        # a marked example date instead of trying to fetch one.
+        ty_page, ty_offer = synthesize_thank_you_page(page, offer, preview=True)
         return render_page(ty_page, ty_offer, {}, page_type="thank_you", **common)
     plan = post_purchase_plan(offer, products_by_id)
     if step == "upsell_carousel" or (step.startswith("upsell:") and plan["strategy"] == "carousel"):

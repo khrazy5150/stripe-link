@@ -140,6 +140,17 @@
             and ship from a warehouse in another.
           </small>
         </label>
+        <label class="offer-field">
+          <span>Orders after this ship the next business day</span>
+          <select v-model.number="form.business.shipping_cutoff_hour">
+            <option :value="null">3:00 PM (suggested)</option>
+            <option v-for="hour in 24" :key="hour - 1" :value="hour - 1">{{ hourLabel(hour - 1) }}</option>
+          </select>
+          <small>
+            A buffer, not a rule — most days you will ship same-day and quietly beat the estimate. It only
+            changes the arrival date shown to buyers on your thank-you page.
+          </small>
+        </label>
       </div>
     </section>
 
@@ -215,6 +226,13 @@ function zoneLabel(zone) {
   } catch {
     return zone;
   }
+}
+
+// "15" -> "3:00 PM". A tenant picks an hour, not a 24-hour number.
+function hourLabel(hour) {
+  const suffix = hour < 12 ? "AM" : "PM";
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelve}:00 ${suffix}`;
 }
 
 // Verification state. Deliberately NOT part of `form`: it is a transient workflow, not a profile field,
@@ -309,7 +327,9 @@ function placeToDocument(place = {}) {
 }
 
 function emptyBusiness() {
-  return { name: "", email: "", phone: "", brands: [], address: emptyPlace() };
+  // `null` cutoff and blank timezone both mean "use the suggestion" -- see cleanBusiness.
+  return { name: "", email: "", phone: "", brands: [], address: emptyPlace(), timezone: "",
+           shipping_cutoff_hour: null };
 }
 
 function addBrand() {
@@ -337,6 +357,11 @@ function cleanBusiness(business, original = {}) {
   // Sent only when the tenant actually CHOSE one. Blank means "follow my address", which keeps working if
   // they move -- persisting the suggestion would freeze a guess into a decision they never made.
   if (business.timezone) result.timezone = business.timezone;
+  // Null means "use the suggested 3pm" and must stay absent, for the same reason a blank timezone does:
+  // a default nobody chose should not look like a decision.
+  if (Number.isInteger(business.shipping_cutoff_hour)) {
+    result.shipping_cutoff_hour = business.shipping_cutoff_hour;
+  }
 
   const sources = { ...(original.sources || {}) };
   for (const key of ["name", "email", "phone"]) {
@@ -371,6 +396,8 @@ function applyProfile(profile) {
     brands: Array.isArray(business.brands) ? [...business.brands] : [],
     address: placeFromDocument(address),
     timezone: business.timezone || "",
+    shipping_cutoff_hour: Number.isInteger(business.shipping_cutoff_hour)
+      ? business.shipping_cutoff_hour : null,
   };
 }
 

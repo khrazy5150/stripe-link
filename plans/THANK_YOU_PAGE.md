@@ -144,7 +144,15 @@ first thing every tenant does is report the thank-you page as broken.
    step, it already calls that endpoint with the same `session_id`, and the stack sits at 94.8% of
    CloudFormation's transform limit — a route costs bytes that should be kept for something which cannot
    be answered anywhere else.
-3. **The builder.** Defaults, icon picker, preview example, cutoff field.
+3. **The builder** ✅ *shipped 2026-10-04.* Defaults became the three-step summary (with `{{arrival}}` in
+   the middle card), "Start Your Journey" and the "Free Shipping" card are gone, card icons use the shared
+   `showIconPicker`, the preview renders a labelled example date, and the cutoff hour joins the timezone
+   on the profile.
+
+   A parity test now holds the two default lists together. They are load-bearing in a way that is easy to
+   miss: `thankYouCopyOverrides` COMPARES the saved cards against the Vue copy to decide whether to
+   persist them, so a drift of one character would make every page store its cards and no future default
+   change would ever reach anyone.
 
 ## Open
 

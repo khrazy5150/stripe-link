@@ -2125,12 +2125,24 @@
                         <input v-model.trim="builder.post_purchase.thank_you.next_steps_title" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_next_steps_title" /></label>
                       <div v-for="(card, i) in builder.post_purchase.thank_you.next_steps" :key="i" class="ty-card-editor">
                         <div class="ty-field-row">
-                          <label class="offer-field ty-emoji"><span>Icon</span><input v-model.trim="card.icon" type="text" maxlength="4" placeholder="📧" /></label>
+                          <label class="offer-field ty-emoji"><span>Icon</span>
+                            <!-- The SAME picker the countdown icons use. A bare text input meant an icon
+                                 could only be changed by pasting an emoji from somewhere else, which is
+                                 why every thank-you page in the wild still wears the defaults. -->
+                            <button type="button" class="badge-icon-picker-btn" aria-label="Card icon"
+                                    @click.stop="showIconPicker(card.icon, (emoji) => { card.icon = emoji; }, 'Choose an Icon')"
+                            >{{ card.icon || '—' }}</button>
+                          </label>
                           <label class="offer-field"><span>Card title</span><input v-model.trim="card.title" type="text" placeholder="Check Your Email" /></label>
                           <button type="button" class="ty-card-remove" title="Remove card" @click="removeNextStepCard(i)">✕</button>
                         </div>
-                        <label class="offer-field"><span>Card text</span><input v-model.trim="card.desc" type="text" placeholder="Confirmation and tracking details…" /></label>
+                        <label class="offer-field"><span>Card text</span><input v-model.trim="card.desc" type="text" placeholder="Your receipt is on its way…" /></label>
                       </div>
+                      <p class="field-hint">
+                        Write <code>{{ '\u007b\u007barrival\u007d\u007d' }}</code> in any card and it becomes that buyer's own delivery
+                        date — the same one the Shipping card above shows. Without a date it reads
+                        &ldquo;soon — we'll email tracking when it ships&rdquo;, so the sentence still finishes.
+                      </p>
                       <button v-if="builder.post_purchase.thank_you.next_steps.length < 6" type="button" class="secondary-action compact" @click="addNextStepCard">+ Add card</button>
                     </template>
 
@@ -2616,9 +2628,9 @@ const form = reactive(defaultWizardForm());
 // The default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps). Declared BEFORE
 // `builder` because defaultBuilderForm() reads it — a const referenced before its line throws a TDZ error.
 const THANK_YOU_DEFAULT_CARDS = [
-  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
-  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
-  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
+  { icon: "📧", title: "Look for an Email", desc: "Your receipt and tracking details are on the way to your inbox." },
+  { icon: "📦", title: "Wait for Your Package", desc: "Your order is expected to arrive {{arrival}}." },
+  { icon: "💬", title: "Tell Us if Anything's Wrong", desc: "Get in touch if you find any issues with your purchase." },
 ];
 const builder = reactive(defaultBuilderForm());
 const defaultFaviconUrl = assetUrl("/icon/favicon.png");  // configured asset CDN (public_asset_base_url)
