@@ -35,9 +35,16 @@ from typing import Any
 ESTIMATE = "estimate"
 SETTLED = "balance_transaction"
 
-# Long enough that the balance transaction has had a chance to attach. The sweep runs every 15 minutes, so
-# anything younger will simply be picked up by the next pass; asking early only wastes a Stripe call.
-MIN_AGE_SECONDS = 5 * 60
+# MEASURED, not guessed. Two real upsell charges were polled until their balance transaction became
+# readable: 92s and 101s, both landing on the same ten-second tick, so the true delay is somewhere between
+# ~82s and ~101s (2026-10-04). That one number closed every open timing question in this file -- including
+# why no synchronous true-up could ever work, and why `payment_intent.succeeded`, which arrives about a
+# second after the charge, is ninety seconds too early.
+#
+# 180 is that measurement plus room for a slower day. The author's call, deliberately above the evidence:
+# tightening to 120 waits on production measurements rather than two test-mode charges. Asking early costs
+# a wasted Stripe call and the next pass gets it anyway, so the conservative direction is the cheap one.
+MIN_AGE_SECONDS = 180
 # ...and far enough back to cover a weekend of failed sweeps, but not so far that a permanently unsettled
 # charge is re-asked forever. A charge still estimated after a week is a thing to look at, not to retry.
 MAX_AGE_SECONDS = 7 * 24 * 60 * 60

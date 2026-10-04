@@ -69,8 +69,7 @@ ledger.
   would rewrite history nobody asked anyone to touch;
 - it must name a charge — without `payment_intent_id` there is nothing to look up, which was true of
   every upsell ever written until 2026-10-04;
-- old enough to have settled (5 min — anything younger is caught by the next pass, and asking early only
-  wastes a Stripe call);
+- old enough to have settled (**180s** — see the measurement below);
 - young enough to be worth retrying (7 days — still estimated after a week is a thing to look at, not to
   retry forever).
 
@@ -101,12 +100,16 @@ built for upsells, but the first drift it was pointed at in the wild was a main 
 $2.78, where `checkout.session.completed` had lost the same settlement race. `charge.updated` would also
 have fired for metadata edits and other noise unrelated to settlement.
 
-**Finding the order costs nothing on an upsell and one call on a checkout.** An upsell's PaymentIntent now
-carries `metadata[order_id]` alongside `metadata[tenant_id]` — the order's full primary key, stamped at
-creation for exactly this, so the webhook does one `get` rather than a scan or a second index. A Checkout
-Session's PaymentIntent carries no reference back to the session, and cannot: the order is keyed on the
-session id, which Stripe assigns after we build the payload. That path therefore asks Stripe which session
-owns the charge, once.
+**It only handles a PaymentIntent that names its own order.** An upsell's carries `metadata[order_id]`
+alongside `metadata[tenant_id]` — the order's full primary key, stamped at creation for exactly this, so
+the webhook does one `get` rather than a scan or a second index.
+
+A Checkout Session's PaymentIntent cannot carry one: the order is keyed on the session id, which Stripe
+assigns after we build the payload. The first version filled that gap by asking Stripe which session owned
+the charge. **That lookup was removed** once the delay below was measured — it cost a Stripe call on every
+sale and corrected nothing, because by the time it ran the checkout order had already been trued by
+`checkout.session.completed`, and on the occasions it had not, the balance transaction was still ~90
+seconds from readable. A call per sale for zero corrections is worse than not trying.
 
 **One implementation, two callers.** The correcting itself is `fee_reconciliation.reconcile_order`, which
 the sweep also calls. The sweep and the webhook decide WHICH order — by age, or because Stripe just said
@@ -121,6 +124,31 @@ estimate is left alone here exactly as it is there.
 finds nothing costs one scan. Every failure in the webhook path — an early event, a missing order, a dead
 table — leaves the order marked `estimate`, which is precisely what the sweep selects on. The accelerator
 failing costs fifteen minutes, not a correction.
+
+### What the measurement changed
+
+Two real upsell charges were polled until their balance transaction became readable:
+
+    upsell_1   READABLE after 101s   stripe_fee=94
+    upsell_2   READABLE after  92s   stripe_fee=122
+
+Both landed on the same ten-second tick, so the true delay sits between roughly **82s and 101s**. That one
+number closed every open timing question in this work, and it is worth stating what it cost to get: three
+separate attempts at a synchronous true-up, each built on a different guess about why the previous one
+failed. None of them could have worked. The thing being raced was ninety seconds away the whole time.
+
+Consequences, all applied:
+
+- **Phase 2 does not fire for upsells**, and cannot. `payment_intent.succeeded` arrives about a second
+  after the charge. It is kept because it costs nothing and would start working if Stripe's timing
+  changed; it is no longer described as the thing that closes the window.
+- **The session lookup was removed** (above).
+- **The gate dropped 300s → 180s**, and the schedule **15 min → 5 min**. The cadence, not the gate, was
+  the real latency: a quarter-hour pass left an order wrong for up to fourteen minutes to correct
+  something ready in under two. Now ~3–8 minutes.
+- **120s is the next step, gated on production data.** These were two test-mode charges; 180 is the
+  measurement plus room for a slower day. Asking early costs a wasted Stripe call and the next pass is
+  only five minutes behind, so the conservative direction is the cheap one.
 
 > **The live Connect endpoint is currently `disabled`.** Phase 2 is inert there until it is enabled, as is
 > every other webhook including the `checkout.session.completed` true-up. Not something Phase 2 introduced.

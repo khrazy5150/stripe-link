@@ -1403,10 +1403,17 @@ def reconcile_payment_intent_fees(stripe_event, *, tenant_id, mode, orders_repo=
         if not api_key:
             return out
 
+        # ONLY a PaymentIntent that names its own order. An upsell stamps `metadata[order_id]` at
+        # creation, so finding it is free. A Checkout Session's PaymentIntent cannot carry one -- the
+        # order is keyed on the session id, which Stripe assigns after we build the payload -- and the
+        # first version of this asked Stripe which session owned the charge to fill the gap.
+        #
+        # That lookup was removed (author's call, 2026-10-04) once the measurement came in. It cost a
+        # Stripe call on EVERY sale and corrected nothing: by the time it ran, the checkout order had
+        # already been trued by `checkout.session.completed`, and on the occasions it had not, the
+        # balance transaction was still ~90 seconds from being readable. A call per sale for zero
+        # corrections is worse than not trying.
         order_id = str(meta.get("order_id") or "")
-        if not order_id:
-            order_id = _order_id_for_payment_intent(payment_intent_id, api_key=api_key,
-                                                    stripe_account=account)
         if not order_id:
             return out
 
@@ -1430,27 +1437,6 @@ def reconcile_payment_intent_fees(stripe_event, *, tenant_id, mode, orders_repo=
     except Exception as exc:  # noqa: BLE001 - a failed true-up must never fail the webhook
         print(f"[fees] payment_intent true-up failed: {type(exc).__name__}: {exc}")
         return out
-
-
-def _order_id_for_payment_intent(payment_intent_id, *, api_key, stripe_account, opener=None):
-    """`order_<session id>` for a Checkout charge, or "" when no session owns it.
-
-    The one extra call the checkout path costs. A Checkout Session's PaymentIntent carries no reference
-    back to the session, and the order is keyed on the session, so the link has to be asked for. Only
-    reached when the PaymentIntent had no `order_id` of its own -- an upsell always does.
-    """
-    from stripe_link.stripe_client import stripe_request
-
-    try:
-        sessions = stripe_request("GET", "/checkout/sessions", api_key=api_key,
-                                  stripe_account=stripe_account, opener=opener,
-                                  params=[("payment_intent", payment_intent_id), ("limit", "1")])
-    except Exception as exc:  # noqa: BLE001
-        print(f"[fees] no session lookup for {payment_intent_id}: {type(exc).__name__}: {exc}")
-        return ""
-    data = sessions.get("data") or []
-    session_id = str(data[0].get("id") or "") if data else ""
-    return f"order_{session_id}" if session_id else ""
 
 
 def reconcile_charge_refunded(

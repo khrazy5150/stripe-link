@@ -360,7 +360,7 @@ class TheScheduleReachesTheSweepTests(unittest.TestCase):
     def test_the_schedule_is_declared_on_that_function(self):
         block = self.TEMPLATE.split("StripeWebhookFunction:", 1)[1].split("\n  PlatformBillingWebhook", 1)[0]
         self.assertIn("FeeReconciliationSweep:", block)
-        self.assertIn("rate(15 minutes)", block)
+        self.assertIn("rate(5 minutes)", block)
 
     def test_the_sweep_has_no_function_of_its_own(self):
         # If one is ever added back, this test is the reminder that the transform limit is why.
@@ -426,23 +426,24 @@ class PhaseTwoTheEventAcceleratesItTests(unittest.TestCase):
         self.assertEqual(repo.rows["order_up_1"]["fees"]["fees_source"], "balance_transaction")
         self.assertEqual(ledger.rows[("t1", "le_sale_pi_up_1")]["amounts"]["stripe_fee"], -109)
 
-    def test_a_checkout_charge_is_found_through_its_session(self):
-        """A Checkout Session's PaymentIntent carries no reference back to the session, and the order is
-        keyed on the session -- so that link has to be asked for, once."""
+    def test_a_checkout_charge_is_IGNORED_rather_than_hunted_for(self):
+        """The first version asked Stripe which session owned the charge, because a Checkout Session's
+        PaymentIntent cannot carry an order id -- the order is keyed on the session, which Stripe assigns
+        after we build the payload.
+
+        That lookup was removed once the delay was measured. It cost a Stripe call on EVERY sale and
+        corrected nothing: by the time it ran the checkout order had already been trued by
+        `checkout.session.completed`, and on the occasions it had not, the balance transaction was still
+        ~90 seconds from readable. A call per sale for zero corrections is worse than not trying
+        (author's call, 2026-10-04)."""
         repo = OrdersRepo([order("order_cs_1", pi="pi_cs_1")])
         out, _, looked_up = self._run(
             self._event({}, pi="pi_cs_1"), repo, actual={"stripe_fee": 847},
             sessions={"data": [{"id": "cs_1"}]})
-        self.assertEqual(out["fee_reconciled"], True)
-        self.assertEqual(looked_up[0][1], "/checkout/sessions")
-        self.assertEqual(looked_up[0][2]["payment_intent"], "pi_cs_1")
-
-    def test_the_session_lookup_is_SKIPPED_when_the_metadata_already_answers(self):
-        # An upsell always carries its order id, so that path must never pay for the extra call.
-        repo = OrdersRepo([order()])
-        _, _, looked_up = self._run(self._event({"order_id": "order_up_1"}), repo,
-                                    actual={"stripe_fee": 109}, sessions={"data": [{"id": "cs_x"}]})
-        self.assertEqual(looked_up, [])
+        self.assertFalse(out["fee_reconciled"])
+        self.assertEqual(looked_up, [], "no Stripe call may be made for a PaymentIntent we cannot place")
+        # And the order is untouched -- the sweep still owns it.
+        self.assertEqual(repo.rows["order_cs_1"]["fees"]["fees_source"], "estimate")
 
     def test_an_order_already_settled_is_left_alone(self):
         repo = OrdersRepo([order(fees=dict(ESTIMATED, fees_source="balance_transaction"))])
@@ -514,3 +515,40 @@ class BothPathsShareOneImplementationTests(unittest.TestCase):
         # Derived before the charge, or there would be nothing to stamp.
         self.assertLess(source.index('order_id = f"order_{session_id}_upsell_{sequence}"'),
                         source.index('pi_params["metadata[order_id]"]'))
+
+
+class TheGateIsSetByMeasurementTests(unittest.TestCase):
+    """Two real upsell charges were polled until their balance transaction became readable: **92s and
+    101s**, both on the same ten-second tick, so the true delay sits between roughly 82s and 101s
+    (2026-10-04). That single number closed every open timing question in this work:
+
+    - why no synchronous true-up could ever succeed — three attempts, all racing something ~90s away;
+    - why `payment_intent.succeeded` is useless here, arriving about a second after the charge;
+    - and why a fifteen-minute sweep was leaving an order wrong for up to fourteen minutes to fix
+      something that had been ready in under two.
+
+    The gate is 180s: the measurement plus room for a slower day. Tightening to 120 is the author's
+    stated next step **once production measurements support it** — these were two test-mode charges, and
+    the conservative direction is the cheap one. Asking early costs a wasted Stripe call; the next pass
+    gets it anyway five minutes later.
+    """
+
+    def test_the_gate_clears_the_measured_delay_with_room(self):
+        from stripe_link.domain.fee_reconciliation import MIN_AGE_SECONDS
+
+        self.assertGreaterEqual(MIN_AGE_SECONDS, 101, "below the slowest charge actually measured")
+        self.assertLessEqual(MIN_AGE_SECONDS, 300, "more caution than the evidence asks for")
+
+    def test_a_charge_at_the_measured_delay_is_not_yet_asked_about(self):
+        # 101s was readable, but only just, and on a test-mode charge. The gate deliberately sits past it.
+        self.assertFalse(due(order(created=1_000_000), 1_000_101))
+
+    def test_a_charge_past_the_gate_is(self):
+        self.assertTrue(due(order(created=1_000_000), 1_000_181))
+
+    def test_the_sweep_runs_often_enough_to_make_the_gate_the_limit(self):
+        """A 5-minute cadence with a 180s gate corrects within ~3-8 minutes. A 15-minute cadence made the
+        schedule the bottleneck rather than settlement, which is the wrong thing to be waiting on."""
+        template = (__import__("pathlib").Path(__file__).resolve().parents[1] / "template.yaml").read_text()
+        block = template.split("FeeReconciliationSweep:", 1)[1][:400]
+        self.assertIn("rate(5 minutes)", block)

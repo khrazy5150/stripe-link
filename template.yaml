@@ -2542,7 +2542,10 @@ Resources:
         FeeReconciliationSweep:
           Type: Schedule
           Properties:
-            Schedule: rate(15 minutes)
+            # Five, not fifteen: the balance transaction becomes readable ~90-100s after the charge
+            # (measured), so a quarter-hour cadence left an order showing the wrong fee for up to 14
+            # minutes to correct something that was ready in under two.
+            Schedule: rate(5 minutes)
             Description: Replace estimated Stripe fees with the charge's actual balance transaction.
 
   # Platform-account Stripe Billing webhook (the tenant's SaaS subscription). Separate endpoint from the Connect
