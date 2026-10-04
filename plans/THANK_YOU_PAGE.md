@@ -204,10 +204,28 @@ hears.
 of stock and restocked Tuesday" is a sentence only they can write, and it does more than any wording we
 could ship.
 
-**A discount coupon is OFFERED, not applied.** Reusing the coupon system that already exists rather than
-minting a parallel one — but suggested only when the date actually slipped, and never automatic. A
-goodwill gesture attached to every shipment stops being a gesture, and a tenant who ships late routinely
-would bleed margin without ever being asked whether they meant to.
+**A discount coupon is OFFERED, not applied** — suggested only when the date actually slipped, and never
+automatic. A goodwill gesture attached to every shipment stops being a gesture, and a tenant who ships
+late routinely would bleed margin without ever being asked whether they meant to.
+
+*Either an existing coupon or an ad-hoc one* (author, 2026-10-04). Those look like two features and are
+one, because **both routes end in a `coupon_grant`** — the primitive that already exists for exactly this:
+*"one recipient's own code for a campaign coupon"*, bound to an email and a Stripe customer, with
+`grant_id` equal to the code so checkout resolves it in a single read.
+
+    existing coupon  ->  grant it to this buyer
+    ad-hoc coupon    ->  create the coupon, then grant it to this buyer
+
+So there is one issuing path with two sources for the coupon behind it, not two flows to keep in step.
+
+And it should be a GRANT either way, not a shared code. A goodwill gesture is personal, and a public code
+in an apology email ends up on a deals site within the week — the grant binds it to the buyer who was
+actually let down, and redemption tracking already follows it.
+
+> **Worth deciding when it is built:** an ad-hoc coupon mints a coupon document per apology, and those
+> accumulate in a tenant's coupon list where they are noise rather than campaigns. Marking them with their
+> origin and hiding them from that screen by default is probably right, but it is a judgement about the
+> Coupons screen rather than this one.
 
 **What the order keeps.** `delivery_estimate` holds what the buyer was ORIGINALLY told; the revision
 lives beside it rather than overwriting it. Support answering "you said the 12th" needs to see both the
