@@ -367,154 +367,57 @@ class TheScheduleReachesTheSweepTests(unittest.TestCase):
         self.assertNotIn("FeeReconciliationFunction", self.TEMPLATE)
 
 
-class PhaseTwoTheEventAcceleratesItTests(unittest.TestCase):
-    """`payment_intent.succeeded` corrects the fee the moment Stripe says the charge succeeded, instead of
-    waiting up to fifteen minutes for the sweep.
+class ThereIsNoEventAtTheRightMomentTests(unittest.TestCase):
+    """Phase 2 was built and then deleted. This records why, so nobody rebuilds it.
 
-    That event rather than `charge.updated`, because the Connect endpoint is ALREADY subscribed to it in
-    both test and live -- no Stripe configuration to add and get wrong -- and because it fires for both
-    sale paths. The second property mattered more than expected: this was built for upsells, but the
-    first drift it was pointed at in the wild was a main checkout understated by $2.78, where
-    `checkout.session.completed` had lost the same settlement race.
+    The plan called for an accelerator: correct the fee the instant Stripe says the charge succeeded,
+    instead of waiting for the sweep. It was built on `payment_intent.succeeded` -- already subscribed on
+    the Connect endpoint in both modes, and firing for both sale paths, so it looked ideal.
+
+    **It never once succeeded.** The event arrives about a second after the charge; the balance
+    transaction is not readable for 76-101s. Four invocations over four hours, every one logging
+    `still unsettled at payment_intent.succeeded; leaving it to the sweep`, each having spent a Stripe
+    call to learn nothing. That is the same race, and the same waste, as the three synchronous attempts
+    inside the upsell handler deleted an hour earlier.
+
+    There is no Stripe event at the right moment. `charge.updated` is no better -- it fires on metadata
+    edits and other noise, not on settlement. The sweep is the whole answer, and that is not a gap in the
+    design; it is what the measurement forces.
+
+    Kept from the attempt, because both are right regardless:
+
+    - `reconcile_order`, the shared primitive the sweep calls. Phase 2 is why it was extracted.
+    - `metadata[order_id]` on the upsell's PaymentIntent -- free, and it makes a charge traceable to an
+      order in the Stripe dashboard for refunds, disputes and support.
     """
 
-    def _event(self, metadata, pi="pi_up_1"):
-        return {"type": "payment_intent.succeeded",
-                "data": {"object": {"id": pi, "metadata": dict(metadata)}}}
+    WEBHOOK = (__import__("pathlib").Path(__file__).resolve().parents[1]
+               / "src" / "handlers" / "stripe_webhook.py").read_text()
+    UPSELL = (__import__("pathlib").Path(__file__).resolve().parents[1]
+              / "src" / "handlers" / "upsell.py").read_text()
+    SWEEP = (__import__("pathlib").Path(__file__).resolve().parents[1]
+             / "src" / "handlers" / "fee_reconciliation.py").read_text()
 
-    def _run(self, event, orders, *, actual=None, ledger=None, sessions=None, now=1_000_010):
-        import handlers.stripe_webhook as webhook
+    def test_the_webhook_does_not_try_to_true_a_fee_on_payment_intent_succeeded(self):
+        self.assertNotIn("payment_intent.succeeded", self.WEBHOOK)
+        self.assertNotIn("reconcile_payment_intent_fees", self.WEBHOOK)
 
-        ledger = ledger or LedgerRepo()
-        looked_up = []
+    def test_no_sale_path_asks_stripe_for_a_fee_it_cannot_have_yet(self):
+        # The upsell handler, then the webhook. Both learned the same thing the expensive way.
+        self.assertNotIn("fetch_actual_fees", self.UPSELL)
+        self.assertNotIn("latest_charge.balance_transaction", self.UPSELL)
 
-        def fetch(pi, **_kwargs):
-            return dict(actual or {})
+    def test_the_checkout_true_up_IS_still_there(self):
+        """The one synchronous true-up that works, and the reason "delete them all" was not the right
+        instruction: 8 of the last 9 main orders were trued at write time by this, at no extra call."""
+        self.assertIn("true_up_fees(fee_breakdown_from_session", self.WEBHOOK)
 
-        real_creds = webhook.checkout_credentials
-        real_request = None
-        webhook.checkout_credentials = lambda *a, **k: ("sk_test_x", "acct_1")
-        if sessions is not None:
-            import stripe_link.stripe_client as client
-            real_request = client.stripe_request
+    def test_the_shared_primitive_survives(self):
+        self.assertIn("def reconcile_order(", self.SWEEP)
+        self.assertIn("moved = reconcile_order(order", self.SWEEP)
 
-            def fake_request(method, path, **kwargs):
-                looked_up.append((method, path, dict(kwargs.get("params") or [])))
-                return sessions
-
-            client.stripe_request = fake_request
-        try:
-            out = webhook.reconcile_payment_intent_fees(
-                event, tenant_id="t1", mode="test", orders_repo=orders, ledger_repo=ledger,
-                repository=StripeRepo(), secret_cipher=Cipher(), actual_fees_fetcher=fetch,
-                now_fn=lambda: now)
-        finally:
-            webhook.checkout_credentials = real_creds
-            if real_request is not None:
-                import stripe_link.stripe_client as client
-                client.stripe_request = real_request
-        return out, ledger, looked_up
-
-    def test_an_upsell_is_found_by_its_own_metadata(self):
-        # Its PaymentIntent carries order_id, stamped at creation for exactly this -- so the webhook does
-        # one `get` rather than a scan or a second index.
-        repo = OrdersRepo([order()])
-        out, ledger, _ = self._run(self._event({"order_id": "order_up_1", "tenant_id": "t1"}), repo,
-                                   actual={"stripe_fee": 109})
-        self.assertEqual(out["fee_reconciled"], True)
-        self.assertEqual(out["drift_cents"], 27)
-        self.assertEqual(repo.rows["order_up_1"]["fees"]["fees_source"], "balance_transaction")
-        self.assertEqual(ledger.rows[("t1", "le_sale_pi_up_1")]["amounts"]["stripe_fee"], -109)
-
-    def test_a_checkout_charge_is_IGNORED_rather_than_hunted_for(self):
-        """The first version asked Stripe which session owned the charge, because a Checkout Session's
-        PaymentIntent cannot carry an order id -- the order is keyed on the session, which Stripe assigns
-        after we build the payload.
-
-        That lookup was removed once the delay was measured. It cost a Stripe call on EVERY sale and
-        corrected nothing: by the time it ran the checkout order had already been trued by
-        `checkout.session.completed`, and on the occasions it had not, the balance transaction was still
-        ~90 seconds from readable. A call per sale for zero corrections is worse than not trying
-        (author's call, 2026-10-04)."""
-        repo = OrdersRepo([order("order_cs_1", pi="pi_cs_1")])
-        out, _, looked_up = self._run(
-            self._event({}, pi="pi_cs_1"), repo, actual={"stripe_fee": 847},
-            sessions={"data": [{"id": "cs_1"}]})
-        self.assertFalse(out["fee_reconciled"])
-        self.assertEqual(looked_up, [], "no Stripe call may be made for a PaymentIntent we cannot place")
-        # And the order is untouched -- the sweep still owns it.
-        self.assertEqual(repo.rows["order_cs_1"]["fees"]["fees_source"], "estimate")
-
-    def test_an_order_already_settled_is_left_alone(self):
-        repo = OrdersRepo([order(fees=dict(ESTIMATED, fees_source="balance_transaction"))])
-        out, _, _ = self._run(self._event({"order_id": "order_up_1"}), repo, actual={"stripe_fee": 999})
-        self.assertFalse(out["fee_reconciled"])
-        self.assertEqual(repo.rows["order_up_1"]["fees"]["stripe_fee"], 82)
-
-    def test_an_order_with_no_marker_is_left_alone_here_too(self):
-        # The same boundary the sweep respects: orders written before `fees_source` existed are not ours
-        # to rewrite, whichever path reaches them.
-        repo = OrdersRepo([order(fees={"stripe_fee": 82, "platform_fee": 89})])
-        out, _, _ = self._run(self._event({"order_id": "order_up_1"}), repo, actual={"stripe_fee": 109})
-        self.assertFalse(out["fee_reconciled"])
-
-    def test_it_does_NOT_wait_for_the_sweeps_settle_window(self):
-        """The sweep waits five minutes because it is guessing at settlement. This is not a guess --
-        Stripe has just said the charge succeeded -- so a seconds-old order is corrected immediately."""
-        repo = OrdersRepo([order(created=1_000_000)])
-        out, _, _ = self._run(self._event({"order_id": "order_up_1"}), repo,
-                              actual={"stripe_fee": 109}, now=1_000_002)
-        self.assertTrue(out["fee_reconciled"])
-
-    def test_an_event_that_is_STILL_early_leaves_it_to_the_sweep(self):
-        repo = OrdersRepo([order()])
-        out, _, _ = self._run(self._event({"order_id": "order_up_1"}), repo, actual={})
-        self.assertFalse(out["fee_reconciled"])
-        # Left marked an estimate on purpose: that is what the sweep selects on.
-        self.assertEqual(repo.rows["order_up_1"]["fees"]["fees_source"], "estimate")
-
-    def test_an_unknown_order_is_not_an_error(self):
-        out, _, _ = self._run(self._event({"order_id": "order_missing"}), OrdersRepo([]),
-                              actual={"stripe_fee": 109})
-        self.assertFalse(out["fee_reconciled"])
-
-    def test_nothing_it_can_do_ever_fails_the_webhook(self):
-        """Stripe retries a failed webhook, and this event's real work -- recording the sale -- already
-        succeeded. A fee that cannot be trued costs fifteen minutes, not a correction."""
-        class Exploding:
-            def scan_type(self): raise RuntimeError("boom")
-            def get(self, *a, **k): raise RuntimeError("dynamo down")
-            def put(self, *a, **k): raise RuntimeError("dynamo down")
-
-        out, _, _ = self._run(self._event({"order_id": "order_up_1"}), Exploding(),
-                              actual={"stripe_fee": 109})
-        self.assertEqual(out, {"fee_reconciled": False})
-
-
-class BothPathsShareOneImplementationTests(unittest.TestCase):
-    """A second pricing path drifts from the first within a release -- the rule this codebase keeps
-    relearning, most recently when an upsell grew its own shipping-quote logic. The sweep and the webhook
-    decide WHICH order; neither decides what correcting one means."""
-
-    def test_the_webhook_calls_the_sweeps_primitive(self):
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "stripe_webhook.py").read_text()
-        block = source.split("def reconcile_payment_intent_fees", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("from handlers.fee_reconciliation import reconcile_order", block)
-        self.assertIn("reconcile_order(order", block)
-
-    def test_the_sweep_calls_it_too(self):
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "fee_reconciliation.py").read_text()
-        self.assertIn("moved = reconcile_order(order", source)
-
-    def test_the_upsell_stamps_the_order_id_its_event_will_need(self):
-        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
-                  / "src" / "handlers" / "upsell.py").read_text()
-        self.assertIn('pi_params["metadata[order_id]"] = order_id', source)
-        # Derived before the charge, or there would be nothing to stamp.
-        self.assertLess(source.index('order_id = f"order_{session_id}_upsell_{sequence}"'),
-                        source.index('pi_params["metadata[order_id]"]'))
+    def test_the_order_id_on_the_paymentintent_survives(self):
+        self.assertIn('pi_params["metadata[order_id]"] = order_id', self.UPSELL)
 
 
 class TheGateIsSetByMeasurementTests(unittest.TestCase):

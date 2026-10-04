@@ -296,20 +296,6 @@ def handler(
     elif event_type == "charge.dispute.created" and tenant_id:
         persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, mode=mode,
                                         orders_repo=orders_repo, ledger_repo=ledger_repo, now_fn=now_fn)
-    elif event_type == "payment_intent.succeeded" and tenant_id:
-        # PHASE 2 (plans/FEE_RECONCILIATION.md): true this charge's fee the moment Stripe says it
-        # succeeded, instead of waiting up to fifteen minutes for the sweep.
-        #
-        # `payment_intent.succeeded` rather than `charge.updated`, because the Connect endpoint is
-        # ALREADY subscribed to it in both modes -- no Stripe configuration to add and get wrong -- and
-        # because it fires for both sale paths. That second property turned out to matter more than
-        # expected: the drift this was built for was measured on an upsell, but the first order it caught
-        # in the wild was a main checkout understated by $2.78, where `checkout.session.completed` had
-        # lost the same settlement race (2026-10-04).
-        persistence = reconcile_payment_intent_fees(
-            stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo,
-            ledger_repo=ledger_repo, repository=repository, secret_cipher=secret_cipher,
-            actual_fees_fetcher=actual_fees_fetcher, now_fn=now_fn)
     elif event_type == "checkout.session.completed" and tenant_id:
         session = _event_data_object(stripe_event)
         session_metadata = session.get("metadata") or {}
@@ -1363,80 +1349,6 @@ def record_refund_ledger_entry(ledger_repo, *, tenant_id: str, order: dict[str, 
         return True
     except Exception:  # noqa: BLE001 - ledger recording must not break refund reconciliation
         return False
-
-
-def reconcile_payment_intent_fees(stripe_event, *, tenant_id, mode, orders_repo=None, ledger_repo=None,
-                                  repository=None, secret_cipher=None, actual_fees_fetcher=None,
-                                  now_fn=None):
-    """Correct one order's estimated Stripe fee, now that its charge has succeeded.
-
-    The accelerator over the 15-minute sweep, and deliberately NOT a second implementation of it: the
-    actual correcting is `fee_reconciliation.reconcile_order`, which the sweep also calls. The only thing
-    decided here is WHICH order, and the answer comes from the PaymentIntent itself.
-
-    **Finding the order costs nothing on an upsell and one call on a checkout.** An upsell's PaymentIntent
-    carries `metadata[order_id]` and `metadata[tenant_id]` -- its full primary key, stamped at creation
-    for exactly this. A Checkout Session's does not, and cannot: the order is keyed on the session id,
-    which Stripe assigns after we build the payload. So that path asks Stripe which session owns this
-    charge, once, and derives the id the same way `order_record_from_session` does.
-
-    **Entirely best-effort.** A webhook that cannot true a fee must still return 200, or Stripe retries an
-    event whose real work (recording the sale) already succeeded. Every failure here leaves the order
-    marked `estimate`, which is precisely what makes the sweep pick it up later -- the accelerator failing
-    costs fifteen minutes, not a correction.
-    """
-    out = {"fee_reconciled": False}
-    try:
-        from handlers.fee_reconciliation import reconcile_order
-        from stripe_link.domain.fee_reconciliation import due
-
-        payment_intent = _event_data_object(stripe_event) or {}
-        payment_intent_id = str(payment_intent.get("id") or "")
-        if not payment_intent_id:
-            return out
-        meta = payment_intent.get("metadata") or {}
-        now = int((now_fn or (lambda: int(time.time())))())
-
-        keys = ((repository or stripe_keys_repository()).get(tenant_id) or {}) if tenant_id else {}
-        api_key, account = checkout_credentials(tenant_id, mode, keys,
-                                                secret_cipher or KmsSecretCipher())
-        if not api_key:
-            return out
-
-        # ONLY a PaymentIntent that names its own order. An upsell stamps `metadata[order_id]` at
-        # creation, so finding it is free. A Checkout Session's PaymentIntent cannot carry one -- the
-        # order is keyed on the session id, which Stripe assigns after we build the payload -- and the
-        # first version of this asked Stripe which session owned the charge to fill the gap.
-        #
-        # That lookup was removed (author's call, 2026-10-04) once the measurement came in. It cost a
-        # Stripe call on EVERY sale and corrected nothing: by the time it ran, the checkout order had
-        # already been trued by `checkout.session.completed`, and on the occasions it had not, the
-        # balance transaction was still ~90 seconds from being readable. A call per sale for zero
-        # corrections is worse than not trying.
-        order_id = str(meta.get("order_id") or "")
-        if not order_id:
-            return out
-
-        orders_repo = orders_repo or orders_repository(mode=mode)
-        order = orders_repo.get(tenant_id, order_id)
-        # `min_age_seconds=0`: the sweep waits because it is guessing at settlement, and this is not a
-        # guess -- Stripe has just said the charge succeeded. The rest of `due` still applies, so an order
-        # that never marked itself an estimate is left alone here exactly as it is there.
-        if not order or not due(order, now, min_age_seconds=0):
-            return out
-
-        ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
-        moved = reconcile_order(order, api_key=api_key, stripe_account=account, now=now,
-                                orders_repo=orders_repo, ledger_repo=ledger_repo,
-                                fetch_fees=actual_fees_fetcher)
-        if moved is None:
-            # Even the event was early. Nothing is wrong and nothing is lost: the sweep still owns this.
-            print(f"[fees] {order_id} still unsettled at payment_intent.succeeded; leaving it to the sweep")
-            return out
-        return {"fee_reconciled": True, "order_id": order_id, "drift_cents": moved}
-    except Exception as exc:  # noqa: BLE001 - a failed true-up must never fail the webhook
-        print(f"[fees] payment_intent true-up failed: {type(exc).__name__}: {exc}")
-        return out
 
 
 def reconcile_charge_refunded(
