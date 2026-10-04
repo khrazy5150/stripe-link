@@ -154,6 +154,37 @@ first thing every tenant does is report the thank-you page as broken.
    persist them, so a drift of one character would make every page store its cards and no future default
    change would ever reach anyone.
 
+## P4 — the promise has to come true (not built)
+
+The thank-you page now says *"Your receipt and tracking details are on the way to your inbox."* Whether
+that becomes true depends on a tenant doing something nothing asks them to do.
+
+**The email is not missing.** Both fulfilment paths already send it — `orders.mark_shipped` (the manual
+"mark as shipped") and `shipping.buy_label` (automatic, `has_tracking=True`). What is missing is the
+trigger:
+
+    shipments recorded: 0
+
+No order has ever been marked shipped or had a label bought, so the email has had nothing to fire on.
+That is not a bug, it is an unperformed step — and a buyer who waits for an email that never arrives
+contacts support instead, which costs the tenant more than the step would have.
+
+So P4 closes the loop rather than building another email:
+
+1. **Tell the tenant there are orders to fulfil.** The notification bell and its badge already exist and
+   already have emitters deferred (`docs/NOTIFICATION_EMITTERS.md`); an unfulfilled physical order is a
+   better first emitter than most of what is queued there, because it has a clear action attached — which
+   is the bar `feedback_notices_only_when_actionable` sets.
+2. **Make the page's promise conditional on the state of the order.** Until a shipment exists there is no
+   tracking to promise, and the card can say what is true now ("we'll email tracking when it ships")
+   rather than asserting something is already on its way.
+3. **Nudge after N days** of an unshipped physical order, as the last resort before the buyer notices.
+
+Worth deciding first, because it shapes the rest: whether the ETA itself should be *revised* when the
+parcel actually ships. The buyer was promised a date computed from an assumed ship day; if the tenant
+ships three days late, the honest thing is a second email with the real date, and the shipment notice is
+already the place that would carry it.
+
 ## Open
 
 - ~~Carrier transit days are business days already~~ **— CONFIRMED 2026-10-04.** Shippo returns a

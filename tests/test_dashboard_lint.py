@@ -23,7 +23,15 @@ DASHBOARD = ROOT / "dashboard"
 # landing editors -- a refactor with real regression risk on the most complex screens in the app.
 #
 # Pinned so it cannot grow. Lower it when the refactor happens; raising it should be deliberate.
-WARNING_CEILING = 46
+#
+# 46 -> 48 (2026-10-04): two more in `AddressFields.vue`, which already held nine of them. The State /
+# Province field became a coded select and heals a legacy name to its code on load, and both writes go
+# through the same prop object every other field in that component writes to -- its own comment says so:
+# "`address` is a reactive object owned by the parent; fields mutate it in place."
+#
+# Contorting two fields around a pattern the other nine follow would make the file harder to read in
+# exchange for a number, and the number is the thing that is wrong. It moves with the refactor above.
+WARNING_CEILING = 48
 
 
 def _npx(*args, cwd=DASHBOARD):

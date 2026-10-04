@@ -27,7 +27,15 @@
       </label>
       <label class="offer-field">
         <span>State / Province <strong>*</strong></span>
-        <input v-model.trim="address.state" type="text" placeholder="CA" />
+        <!-- A CODE where there is a list to pick from, free text everywhere else. Typed names break the
+             timezone inference, NAP consistency and the carriers all at once — see utils/subdivisions. -->
+        <select v-if="subdivisions" v-model="address.state">
+          <option value="">Choose…</option>
+          <!-- A stored value we do not recognise is kept and shown, never silently blanked. -->
+          <option v-if="unlistedState" :value="unlistedState">{{ unlistedState }}</option>
+          <option v-for="[code, name] in subdivisions" :key="code" :value="code">{{ code }} — {{ name }}</option>
+        </select>
+        <input v-else v-model.trim="address.state" type="text" placeholder="Region / Province" />
       </label>
       <label class="offer-field">
         <span>Postal Code <strong>*</strong></span>
@@ -59,14 +67,17 @@
 </template>
 
 <script setup>
+import { computed, watch } from "vue";
+
 import PhoneInput from "./PhoneInput.vue";
 // A named list beats a two-letter box: carriers want ISO-3166 alpha-2, and a tenant typing "UK" (not a
 // code) or "us" produced an address the carrier rejected. Profile already used this list; sharing it here
 // means both screens get the better control rather than the shipping form dragging Profile down to a
 // free-text field.
 import { COUNTRIES } from "../utils/countries";
+import { normalizeSubdivision, subdivisionsFor } from "../utils/subdivisions";
 // `address` is a reactive object owned by the parent; fields mutate it in place.
-defineProps({
+const props = defineProps({
   address: { type: Object, required: true },
   // A shipping address needs a contact and a delivery hint; a business address is just a PLACE. The
   // business's own name and phone already live on the Profile form above it, so repeating them inside the
@@ -74,4 +85,23 @@ defineProps({
   // not something true of a business.
   contact: { type: Boolean, default: true },
 });
+
+const subdivisions = computed(() => subdivisionsFor(props.address.country));
+
+// A value stored before this field was a list -- "Wyoming", or a region from a country with no list we
+// kept. Offered as its own option so the select SHOWS it instead of appearing empty, which would read as
+// "my address lost its state" and is how a tenant ends up re-typing an address that was already right.
+const unlistedState = computed(() => {
+  const current = String(props.address.state || "").trim();
+  if (!current || !subdivisions.value) return "";
+  return subdivisions.value.some(([code]) => code === current) ? "" : current;
+});
+
+// HEAL ON LOAD, and whenever the country changes. "Wyoming" becomes "WY" the moment the form can tell
+// which country it belongs to, so the next save stores a code without the tenant doing anything -- and
+// the timezone inference, the JSON-LD and the carrier all get the same string.
+watch(() => [props.address.country, props.address.state], () => {
+  const healed = normalizeSubdivision(props.address.state, props.address.country);
+  if (healed !== props.address.state) props.address.state = healed;
+}, { immediate: true });
 </script>
