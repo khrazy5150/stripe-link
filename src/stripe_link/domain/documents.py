@@ -2219,6 +2219,16 @@ def validate_business_identity(business: Any) -> None:
     optional_string(business, "name", "business.name")
     optional_string(business, "email", "business.email")
     require_e164(business, "phone", "Business phone")
+    # THE STORE'S WORKING DAY, as an IANA zone name. Suggested from the business address and freely
+    # overridable, because the two are genuinely different things: a seller may live in Pacific time and
+    # ship from a warehouse in Mountain time, and only they know which one is their day (author,
+    # 2026-10-04). It decides when a shipping cutoff falls, and Sabbath mode will need the same answer for
+    # when Friday sundown does -- so it lives on the business identity rather than inside either feature.
+    #
+    # Not validated against a zone list: `delivery_estimate` already degrades to UTC with a loud warning
+    # for a name it cannot load, and refusing a save because a tz database somewhere disagrees would lock
+    # a tenant out of their own profile over a timezone.
+    optional_string(business, "timezone", "business.timezone", max_length=64)
     # Per-field provenance (source: stripe|manual|gbp|derived) so an auto-seed (Stripe Connect, later GBP)
     # never clobbers a tenant's own value. Fill-empty-only is the guarantee; this records where a value came
     # from (plans/BUSINESS_PROFILE_AND_GBP.md).

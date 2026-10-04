@@ -2,6 +2,7 @@ import secrets
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
+from stripe_link.domain.store_timezone import suggest_timezone
 from stripe_link.domain.business_email import (
     CODE_DIGITS, check_code, is_disposable, looks_like_email, start_verification,
 )
@@ -33,7 +34,13 @@ def handler(event, context, repository=None):
         profile = repository.get(tenant_id, user_id)
         if not profile:
             return error_response("Profile not found.", status_code=404, code="not_found")
-        return json_response({"profile": profile})
+        # THE SUGGESTED TIMEZONE TRAVELS WITH THE PROFILE, derived rather than stored. The screen needs a
+        # sensible default in the picker and the inference lives in one place -- a JS copy of the state
+        # table would be a second answer to "where is this store", and the two would drift. Never written
+        # back: a suggestion the tenant has not looked at must not become a value they appear to have
+        # chosen (plans/THANK_YOU_PAGE.md P1).
+        return json_response({"profile": profile,
+                              "timezone_suggested": suggest_timezone((profile.get("business") or {}).get("address"))})
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 

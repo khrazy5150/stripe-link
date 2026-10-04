@@ -6,7 +6,11 @@ import { apiRequest, getAuthSession } from "../api/client";
 // re-fetching. A lightweight precursor to the canonical Business Profile (plans/BUSINESS_PROFILE_AND_GBP.md).
 export const useProfileStore = defineStore("profile", {
   state: () => ({
-    business: { name: "", phone: "", brands: [], address: {} },
+    business: { name: "", phone: "", brands: [], address: {}, timezone: "" },
+    // Derived by the server from the business address and never stored. The picker defaults to it, so a
+    // tenant who never opens the field still gets a sensible working day, and one who does sees what we
+    // guessed rather than a blank (plans/THANK_YOU_PAGE.md P1).
+    timezoneSuggested: "",
     loading: false,
     loaded: false,
     storeAvatarUrl: "",
@@ -54,7 +58,9 @@ export const useProfileStore = defineStore("profile", {
           phone: business.phone || "",
           brands: Array.isArray(business.brands) ? [...business.brands] : [],
           address: business.address || {},
+          timezone: business.timezone || "",
         };
+        this.timezoneSuggested = profile.value.timezone_suggested || "";
       }
       // No profile yet (or the load failed) — brand simply falls back to the product name. Non-fatal.
       this.storeAvatarUrl = avatar.status === "fulfilled" ? (avatar.value.avatar_url || "") : "";

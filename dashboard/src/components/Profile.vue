@@ -126,6 +126,20 @@
           -->
           <AddressFields :address="form.business.address" :contact="false" />
         </fieldset>
+        <label class="offer-field">
+          <span>Store Timezone</span>
+          <select v-model="form.business.timezone">
+            <option value="">
+              Suggested from your address{{ timezoneSuggested ? ` — ${zoneLabel(timezoneSuggested)}` : "" }}
+            </option>
+            <option v-for="zone in timezoneChoices" :key="zone" :value="zone">{{ zoneLabel(zone) }}</option>
+          </select>
+          <small>
+            Your working day — it decides when the shipping cutoff falls, so buyers get an honest delivery
+            estimate. Suggested from your business address, but yours to change: you might live in one zone
+            and ship from a warehouse in another.
+          </small>
+        </label>
       </div>
     </section>
 
@@ -172,6 +186,36 @@ const form = reactive({
   first_name: session.first_name || "", last_name: session.last_name || "", display_name: "",
   business: emptyBusiness(),
 });
+
+// The server's guess from the business address. Transient and NOT part of `form`: a suggestion the tenant
+// has not looked at must never be saved as a value they appear to have chosen -- an empty stored timezone
+// means "use the suggestion", which keeps following the address if they move.
+const timezoneSuggested = ref("");
+
+// EVERY zone the browser knows, not a list we maintain. `Intl.supportedValuesOf` is the complete IANA set
+// and costs nothing to keep current; the short fallback is for the handful of browsers without it, and a
+// tenant needing one that is missing can still be given it server-side -- nothing validates against this.
+const timezoneChoices = computed(() => {
+  try {
+    const all = Intl.supportedValuesOf("timeZone");
+    if (all?.length) return all;
+  } catch { /* older browser */ }
+  return ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix",
+          "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "Europe/London",
+          "Europe/Berlin", "Asia/Tokyo", "Australia/Sydney", "UTC"];
+});
+
+// "America/Denver (GMT-6)" — the offset is what a tenant recognises; the name alone is ambiguous to most.
+function zoneLabel(zone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en", { timeZone: zone, timeZoneName: "shortOffset" })
+      .formatToParts(new Date());
+    const offset = parts.find((p) => p.type === "timeZoneName")?.value;
+    return offset ? `${zone.replace(/_/g, " ")} (${offset})` : zone.replace(/_/g, " ");
+  } catch {
+    return zone;
+  }
+}
 
 // Verification state. Deliberately NOT part of `form`: it is a transient workflow, not a profile field,
 // and mixing it in would send it to the save endpoint.
@@ -290,6 +334,9 @@ function cleanBusiness(business, original = {}) {
   if (business.phone) result.phone = normalizeE164(business.phone);
   if (brands.length) result.brands = brands;
   if (Object.keys(address).length) result.address = address;
+  // Sent only when the tenant actually CHOSE one. Blank means "follow my address", which keeps working if
+  // they move -- persisting the suggestion would freeze a guess into a decision they never made.
+  if (business.timezone) result.timezone = business.timezone;
 
   const sources = { ...(original.sources || {}) };
   for (const key of ["name", "email", "phone"]) {
@@ -323,6 +370,7 @@ function applyProfile(profile) {
     phone: business.phone || "",
     brands: Array.isArray(business.brands) ? [...business.brands] : [],
     address: placeFromDocument(address),
+    timezone: business.timezone || "",
   };
 }
 
@@ -336,6 +384,9 @@ async function load() {
   message.value = "";
   try {
     const body = await apiRequest("/profile", { params: { user_id: userId } });
+    // Derived server-side from the address, never stored. The inference lives in one place; a JS copy of
+    // the state table would be a second answer to "where is this store" and the two would drift.
+    timezoneSuggested.value = body.timezone_suggested || "";
     applyProfile(body.profile || {});
   } catch (err) {
     if (/not found/i.test(err.message)) {
