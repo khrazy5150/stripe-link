@@ -22,7 +22,9 @@ import time
 from stripe_link.domain.fee_reconciliation import _whole, drift, due, fees_of, settled
 from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.kms_secrets import KmsSecretCipher
-from stripe_link.repositories.documents import ledger_repository, orders_repository, stripe_keys_repository
+from stripe_link.repositories.documents import (ledger_repository, notifications_repository,
+                                                orders_repository, shipments_repository,
+                                                stripe_keys_repository)
 from stripe_link.stripe_platform_secrets import checkout_credentials
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,8 @@ MODES = ("test", "live")
 
 
 def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=None,
-            secret_cipher=None, fetch_fees=None, true_up=None, now_fn=None, modes=MODES):
+            secret_cipher=None, fetch_fees=None, true_up=None, now_fn=None, modes=MODES,
+            shipments_repo=None, notifications_repo=None):
     """Reconcile both Stripe modes. Returns a per-mode tally, which is also what the logs carry."""
     from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
 
@@ -44,13 +47,21 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
 
     tally = {}
     for mode in modes:
+        orders_for_mode = orders_repo or orders_repository(mode=mode)
         tally[mode] = _reconcile_mode(
             mode, now,
-            orders_repo=orders_repo or orders_repository(mode=mode),
+            orders_repo=orders_for_mode,
             ledger_repo=ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None),
             stripe_repo=stripe_repo, secret_cipher=secret_cipher,
             fetch_fees=fetch_fees, true_up=true_up)
-    logger.info("fee reconciliation: %s", tally)
+        # A SECOND PASS OVER THE SAME SCAN. Reading the orders table is the expensive half and it is
+        # already happening; asking "and is this one overdue to ship?" costs nothing on top. The two
+        # decisions stay in separate functions -- and separate modules -- so sharing a walk does not make
+        # them one concern (plans/THANK_YOU_PAGE.md P4).
+        tally[mode]["overdue_notified"] = _notify_overdue(
+            mode, now, orders_repo=orders_for_mode, shipments_repo=shipments_repo,
+            notifications_repo=notifications_repo)
+    logger.info("order sweep: %s", tally)
     return tally
 
 
@@ -163,6 +174,54 @@ def _settle_evidence() -> str:
     only log successes.
     """
     return __doc__ or ""
+
+
+def _notify_overdue(mode, now, *, orders_repo, shipments_repo=None, notifications_repo=None) -> int:
+    """Put a bell notice on every paid order that should have shipped by now. Returns how many.
+
+    The notice earns its place by `feedback_notices_only_when_actionable`: "you have orders" is not a
+    notice, because the tenant knows. "This order should have shipped by now" is — we stored the date we
+    promised the buyer on their behalf, so we can name which promise is at risk and what to do about it.
+
+    Idempotent by PRIMARY KEY, not by query: the notification id is derived from the order id, so a sweep
+    running every five minutes rewrites one row instead of filling the bell with copies of itself.
+    """
+    from stripe_link.domain.fulfilment_overdue import is_overdue, overdue_notification
+
+    sent = 0
+    try:
+        from datetime import datetime, timezone as _tz
+
+        today = datetime.fromtimestamp(now, _tz.utc).date()
+        notifications = notifications_repo or (notifications_repository(mode=mode)
+                                               if os.environ.get("NOTIFICATIONS_TABLE") else None)
+        shipments = shipments_repo or (shipments_repository(mode=mode)
+                                       if os.environ.get("SHIPMENTS_TABLE") else None)
+        if notifications is None:
+            return 0
+        for order in orders_repo.scan_type():
+            try:
+                if not is_overdue(order, _shipment_for(shipments, order), today):
+                    continue
+                notifications.put(overdue_notification(order, today))
+                sent += 1
+            except Exception as exc:  # noqa: BLE001 - one bad order never stops the pass
+                logger.warning("overdue notice failed for %s: %s: %s",
+                               order.get("order_id"), type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - and a broken pass never stops the fee reconciliation
+        logger.warning("overdue sweep could not run for %s: %s: %s", mode, type(exc).__name__, exc)
+    return sent
+
+
+def _shipment_for(shipments_repo, order):
+    """This order's shipment, or None. A missing shipments table means every order looks unshipped, which
+    would notify about all of them -- so no repo means no answer and `is_overdue` is never asked."""
+    if shipments_repo is None:
+        return {"status": "shipped"}      # unknowable: assume shipped rather than cry wolf
+    try:
+        return shipments_repo.get(str(order.get("tenant_id") or ""), str(order.get("order_id") or ""))
+    except Exception:  # noqa: BLE001
+        return {"status": "shipped"}
 
 
 def _restate_ledger(ledger_repo, order, now):

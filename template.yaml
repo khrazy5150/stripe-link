@@ -2501,6 +2501,11 @@ Resources:
             TableName: !Ref WebhookEventsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref BookingCreditsTable
+        # Has this order shipped? The scheduled order sweep notifies on orders past the ship date we
+        # promised the buyer, and "shipped" is derived from the shipment document rather than stored on
+        # the order (plans/THANK_YOU_PAGE.md P4). Read-only -- the sweep never writes a shipment.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShipmentsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Version: "2012-10-17"

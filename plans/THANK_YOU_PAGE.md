@@ -248,7 +248,20 @@ it with further revisions. One correction, at the moment the assumption became a
 
 ### Still to build
 
-- **The unfulfilled-order notification**, so the promise has something to come true by. *Next.*
+- ~~The unfulfilled-order notification~~ ✅ *P4c shipped 2026-10-04.* The sale notice stays immediate, as
+  every notification here is; this is a SECOND one for an order past the ship date we promised
+  (`domain/fulfilment_overdue.py`). It earns its place by
+  `feedback_notices_only_when_actionable` — "you have orders" is not a notice because the tenant knows,
+  while "Ada's order was due to ship 3 days ago; they were told a delivery date" names the promise at
+  risk and what to do about it.
+
+  One day's grace, because the cutoff is already a buffer and the tenant may have posted it without
+  telling us. A `warning`, not an error: nothing has failed, and a red badge for a parcel posted this
+  morning would be crying wolf. The notification id is derived from the order id, so a five-minute sweep
+  rewrites one row rather than filling the bell with copies.
+
+  It rides the fee sweep's existing scan — reading the orders table is the expensive half and it was
+  already happening — while keeping its decision in its own module.
 - **The conditional promise** on the thank-you page until a shipment exists.
 - **The nudge** after N days.
 - **The coupon**, per the design above.
