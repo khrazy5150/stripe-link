@@ -110,8 +110,12 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="order in visibleOrders" :key="order.order_id"
-                class="orders-row" :class="{ 'orders-row-selected': selected_.has(order.order_id) }"
+            <!-- A <template v-for> around BOTH rows. A sibling <tr> placed after a v-for <tr> is
+                 OUTSIDE the loop, so `order` is undefined in it and the whole table renders nothing --
+                 which is exactly what shipped, because Vue templates are not type-checked and the build
+                 passed (2026-10-05). -->
+            <template v-for="order in visibleOrders" :key="order.order_id">
+            <tr class="orders-row" :class="{ 'orders-row-selected': selected_.has(order.order_id) }"
                 tabindex="0" @click="openDetail(order, $event)" @keyup.enter="selected = order">
               <td class="orders-col-select">
                 <!-- One row per thing that SHIPS, not per thing that was charged. The expander reveals
@@ -215,7 +219,7 @@
             </tr>
             <!-- ONE LINE, ONE LABEL. Each parcel names its box and what goes in it, so the row reads like
                  a packing slip rather than a count the tenant has to go and look up. -->
-            <tr v-if="order.fulfilment_group && expanded.has(order.order_id)" :key="`${order.order_id}-parcels`"
+            <tr v-if="order.fulfilment_group && expanded.has(order.order_id)"
                 class="orders-parcel-row">
               <td></td>
               <td colspan="7">
@@ -242,6 +246,7 @@
                 </div>
               </td>
             </tr>
+            </template>
           </tbody>
         </table>
       </div>
