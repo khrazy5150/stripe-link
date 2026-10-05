@@ -92,11 +92,16 @@ def notify_buyer(order: dict[str, Any], shipment: dict[str, Any], tenant_id: str
             arrival_line=arrival_line,
             tenant_note=tenant_note,
         )
+        # `to` / `html` / `text` -- the mailer's real parameter names. This called `to_address`,
+        # `html_body` and `text_body`, so every tracking email ever attempted died on a TypeError that was
+        # caught below and recorded on the shipment as `notify_error`. Nothing surfaced it because no
+        # order had ever been marked shipped, and no test caught it because they all pass a `mailer_send`
+        # double that accepts anything (2026-10-05).
         (mailer_send or send_email)(
-            to_address=email,
+            to=email,
             subject=content["subject"],
-            html_body=content["html"],
-            text_body=content["text"],
+            html=content["html"],
+            text=content["text"],
             tenant_id=tenant_id,
         )
         return {"sent": True, "to": email}
