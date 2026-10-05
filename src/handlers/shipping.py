@@ -434,7 +434,8 @@ def live_rates_for(config, tenant_id, *, parcels, destination, secret_cipher):
     secret_ref = str(provider_config.get("api_key_ref") or "")
     if not name or not secret_ref:
         return {"options": [], "error": "no_provider"}
-    from_address = (config or {}).get("ship_from_address") or {}
+    from_address = sender_address((config or {}).get("ship_from_address") or {},
+                                  *_seller_contact(tenant_id, None))
     if not from_address.get("postal_code"):
         # A carrier prices a JOURNEY. Without an origin there is nothing to price, and Shippo rejects the
         # request rather than guessing -- so this is caught here where it can be named.
@@ -877,7 +878,13 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
             secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
         ) if secret_ref else ""
         rates = provider_for(name, api_key).rates(
-            from_address=config.get("ship_from_address") or {},
+            # THE EMAIL HAS TO BE ON THE RATE, not on the purchase. `buy_label` names a `rate_id` and
+            # nothing else, so the sender address the carrier sees was fixed when this ran -- a rate
+            # created without an email produces a rate id that cannot be bought, and the failure surfaces
+            # one click later with the carrier's wording. Fixing only the purchase looked right and
+            # changed nothing (2026-10-05).
+            from_address=sender_address(config.get("ship_from_address") or {},
+                                        *_seller_contact(tenant_id, None)),
             to_address=order.get("shipping_address") or {},
             parcel=parcels[0],
         )

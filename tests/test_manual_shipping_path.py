@@ -94,3 +94,38 @@ class ALabelNeedsASenderEmailTests(unittest.TestCase):
                 raise RuntimeError("dynamo down")
 
         self.assertEqual(_seller_contact("t1", Exploding()), ({}, ""))
+
+
+class TheEmailMustBeOnTheRATETests(unittest.TestCase):
+    """The fix that looked right and changed nothing.
+
+    `buy_label` names a `rate_id` and nothing else — the sender address the carrier sees was fixed when
+    the RATE was created. Putting the email on the purchase left the rate unchanged, so Shippo kept
+    rejecting with `address_from.email must not be empty` and the failure surfaced one click later, in
+    the carrier's words, on a shipment row (2026-10-05).
+
+    Every place that creates a rate has to carry it, because a rate that cannot be bought is a trap left
+    for whoever reaches for it next.
+    """
+
+    def test_the_tenant_facing_rater_carries_it(self):
+        block = SHIPPING_PY.split("def quote_rates", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("sender_address(config.get(\"ship_from_address\")", block)
+
+    def test_the_buyer_facing_rater_carries_it_too(self):
+        block = SHIPPING_PY.split("def live_rates_for", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("sender_address(", block)
+
+    def test_no_rate_is_built_from_the_raw_stored_address(self):
+        """The shape of the bug: `from_address=config.get("ship_from_address") or {}` handed straight to a
+        provider. Every such site now goes through `sender_address` first."""
+        import re
+
+        raw = re.findall(r"from_address=\(?config[^,\n]*ship_from_address[^,\n]*", SHIPPING_PY)
+        self.assertEqual(raw, [], f"a rate is still built from the unfixed address: {raw}")
+
+    def test_the_purchase_only_names_a_rate(self):
+        # Why the first attempt could not have worked, held so nobody re-adds an address argument here.
+        block = SHIPPING_PY.split("purchase = provider_for(name, api_key).buy_label(", 1)[1][:200]
+        self.assertIn("rate_id=rate_id", block)
+        self.assertNotIn("from_address", block)
