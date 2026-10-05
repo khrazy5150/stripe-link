@@ -344,6 +344,58 @@ class ProcessUpsellTests(unittest.TestCase):
         pi_payload = parse_qs(pi_request.data.decode("utf-8"))
         self.assertEqual(pi_payload["payment_method"], ["pm_fallback"])
 
+    def test_process_upsell_charges_a_link_wallet_when_no_card_is_attached(self):
+        """A buyer who paid through Stripe Link has a `link` method and NO card.
+
+        This is the real failure of 2026-10-05: the lookup asked Stripe for `type=card`, got nothing back
+        for such a customer, and the page announced "Card declined" for a customer who was chargeable.
+        The method itself was fine -- a 50c off-session probe against that exact `pm_` succeeded.
+        """
+        opener = FakeStripeOpener({
+            ("GET", "/v1/customers/cus_123"): {"id": "cus_123", "invoice_settings": {}},
+            ("GET", "/v1/payment_methods"): {"data": [{"id": "pm_link_1", "type": "link"}]},
+            ("POST", "/v1/payment_intents"): {"id": "pi_link", "status": "succeeded"},
+        })
+
+        response = self.handle(self.base_event(), opener)
+        self.assertEqual(response["statusCode"], 201)
+        pi_payload = parse_qs(_pi_create(opener).data.decode("utf-8"))
+        self.assertEqual(pi_payload["payment_method"], ["pm_link_1"])
+
+    def test_process_upsell_does_not_narrow_the_payment_method_listing_to_cards(self):
+        """The listing must be unfiltered, because that is what hid the Link wallet.
+
+        Asserted on the REQUEST rather than the outcome: a double that happens to answer every query with
+        the same list would let a `type=card` filter pass the test above while still failing in Stripe.
+        """
+        opener = FakeStripeOpener({
+            ("GET", "/v1/customers/cus_123"): {"id": "cus_123", "invoice_settings": {}},
+            ("GET", "/v1/payment_methods"): {"data": [{"id": "pm_link_1", "type": "link"}]},
+            ("POST", "/v1/payment_intents"): {"id": "pi_link", "status": "succeeded"},
+        })
+
+        self.handle(self.base_event(), opener)
+        listings = [r for r in opener.requests if "/payment_methods" in r.full_url]
+        self.assertTrue(listings, "the handler never listed the customer's payment methods")
+        for request in listings:
+            self.assertNotIn("type=", request.full_url)
+
+    def test_process_upsell_prefers_a_card_over_a_wallet(self):
+        """Widening the listing must not change which method a card-holding customer is charged on."""
+        opener = FakeStripeOpener({
+            ("GET", "/v1/customers/cus_123"): {"id": "cus_123", "invoice_settings": {}},
+            ("GET", "/v1/payment_methods"): {"data": [
+                {"id": "pm_link_1", "type": "link"},
+                {"id": "pm_card_1", "type": "card"},
+            ]},
+            ("POST", "/v1/payment_intents"): {"id": "pi_card", "status": "succeeded"},
+        })
+
+        response = self.handle(self.base_event(), opener)
+        self.assertEqual(response["statusCode"], 201)
+        pi_payload = parse_qs(_pi_create(opener).data.decode("utf-8"))
+        self.assertEqual(pi_payload["payment_method"], ["pm_card_1"])
+
     def test_process_upsell_returns_409_when_no_payment_method_available(self):
         opener = FakeStripeOpener({
             ("GET", "/v1/customers/cus_123"): {"id": "cus_123", "invoice_settings": {}},

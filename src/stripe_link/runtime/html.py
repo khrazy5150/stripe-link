@@ -8745,11 +8745,16 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              if (!ok) throw new Error((body && body.message) || 'Payment failed');",
         "              window.location.assign(postCheckoutNextUrl('accept', funnelStepId));",
         "            })",
-        "            .catch(() => {",
+        "            .catch((err) => {",
         "              cta.dataset.connecting = 'false';",
         "              cta.removeAttribute('aria-disabled');",
         "              cta.classList.remove('is-connecting');",
-        "              cta.textContent = 'Card declined - try again';",
+        # THE REASON, not a guess at it. This said 'Card declined' for every failure -- a 400, a 500, a
+        # dropped connection -- so a buyer whose card was fine was told it was not, and the tenant
+        # debugging it had nothing to go on (2026-10-05). The card IS the likely cause, so it stays the
+        # fallback, but a server that explained itself is believed over our guess.
+        "              cta.textContent = (err && err.message) ? err.message : 'Card declined - try again';",
+        "              try { console.error('[upsell] charge failed:', err); } catch (e) {}",
         "            });",
         "        });",
         "      }",
@@ -8920,10 +8925,12 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # just-made purchases) and becomes 'Continue…' — same funnel-advance, clearer intent.
         "                if (ppDismiss && ppDismiss.dataset.ppProceedLabel && ppDismiss.textContent !== ppDismiss.dataset.ppProceedLabel) ppDismiss.textContent = ppDismiss.dataset.ppProceedLabel;",
         "              })",
-        "              .catch(() => {",
+        "              .catch((err) => {",
         "                btn.dataset.connecting = 'false';",
         "                btn.removeAttribute('aria-disabled');",
-        "                btn.textContent = 'Card declined - try again';",
+        # Same reasoning as the sequential upsell above: say what happened.
+        "                btn.textContent = (err && err.message) ? err.message : 'Card declined - try again';",
+        "                try { console.error('[upsell] add failed:', err); } catch (e) {}",
         "              });",
         "          });",
         "        });",

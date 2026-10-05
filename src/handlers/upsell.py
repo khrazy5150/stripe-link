@@ -471,6 +471,9 @@ def process_upsell(
     except StripeApiError as exc:
         status_code = exc.status_code if exc.status_code and exc.status_code < 500 else 502
         code = "card_declined" if exc.stripe_code == "card_declined" else "stripe_error"
+        # LOGGED, because the page could only ever say "Card declined" and the function said nothing at
+        # all -- a real failure left no trace on either side of the wire (2026-10-05).
+        print(f"[upsell] charge failed for {order_id}: {exc.stripe_code or 'stripe_error'}: {exc.message}")
         return error_response(exc.message, status_code=status_code, code=code)
 
     now = int(now_fn())
@@ -745,6 +748,9 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
             "service_token": str(chosen.get("service_token") or ""), "reason": "standalone"}
 
 
+PREFERRED_PAYMENT_METHOD_TYPES = ("card", "link")
+
+
 def resolve_customer_payment_method(customer_id, *, api_key, stripe_account, opener):
     """Only use payment methods already attached to the customer, matching legacy behavior.
 
@@ -765,17 +771,36 @@ def resolve_customer_payment_method(customer_id, *, api_key, stripe_account, ope
     if isinstance(default_pm, str) and default_pm:
         return default_pm
 
+    # EVERY attached method, not just cards. Asking Stripe for `type=card` meant a buyer who checked out
+    # with Stripe Link -- the one-click wallet Stripe offers on its own hosted Checkout, which attaches a
+    # `link` PaymentMethod and no card -- had nothing here, so the upsell refused to charge a customer
+    # who was perfectly chargeable. The page then reported it as "Card declined", which was wrong twice:
+    # the card was not declined, and there was no card. Measured 2026-10-05 on a real failed upsell
+    # (customer had exactly one method, `pm_...` of type `link`), and a 50c off-session probe against
+    # that same method succeeded, so the method was never the problem -- the filter was.
+    #
+    # `type` is omitted rather than widened to a list because the parameter takes a single value, and the
+    # unfiltered listing is the only call that answers "what can we charge?" in one request.
     payment_methods = stripe_request(
         "GET",
         "/payment_methods",
         api_key=api_key,
         stripe_account=stripe_account,
         opener=opener,
-        params=[("customer", customer_id), ("type", "card")],
+        params=[("customer", customer_id)],
     )
-    data = payment_methods.get("data") or []
+    data = [pm for pm in (payment_methods.get("data") or []) if pm.get("id")]
+    # PREFERENCE, not a gate. Card first because it is the most reliable off-session, then Link; anything
+    # else is still attempted rather than refused here -- Stripe is the authority on whether a saved
+    # method can be confirmed with the buyer gone, and a wrong guess at that list silently drops upsell
+    # revenue. A type that genuinely cannot be reused now fails at the charge, where the error says so
+    # and gets logged.
+    for wanted in PREFERRED_PAYMENT_METHOD_TYPES:
+        for pm in data:
+            if pm.get("type") == wanted:
+                return pm["id"]
     if data:
-        return data[0].get("id", "")
+        return data[0]["id"]
     raise UpsellError("No saved payment method is attached to this customer.")
 
 
