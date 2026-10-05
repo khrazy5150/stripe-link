@@ -2166,6 +2166,36 @@ button:disabled {
   opacity: 1;
 }
 
+/* PROSE inside a banner. The base above is a flex ROW, which is right for the shape it was built for --
+   one short message, optionally a dismiss button pushed to the end -- and wrong the moment the message is
+   a sentence with emphasis in it: each <strong> becomes its own flex column and the sentence is dealt out
+   sideways across the banner in pieces. Opt-in rather than a change to the base, because 95 banners rely
+   on the row and some of them lay out a dismiss button with it. */
+.keys-status-banner.is-prose {
+  display: block;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.keys-status-banner.is-prose strong {
+  font-weight: 800;
+}
+
+/* One statement per line, so a multi-sentence banner is scannable instead of a wall. */
+.keys-status-banner.is-prose .banner-line {
+  display: block;
+}
+
+.keys-status-banner.is-prose .banner-line + .banner-line {
+  margin-top: 0.45rem;
+}
+
+/* A list in a banner reads as a list, not as a run-on. */
+.keys-status-banner.is-prose ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.3rem;
+}
+
 .keys-status-banner.success {
   border-color: #99f6e4;
   background: #ecfdf5;

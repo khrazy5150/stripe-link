@@ -170,3 +170,49 @@ class BumpExposureSeesTheBoxTests(unittest.TestCase):
         from handlers.shipping import _bump_exposure
 
         self.assertEqual(_bump_exposure([{"product_id": "base", "quantity": 1}], [], {}, self.BOXES), {})
+
+
+class BumpPostageIsDestinationBoundTests(unittest.TestCase):
+    """The suggestion must say WHERE it is for, because a flat surcharge cannot track a zone.
+
+    One real offer, measured across US zones on 2026-10-05: 49c to Denver, 105c to New York and Miami,
+    108c to Chicago and Los Angeles, 452c to Anchorage. A bare number invites a tenant to read it as THE
+    number, and the one they are most likely to generate is the worst to use — the preview defaults to
+    their own area, and a shipment to your own postcode is the cheapest zone there is.
+    """
+
+    class _Provider:
+        pass
+
+    def _delta(self, origin_zip, dest_zip):
+        import handlers.shipping as shipping
+
+        parcels = [{"box_name": "Large", "length": 14, "width": 11, "height": 8, "weight": 4.2}]
+        original_pack, original_rate = shipping.pack, shipping.rate_parcels
+        shipping.pack = lambda *a, **k: parcels
+        shipping.rate_parcels = lambda *a, **k: {"error": "", "options": [{"amount": 669, "currency": "usd"}]}
+        try:
+            return shipping._bump_postage_delta(
+                self._Provider(),
+                from_address={"postal_code": origin_zip},
+                destination={"postal_code": dest_zip},
+                lines=[{"product_id": "p", "quantity": 1}],
+                bump_lines=[{"product_id": "b", "quantity": 1}],
+                products={}, boxes=[],
+                base_rates=[{"amount": 620, "currency": "usd"}],
+            )
+        finally:
+            shipping.pack, shipping.rate_parcels = original_pack, original_rate
+
+    def test_it_names_the_destination_it_priced(self):
+        out = self._delta("82009", "10001")["bump_postage"]
+        self.assertEqual(out["amount"], 49)
+        self.assertEqual(out["postal_code"], "10001")
+        self.assertNotIn("rated_to_origin", out)
+
+    def test_it_flags_a_quote_to_the_tenants_own_postcode(self):
+        """The cheapest zone there is, so a surcharge set from it under-collects on every real order."""
+        self.assertTrue(self._delta("82009", "82009")["bump_postage"]["rated_to_origin"])
+
+    def test_the_origin_check_ignores_case_and_spacing(self):
+        self.assertTrue(self._delta(" 82009 ", "82009")["bump_postage"]["rated_to_origin"])

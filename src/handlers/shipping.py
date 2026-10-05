@@ -658,11 +658,22 @@ def _bump_postage_delta(provider, *, from_address, destination, lines, bump_line
         return {}
     base = min(int(rate.get("amount") or 0) for rate in base_rates)
     withbump = min(int(option.get("amount") or 0) for option in rated["options"])
+    origin_zip = str((from_address or {}).get("postal_code") or "").strip().lower()
+    to_zip = str((destination or {}).get("postal_code") or "").strip().lower()
     return {"bump_postage": {
         "amount": max(0, withbump - base),
         "without_bump": base,
         "with_bump": withbump,
         "currency": str((base_rates[0] or {}).get("currency") or "usd"),
+        # WHERE this figure is for, because it is strongly destination-dependent and a flat surcharge is
+        # not. One real offer, measured across US zones 2026-10-05: 49c to Denver, 105c to New York and
+        # Miami, 108c to Chicago and Los Angeles, 452c to Anchorage. A tenant handed a bare number would
+        # reasonably assume it was THE number.
+        "postal_code": str((destination or {}).get("postal_code") or ""),
+        # ...and a warning when they rated to their own doorstep, which is the cheapest zone there is and
+        # therefore the smallest this figure can ever be. Setting the surcharge from it under-collects on
+        # every real order.
+        **({"rated_to_origin": True} if origin_zip and to_zip == origin_zip else {}),
     }}
 
 

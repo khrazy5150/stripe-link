@@ -92,7 +92,7 @@
             <small class="field-hint">Save first — the test uses the key that is stored, not the one typed above.</small>
           </div>
         </div>
-        <div v-if="readiness.length" class="keys-status-banner">
+        <div v-if="readiness.length" class="keys-status-banner is-prose">
           <strong>Before you can buy labels:</strong>
           <ul><li v-for="item in readiness" :key="item">{{ item }}</li></ul>
         </div>
@@ -159,7 +159,7 @@
              count has not moved (2 of 15 dev, 0 of 4 prod measured). Fourteen empty forms was the
              obstacle, not one form -- so they are measurable here, where the gap is reported
              (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P0d). -->
-        <div v-if="unmeasuredProducts.length" class="keys-status-banner warning">
+        <div v-if="unmeasuredProducts.length" class="keys-status-banner warning is-prose">
           <strong>Boxes can only be shared once items are measured.</strong>
           Measure them here — the product itself, out of any packaging.
         </div>
@@ -426,7 +426,7 @@
             Priced from the <strong>Boxes</strong> section below — give each box a price for
             {{ isCatchAllZone(zone) ? "these destinations" : (zone.countries_text || "these countries") }}.
           </p>
-          <p v-if="zone.rule.type === 'flat_rate_box' && boxPricingGap(zone)" class="keys-status-banner warning">
+          <p v-if="zone.rule.type === 'flat_rate_box' && boxPricingGap(zone)" class="keys-status-banner warning is-prose">
             <strong>Buyers here are not charged for shipping.</strong>
             {{ boxPricingGap(zone) }} Checkout has no price to quote, and Stripe cannot ask again once the
             payment page opens — so these orders ship free until a box is priced.
@@ -436,7 +436,7 @@
             <strong>Shipping</strong> element so they can enter a postal code — without one there is no
             address to rate, and nothing is charged.
           </p>
-          <p v-if="zone.rule.type === 'live' && liveZoneGap" class="keys-status-banner warning">
+          <p v-if="zone.rule.type === 'live' && liveZoneGap" class="keys-status-banner warning is-prose">
             <strong>Buyers here are not charged for shipping.</strong> {{ liveZoneGap }}
           </p>
         </div>
@@ -536,7 +536,7 @@
         <p v-if="previewError" class="keys-status-banner warning">{{ previewError }}</p>
         <!-- Nothing measurable means nothing to charge (P0a), said here in the estimator's own terms
              rather than refused as a malformed request. -->
-        <p v-if="previewShipsFree" class="keys-status-banner warning">
+        <p v-if="previewShipsFree" class="keys-status-banner warning is-prose">
           <strong>This ships free.</strong>
           {{ previewUnmeasured.join(", ") }} {{ previewUnmeasured.length === 1 ? "has" : "have" }} no size
           and weight, so there is no parcel to rate and buyers are charged nothing for postage.
@@ -550,23 +550,42 @@
              which is zero in the commonest case: the bump fits the same single parcel, that parcel has to
              become a larger box, and the postage goes up anyway. A real order lost 49c exactly that way
              while this banner stayed silent. -->
-        <p v-if="previewBumpDelta > 0 || previewBumpBoxChange" class="keys-status-banner warning">
-          <strong v-if="previewBumpDelta > 0">Your order bump adds {{ previewBumpDelta }}
-            {{ previewBumpDelta === 1 ? "parcel" : "parcels" }}.</strong>
-          <strong v-else>Your order bump needs a bigger box
-            ({{ previewBumpBoxChange.from.join(", ") }} → {{ previewBumpBoxChange.to.join(", ") }}).</strong>
-          A buyer who adds {{ previewBumpProducts.join(", ") }} on the payment page is not charged for it —
-          Stripe fixes shipping when checkout opens and cannot reprice it after.
-          <template v-if="previewBumpPostage">
-            It costs <strong>{{ formatAmount(previewBumpPostage.amount, previewBumpPostage.currency) }}</strong>
-            more to post ({{ formatAmount(previewBumpPostage.without_bump, previewBumpPostage.currency) }} →
-            {{ formatAmount(previewBumpPostage.with_bump, previewBumpPostage.currency) }}). Put that in the
-            bump price's <strong>Extra postage</strong> field and only the buyers who add it will pay it.
-          </template>
-          <template v-else>
-            Build it into the bump price's <strong>Extra postage</strong> field, make the bump digital, or
-            take it as a cost of conversion.
-          </template>
+        <p v-if="previewBumpDelta > 0 || previewBumpBoxChange" class="keys-status-banner warning is-prose">
+          <span class="banner-line">
+            <strong v-if="previewBumpDelta > 0">Your order bump adds {{ previewBumpDelta }}
+              {{ previewBumpDelta === 1 ? "parcel" : "parcels" }}.</strong>
+            <strong v-else>Your order bump needs a bigger box:
+              {{ previewBumpBoxChange.from.join(", ") }} → {{ previewBumpBoxChange.to.join(", ") }}.</strong>
+          </span>
+          <span class="banner-line">
+            A buyer who adds {{ previewBumpProducts.join(", ") }} on the payment page is not charged for
+            it — Stripe fixes shipping when checkout opens and cannot reprice it after.
+          </span>
+          <span v-if="previewBumpPostage" class="banner-line">
+            <strong>{{ formatAmount(previewBumpPostage.amount, previewBumpPostage.currency) }} more to
+              post</strong> to {{ previewBumpPostage.postal_code || "this destination" }}
+            ({{ formatAmount(previewBumpPostage.without_bump, previewBumpPostage.currency) }} →
+            {{ formatAmount(previewBumpPostage.with_bump, previewBumpPostage.currency) }}).
+          </span>
+          <!-- Rating to your own postcode is the cheapest zone there is, so a surcharge set from it
+               under-collects on every real order. Said here because the figure above looks equally
+               authoritative either way. -->
+          <span v-if="previewBumpPostage?.rated_to_origin" class="banner-line">
+            That is your own postcode — the cheapest possible zone. Rate to somewhere you actually ship to
+            before taking this number.
+          </span>
+          <span class="banner-line">
+            <template v-if="previewBumpPostage">
+              Put {{ formatAmount(previewBumpPostage.amount, previewBumpPostage.currency) }} in the bump
+              price's <strong>Extra postage</strong> field — only the buyers who add it will pay it. It is
+              one flat amount, so check a far postcode too and pick a figure you can live with at both
+              ends.
+            </template>
+            <template v-else>
+              Build it into the bump price's <strong>Extra postage</strong> field, make the bump digital,
+              or take it as a cost of conversion.
+            </template>
+          </span>
         </p>
 
         <div v-for="rate in previewRates" :key="rate.rate_id || rate.service_token" class="offer-item-editor">

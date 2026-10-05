@@ -297,8 +297,29 @@ bump, via `domain/stripe_products.charged_unit_amount`, so only the buyers who T
   against the order above: suggested **49c**, exactly the hand-measured gap. The banner fires on a bigger
   box as well as an extra parcel, and names the figure to type into the field.
 
-Still open: the surcharge is per-bump and destination-blind, so it under-collects on a far zone and
-over-collects on a near one. The deferred alternative below remains the only way to make it exact.
+**How much a flat amount actually costs, measured.** Same offer, same bump, one carrier call per zone
+(2026-10-05):
+
+| destination | without bump | with bump | surcharge |
+|---|---|---|---|
+| 82009 Cheyenne WY — *their own ship-from* | 611c | 663c | **52c** |
+| 80204 Denver CO — *the real order* | 620c | 669c | **49c** |
+| 60601 Chicago IL | 778c | 886c | **108c** |
+| 90210 Los Angeles CA | 778c | 886c | **108c** |
+| 10001 New York NY | 1079c | 1184c | **105c** |
+| 33101 Miami FL | 1079c | 1184c | **105c** |
+| 99501 Anchorage AK | 1467c | 1919c | **452c** |
+
+So one flat figure spans **49c to 452c**, a 9x range. ~105c covers the contiguous US; Alaska is short by
+~347c. The estimator therefore names the postcode it priced, and says so plainly rather than handing over
+a bare number.
+
+**And it warns when the quote is to the tenant's own postcode**, which is the likeliest thing to generate
+and the worst thing to use: it is the cheapest zone there is, so a surcharge taken from it under-collects
+on every real order. Caught because the first screenshot of the feature rated 82009 → 82009.
+
+Still open: the surcharge is per-bump and destination-blind. The deferred alternative below remains the
+only way to make it exact.
 
 Deferred alternative, worth revisiting: move **physical** bumps pre-checkout onto our own page, where the
 shipping element already re-quotes on cart change. Correct shipping — at the cost of the payment-step
