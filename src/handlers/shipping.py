@@ -27,7 +27,7 @@ from stripe_link.domain.shipping import (
     shipment_id_for,
     tenant_boxes,
 )
-from stripe_link.domain.shipping_packing import pack
+from stripe_link.domain.shipping_packing import box_shortfall, pack
 from stripe_link.domain.shipping_rating import rate_parcels
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.carriers import carrier_options
@@ -581,6 +581,11 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None, offer
         "parcel_count": len(parcels),
         "ships_free": False,
         "unmeasured": _unmeasured_names(lines, products),
+        # WHY THAT BOX, when a smaller one looks like it should have done. A correct answer can read
+        # exactly like a bug: one protein shaker bottle rated as a 14x11x8 Large box was reported as
+        # broken, and the packer was right -- the bottle is 10.2in and the Medium box's longest side is
+        # 10in, so it misses by two tenths of an inch (2026-10-05). Nothing on screen could say that.
+        **_box_reason(lines, products, parcels, boxes),
         # WHAT AN ORDER BUMP WOULD ADD. Computed here because this is where a tenant is already looking at
         # shipping, and because a bump taken on Stripe's hosted page can never be priced at checkout --
         # `optional_items` are chosen after `shipping_options` is fixed. Disclosure is the whole remedy
@@ -594,6 +599,23 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None, offer
         "destination": {"country": destination.get("country", ""),
                         "postal_code": destination.get("postal_code", "")},
     })
+
+
+def _box_reason(lines, products, parcels, boxes):
+    """`{box_reason: {...}}` naming the item that ruled out the next box down, or `{}`.
+
+    Single-parcel only, deliberately. With several parcels "which box and why" has several answers and a
+    one-line explanation would have to pick one, which is how a helpful note becomes a misleading one.
+    """
+    if len(parcels or []) != 1:
+        return {}
+    chosen = str(parcels[0].get("box_name") or parcels[0].get("box") or "")
+    shortfall = box_shortfall(packable_items(lines, products), boxes, chosen)
+    if not shortfall:
+        return {}
+    product = (products or {}).get(shortfall["product_id"]) or {}
+    return {"box_reason": {**shortfall,
+                           "product_name": str(product.get("name") or shortfall["product_id"])}}
 
 
 def _unmeasured_names(lines, products):

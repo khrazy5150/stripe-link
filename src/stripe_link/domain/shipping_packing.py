@@ -147,6 +147,60 @@ def _parcel(dimensions, weight, *, distance_unit, mass_unit, box="", packed_from
     return parcel
 
 
+def box_shortfall(units, boxes, chosen_box_name: str) -> dict[str, Any] | None:
+    """Why a smaller box was not used: the item that would not fit it, and by how much. `None` otherwise.
+
+    Purely explanatory -- it changes no packing decision and is computed only when someone asks.
+
+    It exists because a correct answer can look exactly like a bug. A single protein shaker bottle rated
+    as a 14x11x8 Large box, which a tenant reasonably reported as broken (2026-10-05). The packer was
+    right: the bottle is 10.2in tall and their Medium box's longest side is 10in, so it misses by **two
+    tenths of an inch** and the Large is the only box it fits. Nothing on screen could say that, so the
+    only available conclusion was that the software was wrong.
+
+    Reported against the largest box SMALLER than the one chosen, because that is the one a tenant would
+    have expected and the one worth knowing about: it turns "why is this in a huge box" into "your Medium
+    box is 0.2in too short for your best-selling bottle", which is something they can act on -- buy taller
+    boxes, or re-measure an item whose cap they counted twice.
+    """
+    chosen = next((box for box in boxes or [] if str(box.get("name") or "") == str(chosen_box_name)), None)
+    chosen_dims = _dims(chosen) if chosen else None
+    if not chosen_dims:
+        return None
+
+    def volume(dims):
+        return dims[0] * dims[1] * dims[2]
+
+    smaller = []
+    for box in boxes or []:
+        dims = _dims(box)
+        if dims and volume(dims) < volume(chosen_dims):
+            smaller.append((box, dims))
+    if not smaller:
+        return None
+    # The largest of the smaller boxes -- the near miss, not the hopeless one.
+    box, box_dims = max(smaller, key=lambda pair: volume(pair[1]))
+
+    worst = None
+    for unit in units or []:
+        dims = _dims(unit)
+        if not dims:
+            continue
+        if fits_inside(dims, box_dims, compressible=bool(unit.get("compressible"))):
+            continue
+        # BY HOW MUCH, measured the way the fit test measures: both sorted, compared axis by axis, and
+        # the largest overhang is the one that decides it.
+        over = max(side - wall for side, wall in zip(sorted(dims), sorted(box_dims)))
+        if over <= 0:
+            continue
+        if worst is None or over > worst["over_by"]:
+            worst = {"product_id": str(unit.get("product_id") or ""),
+                     "longest_in": max(dims), "over_by": round(over, 2),
+                     "box": str(box.get("name") or ""),
+                     "box_longest_in": max(box_dims)}
+    return worst
+
+
 def _per_item(units, *, distance_unit, mass_unit) -> list[dict[str, Any]]:
     """One parcel per thing: what actually happens for oversized goods, and the honest fallback when
     nothing else is known. Over-estimates rather than under-estimates."""

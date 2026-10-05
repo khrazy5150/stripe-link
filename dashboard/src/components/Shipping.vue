@@ -545,6 +545,14 @@
              plainly than a readiness list does. -->
         <p v-else-if="previewParcels.length" class="field-hint">
           Rated as <strong>{{ previewParcelSummary }}</strong>.
+          <!-- Why that box, when a smaller one looks like it should have done. Without this a correct
+               answer reads as a bug: one shaker bottle in a 14x11x8 box looks absurd until you are told
+               it is 0.2in too tall for the Medium. -->
+          <template v-if="previewBoxReason">
+            {{ previewBoxReason.product_name }} is {{ previewBoxReason.longest_in }}in on its longest side —
+            <strong>{{ previewBoxReason.over_by }}in too long</strong> for your
+            {{ previewBoxReason.box }}.
+          </template>
         </p>
         <!-- Fires on a bigger BOX as well as an extra parcel. It used to fire only on the parcel count,
              which is zero in the commonest case: the bump fits the same single parcel, that parcel has to
@@ -775,6 +783,8 @@ const previewBumpProducts = ref([]);
 // A bump that grows the BOX without adding a parcel. The common case, and the one a parcel count misses:
 // one parcel before, one after, and a bigger box in between.
 const previewBumpBoxChange = ref(null);
+// Why the chosen box, when a smaller one was available but did not fit.
+const previewBoxReason = ref(null);
 const previewBumpPostage = ref(null);
 const offers = ref([]);
 
@@ -856,6 +866,7 @@ async function runRatePreview() {
   previewBumpProducts.value = [];
   previewBumpBoxChange.value = null;
   previewBumpPostage.value = null;
+  previewBoxReason.value = null;
   try {
     const to = {};
     if (preview.country) to.country = preview.country.toUpperCase();
@@ -882,6 +893,7 @@ async function runRatePreview() {
     previewBumpDelta.value = body.bump_parcel_delta || 0;
     previewBumpProducts.value = body.bump_products || [];
     previewBumpBoxChange.value = body.bump_box_change || null;
+    previewBoxReason.value = body.box_reason || null;
     // Absent when the carrier could not price it. A suggestion that might be wrong must not be shown as
     // one, so the banner falls back to naming the box change without a figure.
     previewBumpPostage.value = body.bump_postage || null;
