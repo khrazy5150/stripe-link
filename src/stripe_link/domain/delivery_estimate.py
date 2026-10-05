@@ -127,6 +127,39 @@ def estimate(ordered_at: Any, *, transit_days_min: Any, transit_days_max: Any = 
     }
 
 
+def from_ship_date(ship_on: Any, *, transit_days_min: Any, transit_days_max: Any = None) -> dict[str, Any]:
+    """The same answer, computed from a ship date we KNOW rather than one we assumed.
+
+    plans/THANK_YOU_PAGE.md P4. The buyer was promised a date built on a guess about when the parcel would
+    leave. The moment it actually ships that guess is replaced by a fact, and the arrival has to be
+    recomputed from it — a tenant who was three days out of stock has a buyer holding a date that was
+    never going to happen.
+
+    No cutoff and no timezone here: the parcel is already gone, so there is nothing left to decide about
+    which working day it left on.
+    """
+    low = _whole(transit_days_min)
+    high = _whole(transit_days_max if transit_days_max is not None else transit_days_min)
+    if low is None:
+        return {}
+    if high is None or high < low:
+        high = low
+    try:
+        from datetime import date
+
+        shipped = date.fromisoformat(str(ship_on or "")) if not isinstance(ship_on, date) else ship_on
+    except (TypeError, ValueError):
+        return {}
+    first = add_business_days(shipped, low)
+    last = add_business_days(shipped, high)
+    return {
+        "ships_on": shipped.isoformat(),
+        "arrives_on": first.isoformat(),
+        "arrives_through": last.isoformat() if last != first else None,
+        "exact": last == first,
+    }
+
+
 def _whole(value: Any) -> int | None:
     """Days, tolerating the `Decimal` a stored document hands back (`feedback_decimal_from_dynamo`)."""
     if value is None or isinstance(value, bool):

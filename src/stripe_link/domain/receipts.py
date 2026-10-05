@@ -290,6 +290,13 @@ def shipment_tracking_content(
     tracking_url: str = "",
     has_tracking: bool | None = None,
     support_email: str = "",
+    # WHEN IT SHOULD ARRIVE, recomputed from the day it actually left (plans/THANK_YOU_PAGE.md P4). The
+    # buyer is holding a date built on a guess about when the parcel would ship; finding out it was wrong
+    # by noticing the parcel is late is worse than being told.
+    arrival_line: str = "",
+    # The tenant's OWN words about a delay. "We ran out of stock and restocked Tuesday" is a sentence only
+    # they can write, and it does more than any wording shipped here.
+    tenant_note: str = "",
 ) -> dict[str, str]:
     """"Your order is on its way" — for a label we bought AND for a parcel the tenant posted themselves.
 
@@ -320,7 +327,14 @@ def shipment_tracking_content(
     if via:
         shipped_line += f" Sent via {via}."
 
-    text_lines = [shipped_line, ""]
+    arrival = str(arrival_line or "").strip()
+    note = str(tenant_note or "").strip()
+    text_lines = [shipped_line]
+    if arrival:
+        text_lines.append(arrival)
+    if note:
+        text_lines.append(note)
+    text_lines.append("")
     rows = []
     if order_id:
         rows.append(("Order", str(order_id)))
@@ -341,6 +355,13 @@ def shipment_tracking_content(
         text_lines += ["", f"Questions? Reply to this email or write to {support_email}."]
 
     body = [paragraph(escape(shipped_line))]
+    # Before the tracking table, because the date is what the buyer opened this to find out. The note is
+    # the tenant's explanation for it, so it follows immediately rather than sitting under the parcel
+    # details where it would read as a footnote.
+    if arrival:
+        body.append(paragraph(escape(arrival)))
+    if note:
+        body.append(paragraph(escape(note)))
     if rows:
         body.append(rows_table([(escape(label), escape(value)) for label, value in rows]))
     if number and url:

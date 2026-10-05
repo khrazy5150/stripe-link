@@ -180,7 +180,7 @@ So P4 closes the loop rather than building another email:
    rather than asserting something is already on its way.
 3. **Nudge after N days** of an unshipped physical order, as the last resort before the buyer notices.
 
-### The shipment notice revises the date (author, 2026-10-04)
+### The shipment notice revises the date ✅ *P4a shipped 2026-10-04*
 
 **Yes** — and the delay case is what makes it worth building. *"It may be possible that a tenant who has
 run out of inventory had their shipment delayed. So a revised date with a possible tenant explanation
@@ -234,6 +234,22 @@ actually promised.
 
 **Where it stops.** Once a parcel is with the carrier, tracking is the source of truth and we do not chase
 it with further revisions. One correction, at the moment the assumption became a fact.
+
+> **Built:** `delivery_estimate.from_ship_date`, `shipping_promise.revised_promise` / `revised_sentence`,
+> `shipment_tracking_content(arrival_line=, tenant_note=)`, and `orders.mark_shipped` computing both and
+> storing them on the SHIPMENT. The `buy_label` path still sends the old email — it should carry the same
+> two, and the rate it bought already knows the transit days, so it is the easier of the two callers.
+>
+> **Noticed while building:** the email's hidden preheader (inbox preview text) currently reads "Tracking
+> 94001". A revised date is the thing a buyer most wants to see without opening anything, and that line is
+> the most-read text in the whole message. Worth leading with it when the date moved.
+
+### Still to build
+
+- **The unfulfilled-order notification**, so the promise has something to come true by.
+- **The conditional promise** on the thank-you page until a shipment exists.
+- **The nudge** after N days.
+- **The coupon**, per the design above.
 
 ## Open
 

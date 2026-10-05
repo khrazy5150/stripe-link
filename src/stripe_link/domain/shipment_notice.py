@@ -20,7 +20,8 @@ from stripe_link.mailer import send_email, tenant_email_identity
 
 
 def notify_buyer(order: dict[str, Any], shipment: dict[str, Any], tenant_id: str, *,
-                 has_tracking: bool | None = None, user_profiles_repo=None, mailer_send=None) -> dict[str, Any]:
+                 has_tracking: bool | None = None, user_profiles_repo=None, mailer_send=None,
+                 arrival_line: str = "", tenant_note: str = "") -> dict[str, Any]:
     """Tell the buyer. Reports the OUTCOME rather than swallowing it.
 
     plans/SHIPPING_PROVIDERS.md §P3 says a tracking email must never break what triggered it, which is
@@ -48,6 +49,8 @@ def notify_buyer(order: dict[str, Any], shipment: dict[str, Any], tenant_id: str
             tracking_url=str(shipment.get("tracking_url") or ""),
             has_tracking=has_tracking,
             support_email=identity.get("reply_to", ""),
+            arrival_line=arrival_line,
+            tenant_note=tenant_note,
         )
         (mailer_send or send_email)(
             to_address=email,

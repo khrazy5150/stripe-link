@@ -3766,6 +3766,11 @@ Resources:
       Handler: handlers.orders.handler
       Description: Order history plus fulfilment state, the manual mark-as-shipped path, and address checks.
       Policies:
+        # The shipping QUOTE the order transacted on, for the transit days of the service that actually
+        # shipped -- marking an order shipped recomputes the buyer's arrival date from the day it really
+        # left (plans/THANK_YOU_PAGE.md P4). Read-only; shares CartsTable with carts and tokens.
+        - DynamoDBReadPolicy:
+            TableName: !Ref CartsTable
         # WRITE, not read: an address deliverability verdict is stored on the order it is about, so the
         # Status column can be answered from the table rather than by a provider call per row per render.
         - DynamoDBCrudPolicy:

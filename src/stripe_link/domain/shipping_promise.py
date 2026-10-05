@@ -93,6 +93,82 @@ def promise_for(order: Any, quote: Any = None, *, tz_name: str = "UTC", cutoff_h
     }
 
 
+def revised_promise(order: Any, quote: Any, shipment: Any, *, shipped_on: Any) -> dict[str, Any]:
+    """What the buyer should be told now the parcel has actually gone. `{}` when nothing can be said.
+
+    plans/THANK_YOU_PAGE.md P4. Carries `changed`, because the wording turns on it: a date that still
+    matches is simply stated, while one that moved is a correction. An apology for nothing teaches buyers
+    to expect one and devalues the next real apology — and an EARLIER date is worth saying too, since
+    arriving sooner than promised is good news nobody otherwise hears.
+
+    **Transit days come from the service that actually shipped, where we can know it.** The tenant picks a
+    carrier and service when they mark an order shipped, and it need not be the one the buyer paid for —
+    upgrading to get a late parcel there on time is exactly what a tenant does. Three sources, in order of
+    how much they actually know:
+
+    1. the shipment's own `transit_days`, which the label-buying path has from the rate it bought;
+    2. the stored quote's option for the service named on the shipment, when that service was one we
+       quoted;
+    3. the service the buyer was originally quoted — still right about the SHIP DATE, which is the part
+       that moved, and honest about the rest.
+
+    The carrier registry is not a fourth source: it knows which services carry tracking, not how fast they
+    are, and inventing a duration for "Priority Mail" would be the typed-in guess this work replaced.
+    """
+    from stripe_link.domain.delivery_estimate import from_ship_date
+
+    original = (order or {}).get("delivery_estimate") if isinstance(order, dict) else None
+    original = original if isinstance(original, dict) else {}
+    low, high = _shipment_transit_days(order, quote, shipment)
+    revised = from_ship_date(shipped_on, transit_days_min=low, transit_days_max=high)
+    if not revised:
+        return {}
+    was = str(original.get("arrives_on") or "")
+    now = str(revised.get("arrives_on") or "")
+    return {
+        **revised,
+        "service": _text((shipment or {}).get("service")) or _text(original.get("service")),
+        # `changed` is False when there was no original to move from: nothing was promised, so nothing
+        # was broken, and the buyer just gets a date.
+        "changed": bool(was and now and was != now),
+        "was": was or None,
+        "later": bool(was and now and now > was),
+    }
+
+
+def _shipment_transit_days(order: Any, quote: Any, shipment: Any) -> tuple[Any, Any]:
+    """`(min, max)` for the service that actually shipped — see `revised_promise` for the order."""
+    ship = shipment or {}
+    if ship.get("transit_days_min") is not None:
+        return ship.get("transit_days_min"), ship.get("transit_days_max")
+    named = _text(ship.get("service"))
+    for option in (quote or {}).get("options") or []:
+        if not isinstance(option, dict):
+            continue
+        labels = {_text(option.get("label")).lower(), _text(option.get("service_token")).lower()}
+        if named and named.lower() in labels:
+            return option.get("transit_days_min"), option.get("transit_days_max")
+    quoted = (order or {}).get("shipping_quote") if isinstance(order, dict) else None
+    return transit_days_for(quote, _text((quoted or {}).get("service_token")))
+
+
+def revised_sentence(revised: Any) -> str:
+    """One line for the shipment email. States a date, or corrects one."""
+    if not isinstance(revised, dict) or not revised:
+        return ""
+    first = _spell(revised.get("arrives_on"))
+    through = _spell(revised.get("arrives_through"))
+    when = f"between {first} and {through}" if through and through != first else f"on {first}"
+    if not revised.get("changed"):
+        return f"It should reach you {when}."
+    if revised.get("later"):
+        # Named as a change rather than slipped in: the buyer is holding a date, and finding out by
+        # noticing the parcel is late is worse than being told.
+        return (f"This is later than the {_spell(revised.get('was'))} we first estimated — "
+                f"it should now reach you {when}.")
+    return f"Good news: that is sooner than we first estimated. It should reach you {when}."
+
+
 def promise_sentence(promise: Any) -> str:
     """One line, for the element and for `{{arrival}}` alike.
 
