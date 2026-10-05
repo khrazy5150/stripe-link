@@ -192,12 +192,12 @@ class MarkShippedEndpointTests(unittest.TestCase):
         self.assertIn("tools.usps.com", body["shipment"]["tracking_url"])
         self.assertTrue(body["notification"]["sent"])
         self.assertEqual(len(sent), 1)
-        self.assertEqual(sent[0]["to_address"], "ada@example.com")
+        self.assertEqual(sent[0]["to"], "ada@example.com")
 
     def test_no_tracking_number_is_accepted(self):
         result, sent = _ship({"carrier": "usps", "service": "first_class_mail"})
         self.assertEqual(result["statusCode"], 201)
-        self.assertIn("does not include tracking", sent[0]["text_body"])
+        self.assertIn("does not include tracking", sent[0]["text"])
 
     def test_a_number_without_a_carrier_is_refused_because_it_cannot_become_a_link(self):
         result, sent = _ship({"tracking_number": "94001"})

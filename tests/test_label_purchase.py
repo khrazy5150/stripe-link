@@ -87,7 +87,7 @@ class PurchaseTests(unittest.TestCase):
     def test_the_buyer_is_told(self):
         _, _, sent = _buy()
         self.assertEqual(len(sent), 1)
-        self.assertEqual(sent[0]["to_address"], "ada@example.com")
+        self.assertEqual(sent[0]["to"], "ada@example.com")
 
     def test_buying_TWICE_does_not_buy_two_labels(self):
         """A label is money that cannot be un-spent by refreshing the page. The shipment id is derived
