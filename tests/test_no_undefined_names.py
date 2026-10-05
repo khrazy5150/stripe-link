@@ -68,3 +68,91 @@ class NoUndefinedNamesTests(unittest.TestCase):
         self.assertIn("import os", (SRC / "handlers" / "upsell.py").read_text().split("\n\n", 1)[0])
         self.assertIn("ai_generation_events_repository",
                       (SRC / "handlers" / "ai_generate.py").read_text().split("def ", 1)[0])
+
+
+def _function_bindings(node):
+    """Every name this function binds, including inside nested functions and comprehensions."""
+    bound = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+            bound.add(child.id)
+        elif isinstance(child, ast.arg):
+            bound.add(child.arg)
+        elif isinstance(child, (ast.Import, ast.ImportFrom)):
+            bound |= {(a.asname or a.name.split(".")[0]) for a in child.names}
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(child.name)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            bound.add(child.name)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            bound |= set(child.names)
+    return bound
+
+
+def _module_bindings(tree):
+    bound = set(dir(builtins)) | {"__name__", "__file__", "__doc__", "__all__"}
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound |= {(a.asname or a.name.split(".")[0]) for a in node.names}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            for target in ast.walk(node):
+                if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
+                    bound.add(target.id)
+        elif isinstance(node, (ast.If, ast.Try, ast.With)):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Store):
+                    bound.add(inner.id)
+                elif isinstance(inner, (ast.Import, ast.ImportFrom)):
+                    bound |= {(a.asname or a.name.split(".")[0]) for a in inner.names}
+    return bound
+
+
+class NoFunctionReadsAnotherFunctionsLocalTests(unittest.TestCase):
+    """The gap the module-wide check above cannot close, and which has now cost two outages.
+
+    That check asks whether a name is bound ANYWHERE in the module, which is the right
+    over-approximation for "never imported at all" and blind to the commoner mistake: a name that exists,
+    in a different function.
+
+        persist_checkout_session_completed  ->  user_profiles_repo   (caught by the suite)
+        quote_rates                         ->  body                 (reached production, 2026-10-05,
+                                                                      and took the Orders page down)
+
+    So this asks the narrower question per top-level function: is every name it READS bound by that
+    function, by its module, or by builtins? Nested functions count as part of their parent, because a
+    closure legitimately reads the enclosing scope.
+    """
+
+    def test_every_function_can_resolve_what_it_reads(self):
+        offenders = []
+        for path in sorted(SRC.rglob("*.py")):
+            tree = ast.parse(path.read_text())
+            module = _module_bindings(tree)
+            for node in tree.body:
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                bound = _function_bindings(node) | module
+                for child in ast.walk(node):
+                    if (isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+                            and child.id not in bound):
+                        offenders.append(
+                            f"{path.relative_to(SRC.parent)}:{child.lineno}: "
+                            f"{node.name}() reads `{child.id}`, which it never binds")
+        self.assertEqual(offenders, [], "names bound only in a DIFFERENT function:\n  "
+                                        + "\n  ".join(offenders))
+
+    def test_it_catches_the_shape_that_reached_production(self):
+        """`quote_rates` read `body`, a name every neighbouring handler binds and it did not."""
+        source = "def a(event):\n    body = 1\n    return body\n\ndef b(event):\n    return body\n"
+        tree = ast.parse(source)
+        module = _module_bindings(tree)
+        caught = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                bound = _function_bindings(node) | module
+                caught += [c.id for c in ast.walk(node)
+                           if isinstance(c, ast.Name) and isinstance(c.ctx, ast.Load)
+                           and c.id not in bound]
+        self.assertEqual(caught, ["body"])

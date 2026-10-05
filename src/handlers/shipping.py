@@ -850,7 +850,8 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    order_id = str(parse_json_body(event).get("order_id") or "").strip()
+    payload = parse_json_body(event)
+    order_id = str(payload.get("order_id") or "").strip()
     if not order_id:
         return error_response("An order id is required.", code="missing_order")
 
@@ -892,7 +893,7 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
     # ONE LINE, ONE LABEL. A group needing three boxes is three rates and three labels, each asked for by
     # index -- which `shipment_id_for(..., sequence=N)` was already built to key. The old answer here was
     # to refuse the whole order and tell the tenant to post it manually.
-    parcel_index = max(0, int(body.get("parcel_index") or 0))
+    parcel_index = max(0, int(payload.get("parcel_index") or 0))
     _group_parcel_count = len(parcels)
     if parcel_index >= _group_parcel_count:
         return error_response(f"This group has {_group_parcel_count} parcel(s).", code="no_such_parcel")
