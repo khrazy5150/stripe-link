@@ -546,12 +546,27 @@
         <p v-else-if="previewParcels.length" class="field-hint">
           Rated as <strong>{{ previewParcelSummary }}</strong>.
         </p>
-        <p v-if="previewBumpDelta > 0" class="keys-status-banner warning">
-          <strong>Your order bump adds {{ previewBumpDelta }}
+        <!-- Fires on a bigger BOX as well as an extra parcel. It used to fire only on the parcel count,
+             which is zero in the commonest case: the bump fits the same single parcel, that parcel has to
+             become a larger box, and the postage goes up anyway. A real order lost 49c exactly that way
+             while this banner stayed silent. -->
+        <p v-if="previewBumpDelta > 0 || previewBumpBoxChange" class="keys-status-banner warning">
+          <strong v-if="previewBumpDelta > 0">Your order bump adds {{ previewBumpDelta }}
             {{ previewBumpDelta === 1 ? "parcel" : "parcels" }}.</strong>
+          <strong v-else>Your order bump needs a bigger box
+            ({{ previewBumpBoxChange.from.join(", ") }} → {{ previewBumpBoxChange.to.join(", ") }}).</strong>
           A buyer who adds {{ previewBumpProducts.join(", ") }} on the payment page is not charged for it —
-          Stripe fixes shipping when checkout opens and cannot reprice it after. Build it into the bump's
-          price, make the bump digital, or take it as a cost of conversion.
+          Stripe fixes shipping when checkout opens and cannot reprice it after.
+          <template v-if="previewBumpPostage">
+            It costs <strong>{{ formatAmount(previewBumpPostage.amount, previewBumpPostage.currency) }}</strong>
+            more to post ({{ formatAmount(previewBumpPostage.without_bump, previewBumpPostage.currency) }} →
+            {{ formatAmount(previewBumpPostage.with_bump, previewBumpPostage.currency) }}). Put that in the
+            bump price's <strong>Extra postage</strong> field and only the buyers who add it will pay it.
+          </template>
+          <template v-else>
+            Build it into the bump price's <strong>Extra postage</strong> field, make the bump digital, or
+            take it as a cost of conversion.
+          </template>
         </p>
 
         <div v-for="rate in previewRates" :key="rate.rate_id || rate.service_token" class="offer-item-editor">
@@ -738,6 +753,10 @@ const previewShipsFree = ref(false);
 const previewUnmeasured = ref([]);
 const previewBumpDelta = ref(0);
 const previewBumpProducts = ref([]);
+// A bump that grows the BOX without adding a parcel. The common case, and the one a parcel count misses:
+// one parcel before, one after, and a bigger box in between.
+const previewBumpBoxChange = ref(null);
+const previewBumpPostage = ref(null);
 const offers = ref([]);
 
 /** "3 parcels: Small x2, Medium x1" -- the consequence, in the form a tenant can act on. */
@@ -789,13 +808,17 @@ function togglePreviewProduct(productId) {
   else preview.product_ids.push(id);
 }
 
-function formatRateAmount(rate) {
-  const currency = String(rate.currency || "usd").toUpperCase();
+function formatAmount(cents, currencyCode) {
+  const currency = String(currencyCode || "usd").toUpperCase();
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format((rate.amount || 0) / 100);
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format((cents || 0) / 100);
   } catch (err) {
-    return `${((rate.amount || 0) / 100).toFixed(2)} ${currency}`;
+    return `${((cents || 0) / 100).toFixed(2)} ${currency}`;
   }
+}
+
+function formatRateAmount(rate) {
+  return formatAmount(rate.amount, rate.currency);
 }
 
 function hasService(rate) {
@@ -812,6 +835,8 @@ async function runRatePreview() {
   previewUnmeasured.value = [];
   previewBumpDelta.value = 0;
   previewBumpProducts.value = [];
+  previewBumpBoxChange.value = null;
+  previewBumpPostage.value = null;
   try {
     const to = {};
     if (preview.country) to.country = preview.country.toUpperCase();
@@ -824,6 +849,9 @@ async function runRatePreview() {
         product_ids: preview.offer_id ? undefined : preview.product_ids,
         box: preview.box || undefined,
         to_address: Object.keys(to).length ? to : undefined,
+        // Price the bump's postage too. Costs a second carrier call, which is why the server makes it
+        // opt-in -- but this screen is exactly where a tenant is deciding what to charge for it.
+        price_bump_postage: true,
       },
     });
     previewRates.value = body.rates || [];
@@ -834,6 +862,10 @@ async function runRatePreview() {
     previewUnmeasured.value = body.unmeasured || [];
     previewBumpDelta.value = body.bump_parcel_delta || 0;
     previewBumpProducts.value = body.bump_products || [];
+    previewBumpBoxChange.value = body.bump_box_change || null;
+    // Absent when the carrier could not price it. A suggestion that might be wrong must not be shown as
+    // one, so the banner falls back to naming the box change without a figure.
+    previewBumpPostage.value = body.bump_postage || null;
     // "Ships free" is an ANSWER, not a failure -- the banner says it, so the error line must not.
     if (!previewRates.value.length && !previewShipsFree.value) {
       previewError.value = "The carrier returned no rates for this parcel.";

@@ -3,7 +3,8 @@ import os
 import unittest
 
 from handlers.product_sync import check_product_drift, handler, run_product_sync
-from stripe_link.domain.stripe_products import build_price_params, build_product_params
+from stripe_link.domain.stripe_products import (
+    build_price_params, build_product_params, charged_unit_amount, price_differs)
 from stripe_link.stripe_client import StripeApiError
 from tests.fakes import FakeDocumentRepository
 
@@ -359,3 +360,44 @@ class ProductSyncModeWiringTests(unittest.TestCase):
             mod.handler({"internal_sync": True, "tenant_id": "t", "product_id": "p", "mode": "live"}, None)
 
         self.assertEqual(seen.get("mode"), "live")
+
+
+class OrderBumpPostageSurchargeTests(unittest.TestCase):
+    """An order bump's postage rides in the Stripe price, because nothing else can carry it.
+
+    `optional_items` are ticked on Stripe's hosted page after `shipping_options` are already fixed, and
+    Stripe forbids inline `price_data` for them -- so the only place a bump's postage can be attached is
+    the pre-synced Price itself.
+    """
+
+    def test_stripe_is_charged_the_price_plus_the_surcharge(self):
+        params = build_price_params(
+            {"price_id": "pr1", "currency": "usd", "unit_amount": 953,
+             "context": "order_bump", "shipping_surcharge": 49},
+            "prod_1")
+        self.assertEqual(params["unit_amount"], 1002)
+
+    def test_a_price_without_a_surcharge_is_unchanged(self):
+        params = build_price_params({"price_id": "pr1", "currency": "usd", "unit_amount": 953}, "prod_1")
+        self.assertEqual(params["unit_amount"], 953)
+
+    def test_a_synced_surcharge_does_not_read_as_drift(self):
+        """The comparison has to match what was WRITTEN, or the sync replaces the Price on every run.
+
+        This is the failure mode that makes a surcharge dangerous to bolt on: create price+surcharge,
+        compare bare `unit_amount`, and every sync finds a difference, mints a new Stripe Price and
+        archives the old one -- forever, silently.
+        """
+        local = {"price_id": "pr1", "currency": "usd", "unit_amount": 953,
+                 "context": "order_bump", "shipping_surcharge": 49}
+        in_stripe = {"unit_amount": 1002, "currency": "usd"}
+        self.assertFalse(price_differs(local, in_stripe))
+
+    def test_changing_the_surcharge_is_drift(self):
+        local = {"price_id": "pr1", "currency": "usd", "unit_amount": 953,
+                 "context": "order_bump", "shipping_surcharge": 120}
+        self.assertTrue(price_differs(local, {"unit_amount": 1002, "currency": "usd"}))
+
+    def test_charged_unit_amount_is_what_both_sides_agree_on(self):
+        price = {"unit_amount": 953, "shipping_surcharge": 49}
+        self.assertEqual(charged_unit_amount(price), build_price_params(price, "prod_1")["unit_amount"])

@@ -330,7 +330,11 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
         tax=int(order.get("tax_amount") or 0),
         # Written by `shipping_charges.buyer_paid_shipping` on both order paths. Absent on a digital order,
         # which is why `or 0` is safe here and a stored 0 would not have been (plans/SHIPPING_CHARGES.md).
-        shipping_revenue=int(order.get("shipping_amount") or 0),
+        # ...PLUS the postage that arrived inside an order bump's price. A bump is ticked after Stripe's
+        # shipping options are fixed, so its parcel cost cannot ride the shipping line and is folded into
+        # the bump price instead; counting only `shipping_amount` would book that money as merchandise and
+        # report a shipping margin that is short by exactly the amount the tenant charged to cover postage.
+        shipping_revenue=int(order.get("shipping_amount") or 0) + int(order.get("bump_shipping_amount") or 0),
         idempotency_key=f"sale:{key_ref}",
         order_id=order_id or None,
         offer_id=str(order.get("offer_id") or "") or None,

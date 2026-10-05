@@ -133,6 +133,21 @@
       </label>
       <small v-if="redundancyWarning(price, index)" class="price-context-warning">⚠ {{ redundancyWarning(price, index) }}</small>
 
+      <!-- POSTAGE FOR A BUMP, which cannot be charged as shipping. An order bump is ticked on Stripe's own
+           checkout page, after the shipping options for that session are already fixed, so the bump's size
+           never reaches the shipping quote. Measured on a real order: a cart quoted at $6.20 needed a
+           bigger box and cost $6.69 once the bump was in it, and the seller absorbed the difference.
+           Only offered where it can apply -- a bump price, on something that physically ships. -->
+      <label v-if="price.context === 'order_bump' && productType === 'physical'">
+        Extra postage for this bump
+        <input v-model.number="price.shipping_surcharge" type="number" min="0" step="0.01" />
+        <span class="field-note">
+          Added to this bump's price, so only buyers who add it pay it. Shipping for the order was already
+          quoted before the buyer saw this bump, so this is what covers the bigger box it may force. Leave
+          at 0 if it rides along for nothing.
+        </span>
+      </label>
+
       <!-- A tip jar's real pricing: the amounts it offers, each showing what the buyer pays and what the
            tenant keeps under the mode above. The old pair of inputs here (Minimum / Suggested amount) is
            gone -- the platform owns the range now, and "suggested" was the deprecated single-amount shape

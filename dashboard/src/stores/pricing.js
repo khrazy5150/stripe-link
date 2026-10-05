@@ -136,6 +136,17 @@ export async function buildPriceDocument(priceForm, productType, now) {
     created_at: priceForm.created_at || now,
     updated_at: now,
   };
+  // POSTAGE, kept OUT of the fee calculation above on purpose. An order bump is ticked on Stripe's hosted
+  // page after the session's shipping options are already fixed, so its parcel cost can only travel inside
+  // its own price -- but it is still postage, and the platform takes no cut of postage
+  // (domain/fees.FEE_APPLIES_TO_SHIPPING). Keyed separately so `tenant_keyed_amount` stays merchandise and
+  // the sync adds the two at the last moment (domain/stripe_products.charged_unit_amount).
+  //
+  // Written only on an order_bump price, which is also what the document validator enforces: any other
+  // price can be bought as an ordinary cart line, and an ordinary cart line is already inside the live
+  // shipping quote, so folding postage in would charge it twice.
+  const bumpPostage = cents(priceForm.shipping_surcharge);
+  if (price.context === "order_bump" && bumpPostage > 0) price.shipping_surcharge = bumpPostage;
   if (pricingModel === "recurring" && priceForm.billing_interval) {
     // The NESTED shape Stripe takes and `build_price_params` reads. Writing it is the whole fix: a price
     // saved as "recurring" with nothing here synced to Stripe as a one-time price and charged once.

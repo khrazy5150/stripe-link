@@ -17,7 +17,8 @@ from stripe_link.common import (
     resolve_stripe_mode,
     tenant_id_from_event,
 )
-from stripe_link.domain.stripe_products import build_price_params, build_product_params, price_differs
+from stripe_link.domain.stripe_products import (
+    build_price_params, build_product_params, charged_unit_amount, price_differs)
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import RepositoryError, products_repository, stripe_keys_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
@@ -236,10 +237,12 @@ def check_product_drift(product, *, api_key, stripe_account, caller):
             differences.append({"field": "price", "price_id": price.get("price_id"), "issue": "not_synced"})
         elif stripe_price_id not in stripe_prices:
             differences.append({"field": "price", "price_id": price.get("price_id"), "issue": "missing_in_stripe"})
-        elif int(stripe_prices[stripe_price_id].get("unit_amount") or 0) != int(price.get("unit_amount") or 0):
+        elif int(stripe_prices[stripe_price_id].get("unit_amount") or 0) != charged_unit_amount(price):
+            # `charged_unit_amount`, not `unit_amount`: an order bump's postage surcharge is part of what
+            # Stripe charges, so comparing the bare amount would report permanent drift on every bump.
             differences.append({
                 "field": "price_amount", "price_id": price.get("price_id"),
-                "local": price.get("unit_amount"), "stripe": stripe_prices[stripe_price_id].get("unit_amount"),
+                "local": charged_unit_amount(price), "stripe": stripe_prices[stripe_price_id].get("unit_amount"),
             })
 
     return {"in_sync": not differences, "differences": differences}

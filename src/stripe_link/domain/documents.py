@@ -6,6 +6,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES
 from stripe_link.domain.cart import CART_STATUSES, MAX_CART_LINES, MAX_LINE_QTY
 from stripe_link.domain.composition import ELEMENTS, supported_goals
 from stripe_link.domain.semantic_schema import OFFER_SEMANTIC_MODEL_SCHEMA, check_schema
+from stripe_link.domain.stripe_products import ORDER_BUMP_CONTEXT
 from stripe_link.domain import tips
 from stripe_link.domain.section_theme import SECTION_TONES
 
@@ -1018,6 +1019,20 @@ def validate_product_document(document: dict[str, Any]) -> None:
         optional_non_negative_int(price, "discount_pct", "price.discount_pct")
         optional_non_negative_int(price, "compare_at_unit_amount", "price.compare_at_unit_amount")
         optional_non_negative_int(price, "tenant_keyed_amount", "price.tenant_keyed_amount")
+        # POSTAGE FOLDED INTO A BUMP'S PRICE, and ONLY a bump's. An order bump is ticked on Stripe's
+        # hosted page after `shipping_options` are already fixed, so its size never reaches the postage
+        # quote and the tenant absorbs whatever bigger box it forces (49c on a real order, 734c with five
+        # units -- measured 2026-10-05). This is the amount that covers it, charged only to the buyers who
+        # take the bump.
+        #
+        # Restricted to the `order_bump` context because that restriction is the SAFETY PROPERTY, not
+        # tidiness: any other price can be bought as an ordinary cart line, and an ordinary cart line is
+        # already inside the live shipping quote. Folding postage into one would bill it twice.
+        optional_non_negative_int(price, "shipping_surcharge", "price.shipping_surcharge")
+        if int(price.get("shipping_surcharge") or 0) and price.get("context") != ORDER_BUMP_CONTEXT:
+            raise DocumentValidationError(
+                "price.shipping_surcharge is only valid on an order_bump price; any other price is "
+                "already covered by the cart's shipping quote, so folding postage in would charge it twice.")
         validate_price_fee_breakdown(price.get("fee_breakdown"), "price.fee_breakdown")
         if len(price.get("currency", "")) != 3 or price.get("currency", "") != price.get("currency", "").lower():
             raise DocumentValidationError("price.currency must be a lowercase 3-letter currency code.")

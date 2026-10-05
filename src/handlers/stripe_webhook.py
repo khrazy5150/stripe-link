@@ -1936,6 +1936,47 @@ def _actual_fees_for_session(session, tenant_id, *, repository=None, secret_ciph
     return fetch_actual_fees(payment_intent, api_key=api_key, stripe_account=stripe_account)
 
 
+def bump_postage_from_metadata(raw: Any) -> dict[str, int]:
+    """`{stripe_price_id: surcharge}` from the session's `order_bump_shipping` stamp. `{}` when absent.
+
+    Tolerant by design: this decides how an amount is CLASSIFIED (postage vs merchandise), never whether
+    the order is recorded, so a malformed pair is skipped rather than raised. An older session predating
+    the stamp simply has no postage to attribute.
+    """
+    out: dict[str, int] = {}
+    for pair in str(raw or "").split(","):
+        stripe_price_id, _, amount = pair.partition(":")
+        stripe_price_id = stripe_price_id.strip()
+        if not stripe_price_id:
+            continue
+        try:
+            surcharge = int(amount)
+        except (TypeError, ValueError):
+            continue
+        if surcharge > 0:
+            out[stripe_price_id] = surcharge
+    return out
+
+
+def bump_postage_collected(line_items: list[dict[str, Any]] | None, surcharges: dict[str, int]) -> int:
+    """How much POSTAGE the buyer paid inside the bump lines they actually took.
+
+    Counted off what Stripe says was bought, not off what was offered: a bump is optional, so the offered
+    surcharge is only collected when the box was ticked. Multiplied by quantity, because the surcharge is
+    per unit and so is the parcel growth that justified it.
+    """
+    if not surcharges:
+        return 0
+    total = 0
+    for line in line_items or []:
+        if not line.get("is_order_bump"):
+            continue
+        surcharge = surcharges.get(str(line.get("stripe_price_id") or ""))
+        if surcharge:
+            total += surcharge * max(1, int(line.get("quantity") or 1))
+    return total
+
+
 def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_price_ids: set[str], currency: str) -> list[dict[str, Any]]:
     """Normalize Stripe line items into the order's line_items, flagging which were pre-purchase order bumps
     (their Stripe price id was offered as an optional_item). plans/SALES_FUNNELS.md P2."""
@@ -2337,6 +2378,16 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
     session_id = session.get("id", "")
     bump_price_ids = {pid for pid in str(metadata.get("order_bump_ids") or "").split(",") if pid}
     resolved_line_items = order_line_items_from_stripe(line_items, bump_price_ids, session.get("currency") or "usd")
+    # POSTAGE THAT CAME IN THROUGH A BUMP LINE. An order bump is ticked on Stripe's hosted page after
+    # `shipping_options` are fixed, so its parcel cost cannot be charged as shipping -- it is folded into
+    # the bump's own price instead (domain/stripe_products.charged_unit_amount). Recorded separately here
+    # rather than added to `shipping_amount`, which means one specific thing: what Stripe reported for the
+    # shipping LINE. The fee split is computed from that figure and must keep agreeing with the
+    # `application_fee_amount` checkout actually sent, so widening it would re-break the mismatch fixed on
+    # 2026-10-01. The ledger adds the two together for `shipping_revenue`, which is where the question
+    # "did postage pay for itself?" is actually asked.
+    bump_shipping = bump_postage_collected(
+        resolved_line_items, bump_postage_from_metadata(metadata.get("order_bump_shipping")))
     shipping_address = destination_address_from_session(session)
     record = {
         "tenant_id": tenant_id,
@@ -2371,6 +2422,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         # and nothing knew one (plans/SHIPPING_PROVIDERS.md P0). Absent for digital orders, which is why
         # it is only written when there is one -- an empty address block on every download is noise.
         **({"shipping_address": shipping_address} if shipping_address else {}),
+        **({"bump_shipping_amount": bump_shipping} if bump_shipping else {}),
         # What the buyer PAID for shipping. Not computed here: the buyer chose the service level, so the
         # amount only exists once Stripe reports it (plans/SHIPPING_CHARGES.md). Absent for digital orders
         # rather than zero -- a stored 0 would claim shipping was offered and declined.

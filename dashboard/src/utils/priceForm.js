@@ -17,6 +17,7 @@ export function defaultPriceForm() {
     pricing_model: "one_time",
     fee_handling: "standard",
     context: "standard",
+    shipping_surcharge: 0,
     min_amount: 0,
     suggested_amount: 0,
     // Tip jar (pricing_model customer_chooses). presets are CHARGED amounts -- what the buyer taps is what
@@ -71,6 +72,10 @@ export function priceFormFromDocument(price) {
     pricing_model: price.pricing_model || "one_time",
     fee_handling: price.fee_handling || "standard",
     context: price.context || "standard",
+    // POSTAGE FOLDED INTO AN ORDER BUMP'S PRICE. Held in dollars like every other money field here, and
+    // NOT divided by quantity: a bump is offered as one unit, and the surcharge is what that one unit
+    // adds to the parcel.
+    shipping_surcharge: Number(((Number(price.shipping_surcharge || 0)) / 100).toFixed(2)),
     min_amount: centsToMoneyInput(price.min_amount || 0, quantity),
     suggested_amount: centsToMoneyInput(price.suggested_amount || 0, quantity),
     // A legacy suggested_amount becomes the first preset, which is what it always meant -- one amount offered

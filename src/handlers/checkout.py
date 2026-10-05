@@ -554,6 +554,11 @@ def order_bump_optional_items(offer, products_by_id, key_mode):
 
     Order bumps are PRE-purchase: they ride the initial Checkout session, unlike the post-purchase one-click
     upsell/downsell steps.
+
+    The third element is the price's `shipping_surcharge` -- the postage folded into what Stripe charges
+    (domain/stripe_products.charged_unit_amount). It is returned HERE, where the bump is already resolved
+    to its product and price, so the session can record what the surcharge was worth without resolving the
+    offer a second time.
     """
     bumps = []
     for bump in stage_opportunities(offer, STAGE_CHECKOUT):
@@ -565,7 +570,7 @@ def order_bump_optional_items(offer, products_by_id, key_mode):
             print(f"[checkout] skipping order bump product='{bump.get('product_id')}' price='{bump.get('price_id')}' "
                   f"— not Stripe-synced for mode '{key_mode}' (optional_items require a synced price)")
             continue
-        bumps.append((stripe_price_id, str(bump.get("price_id") or "")))
+        bumps.append((stripe_price_id, str(bump.get("price_id") or ""), int(price.get("shipping_surcharge") or 0)))
     return bumps
 
 
@@ -1396,7 +1401,7 @@ def build_checkout_payload(
     # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same
     # session if the buyer adds them). plans/SALES_FUNNELS.md P2.
     order_bumps = order_bump_optional_items(offer, products_by_id, key_mode)
-    for index, (stripe_price_id, _price_id) in enumerate(order_bumps):
+    for index, (stripe_price_id, _price_id, _surcharge) in enumerate(order_bumps):
         payload[f"optional_items[{index}][price]"] = stripe_price_id
         payload[f"optional_items[{index}][quantity]"] = "1"
 
@@ -1453,7 +1458,16 @@ def build_checkout_payload(
     payload["metadata[funnel_id]"] = ""
     # The bumps' STRIPE price ids offered, so fulfillment can flag which completed line items were bumps
     # (what was actually purchased comes from the session's line_items). plans/SALES_FUNNELS.md P2.
-    payload["metadata[order_bump_ids]"] = ",".join(stripe_price_id for stripe_price_id, _price_id in order_bumps)
+    payload["metadata[order_bump_ids]"] = ",".join(sid for sid, _price_id, _surcharge in order_bumps)
+    # ...and how much of each bump's price is POSTAGE, so the order can record it as shipping revenue
+    # rather than product revenue. Stamped here because this is the last moment both facts are in hand:
+    # the webhook sees Stripe line items, which carry one amount and no idea what it is made of.
+    #
+    # Written only when some bump actually carries a surcharge, so the overwhelming majority of sessions
+    # (digital offers, bumps that need no extra postage) carry no extra metadata key at all.
+    bump_postage = ",".join(f"{sid}:{surcharge}" for sid, _price_id, surcharge in order_bumps if surcharge)
+    if bump_postage:
+        payload["metadata[order_bump_shipping]"] = bump_postage
 
     # Mirror the session's identifying metadata onto the SUBSCRIPTION, so every future renewal invoice can
     # say what it is for. A renewal is a fresh order the tenant must fulfil, and the cycle invoice Stripe

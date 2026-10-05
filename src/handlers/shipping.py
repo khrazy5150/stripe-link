@@ -578,6 +578,11 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None, offer
         # `optional_items` are chosen after `shipping_options` is fixed. Disclosure is the whole remedy
         # available (plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P2).
         **_bump_exposure(lines, bump_lines, products, boxes),
+        # ...and what it costs, when asked for. This is the figure that goes in the bump price's
+        # "Extra postage" field, so it is computed from the same pack-and-rate the buyer's quote runs.
+        **(_bump_postage_delta(provider, from_address=from_address, destination=destination, lines=lines,
+                               bump_lines=bump_lines, products=products, boxes=boxes, base_rates=rates)
+           if body.get("price_bump_postage") and bump_lines else {}),
         "destination": {"country": destination.get("country", ""),
                         "postal_code": destination.get("postal_code", "")},
     })
@@ -594,20 +599,71 @@ def _unmeasured_names(lines, products):
     return names
 
 
-def _bump_exposure(lines, bump_lines, products, boxes):
-    """How many extra parcels an order bump adds, which is postage the tenant will never be paid for.
+def _box_names(parcels):
+    return [str(parcel.get("box_name") or parcel.get("box") or "") for parcel in parcels or []]
 
-    Returns `{}` when the offer has no bump. Parcel COUNT rather than a price: pricing it would mean a
-    second carrier call for a figure whose point is "this is not free", and the count is what a tenant can
-    act on -- a bump that adds no parcel is genuinely free to ship.
+
+def _bump_exposure(lines, bump_lines, products, boxes):
+    """What an order bump adds to the parcel, which is postage the tenant will never be paid for.
+
+    Returns `{}` when the offer has no bump.
+
+    **Parcel count was not enough.** This reported only how many EXTRA parcels a bump forces, on the
+    reasoning that a bump adding no parcel is free to ship. That reasoning has a hole, and a real order
+    fell through it on 2026-10-05: the bump added no parcel and still cost 49c, because the same single
+    parcel had to become a bigger BOX (Medium 10x8x6 -> Large 14x11x8). The count said zero exposure for
+    the exact case that produced the loss, and the same cart with five bump units cost 734c more while
+    still packing into one parcel.
+
+    So the box itself is reported too. Both are packing facts -- local, no carrier call -- so this stays
+    the cheap half of the answer; `_bump_postage_delta` prices it when a tenant asks for the number.
     """
     if not bump_lines:
         return {}
-    base = len(pack(packable_items(lines, products), boxes))
-    withbump = len(pack(packable_items(list(lines) + list(bump_lines), products), boxes))
-    return {"bump_parcel_delta": max(0, withbump - base),
-            "bump_products": [str((products.get(b["product_id"]) or {}).get("name") or b["product_id"])
-                              for b in bump_lines]}
+    base = pack(packable_items(lines, products), boxes)
+    withbump = pack(packable_items(list(lines) + list(bump_lines), products), boxes)
+    exposure = {
+        "bump_parcel_delta": max(0, len(withbump) - len(base)),
+        "bump_products": [str((products.get(b["product_id"]) or {}).get("name") or b["product_id"])
+                          for b in bump_lines],
+    }
+    before, after = _box_names(base), _box_names(withbump)
+    if before != after:
+        # The signal that a surcharge is needed even when the parcel count did not move.
+        exposure["bump_box_change"] = {"from": before, "to": after}
+    return exposure
+
+
+def _bump_postage_delta(provider, *, from_address, destination, lines, bump_lines, products, boxes,
+                        base_rates):
+    """What the bump actually adds in money: rate the parcel WITH it, minus the cheapest rate without.
+
+    `{}` when it cannot be priced, because a suggestion that might be wrong must not look like a quote.
+
+    This is the number the tenant types into `price.shipping_surcharge`, and nothing else can produce it:
+    the cost of a bump is not the cost of shipping the bump, it is how much bigger the box it forces has
+    to be, which is only visible by packing and rating the whole order twice. Opt-in (`price_bump_postage`)
+    because it costs a second carrier call, and the preview's usual job needs only one.
+
+    The CHEAPEST on both sides, compared like with like -- a delta taken between two different service
+    levels would be measuring the service, not the bump.
+    """
+    if not bump_lines or not base_rates:
+        return {}
+    parcels = pack(packable_items(list(lines) + list(bump_lines), products), boxes)
+    if not parcels:
+        return {}
+    rated = rate_parcels(provider, from_address=from_address, to_address=destination, parcels=parcels)
+    if rated["error"] or not rated["options"]:
+        return {}
+    base = min(int(rate.get("amount") or 0) for rate in base_rates)
+    withbump = min(int(option.get("amount") or 0) for option in rated["options"])
+    return {"bump_postage": {
+        "amount": max(0, withbump - base),
+        "without_bump": base,
+        "with_bump": withbump,
+        "currency": str((base_rates[0] or {}).get("currency") or "usd"),
+    }}
 
 
 def measure_products(event, repository, *, products_repo=None):

@@ -259,6 +259,47 @@ computation and states the number:
 Rejected alternative: quoting all bumps into the shipping price from the start. It overcharges every buyer
 who declines the bump, which is worse than the problem.
 
+#### P2b — Charging it, not just disclosing it ✅ (shipped 2026-10-05)
+
+P2 said disclosure was "the whole remedy available". It was not, and the exposure number it disclosed was
+measuring the wrong thing.
+
+**What the parcel count missed.** `_bump_exposure` reported how many EXTRA PARCELS a bump forces, on the
+reasoning that a bump adding no parcel ships free. A real order disproved it: quoted at **620c**, shipped
+at **669c**, one parcel throughout — the single parcel simply had to become a **Large (14x11x8)** instead
+of a **Medium (10x8x6)**. The count said *zero exposure* for the case that produced the loss. Scaling the
+same unquoted bump: 1–3 units **49c**, 4 units **163c**, 5 units **734c**. Box sizes are cliffs, so the
+exposure was never bounded by pennies.
+
+Measured the same day, and worth recording because the first diagnosis was wrong: the two **post-purchase
+upsells** on that order added **nothing at all** (669c → 669c → 669c). P1's zero-delta answer was correct;
+the bump had already moved the box before the first upsell page loaded.
+
+**The remedy: `price.shipping_surcharge`.** A flat postage amount folded into what Stripe charges for the
+bump, via `domain/stripe_products.charged_unit_amount`, so only the buyers who TAKE the bump pay it.
+
+- Flat rather than live because `optional_items` require a **pre-synced Stripe Price** — there is no
+  per-destination hook at the moment the buyer ticks the box. This is the ceiling of what the hosted page
+  allows, not a preference.
+- **Confined to `order_bump` prices**, enforced by the document validator. That confinement is a safety
+  property: any other price can also be bought as an ordinary cart line, and an ordinary cart line is
+  already inside the live shipping quote, so folding postage in would bill it twice.
+- **Every reader goes through `charged_unit_amount`** — the price builder, `price_differs`, and the drift
+  check. Writing price+surcharge while comparing bare `unit_amount` would find a difference on every sync
+  and replace the Stripe Price forever.
+- **Recorded as postage, not merchandise.** Checkout stamps `metadata[order_bump_shipping]`; the webhook
+  turns it back into `order.bump_shipping_amount` for the bumps actually taken, and the ledger adds it to
+  `shipping_revenue`. Kept OUT of `order.shipping_amount`, which means one specific thing (what Stripe
+  reported for the shipping LINE) and drives the fee split that must keep agreeing with the
+  `application_fee_amount` checkout actually sent.
+- **The estimator now reports the box change and prices the delta** (`bump_box_change`, and
+  `bump_postage` under the opt-in `price_bump_postage`, which costs a second carrier call). Verified live
+  against the order above: suggested **49c**, exactly the hand-measured gap. The banner fires on a bigger
+  box as well as an extra parcel, and names the figure to type into the field.
+
+Still open: the surcharge is per-bump and destination-blind, so it under-collects on a far zone and
+over-collects on a near one. The deferred alternative below remains the only way to make it exact.
+
 Deferred alternative, worth revisiting: move **physical** bumps pre-checkout onto our own page, where the
 shipping element already re-quotes on cart change. Correct shipping — at the cost of the payment-step
 placement that makes bumps convert.

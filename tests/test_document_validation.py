@@ -949,3 +949,48 @@ class DocumentValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrderBumpShippingSurchargeTests(unittest.TestCase):
+    """`price.shipping_surcharge` -- the postage folded into an order bump's Stripe price.
+
+    A bump is ticked on Stripe's hosted Checkout page via `optional_items`, which is strictly after
+    `shipping_options` are fixed at session creation, so its size never reaches the postage quote. On a
+    real order (2026-10-05) a cart quoted at 620c shipped at 669c once the bump was in the box.
+    """
+
+    def setUp(self):
+        self.product = load_fixture("product-creatine-gummies.json")
+
+    def _with_price(self, **fields):
+        product = copy.deepcopy(self.product)
+        price = copy.deepcopy(product["prices"][0])
+        price["price_id"] = "price_bump_surcharge"
+        price.update(fields)
+        product["prices"].append(price)
+        return product
+
+    def test_accepts_a_surcharge_on_an_order_bump_price(self):
+        validate_product_document(self._with_price(context="order_bump", shipping_surcharge=49))
+
+    def test_accepts_an_order_bump_price_without_one(self):
+        validate_product_document(self._with_price(context="order_bump"))
+
+    def test_rejects_a_surcharge_on_any_other_price(self):
+        """The confinement is the safety property, not tidiness.
+
+        Any non-bump price can also be bought as an ordinary cart line, and an ordinary cart line is
+        already inside the live shipping quote -- folding postage into one would bill it twice.
+        """
+        for context in ("standard", "sale", "upsell", "downsell"):
+            with self.subTest(context=context):
+                with self.assertRaises(DocumentValidationError):
+                    validate_product_document(self._with_price(context=context, shipping_surcharge=49))
+
+    def test_rejects_a_negative_surcharge(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(self._with_price(context="order_bump", shipping_surcharge=-49))
+
+    def test_a_zero_surcharge_is_not_a_context_error(self):
+        """Zero means "no postage folded in", which is true of every price, bump or not."""
+        validate_product_document(self._with_price(context="standard", shipping_surcharge=0))
