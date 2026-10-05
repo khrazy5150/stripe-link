@@ -261,6 +261,26 @@ def tenant_boxes(config: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [dict(box) for box in boxes if isinstance(box, dict) and box.get("name")]
 
 
+def sender_address(ship_from: dict, business: dict | None = None, owner_email: str = "") -> dict:
+    """The ship-from address with an email on it, because a carrier will not buy a label without one.
+
+    Shippo rejects a purchase with `Attribute "address_from.email" must not be empty` -- and does NOT
+    reject a rate request, so a tenant can price a parcel all week and only discover the gap at the moment
+    they try to post it (reported 2026-10-05, on a ship-from address saved before the field mattered).
+
+    The address's own email wins. Failing that the business email, then the account the tenant signs in
+    with: all three are the seller, and a label's sender address is for the carrier to reach THEM. An
+    address that already carries one is returned untouched.
+    """
+    address = dict(ship_from or {})
+    if _clean(address.get("email")):
+        return address
+    fallback = _clean((business or {}).get("email")) or _clean(owner_email)
+    if fallback:
+        address["email"] = fallback
+    return address
+
+
 def packable_items(lines: list[dict[str, Any]], products_by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Order lines + product documents -> what `pack()` takes.
 

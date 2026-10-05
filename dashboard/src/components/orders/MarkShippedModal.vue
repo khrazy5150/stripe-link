@@ -37,6 +37,19 @@
           <input v-model.trim="form.tracking_number" type="text" placeholder="Leave blank if there is none" />
         </label>
 
+        <!-- The tenant's OWN words, carried into the buyer's email. "We ran out of stock and restocked
+             Tuesday" is a sentence only they can write, and it does more than any wording shipped here.
+             Shown always, not only when late: a parcel going out early is worth a line too. -->
+        <label>
+          Note to the buyer <span class="field-optional">optional</span>
+          <textarea v-model.trim="form.note" rows="2" maxlength="400"
+                    placeholder="Anything they should know — a delay, a substitution, a thank you."></textarea>
+          <small class="field-hint">
+            Added to their shipping email, above the tracking details. They also get the arrival date,
+            recalculated from today.
+          </small>
+        </label>
+
         <label v-if="form.carrier === 'other'">
           Tracking link
           <input v-model.trim="form.tracking_url" type="url" placeholder="https://..." />
@@ -69,7 +82,7 @@ const props = defineProps({
 });
 const emit = defineEmits(["close", "shipped"]);
 
-const form = reactive({ carrier: "", service: "", tracking_number: "", tracking_url: "" });
+const form = reactive({ carrier: "", service: "", tracking_number: "", tracking_url: "", note: "" });
 const localError = ref("");
 
 const buyerName = computed(() =>

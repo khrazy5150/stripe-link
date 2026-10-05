@@ -20,8 +20,10 @@ ORDER = {
 CONFIG = {
     "tenant_id": "t1", "enabled": True,
     "provider": {"name": "mock", "api_key_ref": "", "connection_status": "connected"},
+    # The email is not decoration: a carrier refuses a label without one on the sender, so a ship-from
+    # that could really buy a label carries it (2026-10-05).
     "ship_from_address": {"name": "Shop", "street1": "9 Elm", "city": "Denver", "state": "CO",
-                          "postal_code": "80204", "country": "US"},
+                          "postal_code": "80204", "country": "US", "email": "shop@example.com"},
     "boxes": [{"name": "Small", "length": 8, "width": 6, "height": 4, "empty_weight": 0.2}],
 }
 PARCEL = {"length": 8, "width": 6, "height": 4, "distance_unit": "in", "weight": 1.2, "mass_unit": "lb"}

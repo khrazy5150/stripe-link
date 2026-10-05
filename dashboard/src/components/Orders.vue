@@ -197,6 +197,13 @@
                         :disabled="!canLabel(order) || buying"
                         :title="labelTitle(order)"
                         @click.stop="labelOne(order)">Label</button>
+                <!-- MarkShippedModal, its submit handler and POST /orders/{id}/ship all existed; nothing
+                     ever set `shipping` to an order, so the whole manual path was unreachable from the
+                     screen. A tenant who posts parcels themselves — or whose label purchase fails — had
+                     no way to tell a buyer their order was on its way (reported 2026-10-05). -->
+                <button v-if="!order.fulfilment?.shipment" type="button" class="link-action orders-mark-shipped"
+                        title="Already posted it yourself? Record it and send the buyer their tracking."
+                        @click.stop="shipping = order">Mark shipped</button>
               </td>
             </tr>
           </tbody>

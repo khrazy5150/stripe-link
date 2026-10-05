@@ -34,6 +34,7 @@ from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.domain.shipment_notice import notify_buyer, revision_for
+from stripe_link.domain.shipping import sender_address
 from stripe_link.domain.shipping_promise import revised_sentence
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -43,6 +44,7 @@ from stripe_link.repositories.documents import (
     refund_requests_repository,
     shipments_repository,
     shipping_config_repository,
+    user_profiles_repository,
 )
 
 
@@ -925,6 +927,20 @@ def quoted_service_status(order, rates):
     }}
 
 
+def _seller_contact(tenant_id, user_profiles_repo):
+    """`(business, owner_email)` for the tenant, or `({}, "")`. Never raises: a missing profile means the
+    ship-from address has to carry its own email, which is the next thing checked anyway."""
+    try:
+        repo = user_profiles_repo or (user_profiles_repository()
+                                      if os.environ.get("USER_PROFILES_TABLE") else None)
+        if repo is None:
+            return {}, ""
+        owner = repo.get(tenant_id, tenant_id) or {}
+        return (owner.get("business") or {}), str(owner.get("email") or "")
+    except Exception:  # noqa: BLE001
+        return {}, ""
+
+
 def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_repo=None,
               shipments_repo=None, user_profiles_repo=None, mailer_send=None,
               now_fn=lambda: int(time.time())):
@@ -973,9 +989,19 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
         return error_response("Re-quote this order before buying.", code="missing_parcel")
 
     now = int(now_fn())
+    # AN EMAIL ON THE SENDER, or the carrier refuses the purchase. Shippo rejects a label with
+    # `address_from.email must not be empty` and does NOT reject a RATE request, so a tenant can price
+    # parcels all week and only meet the gap at the moment they try to post one. Falls back to the
+    # business email, then the account they sign in with -- all three are the seller.
+    from_address = sender_address(config.get("ship_from_address") or {},
+                                  *_seller_contact(tenant_id, user_profiles_repo))
+    if not str(from_address.get("email") or "").strip():
+        # Named where it can be fixed, rather than relayed in the carrier's words.
+        return error_response(
+            "Add an email address to your ship-from address on the Shipping screen — carriers will not "
+            "issue a label without one.", code="ship_from_email_required")
     try:
-        claim = build_shipment(order=order, from_address=config.get("ship_from_address") or {},
-                               parcel=parcel, now=now)
+        claim = build_shipment(order=order, from_address=from_address, parcel=parcel, now=now)
     except ShipmentError as exc:
         return error_response(str(exc), code="invalid_shipment")
     try:
