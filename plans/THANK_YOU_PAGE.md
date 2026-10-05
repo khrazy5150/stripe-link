@@ -266,6 +266,20 @@ it with further revisions. One correction, at the moment the assumption became a
 - **The nudge** after N days.
 - **The coupon**, per the design above.
 
+## The $0 upsell shipping depends on something the screen cannot do
+
+`combined_delta` charges nothing for an upsell because it re-packs the order's lines WITH it, re-rates,
+and finds the carrier charges no more to carry it. That is right, and it is only right **if one parcel
+actually ships**.
+
+The Orders screen offers a label per ORDER, and an upsell is its own order. A real funnel on 2026-10-04
+collected $6.20 of shipping and was offered $18.20 of labels — a $12 loss on a $113 sale, landing on a
+carrier invoice weeks later rather than anywhere near the order.
+
+See **plans/FULFILMENT_GROUPS.md**. It is the other half of this work: the promise made here is kept
+there, and until it is built the honest reading is that this plan's shipping maths is ahead of the
+fulfilment the product can perform.
+
 ## Open
 
 - ~~Carrier transit days are business days already~~ **— CONFIRMED 2026-10-04.** Shippo returns a
