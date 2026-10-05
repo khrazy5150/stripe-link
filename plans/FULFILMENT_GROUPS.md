@@ -85,12 +85,36 @@ speculative requirement.
 - **`record_shipping_cost_entry`.** The postage is one cost against a group that collected revenue on one
   of its orders; the ledger's `shipping_margin` is wrong until both sides agree on the unit.
 
+## Built 2026-10-05
+
+`domain/fulfilment_groups.py` groups on the shared session, packs the union, and names each parcel's box
+and contents. `orders.py` attaches the group to the parent and a `ships_with` pointer to the others.
+`shipping.quote_rates` packs the whole GROUP and rates one parcel by index; `buy_label` keys the shipment
+on `sequence = parcel_index + 1`, which is what `shipment_id_for`'s sequence was always for. The Orders
+screen folds children under their parent and expands into one line per parcel, each with its own rate and
+its own label.
+
+**The multi-parcel refusal is gone.** `quote_rates` used to reject an order needing more than one box —
+*"buying multi-parcel labels is not supported yet, mark it shipped manually"*. A group needing three boxes
+is now three lines, three rates and three labels.
+
+Two things found by running it against the real orders rather than reasoning about them:
+
+- **A Stripe line item has no `product_id`.** It carries `stripe_price_id` and a name. The first version
+  read `product_id` off the line and silently packed only the upsells, dropping both cart items — the
+  exact failure `resolve_order_lines` documents, which is now reused instead of re-done.
+- **`fulfilment_context` never returned the shipping config**, so the boxes would have been empty and
+  every group would have packed into nothing. The unit tests passed either way; it took real products and
+  real boxes to show it.
+
 ## Open
 
 - **An upsell that arrives after the parent shipped.** Unlikely — upsells happen seconds later in the same
   flow — but possible if a tenant is fast. The group would need to either refuse to re-use a spent
   shipment or deliberately start `sequence=2`.
-- **Mixed destinations.** Nothing stops an upsell carrying a different shipping address today, since it is
-  read from the original session. Grouping must verify the addresses match rather than assume it.
+- ~~Mixed destinations.~~ **Handled, and kept as an invariant guard.** A differing destination splits the
+  group. The author's point stands — the buyer enters an address once at checkout and an upsell inherits
+  it by reference, never re-asking — so this should never fire. That is exactly why it is worth keeping:
+  if it ever does, something upstream is wrong and two parcels to two doors is the right answer anyway.
 - **What the tenant sees for money.** Grouping fulfilment must not group REVENUE: the Orders screen's
   PAID column, the ledger and refunds stay per-order, or a refund of one upsell becomes ambiguous.

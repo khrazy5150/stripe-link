@@ -33,6 +33,7 @@ from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
+from stripe_link.domain.fulfilment_groups import group_parcels
 from stripe_link.domain.shipment_notice import notify_buyer, revision_for
 from stripe_link.domain.shipping import sender_address
 from stripe_link.domain.shipping_promise import revised_sentence
@@ -816,6 +817,26 @@ def list_carriers(event, repository, secret_cipher):
     return json_response(payload)
 
 
+def _fulfilment_group_for(order, tenant_id, orders_repo):
+    """Every order that ships in the same box as this one, parent first.
+
+    Reads the tenant's orders to find the siblings. Falls back to the order alone, because a group of one
+    is the common case and an unreadable list must not stop a tenant buying a label.
+    """
+    try:
+        from stripe_link.domain.fulfilment_groups import group_key, group_orders
+
+        key = group_key(order)
+        siblings = [o for o in (orders_repo.list_for_tenant(tenant_id) or [])
+                    if group_key(o) == key]
+        for members in group_orders(siblings):
+            if any(str(o.get("order_id")) == str(order.get("order_id")) for o in members):
+                return members
+    except Exception as exc:  # noqa: BLE001
+        print(f"[fulfilment] group lookup failed for {order.get('order_id')}: {type(exc).__name__}: {exc}")
+    return [order]
+
+
 def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_repo=None):
     """Rates for ONE order, packed by the same `pack()` every other caller uses.
 
@@ -858,17 +879,24 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
         return error_response(" ".join(state["reasons"]) or "This order cannot be shipped.",
                               code="not_eligible")
 
-    parcels = pack(packable_items(state["lines"], {str(p.get("product_id") or ""): p for p in products}),
-                   tenant_boxes(config))
+    # THE WHOLE GROUP, not just this order. An upsell is its own order because it is its own charge, and
+    # rating them separately is how a funnel that collected $6.20 of postage was offered $18.20 of labels
+    # -- three boxes to one address (plans/FULFILMENT_GROUPS.md). The buyer was charged $0 for those
+    # upsells BECAUSE they ride along, so this has to pack what that promise priced.
+    products_by_id = {str(p.get("product_id") or ""): p for p in products if p.get("product_id")}
+    group = _fulfilment_group_for(order, tenant_id, orders)
+    parcels = group_parcels(group, products_by_id=products_by_id, boxes=tenant_boxes(config),
+                            index=product_index(products))
     if not parcels:
         return error_response("Nothing in this order needs a parcel.", code="nothing_to_pack")
-    if len(parcels) > 1:
-        # Multi-parcel orders are out of scope for this slice and must say so rather than quietly quoting
-        # postage for one box and shipping three (plans/ORDER_FULFILMENT.md, "Deliberately not").
-        return error_response(
-            f"This order needs {len(parcels)} parcels, and buying multi-parcel labels is not supported "
-            "yet — mark it shipped manually once you have posted it.",
-            code="multi_parcel")
+    # ONE LINE, ONE LABEL. A group needing three boxes is three rates and three labels, each asked for by
+    # index -- which `shipment_id_for(..., sequence=N)` was already built to key. The old answer here was
+    # to refuse the whole order and tell the tenant to post it manually.
+    parcel_index = max(0, int(body.get("parcel_index") or 0))
+    _group_parcel_count = len(parcels)
+    if parcel_index >= _group_parcel_count:
+        return error_response(f"This group has {_group_parcel_count} parcel(s).", code="no_such_parcel")
+    parcels = [parcels[parcel_index]]
 
     provider_config = dict(config.get("provider") or {})
     name = str(provider_config.get("name") or "")
@@ -897,6 +925,11 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
     return json_response({
         "order_id": order_id,
         "parcel": parcels[0],
+        # WHICH BOX OF HOW MANY, so the screen can draw a line per parcel and the tenant can see what goes
+        # in each. `parcel_index` rides back to the label purchase, where it becomes the shipment sequence.
+        "parcel_index": parcel_index,
+        "parcel_count": _group_parcel_count,
+        "ships_with": [str(o.get("order_id") or "") for o in group],
         "rates": selection["candidates"],
         "selected": selection["rate"],
         "selection_reason": selection["reason"],
@@ -984,7 +1017,10 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
         return error_response("Order not found.", status_code=404, code="order_not_found")
 
     shipments = shipments_repo or shipments_repository(mode=mode)
-    shipment_id = shipment_id_for(order_id)
+    # ONE SHIPMENT PER PARCEL. `sequence` already existed for a deliberate split and is exactly this: a
+    # group needing two boxes buys `shp_<order>_outbound_1` and `_outbound_2`, so a double-clicked Buy
+    # Label still loses the conditional write on its own parcel rather than buying a second label for it.
+    shipment_id = shipment_id_for(order_id, sequence=max(1, int(body.get("parcel_index") or 0) + 1))
     existing = shipments.get(tenant_id, shipment_id)
     if existing and existing.get("status") in {"purchased", "shipped"}:
         # The second click, or the retry. Hand back the label that was already bought rather than buying

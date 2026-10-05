@@ -114,6 +114,13 @@
                 class="orders-row" :class="{ 'orders-row-selected': selected_.has(order.order_id) }"
                 tabindex="0" @click="openDetail(order, $event)" @keyup.enter="selected = order">
               <td class="orders-col-select">
+                <!-- One row per thing that SHIPS, not per thing that was charged. The expander reveals
+                     the boxes this group actually needs -- as few as the items allow, which is the
+                     packer's answer and the same one the buyer's postage was priced from. -->
+                <button v-if="order.fulfilment_group" type="button" class="orders-group-toggle"
+                        :aria-expanded="expanded.has(order.order_id)"
+                        :title="`${order.fulfilment_group.order_ids.length} orders — ${parcelsOf(order).length} parcel(s)`"
+                        @click.stop="toggleGroup(order)">{{ expanded.has(order.order_id) ? "−" : "+" }}</button>
                 <!-- Only a shippable, unshipped order can join a bulk print. The reason a box is
                      unavailable is in its tooltip and, at length, in the Status cell. -->
                 <input type="checkbox" :checked="selected_.has(order.order_id)"
@@ -204,6 +211,35 @@
                 <button v-if="!order.fulfilment?.shipment" type="button" class="link-action orders-mark-shipped"
                         title="Already posted it yourself? Record it and send the buyer their tracking."
                         @click.stop="shipping = order">Mark shipped</button>
+              </td>
+            </tr>
+            <!-- ONE LINE, ONE LABEL. Each parcel names its box and what goes in it, so the row reads like
+                 a packing slip rather than a count the tenant has to go and look up. -->
+            <tr v-if="order.fulfilment_group && expanded.has(order.order_id)" :key="`${order.order_id}-parcels`"
+                class="orders-parcel-row">
+              <td></td>
+              <td colspan="7">
+                <p class="orders-parcel-intro">
+                  {{ order.fulfilment_group.order_ids.length }} orders to one address &mdash;
+                  {{ parcelsOf(order).length }}
+                  {{ parcelsOf(order).length === 1 ? "parcel" : "parcels" }}.
+                  <span v-if="groupMembers(order).length">
+                    Includes {{ groupMembers(order).slice(1).length }} post-purchase
+                    {{ groupMembers(order).slice(1).length === 1 ? "upsell" : "upsells" }}, already paid
+                    for and shipping free with this box.
+                  </span>
+                </p>
+                <div v-for="(parcel, i) in parcelsOf(order)" :key="i" class="orders-parcel">
+                  <div class="orders-parcel-what">
+                    <strong>{{ parcel.box || "Custom box" }}</strong>
+                    <span class="orders-parcel-contents">{{ (parcel.contents || []).join(", ") }}</span>
+                  </div>
+                  <button type="button" class="primary-action orders-label-button"
+                          :disabled="buying"
+                          @click.stop="labelParcel(order, i)">
+                    {{ parcelRate(order, i) ? `Buy ${money(parcelRate(order, i).amount)}` : "Get rate" }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -325,7 +361,78 @@ const formatDate = formatEpochDate;
 // has to move to the query, and the caret must stop implying it sorted everything.
 const sort = reactive({ key: "created_at", direction: "desc" });
 
-const visibleOrders = computed(() => sortOrders(orders.value, sort.key, sort.direction));
+// An upsell is its own ORDER because it is its own charge, but it is not its own PARCEL -- it ships in
+// the buyer's existing box, which is why it was charged $0 for postage. Listing it as a peer is how a
+// funnel that collected $6.20 was offered $18.20 of labels (plans/FULFILMENT_GROUPS.md). It appears under
+// its parent's expander instead.
+const visibleOrders = computed(() =>
+  sortOrders(orders.value.filter((o) => !o.ships_with), sort.key, sort.direction));
+
+// Expanded groups, by parent order id.
+const expanded = ref(new Set());
+function toggleGroup(order) {
+  const next = new Set(expanded.value);
+  next.has(order.order_id) ? next.delete(order.order_id) : next.add(order.order_id);
+  expanded.value = next;
+}
+const ordersById = computed(() =>
+  Object.fromEntries(orders.value.map((o) => [o.order_id, o])));
+function groupMembers(order) {
+  return (order.fulfilment_group?.order_ids || [])
+    .map((id) => ordersById.value[id]).filter(Boolean);
+}
+function parcelsOf(order) {
+  return order.fulfilment_group?.parcels || [];
+}
+
+// Rates are cached per PARCEL, not per order: a group needing two boxes gets two quotes and two labels,
+// and keying them together would show the second box the first box's price.
+const parcelRates = ref({});
+const parcelKey = (order, index) => `${order.order_id}#${index}`;
+function parcelRate(order, index) {
+  return parcelRates.value[parcelKey(order, index)]?.selected || null;
+}
+
+async function labelParcel(order, index) {
+  const key = parcelKey(order, index);
+  const cached = parcelRates.value[key];
+  if (!cached?.selected) {
+    // The tenant sees the price before it is spent, never after -- the same two-step the single-order
+    // button uses, because a label is money that cannot be un-spent by refreshing the page.
+    try {
+      const body = await apiRequest("/shipping/rates", {
+        method: "POST", body: { order_id: order.order_id, parcel_index: index },
+      });
+      parcelRates.value = { ...parcelRates.value, [key]: {
+        selected: body.selected || null, parcel: body.parcel || null,
+      } };
+      if (!body.selected) message.value = "No rate came back for that parcel.";
+    } catch (err) {
+      message.value = err.message || "No rates.";
+    }
+    return;
+  }
+  buying.value = true;
+  try {
+    await apiRequest("/shipping/labels", {
+      method: "POST",
+      body: {
+        order_id: order.order_id,
+        parcel_index: index,
+        rate_id: cached.selected.rate_id,
+        parcel: cached.parcel,
+        amount: cached.selected.amount,
+        currency: cached.selected.currency,
+      },
+    });
+    message.value = "Label bought. The buyer was sent their tracking.";
+    await load();
+  } catch (err) {
+    message.value = err.message || "Could not buy that label.";
+  } finally {
+    buying.value = false;
+  }
+}
 
 function sortBy(key) {
   if (sort.key === key) {

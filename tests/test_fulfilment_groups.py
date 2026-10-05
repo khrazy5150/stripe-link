@@ -142,3 +142,72 @@ class TheListMarksThemTests(unittest.TestCase):
 
         _attach_fulfilment_groups(orders, {"products_by_id": None, "index": None, "config": None})
         self.assertEqual(len(orders), 2)
+
+
+class TheScreenShowsOneRowPerBOXTests(unittest.TestCase):
+    """An upsell is its own ORDER because it is its own charge, but it is not its own PARCEL — it ships in
+    the buyer's existing box, which is why it was charged $0 for postage. Listing it as a peer is how a
+    funnel that collected $6.20 was offered $18.20 of labels."""
+
+    ORDERS_VUE = (__import__("pathlib").Path(__file__).resolve().parents[1]
+                  / "dashboard" / "src" / "components" / "Orders.vue").read_text()
+
+    def test_children_are_folded_into_their_parent(self):
+        self.assertIn("orders.value.filter((o) => !o.ships_with)", self.ORDERS_VUE)
+
+    def test_the_expander_appears_only_for_a_group(self):
+        self.assertIn('v-if="order.fulfilment_group"', self.ORDERS_VUE)
+
+    def test_each_parcel_names_its_box_and_contents(self):
+        self.assertIn('parcel.box || "Custom box"', self.ORDERS_VUE)
+        self.assertIn("(parcel.contents || []).join", self.ORDERS_VUE)
+
+    def test_rates_are_cached_per_parcel_not_per_order(self):
+        """A group needing two boxes gets two quotes; keying them together would show the second box the
+        first box's price."""
+        self.assertIn("const parcelKey = (order, index)", self.ORDERS_VUE)
+        self.assertIn("${order.order_id}#${index}", self.ORDERS_VUE)
+
+    def test_the_price_is_shown_before_it_is_spent(self):
+        # The same two-step the single-order button uses: a label is money that cannot be un-spent by
+        # refreshing the page.
+        block = self.ORDERS_VUE.split("async function labelParcel", 1)[1].split("\n}", 1)[0]
+        self.assertLess(block.index("/shipping/rates"), block.index("/shipping/labels"))
+
+    def test_the_parcel_index_travels_to_both_calls(self):
+        block = self.ORDERS_VUE.split("async function labelParcel", 1)[1].split("\n}", 1)[0]
+        self.assertEqual(block.count("parcel_index: index"), 2)
+
+
+class TheServerRatesAndBuysPerParcelTests(unittest.TestCase):
+    SHIPPING_PY = (__import__("pathlib").Path(__file__).resolve().parents[1]
+                   / "src" / "handlers" / "shipping.py").read_text()
+
+    def test_rating_packs_the_whole_group(self):
+        block = self.SHIPPING_PY.split("def quote_rates", 1)[1][:4000]
+        self.assertIn("_fulfilment_group_for(order, tenant_id, orders)", block)
+        self.assertIn("group_parcels(group", block)
+
+    def test_the_multi_parcel_refusal_is_gone(self):
+        """It used to refuse the whole order and tell the tenant to post it by hand. A group needing three
+        boxes is now three lines, three rates and three labels."""
+        self.assertNotIn("multi_parcel", self.SHIPPING_PY)
+
+    def test_each_parcel_gets_its_own_shipment_id(self):
+        """`sequence` already existed for a deliberate split and is exactly this: a double-clicked Buy
+        Label still loses the conditional write on its OWN parcel rather than buying a second label."""
+        self.assertIn('shipment_id_for(order_id, sequence=max(1, int(body.get("parcel_index") or 0) + 1))',
+                      self.SHIPPING_PY)
+
+    def test_an_out_of_range_parcel_is_refused(self):
+        self.assertIn("no_such_parcel", self.SHIPPING_PY)
+
+    def test_a_group_lookup_failure_falls_back_to_the_order_alone(self):
+        from handlers.shipping import _fulfilment_group_for
+
+        class Exploding:
+            def list_for_tenant(self, _t):
+                raise RuntimeError("dynamo down")
+
+        order = {"order_id": "order_1", "session_id": "cs_1"}
+        self.assertEqual(_fulfilment_group_for(order, "t1", Exploding()), [order])
