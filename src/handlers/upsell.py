@@ -6,7 +6,9 @@ from stripe_link.common import error_response, json_response, parse_json_body, q
 from stripe_link.silo import current_silo
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
-from stripe_link.domain.pricing import PricingError, load_offer_products, resolve_offer
+from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
+from stripe_link.domain.pricing import (
+    PricingError, find_price, load_offer_products, resolve_offer)
 from stripe_link.domain.shipping import destination_address_from_session
 from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -139,7 +141,8 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
                event, tenant_id, offer_id, product_id, shipping_details,
                # The SAME baseline the charge will use, so the button and the card cannot disagree.
                baseline=session_shipping_baseline(session_id, api_key=api_key,
-                                                  stripe_account=stripe_account, opener=opener))}
+                                                  stripe_account=stripe_account, opener=opener),
+               session_id=session_id)}
            if offer_id and product_id else {}),
         # WHEN THE PARCEL IS DUE, for the thank-you page's shipping element and the `{{arrival}}` token in
         # its cards (plans/THANK_YOU_PAGE.md P2). Read from the ORDER rather than recomputed: the promise
@@ -184,7 +187,8 @@ def _delivery_promise(tenant_id, session_id, *, mode, orders_repo=None):
         return {}
 
 
-def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_details, baseline=None):
+def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_details, baseline=None,
+                            session_id=""):
     """The postage the accept button must disclose. `{amount, service_token, reason}`; zeros on any failure.
 
     **It must quote exactly what the charge will quote**, or the button states one price and the card takes
@@ -199,7 +203,8 @@ def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_det
     Best-effort by the same argument as the charge: a quote that cannot be had means no postage is
     charged, so a page that cannot show one is still telling the truth.
     """
-    from stripe_link.repositories.documents import offers_repository, products_repository
+    from stripe_link.repositories.documents import (offers_repository, orders_repository,
+                                                     products_repository)
 
     try:
         mode = resolve_stripe_mode(event)
@@ -207,6 +212,11 @@ def _session_shipping_quote(event, tenant_id, offer_id, product_id, shipping_det
         if not offer:
             return {"amount": 0, "service_token": "", "reason": "offer_not_found"}
         products_repo = products_repository(mode=mode)
+        # THE SAME BOX THE CHARGE WILL SEE. Disclosing a delta measured from the bare checkout quote while
+        # charging one measured from the real parcel is how a button comes to state a price the card does
+        # not take.
+        baseline = box_so_far(baseline, tenant_id=tenant_id, session_id=session_id, offer=offer,
+                              products_repo=products_repo, orders_repo=orders_repository(mode=mode))
         wanted = str(product_id or "").strip()
         if not wanted:
             return {"amount": 0, "service_token": "", "reason": "no_product"}
@@ -265,7 +275,12 @@ def session_shipping_baseline(session_id, *, api_key, stripe_account, opener):
     try:
         session = stripe_request(
             "GET", f"/checkout/sessions/{session_id}",
-            api_key=api_key, stripe_account=stripe_account, opener=opener)
+            api_key=api_key, stripe_account=stripe_account, opener=opener,
+            # The BUMP the buyer ticked is in here and nowhere else at this moment. It is not in the
+            # shipping quote -- a bump is chosen on Stripe's page after the quote is stamped -- and the
+            # order the webhook writes may not exist yet. Expanding costs nothing extra: this request is
+            # already being made.
+            params=[("expand[]", "line_items")])
     except Exception:  # noqa: BLE001 - not knowing is a fallback, never a failed sale
         return {}
     meta = session.get("metadata") or {}
@@ -286,7 +301,126 @@ def session_shipping_baseline(session_id, *, api_key, stripe_account, opener):
               "price_id": str(line.get("price_id") or ""),
               "quantity": max(1, int(line.get("quantity") or 1))}
              for line in (quote.get("items") or []) if line.get("product_id")]
-    return {"items": lines, "amount": paid} if lines else {}
+    if not lines:
+        return {}
+    # WHICH STRIPE PRICES WERE ACTUALLY BOUGHT, so the caller can tell a bump that was ticked from one
+    # that was merely offered, and WHAT POSTAGE came in through them. Both are carried out of here rather
+    # than re-fetched, because this function already holds the session.
+    taken = {}
+    for line in ((session.get("line_items") or {}).get("data") or []):
+        price = line.get("price") if isinstance(line.get("price"), dict) else {}
+        stripe_price_id = str(price.get("id") or "")
+        if stripe_price_id:
+            taken[stripe_price_id] = taken.get(stripe_price_id, 0) + max(1, int(line.get("quantity") or 1))
+    return {"items": lines, "amount": paid, "taken_price_ids": taken,
+            "bump_shipping": _bump_postage_paid(meta.get("order_bump_shipping"), taken)}
+
+
+def _bump_postage_paid(raw, taken_price_ids):
+    """Postage already collected through the bump lines the buyer actually ticked.
+
+    The surcharge is folded into the bump's own price (domain/stripe_products.charged_unit_amount), so it
+    is money paid for the parcel that does not appear in the shipping line. A later upsell measuring its
+    delta against the shipping line alone would be measuring against a figure that is short by this much.
+    """
+    total = 0
+    for pair in str(raw or "").split(","):
+        stripe_price_id, _, amount = pair.partition(":")
+        quantity = taken_price_ids.get(stripe_price_id.strip(), 0)
+        if not quantity:
+            continue
+        try:
+            total += int(amount) * quantity
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+# How far to walk when looking for upsells already accepted and the step number is unknown. A funnel
+# with more steps than this simply stops accumulating, which under-states the box rather than inventing
+# one.
+MAX_DISCOVERED_UPSELLS = 20
+
+
+def box_so_far(baseline, *, tenant_id, session_id, sequence=None, offer=None, products_repo=None,
+               orders_repo=None):
+    """What is ALREADY in the parcel, and what has already been paid to post it.
+
+    An upsell's postage is a DELTA, and a delta is only as honest as the thing it is measured from.
+    `session_shipping_baseline` answers "what did the original checkout quote cover", which is NOT the
+    same question -- it is blind to two things that are genuinely in the box by the time an upsell is
+    offered:
+
+      - **the order bump**, which is ticked on Stripe's hosted page after the shipping quote is stamped,
+        and so appears in no quote anywhere; and
+      - **every upsell the buyer has already accepted**, because each one was rated against this same
+        original quote.
+
+    While upsells were small the error was zero and invisible. It is not small when they are not.
+    Measured on real products 2026-10-05: cart 620c, then two Whey Protein upsells. Each was rated against
+    the original cart and charged 203c, so the buyer paid 1026c to post a parcel that costs 837c -- a
+    **189c OVERCHARGE**, taken from the customer. The reverse is just as available: two upsells that each
+    fit alone but together force a second parcel would each be charged nothing for it.
+
+    So the baseline is cumulative. Items the buyer has bought and postage they have already paid both
+    accumulate, and the delta is always "what does adding THIS cost on top of what is already going".
+
+    Reads are best-effort: a baseline that cannot be completed is returned as far as it got, because an
+    approximate delta beats refusing the sale.
+    """
+    if not baseline or not baseline.get("items"):
+        return baseline
+    items = list(baseline["items"])
+    amount = int(baseline.get("amount") or 0) + int(baseline.get("bump_shipping") or 0)
+
+    # THE BUMP. Resolved through the offer, because only the offer knows which products are offered as
+    # bumps, and matched on the Stripe price ids the session says were bought.
+    taken = baseline.get("taken_price_ids") or {}
+    if taken and offer and products_repo:
+        for bump in stage_opportunities(offer, STAGE_CHECKOUT):
+            bump_product_id = str(bump.get("product_id") or "")
+            if not bump_product_id:
+                continue
+            try:
+                product = products_repo.get(tenant_id, bump_product_id)
+            except Exception:  # noqa: BLE001
+                continue
+            price = find_price(product or {}, str(bump.get("price_id") or ""))
+            quantity = taken.get(str(price.get("stripe_price_id") or ""), 0)
+            if quantity:
+                items.append({"product_id": bump_product_id, "price_id": str(bump.get("price_id") or ""),
+                              "quantity": quantity})
+
+    # EVERY UPSELL ALREADY ACCEPTED. Their order ids are deterministic and they are written synchronously
+    # before the buyer can reach the next step, so this is a direct read per prior step -- no scan, and no
+    # race of the kind that moved the baseline off the order in the first place.
+    #
+    # `sequence` is known on the charge (the page sends its funnel step) and NOT on the disclosure, which
+    # is a plain GET for the page about to be shown. Rather than republish every funnel page to add the
+    # step number, an absent one is DISCOVERED by walking the deterministic ids until one is missing --
+    # bounded, and it finds exactly the steps already accepted. Both paths must agree, because the button
+    # states a price and the charge takes one.
+    if orders_repo:
+        earlier = 0
+        limit = (sequence - 1) if sequence else MAX_DISCOVERED_UPSELLS
+        while earlier < limit:
+            earlier += 1
+            try:
+                order = orders_repo.get(tenant_id, f"order_{session_id}_upsell_{earlier}")
+            except Exception:  # noqa: BLE001
+                continue
+            if not order:
+                if not sequence:
+                    break  # a gap means there are no more; with a known sequence, keep checking the rest
+                continue
+            if str(order.get("status") or "") not in ("paid", "succeeded"):
+                continue
+            product_id = str((order.get("product") or {}).get("product_id") or "")
+            if product_id:
+                items.append({"product_id": product_id, "quantity": 1})
+            amount += int(order.get("shipping_amount") or 0)
+
+    return {"items": items, "amount": amount}
 
 
 def process_upsell(
@@ -415,9 +549,13 @@ def process_upsell(
     upsell_shipping = quote_upsell_shipping(
         tenant_id, resolved.get("items") or [], products_by_id,
         destination=shipping_address, mode=mode, secret_cipher=secret_cipher,
-        # What is already going, so this charges only what the extra item ADDS.
-        baseline=session_shipping_baseline(session_id, api_key=api_key, stripe_account=stripe_account,
-                                           opener=opener),
+        # What is already going, so this charges only what the extra item ADDS -- including the order
+        # bump and every upsell already accepted, which the checkout quote alone cannot see.
+        baseline=box_so_far(
+            session_shipping_baseline(session_id, api_key=api_key, stripe_account=stripe_account,
+                                      opener=opener),
+            tenant_id=tenant_id, session_id=session_id, sequence=sequence, offer=offer,
+            products_repo=products_repo, orders_repo=orders_repo),
         # So the delta can measure what is ALREADY in the box: `products_by_id` holds only the upsell.
         products_repo=products_repo)
     shipping_amount = int(upsell_shipping.get("amount") or 0)

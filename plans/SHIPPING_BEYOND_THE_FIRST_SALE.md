@@ -243,6 +243,41 @@ missing products, and it refuses outright to rate a line whose product is not in
 letting the packer invent a box for it. A map it cannot complete falls back to the standalone rate,
 which over-charges in the one direction a tenant can refund.
 
+#### P1b — The delta must measure from the WHOLE box ✅ (shipped 2026-10-05)
+
+`session_shipping_baseline` answers *"what did the original checkout quote cover"*. P1 treated that as
+*"what is already in the parcel"*, and the two differ by everything the buyer added after the quote was
+stamped:
+
+- **the order bump**, ticked on Stripe's hosted page after the quote exists, so it appears in no quote
+  anywhere — nor does the postage folded into its price (P2b); and
+- **every upsell already accepted**, each of which was rated against that same original quote.
+
+While upsells were small the error was exactly zero, which is why it survived every test so far. It is not
+zero when they are not. Measured on real products: cart 620c, order bump, then two Whey Protein upsells.
+
+| | charged | box seen |
+|---|---|---|
+| upsell 1 | 203c | cart only (620c) — bump invisible |
+| upsell 2 | 203c | cart only (620c) — bump AND upsell 1 invisible |
+| **collected** | **1026c** | |
+| **true cost of the parcel that ships** | **837c** | |
+| | **+189c overcharged to the BUYER** | |
+
+The reverse is equally available: two upsells that each fit alone but together force a second parcel would
+each be charged nothing for it.
+
+`box_so_far` makes the baseline cumulative — items and postage both accumulate, so the delta is always
+"what does adding THIS cost on top of what is already going". Re-run through the fixed path the same
+funnel collects 770 + 53 + 14 = **837c, exactly the true cost**.
+
+The bump is resolved through the offer and matched against the Stripe price ids the SESSION says were
+bought (offered is not bought). Prior upsells are read by their deterministic order ids, which are written
+synchronously before the buyer can reach the next step — so this is a direct read per step, with none of
+the race that moved the baseline off the order in the first place. The disclosure carries no step number,
+so it DISCOVERS the accepted steps by walking until a gap; both paths must reach the same box, because the
+button states a price and the charge takes one.
+
 ### P2 — Order-bump exposure ✅ (shipped with P0e)
 
 > Built as part of the rate estimator rather than the offer builder: the estimator already packs the

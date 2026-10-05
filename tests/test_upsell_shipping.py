@@ -501,8 +501,22 @@ class BothCallSitesMustPassTheRepoTests(unittest.TestCase):
         self.assertIn("products_repo=products_repo", block)
 
     def test_the_charge_passes_it(self):
-        block = self.UPSELL.split("upsell_shipping = quote_upsell_shipping", 1)[1][:600]
+        # Delimited by the next statement rather than by a character count. A fixed window silently
+        # measures whatever happens to be in it: adding the cumulative-baseline argument pushed the call's
+        # own arguments past 600 characters and failed a guard about something it had not touched.
+        block = (self.UPSELL.split("upsell_shipping = quote_upsell_shipping", 1)[1]
+                 .split("\n    shipping_amount", 1)[0])
         self.assertIn("products_repo=products_repo", block)
+
+    def test_both_call_sites_measure_from_the_whole_box(self):
+        """Not just the checkout quote. The bump and every accepted upsell are in the parcel too, and an
+        upsell rated against the bare quote over-charged a real cart by 189c (2026-10-05)."""
+        charge = (self.UPSELL.split("upsell_shipping = quote_upsell_shipping", 1)[1]
+                  .split("\n    shipping_amount", 1)[0])
+        disclosure = self.UPSELL.split("def _session_shipping_quote", 1)[1].split("\ndef ", 1)[0]
+        for name, block in (("charge", charge), ("disclosure", disclosure)):
+            with self.subTest(call_site=name):
+                self.assertIn("box_so_far", block)
 
 
 class TheUpsellRecordsWhatStripeActuallyTookTests(unittest.TestCase):
