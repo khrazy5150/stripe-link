@@ -125,6 +125,7 @@ def list_orders(event, repository, mode, *, products_repo=None, shipments_repo=N
         suggestion = suggested_correction(order)
         if suggestion:
             order["address_suggestion"] = suggestion
+    _attach_fulfilment_groups(orders, context)
     return json_response({
         "orders": orders,
         "count": len(orders),
@@ -139,6 +140,42 @@ def list_orders(event, repository, mode, *, products_repo=None, shipments_repo=N
             for group in handover_groups(list(context["shipments"].values()))
         ],
     })
+
+
+def _attach_fulfilment_groups(orders, context) -> None:
+    """Mark which orders ship together, and what boxes that takes. In place.
+
+    plans/FULFILMENT_GROUPS.md. An upsell is its own ORDER because it is its own charge, and the screen
+    offered a label per order -- three boxes to one address on a funnel that collected postage for one.
+    The buyer was charged $0 for those upsells precisely BECAUSE they ride along, so the screen was
+    undoing a promise the pricing had already made.
+
+    The PARENT carries the group; the others carry a pointer to it. Nothing new is stored and nothing is
+    recomputed on write: this is a view over orders the tenant already has.
+    """
+    try:
+        from stripe_link.domain.fulfilment_groups import group_orders, group_parcels
+        from stripe_link.domain.shipping import tenant_boxes
+
+        boxes = tenant_boxes(context.get("config") or {})
+        by_id = {str(o.get("order_id") or ""): o for o in orders}
+        for members in group_orders(orders):
+            parent = members[0]
+            if len(members) < 2:
+                continue        # an order that ships alone needs no grouping and gains no row
+            parent["fulfilment_group"] = {
+                "order_ids": [str(o.get("order_id") or "") for o in members],
+                # As few boxes as the items allow -- the packer's job, and the reason a tenant should not
+                # be the one deciding. Each parcel is one label.
+                "parcels": group_parcels(members, products_by_id=context["products_by_id"],
+                                         boxes=boxes, index=context["index"]),
+            }
+            for child in members[1:]:
+                row = by_id.get(str(child.get("order_id") or ""))
+                if row is not None:
+                    row["ships_with"] = str(parent.get("order_id") or "")
+    except Exception as exc:  # noqa: BLE001 - a grouping failure must never cost a tenant their order list
+        print(f"[fulfilment] groups not attached: {type(exc).__name__}: {exc}")
 
 
 def fulfilment_context(tenant_id, mode, products_repo=None, shipments_repo=None, shipping_config_repo=None):
@@ -176,6 +213,9 @@ def fulfilment_context(tenant_id, mode, products_repo=None, shipments_repo=None,
         "shipments": shipments,
         "readiness": label_readiness(config) if config else [],
         "configured": bool(config),
+        # The boxes a group packs into come from here. Returned rather than re-read: the config is already
+        # loaded above, and a second fetch per request to answer the same question is waste.
+        "config": config,
     }
 
 
