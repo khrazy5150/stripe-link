@@ -25,6 +25,7 @@ from stripe_link.domain.address_validation import (
     suggested_correction,
 )
 from stripe_link.domain.carriers import carrier_options, service_has_tracking, tracking_url
+from stripe_link.domain.shipment_notice import revision_for
 from stripe_link.domain.shipping_promise import revised_sentence
 from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_state, product_index
 from stripe_link.domain.handover import handover_groups, orders_csv
@@ -178,36 +179,6 @@ def fulfilment_context(tenant_id, mode, products_repo=None, shipments_repo=None,
     }
 
 
-def _revised_arrival(order, shipment, tenant_id, mode, *, quotes_repo=None):
-    """The recomputed arrival, or `{}`. Never raises: a parcel that shipped must still record as shipped.
-
-    The ship date is the one the tenant gave, read in UTC rather than their timezone — unlike the original
-    estimate there is no cutoff to decide, so the only thing the date is used for is counting business days
-    forward, and a few hours either side of midnight cannot change which weekday that lands on.
-    """
-    try:
-        from datetime import timezone as _tz
-
-        from stripe_link.domain.shipping_promise import revised_promise
-        from stripe_link.repositories.documents import shipping_quotes_repository
-
-        quote = {}
-        quote_id = str(((order.get("shipping_quote") or {}) if isinstance(order, dict) else {}).get("quote_id") or "")
-        if quote_id:
-            repo = quotes_repo or (shipping_quotes_repository(mode=mode)
-                                   if os.environ.get("CARTS_TABLE") else None)
-            if repo is not None:
-                quote = repo.get(tenant_id, quote_id) or {}
-        shipped_at = int(shipment.get("shipped_at") or 0)
-        if not shipped_at:
-            return {}
-        shipped_on = datetime.fromtimestamp(shipped_at, _tz.utc).date()
-        return revised_promise(order, quote, shipment, shipped_on=shipped_on)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[delivery] revision not computed for {order.get('order_id')}: {type(exc).__name__}: {exc}")
-        return {}
-
-
 def mark_shipped(event, repository, order_id, mode, *, shipments_repo=None, user_profiles_repo=None,
                  mailer_send=None, quotes_repo=None, now_fn=lambda: int(time.time())):
     """The manual path: the tenant posted it themselves and is telling the buyer so.
@@ -245,7 +216,7 @@ def mark_shipped(event, repository, order_id, mode, *, shipments_repo=None, user
     # the SHIPMENT, never over the order's own `delivery_estimate`: support answering "but you said the
     # 12th" needs both the promise and the correction, and a field that quietly becomes the new truth
     # loses the thing that was actually promised.
-    revised = _revised_arrival(order, shipment, tenant_id, mode, quotes_repo=quotes_repo)
+    revised = revision_for(order, shipment, tenant_id, mode, quotes_repo=quotes_repo)
     if revised:
         shipment["delivery_revision"] = revised
     note = str(body.get("note") or "").strip()[:400]

@@ -379,7 +379,11 @@ def shipment_tracking_content(
         "subject": subject,
         "html": render_email(
             title=subject,
-            preheader=(f"Tracking {number}" if number else shipped_line),
+            # THE ARRIVAL DATE LEADS, when there is one. The preheader is the line shown beside the
+            # subject in an inbox, so it is the most-read text in the message and the only part many
+            # buyers see at all. "Tracking 94001" is a reference number; "Estimated to arrive Monday,
+            # October 12" is the thing they opened the email to find out.
+            preheader=(arrival or (f"Tracking {number}" if number else shipped_line)),
             business_name=business,
             body="".join(body),
         ),

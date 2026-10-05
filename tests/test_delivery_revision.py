@@ -150,6 +150,23 @@ class TheEmailCarriesBothTests(unittest.TestCase):
         self.assertEqual(len(body), 2, "no tracking row to compare against")
         self.assertIn("October 12", body[0])
 
+    def test_the_preheader_leads_with_the_date(self):
+        """The preheader is the line shown beside the subject in an inbox — the most-read text in the
+        message, and the only part many buyers see at all. "Tracking 94001" is a reference number; the
+        arrival date is what they opened it to find out."""
+        import re
+
+        out = self._content(arrival_line="Estimated to arrive Monday, October 12.")
+        preheader = re.search(r"overflow:hidden\">([^<&]{0,80})", out["html"]).group(1)
+        self.assertEqual(preheader, "Estimated to arrive Monday, October 12.")
+
+    def test_and_falls_back_to_the_tracking_number(self):
+        import re
+
+        out = self._content()
+        preheader = re.search(r"overflow:hidden\">([^<&]{0,80})", out["html"]).group(1)
+        self.assertEqual(preheader, "Tracking 94001")
+
     def test_an_email_without_either_is_unchanged(self):
         plain = self._content()
         self.assertIn("Workout Bundle is on its way.", plain["text"])
@@ -174,6 +191,23 @@ class TheHandlerStoresTheCorrectionBesideThePromiseTests(unittest.TestCase):
         self.assertIn('str(body.get("note") or "").strip()[:400]', self.SOURCE)
 
     def test_a_failed_revision_never_stops_a_parcel_shipping(self):
-        block = self.SOURCE.split("def _revised_arrival", 1)[1].split("\ndef ", 1)[0]
+        source = (__import__("pathlib").Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "domain" / "shipment_notice.py").read_text()
+        block = source.split("def revision_for", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("except Exception", block)
         self.assertIn("return {}", block)
+
+    def test_BOTH_ship_paths_send_the_same_correction(self):
+        """`buy_label` shipped the old email -- no arrival date, no explanation -- so a buyer whose tenant
+        BOUGHT postage got less than one whose tenant typed a tracking number in by hand. One
+        computation, two callers, rather than a second copy to word it differently within a release."""
+        root = __import__("pathlib").Path(__file__).resolve().parents[1] / "src" / "handlers"
+        for name in ("orders.py", "shipping.py"):
+            source = (root / name).read_text()
+            self.assertIn("revision_for(order", source, f"{name} does not compute a revision")
+            self.assertIn("arrival_line=revised_sentence(revised)", source, f"{name} does not send it")
+
+    def test_neither_handler_keeps_its_own_copy(self):
+        root = __import__("pathlib").Path(__file__).resolve().parents[1] / "src" / "handlers"
+        for name in ("orders.py", "shipping.py"):
+            self.assertNotIn("def _revised_arrival", (root / name).read_text())

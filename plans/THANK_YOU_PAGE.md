@@ -236,17 +236,19 @@ actually promised.
 it with further revisions. One correction, at the moment the assumption became a fact.
 
 > **Built:** `delivery_estimate.from_ship_date`, `shipping_promise.revised_promise` / `revised_sentence`,
-> `shipment_tracking_content(arrival_line=, tenant_note=)`, and `orders.mark_shipped` computing both and
-> storing them on the SHIPMENT. The `buy_label` path still sends the old email — it should carry the same
-> two, and the rate it bought already knows the transit days, so it is the easier of the two callers.
+> `shipment_tracking_content(arrival_line=, tenant_note=)`, and `shipment_notice.revision_for` — which
+> lives there rather than in either handler because **both** of them ship parcels. `orders.mark_shipped`
+> and `shipping.buy_label` now send the identical email; the label path had been sending the old one, so
+> a buyer whose tenant BOUGHT postage got less than one whose tenant typed a tracking number by hand.
 >
-> **Noticed while building:** the email's hidden preheader (inbox preview text) currently reads "Tracking
-> 94001". A revised date is the thing a buyer most wants to see without opening anything, and that line is
-> the most-read text in the whole message. Worth leading with it when the date moved.
+> **The preheader leads with the date.** It is the line shown beside the subject in an inbox — the
+> most-read text in the message and the only part many buyers see at all. "Tracking 94001" is a reference
+> number; "Estimated to arrive Monday, October 12" is what they opened it to find out. Falls back to the
+> tracking number when there is no date.
 
 ### Still to build
 
-- **The unfulfilled-order notification**, so the promise has something to come true by.
+- **The unfulfilled-order notification**, so the promise has something to come true by. *Next.*
 - **The conditional promise** on the thank-you page until a shipment exists.
 - **The nudge** after N days.
 - **The coupon**, per the design above.

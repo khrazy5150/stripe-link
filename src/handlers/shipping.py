@@ -33,7 +33,8 @@ from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
-from stripe_link.domain.shipment_notice import notify_buyer
+from stripe_link.domain.shipment_notice import notify_buyer, revision_for
+from stripe_link.domain.shipping_promise import revised_sentence
 from stripe_link.repositories.documents import (
     RepositoryError,
     offers_repository,
@@ -1036,8 +1037,15 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # The buyer is told the same way the manual path tells them -- one builder, one mailer. Best-effort
     # HERE, unlike the manual path: the label is already bought and paid for, so a bounced address must
     # not turn a successful purchase into an error the tenant thinks they should retry.
+    # THE SAME CORRECTION THE MANUAL PATH SENDS. This path shipped the old email -- no arrival date, no
+    # explanation -- so a buyer whose tenant BOUGHT postage got less than one whose tenant typed a tracking
+    # number in by hand. One builder, one computation, both callers (plans/THANK_YOU_PAGE.md P4).
+    revised = revision_for(order, saved, tenant_id, mode)
+    if revised:
+        saved["delivery_revision"] = revised
     notified = notify_buyer(order, saved, tenant_id, has_tracking=True,
-                            user_profiles_repo=user_profiles_repo, mailer_send=mailer_send)
+                            user_profiles_repo=user_profiles_repo, mailer_send=mailer_send,
+                            arrival_line=revised_sentence(revised))
     if notified.get("sent"):
         saved["notified_at"] = now
         try:
