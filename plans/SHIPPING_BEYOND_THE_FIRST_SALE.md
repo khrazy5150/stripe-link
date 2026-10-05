@@ -318,6 +318,29 @@ a bare number.
 and the worst thing to use: it is the cheapest zone there is, so a surcharge taken from it under-collects
 on every real order. Caught because the first screenshot of the feature rated 82009 → 82009.
 
+**Worked out, not typed** (2026-10-05, the author: *"I just don't like the manual entry. I think there
+should be a button that uses smart pricing to figure out postage."*). Right — the figure is the difference
+between two carrier quotes on two different box sizes, which is not something anyone can estimate, and a
+field nobody can fill correctly is not a remedy.
+
+`suggest_bump_postage` finds an offer that really sells this product as a bump (the one with the MOST
+landing items, since the biggest cart is the one closest to needing a bigger box), packs it with and
+without, and rates **four US destinations in parallel** — eight carrier round-trips in ~4s rather than
+~30s queued. It fills in the WIDEST result and shows the whole spread beside it, because one number cannot
+be right everywhere and a tenant choosing what to charge should see the range they are choosing over.
+Verified live: suggests 108c on the real Workout Bundle, with samples 105/105/108/108.
+
+Alaska and Hawaii are deliberately out of the sample: one 452c outlier would triple the surcharge for
+every mainland buyer, which is a worse trade than absorbing the rare non-contiguous order. The response
+says so rather than hiding it. The tenant's own postcode is excluded too — carriers refuse an identical
+pair, and a quote to your own door is the cheapest zone there is.
+
+**It has no route of its own, and that is not a style choice.** Adding `/shipping/bump-postage` as a
+fifteenth shipping endpoint made the transformed stack exceed CloudFormation's hard **1,000,000-byte** SAM
+limit and the deploy was refused outright. It rides `/shipping/rate-preview`, split by a `bump_postage_for`
+body key. **Until the template is slimmed (derived table names ~146KB, collapsed IAM ~100KB) no new
+endpoint can be added anywhere in this stack.**
+
 Still open: the surcharge is per-bump and destination-blind. The deferred alternative below remains the
 only way to make it exact.
 

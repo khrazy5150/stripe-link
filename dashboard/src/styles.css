@@ -2166,6 +2166,23 @@ button:disabled {
   opacity: 1;
 }
 
+/* The surcharge field and its "Work it out" button on one line. */
+.bump-postage-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bump-postage-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.bump-postage-field button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 /* PROSE inside a banner. The base above is a flex ROW, which is right for the shape it was built for --
    one short message, optionally a dismiss button pushed to the end -- and wrong the moment the message is
    a sentence with emphasis in it: each <strong> becomes its own flex column and the sentence is dealt out

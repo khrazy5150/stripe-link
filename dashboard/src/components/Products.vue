@@ -321,6 +321,7 @@
               :prices="form.prices"
               v-model:default-index="form.default_price_index"
               :product-type="form.product_type"
+              :product-id="form.product_id"
               subtitle="Product owns the canonical price list. Labels and bundle presentation are set in Offers."
             />
           </section>
@@ -454,6 +455,7 @@
               :prices="form.prices"
               v-model:default-index="form.default_price_index"
               :product-type="form.product_type"
+              :product-id="form.product_id"
               subtitle="Product owns the canonical price list. Labels and bundle presentation are set in Offers."
             />
           </section>

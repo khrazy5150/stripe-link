@@ -88,6 +88,14 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
                          orders_repo=orders_repo, shipments_repo=shipments_repo,
                          user_profiles_repo=user_profiles_repo, mailer_send=mailer_send, now_fn=now_fn)
     if _action(event) == "rate-preview" and method == "POST":
+        # TWO questions on ONE route, split by the body. They belong apart -- "what do carriers charge for
+        # this parcel" and "what should this bump's surcharge be" have different inputs and different
+        # shapes -- but a route of its own cannot be had: adding one took the transformed stack over
+        # CloudFormation's hard 1,000,000-byte SAM limit, measured 2026-10-05. Until the template is
+        # slimmed (derived table names, collapsed IAM), new endpoints have to ride existing routes.
+        if parse_json_body(event).get("bump_postage_for"):
+            return suggest_bump_postage(event, repository, secret_cipher, products_repo=products_repo,
+                                        offers_repo=offers_repo)
         return preview_rates(event, repository, secret_cipher, products_repo=products_repo,
                              offers_repo=offers_repo)
     if _action(event) == "carriers" and method == "GET":
@@ -597,6 +605,188 @@ def _unmeasured_names(lines, products):
         if not all(float(own.get(f) or 0) > 0 for f in ("length_in", "width_in", "height_in")):
             names.append(str(product.get("name") or line.get("product_id") or "a product"))
     return names
+
+
+# WHERE TO SAMPLE a bump's postage. The surcharge is one flat number but the cost it covers is not: the
+# same bump on the same offer, measured 2026-10-05 from a Cheyenne WY origin, cost 49c to Denver, 105c to
+# New York and Miami, 108c to Chicago and Los Angeles, and 452c to Anchorage. A figure taken from one
+# destination -- especially the tenant's own area, which is what the rate screen sits next to -- is the
+# cheapest zone there is and under-collects on everything else.
+#
+# So the suggestion is sampled across a SPREAD and the widest contiguous result wins. Alaska and Hawaii
+# are deliberately out: one 452c outlier would triple the surcharge for every mainland buyer, which is a
+# worse trade than absorbing the rare non-contiguous order. The response says so rather than hiding it.
+BUMP_POSTAGE_SAMPLES = {
+    "US": [
+        {"name": "Sample", "street1": "350 5th Ave", "city": "New York", "state": "NY",
+         "postal_code": "10001", "country": "US"},
+        {"name": "Sample", "street1": "200 N Spring St", "city": "Los Angeles", "state": "CA",
+         "postal_code": "90012", "country": "US"},
+        {"name": "Sample", "street1": "121 N LaSalle St", "city": "Chicago", "state": "IL",
+         "postal_code": "60602", "country": "US"},
+        {"name": "Sample", "street1": "3500 Pan American Dr", "city": "Miami", "state": "FL",
+         "postal_code": "33133", "country": "US"},
+    ],
+}
+
+# Said in the response so the tenant knows what the number does NOT cover.
+BUMP_POSTAGE_EXCLUDED = {"US": "Alaska and Hawaii are not included — they cost far more than the mainland."}
+
+
+def _bump_offer_for(offers, product_id, price_id):
+    """The offer to rate this bump against: one that actually offers it at checkout.
+
+    A bump's postage is meaningless on its own. What it costs is how much bigger the box of the order it
+    rides in has to be, so the question needs a cart -- and the honest cart is an offer that really sells
+    this product as a bump. Where several do, the one with the MOST landing items wins: the biggest cart
+    is the one closest to needing a bigger box, which is the case worth covering.
+    """
+    candidates = []
+    for offer in offers or []:
+        for bump in stage_opportunities(offer, STAGE_CHECKOUT):
+            if str(bump.get("product_id") or "") != product_id:
+                continue
+            if price_id and str(bump.get("price_id") or "") not in ("", price_id):
+                continue
+            candidates.append(offer)
+            break
+    if not candidates:
+        return None
+    return max(candidates, key=lambda offer: len(offer.get("items") or []))
+
+
+def suggest_bump_postage(event, repository, secret_cipher, *, products_repo=None, offers_repo=None):
+    """What to charge for an order bump's postage, worked out rather than typed from memory.
+
+    plans/SHIPPING_BEYOND_THE_FIRST_SALE.md P2b. The field it fills exists because Stripe fixes a
+    session's shipping options before the buyer ever sees the bump, so a bump's parcel cost can only be
+    charged inside its own price. Asking a tenant to guess that number was the weakest part of the
+    remedy: it is the difference between two carrier quotes on two different box sizes, which is not
+    something anyone can estimate.
+
+    Rates the offer's cart WITH and WITHOUT the bump at each sampled destination, in parallel, and
+    suggests the widest result. Returns the whole spread, because one number cannot be right everywhere
+    and a tenant deciding what to charge should see the range they are deciding over.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    subject = parse_json_body(event).get("bump_postage_for")
+    subject = subject if isinstance(subject, dict) else {}
+    product_id = str(subject.get("product_id") or "").strip()
+    price_id = str(subject.get("price_id") or "").strip()
+    if not product_id:
+        return error_response("bump_postage_for.product_id is required.", code="missing_product")
+
+    config = repository.get(tenant_id) or {}
+    from_address = config.get("ship_from_address") or {}
+    if not from_address.get("postal_code"):
+        return error_response("Add your ship-from address before working out postage.",
+                              code="missing_ship_from")
+
+    mode = resolve_stripe_mode(event)
+    offers_repo = offers_repo or offers_repository(mode=mode)
+    offer = _bump_offer_for(offers_repo.list_for_tenant(tenant_id), product_id, price_id)
+    if not offer:
+        return error_response(
+            "This price is not offered as an order bump yet. Add it to an offer's order bumps first — "
+            "what the postage costs depends on the order it rides in.",
+            code="no_bump_offer")
+
+    products_repo = products_repo or products_repository(mode=mode)
+    lines = [{"product_id": str(item.get("product_id") or ""),
+              "quantity": max(1, int(item.get("quantity") or 1))}
+             for item in (offer.get("items") or []) if item.get("product_id")]
+    bump_lines = [{"product_id": product_id, "quantity": 1}]
+    if not lines:
+        return error_response("That offer has nothing to ship.", code="nothing_to_ship")
+
+    products = {}
+    for line in lines + bump_lines:
+        product = products_repo.get(tenant_id, line["product_id"])
+        if not product:
+            return error_response(f"Product '{line['product_id']}' was not found.", status_code=404,
+                                  code="product_not_found")
+        products[line["product_id"]] = product
+
+    boxes = tenant_boxes(config)
+    base_parcels = pack(packable_items(lines, products), boxes)
+    with_parcels = pack(packable_items(lines + bump_lines, products), boxes)
+    if not base_parcels or not with_parcels:
+        # Nothing measurable, so nothing to charge -- the same answer P0a gives everywhere else, and far
+        # more useful than a zero with no reason.
+        return json_response({"suggested": 0, "samples": [], "ships_free": True,
+                              "unmeasured": _unmeasured_names(lines + bump_lines, products),
+                              "offer": {"offer_id": offer.get("offer_id"), "name": offer.get("name") or ""}})
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    if not name or not secret_ref:
+        return error_response("Connect a shipping provider to work out postage.", code="missing_provider")
+    try:
+        api_key = secret_cipher.decrypt(secret_ref, tenant_id=tenant_id, mode=SECRET_MODE,
+                                        field=SECRET_FIELD)
+        provider = provider_for(name, api_key)
+    except Exception as exc:  # noqa: BLE001
+        return error_response(f"Could not reach the carrier: {type(exc).__name__}", status_code=502,
+                              code="provider_error")
+
+    country = str(from_address.get("country") or "US").strip().upper()[:2]
+    samples = BUMP_POSTAGE_SAMPLES.get(country) or SAMPLE_DESTINATIONS.get(country) or []
+    origin_zip = str(from_address.get("postal_code") or "").strip().lower()
+    # Never the origin itself: carriers refuse an identical pair, and a quote to your own door is the
+    # cheapest zone there is anyway.
+    samples = [s for s in samples if str(s["postal_code"]).strip().lower() != origin_zip]
+    if not samples:
+        return error_response("No sample destination to rate against in your country.",
+                              code="no_samples")
+
+    def sample_delta(destination):
+        """`(postal_code, delta, without, with)` or None. One destination's answer, rated both ways."""
+        try:
+            base = rate_parcels(provider, from_address=from_address, to_address=destination,
+                                parcels=base_parcels)
+            withbump = rate_parcels(provider, from_address=from_address, to_address=destination,
+                                    parcels=with_parcels)
+        except Exception as exc:  # noqa: BLE001 - one unreachable sample must not lose the others
+            print(f"[shipping] bump postage sample {destination.get('postal_code')} failed: "
+                  f"{type(exc).__name__}: {exc}")
+            return None
+        if base["error"] or withbump["error"] or not base["options"] or not withbump["options"]:
+            return None
+        # The CHEAPEST on both sides, compared like with like: a delta taken between two service levels
+        # would be measuring the service, not the bump.
+        cheap_base = min(int(o.get("amount") or 0) for o in base["options"])
+        cheap_with = min(int(o.get("amount") or 0) for o in withbump["options"])
+        return {"postal_code": str(destination.get("postal_code") or ""),
+                "city": str(destination.get("city") or ""),
+                "amount": max(0, cheap_with - cheap_base),
+                "without_bump": cheap_base, "with_bump": cheap_with}
+
+    # In PARALLEL, because this is a button a tenant is waiting on: four destinations rated two ways is
+    # eight carrier round-trips, which is half a minute end to end if they queue.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=len(samples)) as pool:
+        results = [row for row in pool.map(sample_delta, samples) if row]
+
+    if not results:
+        return error_response("The carrier would not quote any of the sample destinations.",
+                              status_code=502, code="provider_error")
+
+    amounts = [row["amount"] for row in results]
+    return json_response({
+        # The WIDEST, so the surcharge covers the sampled range rather than the luckiest corner of it.
+        # A tenant who would rather average can see every sample and type their own.
+        "suggested": max(amounts),
+        "lowest": min(amounts),
+        "samples": sorted(results, key=lambda row: row["amount"]),
+        "currency": "usd",
+        "boxes": {"without": _box_names(base_parcels), "with": _box_names(with_parcels)},
+        "offer": {"offer_id": offer.get("offer_id"), "name": offer.get("name") or ""},
+        **({"excluded": BUMP_POSTAGE_EXCLUDED[country]} if country in BUMP_POSTAGE_EXCLUDED else {}),
+    })
 
 
 def _box_names(parcels):

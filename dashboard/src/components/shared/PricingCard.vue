@@ -140,11 +140,35 @@
            Only offered where it can apply -- a bump price, on something that physically ships. -->
       <label v-if="price.context === 'order_bump' && productType === 'physical'">
         Extra postage for this bump
-        <input v-model.number="price.shipping_surcharge" type="number" min="0" step="0.01" />
+        <span class="bump-postage-field">
+          <input v-model.number="price.shipping_surcharge" type="number" min="0" step="0.01" />
+          <!-- The difference between two carrier quotes on two different box sizes is not something
+               anyone can estimate, so it is worked out rather than typed. Needs a saved product, because
+               the rating has to run against a real offer's cart. -->
+          <button type="button" class="secondary-action" :disabled="bumpBusy || !canWorkOutPostage()"
+                  @click="workOutPostage(price)">
+            {{ bumpBusy ? "Working it out…" : "Work it out" }}
+          </button>
+        </span>
         <span class="field-note">
           Added to this bump's price, so only buyers who add it pay it. Shipping for the order was already
           quoted before the buyer saw this bump, so this is what covers the bigger box it may force. Leave
           at 0 if it rides along for nothing.
+        </span>
+        <span v-if="!productId" class="field-note">Save the product first to work this out for you.</span>
+        <span v-if="bumpError" class="price-context-warning">⚠ {{ bumpError }}</span>
+        <span v-if="bumpResult" class="field-note">
+          <template v-if="bumpResult.ships_free">
+            Nothing here has a measured size, so there is no parcel to price.
+          </template>
+          <template v-else>
+            <strong>{{ money(bumpResult.suggested) }}</strong> covers every sampled destination
+            ({{ money(bumpResult.lowest) }}–{{ money(bumpResult.suggested) }}:
+            {{ bumpResult.samples.map((s) => `${s.city} ${money(s.amount)}`).join(", ") }}),
+            rated on <em>{{ bumpResult.offer.name }}</em> —
+            {{ bumpResult.boxes.without.join(", ") }} → {{ bumpResult.boxes.with.join(", ") }}.
+            <template v-if="bumpResult.excluded"> {{ bumpResult.excluded }}</template>
+          </template>
         </span>
       </label>
 
@@ -172,6 +196,8 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
+import { apiRequest } from "../../api/client";
 import { BILLING_INTERVALS, MAX_INTERVAL_COUNT, defaultPriceForm, pricePreviewFor } from "../../utils/priceForm";
 import TipAmountsField from "./TipAmountsField.vue";
 
@@ -179,6 +205,10 @@ const props = defineProps({
   prices: { type: Array, required: true },
   defaultIndex: { type: Number, default: 0 },
   productType: { type: String, default: "physical" },
+  // The SAVED product this price belongs to. Only needed to work out an order bump's postage, which has
+  // to be rated against a real offer, so it is optional: a card for an unsaved product simply offers the
+  // field without the button.
+  productId: { type: String, default: "" },
   title: { type: String, default: "Pricing" },
   subtitle: { type: String, default: "" },
   allowMultiple: { type: Boolean, default: true },
@@ -232,6 +262,52 @@ function redundancyWarning(price, index) {
   return perQuantity
     ? `Only the first ${label} price for quantity ${quantity} is used — this one is ignored.`
     : `Only the first ${label} price is used — this one is ignored. Put additional ${label.toLowerCase()}s on separate products.`;
+}
+
+// WORKING OUT AN ORDER BUMP'S POSTAGE. The number is the difference between two carrier quotes on two
+// different box sizes, sampled across destinations — not something a tenant can estimate, and the field
+// was manual entry until this existed.
+const bumpBusy = ref(false);
+const bumpError = ref("");
+const bumpResult = ref(null);
+
+function money(cents) {
+  const currency = String(bumpResult.value?.currency || "usd").toUpperCase();
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format((cents || 0) / 100);
+  } catch (err) {
+    return `${((cents || 0) / 100).toFixed(2)} ${currency}`;
+  }
+}
+
+function canWorkOutPostage() {
+  // Only the PRODUCT is required. A bump price added in this session has no price_id yet, and the server
+  // matches on the product when one is not given — refusing here would disable the button in exactly the
+  // case a tenant most needs it.
+  return Boolean(props.productId);
+}
+
+async function workOutPostage(price) {
+  bumpBusy.value = true;
+  bumpError.value = "";
+  bumpResult.value = null;
+  try {
+    // The rate-preview route, told which question to answer. It cannot have a route of its own: the
+    // transformed stack is at CloudFormation's 1MB SAM limit and one more endpoint exceeds it.
+    const body = await apiRequest("/shipping/rate-preview", {
+      method: "POST",
+      body: { bump_postage_for: { product_id: props.productId, price_id: price.price_id || undefined } },
+    });
+    bumpResult.value = body;
+    // FILLED IN, not just reported. The widest sampled result, so the surcharge covers the range rather
+    // than the luckiest corner of it — and the spread is shown beside it so a tenant who would rather
+    // charge less can see exactly what they are trading away.
+    if (!body.ships_free) price.shipping_surcharge = Number(((body.suggested || 0) / 100).toFixed(2));
+  } catch (err) {
+    bumpError.value = err.message || "Could not work out the postage.";
+  } finally {
+    bumpBusy.value = false;
+  }
 }
 
 function addPrice() {
