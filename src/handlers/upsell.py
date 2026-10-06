@@ -644,6 +644,12 @@ def process_upsell(
         "order_id": order_id,
         "schema_version": "2026-05-29",
         "document_type": "order",
+        # WHICH STRIPE MODE THIS SALE WAS IN. The repository stamps this on write, but the ledger is
+        # handed this dict BEFORE that happens -- so without it here a live upsell recorded itself as
+        # test money and vanished from live reports (found 2026-10-07). `stripe_mode` rather than `mode`
+        # because that is the name storage filters on, and the one plans/STRIPE_MODE_STORAGE.md
+        # standardises on; on a Stripe session `mode` already means payment-vs-subscription.
+        "stripe_mode": mode,
         "session_id": session_id,
         # WHICH CHARGE THIS WAS. Absent since upsells were written, and every consequence of that is a
         # thing nobody could do: `sale_entry_from_order` fell back to keying the ledger row on the order

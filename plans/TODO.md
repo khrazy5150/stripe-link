@@ -26,7 +26,9 @@ does. An upsell's order_record has 28 keys and none is `mode` — its mode reach
 `stripe_mode`, stamped by the repository *after* the dict is handed to the ledger. So a **live upsell
 wrote a ledger entry stamped `test`**, and the fail-safe default made it silent: live upsell revenue
 absent from live reports, with nothing saying so. Invisible today only because every order in both
-deployments is test-mode. The fix reads `stripe_mode` first; two names for one fact is the cause.
+deployments is test-mode. Fixed at the source — the upsell order record now declares its own `stripe_mode` — and in the reader, with
+a guard asserting every order-record builder that feeds the ledger declares one. Two names for one fact
+remains the cause.
 
 ### Why URGENT rather than a cleanup
 

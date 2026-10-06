@@ -55,3 +55,73 @@ class LedgerModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheUpsellOrderCarriesItsOwnModeTests(unittest.TestCase):
+    """The fix at the source, rather than at the reader.
+
+    The repository stamps `stripe_mode` on write, but the ledger is handed the in-memory dict BEFORE that
+    happens. So the record has to carry its own mode or the ledger is guessing -- and its fail-safe guess
+    is "test", which is how live upsell revenue went missing silently.
+    """
+
+    def _stored_order(self, mode):
+        from tests.test_upsell_handler import FakeStripeOpener, ProcessUpsellTests
+
+        case = ProcessUpsellTests("test_process_upsell_charges_saved_payment_method_and_records_order")
+        case.setUp()
+        try:
+            opener = FakeStripeOpener({
+                ("GET", "/v1/customers/cus_123"): {
+                    "id": "cus_123", "invoice_settings": {"default_payment_method": {"id": "pm_1"}}},
+                ("POST", "/v1/payment_intents"): {"id": "pi_1", "status": "succeeded"},
+            })
+            response = case.handle(case.base_event(mode=mode), opener)
+            self.assertEqual(response["statusCode"], 201, response.get("body"))
+            return case.orders_repo.get("tenant_demo", "order_cs_test_123_upsell_1")
+        finally:
+            case.tearDown()
+
+    def test_a_live_upsell_records_itself_as_live(self):
+        """The bug, end to end: charge in live mode, and the stored order must say so."""
+        record = self._stored_order("live")
+        self.assertIsNotNone(record, "the upsell did not store an order")
+        self.assertEqual(record.get("stripe_mode"), "live")
+        self.assertEqual(sale_entry_from_order(record, now_epoch=1)["mode"], "live")
+
+    def test_a_test_upsell_records_itself_as_test(self):
+        record = self._stored_order("test")
+        self.assertIsNotNone(record)
+        self.assertEqual(record.get("stripe_mode"), "test")
+        self.assertEqual(sale_entry_from_order(record, now_epoch=1)["mode"], "test")
+
+
+class EveryOrderRecordHandedToTheLedgerCarriesItTests(unittest.TestCase):
+    """Guarding the class, not just the instance.
+
+    Three builders produce order records that go to the ledger. Two always carried a mode; the upsell did
+    not, and the omission was silent for as long as nobody sold anything live. A fourth builder added
+    later would be just as silent.
+    """
+
+    from pathlib import Path as _Path
+    ROOT = _Path(__file__).resolve().parents[1]
+
+    def _record_keys(self, path, marker, end="\n    }"):
+        import re
+        source = (self.ROOT / path).read_text(encoding="utf-8")
+        block = source.split(marker, 1)[1].split(end, 1)[0]
+        return set(re.findall(r'^\s*"(\w+)":', block, re.M))
+
+    def test_the_upsell_record_declares_its_mode(self):
+        keys = self._record_keys("src/handlers/upsell.py", "    order_record = {")
+        self.assertIn("stripe_mode", keys)
+
+    def test_both_webhook_records_declare_theirs(self):
+        import re
+        source = (self.ROOT / "src" / "handlers" / "stripe_webhook.py").read_text(encoding="utf-8")
+        for fn in ("order_record_from_session", "order_record_from_invoice"):
+            with self.subTest(builder=fn):
+                body = source.split(f"def {fn}(", 1)[1].split("\n\ndef ", 1)[0]
+                keys = set(re.findall(r'^\s*"(\w+)":', body, re.M))
+                self.assertIn("stripe_mode", keys)

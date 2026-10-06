@@ -50,8 +50,19 @@ So a **live upsell wrote a ledger entry stamped `test`**, and the fail-safe defa
 upsell revenue would be absent from live financial reports with nothing anywhere saying so. Invisible in
 both deployments today only because every order in them is test-mode.
 
-Fixed by reading `stripe_mode` first. That is a patch over the symptom; two names for one fact is the
-cause, and this plan is the cure.
+Fixed in two places, because the reader alone would have been a patch over the symptom:
+
+- the **upsell order record now declares `"stripe_mode": mode`** itself, so the dict handed to the ledger
+  carries the answer rather than relying on a stamp that happens afterwards (the author, 2026-10-07:
+  *"you will also need to fix the upsells so they too include the mode"*);
+- `_order_mode` reads `stripe_mode` first, so an older record still resolves correctly.
+
+Both webhook builders already declared it; the upsell was the only gap. A test now asserts that **every**
+order-record builder that feeds the ledger declares a mode, because a fourth one added later would be
+just as silent — and it was verified failing against the unfixed source rather than merely passing
+against the fixed one.
+
+Two names for one fact remains the cause, and this plan is the cure.
 
 ## 4. What to change
 
