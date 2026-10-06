@@ -275,7 +275,13 @@ def dispute_entry_from_event(dispute: dict[str, Any], order: dict[str, Any], *,
         tenant_id=str(order.get("tenant_id") or ""),
         entry_id=f"le_dispute_{dispute_id}",
         occurred_at=int((dispute or {}).get("created") or now_epoch),
-        mode="live" if order.get("mode") == "live" else "test",
+        # `stripe_mode` FIRST, because it is the field the repository stamps on every order it writes and
+        # the only one guaranteed present. `mode` is written by the webhook's checkout path and by nothing
+        # else -- an upsell's order_record has 28 keys and none of them is `mode` -- so reading it alone
+        # meant a LIVE upsell produced a ledger entry stamped "test", which the fail-safe default made
+        # silent. Live upsell revenue would simply be absent from live reports (found 2026-10-07 while
+        # tracing why one concept has two field names).
+        mode=_order_mode(order),
         currency=str((dispute or {}).get("currency") or order.get("currency") or "usd"),
         dispute_amount=amount,
         dispute_fee=fee,
@@ -366,6 +372,22 @@ def _merge_by_name(rows: Any) -> list[dict[str, Any]]:
     return merged
 
 
+def _order_mode(order: dict[str, Any]) -> str:
+    """The Stripe mode an order was placed in.
+
+    `stripe_mode` FIRST, because it is what the repository stamps on every order it writes and the only
+    field guaranteed present. `mode` is written by the webhook's checkout path and by nothing else -- an
+    upsell's order_record has 28 keys and none of them is `mode` -- so reading it alone meant a LIVE
+    upsell produced a ledger entry stamped "test", which the fail-safe default made silent. Live upsell
+    revenue would simply be absent from live reports (found 2026-10-07).
+
+    Anything not explicitly "live" is "test", matching `common.normalize_stripe_mode`: under-reporting
+    real revenue is recoverable, reporting test money as real is not.
+    """
+    raw = order.get("stripe_mode") or order.get("mode")
+    return "live" if str(raw or "").strip().lower() == "live" else "test"
+
+
 def sale_lines(order: dict[str, Any]) -> list[dict[str, Any]] | None:
     """Per-line revenue for a sale entry, or None when the order is not itemised.
 
@@ -442,7 +464,13 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
         tenant_id=str(order.get("tenant_id") or ""),
         entry_id=f"le_sale_{key_ref}",
         occurred_at=int(order.get("created_at") or now_epoch),
-        mode="live" if order.get("mode") == "live" else "test",
+        # `stripe_mode` FIRST, because it is the field the repository stamps on every order it writes and
+        # the only one guaranteed present. `mode` is written by the webhook's checkout path and by nothing
+        # else -- an upsell's order_record has 28 keys and none of them is `mode` -- so reading it alone
+        # meant a LIVE upsell produced a ledger entry stamped "test", which the fail-safe default made
+        # silent. Live upsell revenue would simply be absent from live reports (found 2026-10-07 while
+        # tracing why one concept has two field names).
+        mode=_order_mode(order),
         currency=str(order.get("currency") or "usd"),
         gross=gross,
         # NESTED under `fees`, which is where both order paths write them. Read flat, these were always

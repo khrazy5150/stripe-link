@@ -2,6 +2,42 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
+## 🚨 URGENT — one Stripe mode, three storage mechanisms and two field names (found 2026-10-07)
+
+**Plan: `plans/STRIPE_MODE_STORAGE.md`** (written 2026-10-07). Sibling to `STRIPE_MODE_DECOUPLING.md`,
+which settled where mode comes FROM; this settles how it is stored and read.
+
+One concept is expressed three ways across 46 tables: mode in the **sort key** for the 14 document tables
+(products, pages, offers), a server-side **FilterExpression on `stripe_mode`** for orders/customers/refunds,
+and a **client-side Python filter on `mode`** for the ledger.
+
+**The sort key is strictly better and the cost scales with the rows you discard.** `begins_with` is a key
+condition — DynamoDB seeks to the range. A FilterExpression is applied after the read, so capacity is
+charged for every row examined; the client-side variant also ships them all to the Lambda. A tenant with
+100k orders, 95% test, pays to read ~95k rows on every live report, and `_query_all_pages` pages through
+all of them so latency tracks the waste too.
+
+Worth naming the inversion: **the family that already does it right (products) is the one that needed it
+least.** Catalogues plateau. Orders and the ledger grow per transaction, forever.
+
+**It was already hiding a live bug** (fixed 2026-10-07, `_order_mode` in `domain/ledger.py`):
+`sale_entry_from_order` read `order["mode"]`, which the webhook's checkout path writes and nothing else
+does. An upsell's order_record has 28 keys and none is `mode` — its mode reaches storage only as
+`stripe_mode`, stamped by the repository *after* the dict is handed to the ledger. So a **live upsell
+wrote a ledger entry stamped `test`**, and the fail-safe default made it silent: live upsell revenue
+absent from live reports, with nothing saying so. Invisible today only because every order in both
+deployments is test-mode. The fix reads `stripe_mode` first; two names for one fact is the cause.
+
+### Why URGENT rather than a cleanup
+
+**The tables are being wiped, so this is a schema decision and not a migration.** No dual-read window, no
+backfill, no rewrite. The same change once tenants have volume means rewriting every order and ledger
+row's sort key — which cannot be done in place, because the sort key is part of the primary key.
+
+This is the last cheap moment.
+
+---
+
 ## 🚨 URGENT — every product's refund policy is a string literal in the dashboard's JavaScript (found 2026-09-30)
 
 **Plan: `plans/REFUND_POLICY.md`** (written 2026-09-30). Port stripe-cart's `src/refund_policy.py` — its
