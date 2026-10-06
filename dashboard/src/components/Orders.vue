@@ -149,9 +149,13 @@
               </td>
 
               <td class="orders-col-money">
-                <div>{{ formatMoney(order.amount_total, order.currency) }}</div>
+                <div>{{ formatMoney(groupPaid(order), order.currency) }}</div>
+                <!-- Named when it is a sum, so the figure is never mistaken for one charge. -->
+                <small v-if="groupMembers(order).length > 1" class="orders-paid-note">
+                  {{ groupMembers(order).length }} charges
+                </small>
                 <div v-if="Number(order.amount_refunded) > 0" class="orders-place">
-                  −{{ formatMoney(order.amount_refunded, order.currency) }} refunded
+                  −{{ formatMoney(groupRefunded(order), order.currency) }} refunded
                 </div>
               </td>
 
@@ -225,6 +229,8 @@
               <td colspan="7">
                 <p class="orders-parcel-intro">
                   {{ order.fulfilment_group.order_ids.length }} orders to one address &mdash;
+                  {{ groupItemCount(order) }}
+                  {{ groupItemCount(order) === 1 ? "item" : "items" }} in
                   {{ parcelsOf(order).length }}
                   {{ parcelsOf(order).length === 1 ? "parcel" : "parcels" }}.
                   <span v-if="groupMembers(order).length">
@@ -385,6 +391,30 @@ const ordersById = computed(() =>
 function groupMembers(order) {
   return (order.fulfilment_group?.order_ids || [])
     .map((id) => ordersById.value[id]).filter(Boolean);
+}
+
+// WHAT THE BUYER PAID IN TOTAL, not what the first charge took. A grouped order is several charges -- the
+// checkout plus each accepted upsell -- and the Paid column showed only the one the row is keyed on. A
+// $118.06 sale read as $59.35, which is not a rounding difference: it is the upsell revenue missing from
+// the one screen a tenant reconciles against (author, 2026-10-06).
+//
+// Falls back to the order's own total, so an ungrouped row is unchanged.
+function groupPaid(order) {
+  const members = groupMembers(order);
+  if (members.length < 2) return Number(order.amount_total || 0);
+  return members.reduce((sum, member) => sum + Number(member.amount_total || 0), 0);
+}
+
+function groupRefunded(order) {
+  const members = groupMembers(order);
+  if (members.length < 2) return Number(order.amount_refunded || 0);
+  return members.reduce((sum, member) => sum + Number(member.amount_refunded || 0), 0);
+}
+
+// THINGS TO POST, which is what the parcel line is about. "2 orders" counts charges; a packer counts
+// items, and the two differ whenever a checkout carried an order bump -- 2 orders, 3 things in the box.
+function groupItemCount(order) {
+  return parcelsOf(order).reduce((count, parcel) => count + (parcel.contents || []).length, 0);
 }
 function parcelsOf(order) {
   return order.fulfilment_group?.parcels || [];

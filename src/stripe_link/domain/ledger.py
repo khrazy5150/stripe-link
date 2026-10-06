@@ -337,8 +337,20 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
         shipping_revenue=int(order.get("shipping_amount") or 0) + int(order.get("bump_shipping_amount") or 0),
         idempotency_key=f"sale:{key_ref}",
         order_id=order_id or None,
-        offer_id=str(order.get("offer_id") or "") or None,
-        product_id=str(order.get("product_id") or "") or None,
+        # NESTED, which is where both order paths actually write them -- `attribution.offer_id` and
+        # `product.product_id`. Read flat, these were always None and were dropped, so NOT ONE ledger
+        # entry ever written carries a product or an offer. Every question a report exists to answer --
+        # which product earns, which offer converts, what a funnel is worth -- was unanswerable from the
+        # ledger, and nothing said so because an absent field looks exactly like a sale that had none.
+        #
+        # This is the same mistake as the `fees` one twelve lines above, in the same function, one field
+        # over: flat reads against a nested document (found 2026-10-06, while asking what "proper
+        # reporting" would need). The flat read stays as a fallback for the invoice path and for anything
+        # written before the shapes diverged.
+        offer_id=str(order.get("offer_id")
+                     or (order.get("attribution") or {}).get("offer_id") or "") or None,
+        product_id=str(order.get("product_id")
+                       or (order.get("product") or {}).get("product_id") or "") or None,
         customer=customer,
         stripe={"payment_intent_id": payment_intent} if payment_intent else None,
         # Defaults to "webhook" because that is how nearly every sale arrives. An upsell does not: it is a
