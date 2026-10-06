@@ -124,9 +124,23 @@ class TableGrantTests(unittest.TestCase):
                     exemption = PURE_ENTRY_POINTS.get((function, env))
                     if exemption and exemption[0] == path.stem:
                         continue
-                    if not re.search(rf"TableName: !Ref {table}\b", self.blocks[function]):
+                    if not self._granted(self.blocks[function], table):
                         missing.append(f"{function} (handlers.{path.stem}) reads {env} but is not granted {table}")
         self.assertEqual([], missing, "\n".join(missing))
+
+    @staticmethod
+    def _granted(block: str, table: str) -> bool:
+        """Whether this function's policy block grants `table`, in EITHER form it can be written.
+
+        SAM's `DynamoDBCrudPolicy`/`DynamoDBReadPolicy` is the usual one. It emits a separate statement
+        per table with the whole action list repeated, which at 24 tables overran IAM's hard 10,240-byte
+        limit on a role's inline policy and had a deploy refused outright (2026-10-06). A function past
+        that point writes the actions once and the tables as resource ARNs instead; the grant is the same
+        and this guard has to see both, or the cheaper form would read as no grant at all.
+        """
+        if re.search(rf"TableName: !Ref {table}\b", block):
+            return True
+        return bool(re.search(rf":table/\$\{{{table}\}}\"", block))
 
     @staticmethod
     def _repository_factories() -> dict[str, tuple[str, ...]]:

@@ -2441,58 +2441,96 @@ Resources:
       Handler: handlers.stripe_webhook.handler
       Description: Receives Stripe Connect webhook events.
       Policies:
+        # DynamoDB access is written as TWO statements rather than 24 SAM policy templates. Each
+        # template emits its own statement with the full action list repeated, and at 18 crud + 6 read
+        # tables that overran IAM's hard 10,240-byte limit on a role's inline policy -- the deploy that
+        # added one more read (OffersTable, for tier labels) was refused outright and rolled the stack
+        # back (2026-10-06). Listing the actions once and the tables as resources says exactly the same
+        # thing in a fraction of the bytes.
+        #
+        # The action lists are SAM's own, copied verbatim from what DynamoDBCrudPolicy and
+        # DynamoDBReadPolicy generate, so this is a re-packing and not a re-grant.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+                - dynamodb:PutItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:BatchGetItem
+                - dynamodb:DescribeTable
+                - dynamodb:ConditionCheckItem
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${StripeKeysTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${StripeKeysTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserProfilesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserProfilesTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SitesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SitesTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CheckoutSessionsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CheckoutSessionsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CustomersTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CustomersTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${InvoicesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${InvoicesTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NotificationsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NotificationsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RefundsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RefundsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LedgerTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LedgerTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ReviewsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ReviewsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CartsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CartsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ServicesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ServicesTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CouponGrantsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CouponGrantsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CouponRedemptionsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CouponRedemptionsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CouponsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CouponsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${WebhookEventsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${WebhookEventsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BookingCreditsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BookingCreditsTable}/index/*"
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:BatchGetItem
+                - dynamodb:DescribeTable
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PlatformConfigTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PlatformConfigTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TenantProfilesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TenantProfilesTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OffersTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OffersTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CalendarConnectionsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CalendarConnectionsTable}/index/*"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ShipmentsTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ShipmentsTable}/index/*"
         # CRUD (not Read): account.updated persists Connect verification state onto the stripe_keys doc.
-        - DynamoDBCrudPolicy:
-            TableName: !Ref StripeKeysTable
         # account.updated also auto-seeds the business NAP (user_profile) and recomputes Site eligibility.
-        - DynamoDBCrudPolicy:
-            TableName: !Ref UserProfilesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SitesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CheckoutSessionsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref OrdersTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CustomersTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref InvoicesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref NotificationsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref PlatformConfigTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref TenantProfilesTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref ProductsTable
         # WHICH TIER THE BUYER CHOSE. A tiered offer prices 1/2/3 of a thing as three Prices of one
         # product, so every tier arrives from Stripe as `quantity: 1` under the same name. The offer's
         # `selectable_prices` is the only place that says otherwise, and it carries the tenant's own
         # label too (plans/REPORTING.md 2c). Read-only, once per order, and only when the session names
         # an offer.
-        - DynamoDBReadPolicy:
-            TableName: !Ref OffersTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RefundsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref LedgerTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ReviewsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CartsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ServicesTable
         # A paid session carrying a coupon writes a durable redemption row and bumps the counters it
         # feeds -- the tenant's cap is enforced from OUR number, not Stripe's (COUPONS_COMPLETION.md,
         # Option B slice 1). Crud on the coupons table because the counter is an atomic update on it.
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CouponGrantsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CouponRedemptionsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CouponsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref CalendarConnectionsTable
         - Statement:
             Effect: Allow
             Action:
@@ -2504,15 +2542,9 @@ Resources:
             Action:
               - secretsmanager:GetSecretValue
             Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/google-oauth/*"
-        - DynamoDBCrudPolicy:
-            TableName: !Ref WebhookEventsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref BookingCreditsTable
         # Has this order shipped? The scheduled order sweep notifies on orders past the ship date we
         # promised the buyer, and "shipped" is derived from the shipment document rather than stored on
         # the order (plans/THANK_YOU_PAGE.md P4). Read-only -- the sweep never writes a shipment.
-        - DynamoDBReadPolicy:
-            TableName: !Ref ShipmentsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Version: "2012-10-17"
