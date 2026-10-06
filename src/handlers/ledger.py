@@ -28,4 +28,41 @@ def handler(event, context, repository=None):
     except RepositoryError as exc:
         return error_response(str(exc), code="ledger_read_failed")
 
-    return json_response({"entries": entries, "count": len(entries), "summary": summarize(entries)})
+    # A PERIOD, filtered here rather than in the browser. Reporting asks "this month against last", and
+    # shipping a tenant's whole ledger to the page to slice it there stops working on the first tenant
+    # with real volume (plans/REPORTING.md §4). Both bounds optional and inclusive; `occurred_at` is on
+    # every entry.
+    window = _window(params)
+    if window:
+        since, until = window
+        entries = [entry for entry in entries
+                   if (since is None or int(entry.get("occurred_at") or 0) >= since)
+                   and (until is None or int(entry.get("occurred_at") or 0) <= until)]
+
+    summary = summarize(entries)
+    # HOW MUCH OF THE MARGIN IS KNOWN. `shipping_cost` only exists once a label is bought, so a period
+    # where most orders have not shipped reports a margin computed from the few that have -- 5 of 71 read
+    # as a ~96% margin on postage, which is the one figure in this summary a tenant could act wrongly on
+    # (plans/REPORTING.md §2b). `summarize` already refuses to invent a margin when NO cost exists; the
+    # partial case is this. Stated beside the number rather than hidden, and never silently corrected.
+    sales = [entry for entry in entries if entry.get("entry_type") == "sale"]
+    shipped = {str(entry.get("order_id") or "") for entry in entries
+               if entry.get("entry_type") == "shipping_cost" and entry.get("order_id")}
+    summary["shipping_cost_coverage"] = {"shipped": len(shipped), "sales": len(sales)}
+
+    return json_response({"entries": entries, "count": len(entries), "summary": summary})
+
+
+def _window(params):
+    """`(since, until)` epoch bounds from `from`/`to`, or None when neither was asked for."""
+    def bound(key):
+        raw = str(params.get(key) or "").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    since, until = bound("from"), bound("to")
+    return (since, until) if (since is not None or until is not None) else None

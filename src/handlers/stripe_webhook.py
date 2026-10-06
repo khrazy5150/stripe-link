@@ -719,7 +719,22 @@ def persist_checkout_session_completed(
 
     fees = true_up_fees(fee_breakdown_from_session(session, billing_config_loader), actual_fees)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
-    order_record = order_record_from_session(session, tenant_id, now, fees, line_items=line_items)
+    # WHICH TIER THE BUYER CHOSE, from the offer that offered it. One read, and only when the session
+    # names an offer -- `selectable_prices` carries both the size and the tenant's own label, so nothing
+    # else needs loading. Best-effort: an order whose offer has been deleted records its lines exactly as
+    # it did before, rather than failing over a descriptive field.
+    tiers = {}
+    offer_id = str((session.get("metadata") or {}).get("offer_id") or "")
+    if offer_id and os.environ.get("OFFERS_TABLE"):
+        try:
+            from stripe_link.domain.pricing import offer_price_tiers
+            from stripe_link.repositories.documents import offers_repository
+
+            tiers = offer_price_tiers(offers_repository(mode=mode).get(tenant_id, offer_id))
+        except Exception as exc:  # noqa: BLE001 - a label must never cost an order
+            print(f"[webhook] tier labels unavailable for {offer_id}: {type(exc).__name__}: {exc}")
+    order_record = order_record_from_session(session, tenant_id, now, fees, line_items=line_items,
+                                             tiers=tiers)
     # THE DELIVERY PROMISE, computed once and stored on the order (plans/THANK_YOU_PAGE.md P2). Not
     # recomputed when the thank-you page is viewed: the buyer was told a date, and that date must not
     # quietly change because the tenant edited their cutoff next week. Best-effort -- a thank-you page
@@ -1977,13 +1992,31 @@ def bump_postage_collected(line_items: list[dict[str, Any]] | None, surcharges: 
     return total
 
 
-def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_price_ids: set[str], currency: str) -> list[dict[str, Any]]:
+def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_price_ids: set[str],
+                                 currency: str, tiers: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Normalize Stripe line items into the order's line_items, flagging which were pre-purchase order bumps
-    (their Stripe price id was offered as an optional_item). plans/SALES_FUNNELS.md P2."""
+    (their Stripe price id was offered as an optional_item). plans/SALES_FUNNELS.md P2.
+
+    WHICH TIER SOLD, when the offer sells several. A tiered offer prices 1 / 2 / 3 of a thing as three
+    Prices of the same product, so every one of them arrives here as `quantity: 1` under the product's
+    name and the order could not say which the buyer chose. The pointer back was always present and
+    always discarded: we stamp our own `price_id` into each Stripe Price's metadata, and this fetch
+    already expands `data.price` -- so the identifying key was sitting in the payload, unread.
+
+    `tiers` is the offer's own `selectable_prices`, which carry both the size and the tenant's words for
+    it (`domain/pricing.offer_price_tiers`). Absent for an order whose offer has since been deleted, in
+    which case a line simply says no more than it used to.
+    """
     items = []
+    tiers = tiers or {}
     for line in line_items or []:
         price = line.get("price") if isinstance(line.get("price"), dict) else {}
         stripe_price_id = str(price.get("id") or "")
+        # OUR id for this price, from the metadata `build_price_params` stamps on every Price it creates.
+        # Recorded whether or not a tier is known: it is the only durable key from a Stripe line back to
+        # the catalogue, and a report that wants to group by price needs it even when nothing is tiered.
+        local_price_id = str((price.get("metadata") or {}).get("price_id") or "")
+        tier = tiers.get(local_price_id) or {}
         items.append({
             "name": line.get("description") or "",
             "amount_subtotal": int(line.get("amount_subtotal") or 0),
@@ -1992,6 +2025,12 @@ def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_p
             "currency": str(line.get("currency") or currency or "usd"),
             "stripe_price_id": stripe_price_id,
             "is_order_bump": bool(stripe_price_id) and stripe_price_id in bump_price_ids,
+            **({"price_id": local_price_id} if local_price_id else {}),
+            # The UNITS this one line represents -- 2, for a "2 Items" tier that Stripe calls quantity 1.
+            # Written only when the offer says so, because a 1 nobody chose is indistinguishable from the
+            # Stripe quantity already on the line.
+            **({"unit_quantity": tier["quantity"]} if int(tier.get("quantity") or 1) > 1 else {}),
+            **({"tier_label": tier["label"]} if tier.get("label") else {}),
         })
     return items
 
@@ -2370,14 +2409,17 @@ def attach_delivery_promise(order_record, *, tenant_id, mode, user_profiles_repo
               f"{type(exc).__name__}: {exc}")
 
 
-def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any], line_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any],
+                              line_items: list[dict[str, Any]] | None = None,
+                              tiers: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
     details = customer_details(session)
     product_name = metadata.get("product_name") or "Checkout"
     created = int(session.get("created") or now)
     session_id = session.get("id", "")
     bump_price_ids = {pid for pid in str(metadata.get("order_bump_ids") or "").split(",") if pid}
-    resolved_line_items = order_line_items_from_stripe(line_items, bump_price_ids, session.get("currency") or "usd")
+    resolved_line_items = order_line_items_from_stripe(
+        line_items, bump_price_ids, session.get("currency") or "usd", tiers)
     # POSTAGE THAT CAME IN THROUGH A BUMP LINE. An order bump is ticked on Stripe's hosted page after
     # `shipping_options` are fixed, so its parcel cost cannot be charged as shipping -- it is folded into
     # the bump's own price instead (domain/stripe_products.charged_unit_amount). Recorded separately here

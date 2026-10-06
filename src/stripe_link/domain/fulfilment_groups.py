@@ -119,12 +119,17 @@ def parcel_contents(parcel: Any, products_by_id: dict[str, Any] | None) -> list[
     "Medium box: Creatine Gummies, Whey Protein" is a packing slip. "Medium box: 2 items" is a number they
     have to go and look up.
     """
-    names = []
+    # COUNTED, not repeated. A "3 Items" tier packs as three units, and listing the same name three
+    # times reads as three different things to put in the box rather than three of one.
+    counts: dict[str, int] = {}
+    order: list[str] = []
     for product_id in (parcel or {}).get("packed_from") or []:
         product = (products_by_id or {}).get(_text(product_id)) or {}
         name = _text(product.get("name")) or _text(product_id)
-        names.append(name)
-    return names
+        if name not in counts:
+            order.append(name)
+        counts[name] = counts.get(name, 0) + 1
+    return [name if counts[name] == 1 else f"{name} x{counts[name]}" for name in order]
 
 
 def group_parcels(group: list[dict[str, Any]] | None, *, products_by_id: dict[str, Any],

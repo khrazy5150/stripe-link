@@ -39,9 +39,11 @@ worth — was unanswerable, and nothing said so, because an absent field looks e
 genuinely had none. Identical in shape to the `fees` bug recorded twelve lines above it in the same
 function.
 
-Fixed for new entries. **The 76 existing entries are still blank**, and the orders they came from are all
-still present, so a backfill is possible and cheap. Worth doing before any report ships, or the first
-thing a tenant sees is a year of "unattributed".
+Fixed for new entries, and **the 67 fillable existing entries were backfilled from their orders**
+(2026-10-06). The ledger now answers the question it exists for — top products by revenue: Creatine
+Gummies $2,700.55, Aipas M2 Max Electric Bike $1,666.35, Electric Scooter $284.93; top offers: Workout
+Bundle $2,952.06, E-Transport $1,951.28. $2,539.13 remains unattributed by product (subscription and
+invoice entries that carry no product block) and is reported as such rather than hidden.
 
 ### 2b. `shipping_margin` is honest per-entry and misleading in aggregate
 
@@ -50,9 +52,10 @@ only **5 of 71** sales have had a label bought, so `shipping_cost` is missing fo
 figure reads as a ~96% margin on postage.
 
 `summarize` already refuses to invent a margin when `shipping_cost` is entirely absent (returns `None`
-rather than `revenue + 0`, deliberately). The partial case was not considered. A report must either
-restrict the margin to orders that have a label, or state the coverage beside it ("5 of 71 shipped").
-This is the one number in the summary a tenant could act wrongly on.
+rather than `revenue + 0`, deliberately). The partial case was not considered. ✅ `/ledger` now returns
+`shipping_cost_coverage: {shipped, sales}` and the report states it beside the figure — *"Shipping paid
+covers 5 of 71 sales — the rest have no label bought yet, so shipping margin reads higher than it will
+finish."* Stated, never silently corrected.
 
 ### 2c. Orders do not record which TIER was bought
 
@@ -61,17 +64,29 @@ therefore says `quantity: 1` and `name: "Creatine Gummies"` whatever the buyer c
 in our own price document's `quantity`. So neither the Orders screen nor any report can say which tier
 sold — and "which tier converts" is one of the questions a tiered offer exists to answer.
 
-Fix at **write time**, not display time: resolve the line's `stripe_price_id` against the product's
-prices in the webhook and stamp `unit_quantity` (and the offer's label where there is one) onto the line
-item. The webhook already holds `products_repo` before `order_record_from_session` is called. Display-time
-resolution would leave every historical order unreadable and put the same lookup in two screens.
+✅ **Shipped 2026-10-06, and it needed no product read at all.** The key back was always in the payload:
+`build_price_params` stamps our own `price_id` into every Stripe Price's metadata and the line-item fetch
+already expands `data.price` — it was simply discarded. The offer's `selectable_prices` then supplies both
+the size and the tenant's own label, so it is **one offer read** per order and no product lookup.
+
+The label **cannot** be stamped onto the Stripe Price at sync time, which is what settled the design: it
+belongs to the (offer, price) PAIR. Proven in real data — `price_NxQYoPLerzo` is "1 Item" in one offer and
+"Every day" in another. Stamping would describe the second offer's orders in the first offer's words.
+
+**And it uncovered a live shipping bug.** `resolve_order_lines` kept Stripe's `quantity: 1`, so a "3
+Items" tier was packed and labelled as ONE unit — a box too small and a label too cheap, re-billed by the
+carrier weeks later. The buyer's own quote was right all along (the landing page passes the tier quantity
+to `shipping_quote`), so the two halves of one sale disagreed and only the label said so. Fixed: the
+packer multiplies by `unit_quantity`, and the packing slip counts rather than repeats ("NAD Supplement
+x3").
 
 ## 3. Shape of the reports themselves
 
 One screen, date-ranged, reading `/ledger`. Sections in the order a tenant actually asks:
 
-1. **Money** — gross, fees, shipping, net, profit, for the period and against the previous one. Already
-   computable today; this is `summarize` with a date filter.
+1. **Money** ✅ shipped 2026-10-06 — gross, merchandise, shipping collected, Stripe and platform fees,
+   shipping paid, net, profit; period-selectable, compared against the same length of time immediately
+   before. Filtering is server-side on `occurred_at`. The Reports menu item is no longer disabled.
 2. **What sold** — revenue and units by product, then by offer. Needs 2a (shipped) and 2c.
 3. **Funnel** — checkout vs bump vs upsell revenue, take-up rate per step. `entry.source` already
    separates upsells; bumps need `is_order_bump` rolled up from the order's line items.
@@ -93,10 +108,9 @@ One screen, date-ranged, reading `/ledger`. Sections in the order a tenant actua
 
 ## 5. Order of work
 
-1. **Backfill 2a** on existing entries from their orders.
-2. **2c**, so the tier is recorded from now on.
-3. Report 1 (**Money**) — almost free, and it is what enables the menu item.
-4. Report 2 (**What sold**) — the first one that needs the work above.
-5. Reports 3–5 as wanted.
-
-Steps 1–3 are small and unblock the disabled menu. 4 onward is where the real work is.
+1. ✅ **Backfill 2a** — 67 entries filled from their orders.
+2. ✅ **2c** — tier recorded, and a packing bug fixed with it.
+3. ✅ Report 1 (**Money**).
+4. Report 2 (**What sold**) — now unblocked: the ledger carries product and offer, and orders carry the
+   tier. This is the next one.
+5. Reports 3–5 (**Funnel**, **Shipping**, **Export**) as wanted.

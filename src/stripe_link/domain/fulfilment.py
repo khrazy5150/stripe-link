@@ -68,6 +68,17 @@ def resolve_order_lines(order: dict[str, Any], index: dict[str, dict[str, Any]])
         entry = dict(line)
         if product:
             entry["product_id"] = str(product.get("product_id") or "")
+        # HOW MANY THINGS ARE ACTUALLY IN THE BOX. A tiered offer prices 3 of something as ONE Stripe
+        # Price, so Stripe reports `quantity: 1` and the packer sized the parcel for a single unit -- a
+        # box too small and a label too cheap, which the carrier re-bills weeks later. The buyer's own
+        # quote was right (the landing page passes the tier's quantity to `shipping_quote`), so the two
+        # halves of the same sale disagreed. Found 2026-10-06, the moment `unit_quantity` existed to
+        # compare against.
+        #
+        # Multiplied, not replaced: a buyer can take two of the "3 Items" tier, and that is six.
+        units = int(line.get("unit_quantity") or 0)
+        if units > 1:
+            entry["quantity"] = max(1, int(line.get("quantity") or 1)) * units
         resolved.append(entry)
     if resolved:
         return resolved

@@ -222,6 +222,36 @@ class ResolvedOfferItem:
     default_fulfiller_id: str = ""
 
 
+def offer_price_tiers(offer: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """`{local_price_id: {quantity, label}}` for every price the offer offers as a choice.
+
+    A tiered offer sells 1 / 2 / 3 of a thing as three **Prices of the same product**, so Stripe's line
+    item says `quantity: 1` and carries the product's name whichever the buyer picked. Nothing in the
+    Stripe payload distinguishes them -- which is why an order could not say which tier sold, and "which
+    tier converts" is most of why a tenant builds a tiered offer at all.
+
+    The OFFER is the whole answer: `selectable_prices` already carries both the size and the tenant's own
+    words for it. No product read is needed.
+
+    **The label belongs to the (offer, price) PAIR, not to the price**, which is why it cannot be stamped
+    onto the Stripe Price at sync time. Proven in real data 2026-10-06: `price_NxQYoPLerzo` is "1 Item" in
+    one offer and "Every day" in another. Stamp it and the second offer's orders would describe themselves
+    with the first offer's words.
+    """
+    tiers: dict[str, dict[str, Any]] = {}
+    for item in (offer or {}).get("items") or []:
+        for choice in item.get("selectable_prices") or []:
+            price_id = str(choice.get("price_id") or "")
+            if not price_id:
+                continue
+            tier: dict[str, Any] = {"quantity": max(1, int(choice.get("quantity") or 1))}
+            label = str(choice.get("label") or "").strip()
+            if label:
+                tier["label"] = label
+            tiers[price_id] = tier
+    return tiers
+
+
 def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: Any) -> dict[str, dict[str, Any]]:
     products_by_id = {}
     for item in stage_opportunities(offer, STAGE_LANDING):

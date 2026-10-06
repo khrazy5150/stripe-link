@@ -2465,6 +2465,13 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
+        # WHICH TIER THE BUYER CHOSE. A tiered offer prices 1/2/3 of a thing as three Prices of one
+        # product, so every tier arrives from Stripe as `quantity: 1` under the same name. The offer's
+        # `selectable_prices` is the only place that says otherwise, and it carries the tenant's own
+        # label too (plans/REPORTING.md 2c). Read-only, once per order, and only when the session names
+        # an offer.
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RefundsTable
         - DynamoDBCrudPolicy:

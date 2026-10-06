@@ -119,7 +119,8 @@
               </svg>
               Preferences
             </button>
-            <button class="user-dropdown-item" type="button" role="menuitem" disabled>
+            <button class="user-dropdown-item" type="button" role="menuitem"
+                    @click="activeView = 'reports'; userMenuOpen = false">
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7.5 3.75h6.75L18 7.5v12.75H7.5A1.5 1.5 0 0 1 6 18.75V5.25a1.5 1.5 0 0 1 1.5-1.5Zm6.75 0V7.5H18M9 11.25h6M9 14.25h6M9 17.25h3" />
               </svg>
@@ -187,6 +188,7 @@
         <Billing v-else-if="activeView === 'billing'" :key="`billing-${auth.session?.client_id || ''}`" />
         <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
         <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
+        <Reports v-else-if="activeView === 'reports'" :key="`reports-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       </div>
 </main>
     <ToastHost @select="onToastSelect" />
@@ -211,6 +213,7 @@ import LandingPages from "./components/LandingPages.vue";
 import Leads from "./components/Leads.vue";
 import Reviews from "./components/Reviews.vue";
 import Notifications from "./components/Notifications.vue";
+import Reports from "./components/Reports.vue";
 import Offers from "./components/Offers.vue";
 import Orders from "./components/Orders.vue";
 import Preferences from "./components/Preferences.vue";
