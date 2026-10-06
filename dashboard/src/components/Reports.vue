@@ -19,19 +19,34 @@
 
     <div v-if="error" class="keys-status-banner error is-prose">{{ error }}</div>
 
-    <!-- MONEY, in the order a tenant reads it: what came in, what was taken out, what is left. Each
-         figure is the ledger's own -- nothing here adds money up a second time. -->
-    <div v-if="summary" class="reports-grid">
-      <article v-for="card in cards" :key="card.label" class="reports-card" :class="card.tone">
-        <p class="reports-card-label">{{ card.label }}</p>
-        <p class="reports-card-value">{{ money(card.value) }}</p>
-        <p v-if="card.note" class="reports-card-note">{{ card.note }}</p>
-        <p v-if="card.delta !== null && card.delta !== undefined" class="reports-card-delta"
-           :class="card.delta >= 0 ? 'is-up' : 'is-down'">
-          {{ card.delta >= 0 ? "▲" : "▼" }} {{ money(Math.abs(card.delta)) }} vs {{ previousLabel }}
-        </p>
-      </article>
-    </div>
+    <!-- A TABLE, not cards. These figures are one statement that adds up -- revenue, then what was taken
+         out, then what is left -- and a row of cards says they are eight unrelated numbers. Read down the
+         column and the arithmetic is visible; laid out as cards it is not. -->
+    <table v-if="summary" class="data-table reports-table">
+      <thead>
+        <tr>
+          <th scope="col">Figure</th>
+          <th scope="col" class="reports-num">{{ periodLabel }}</th>
+          <th v-if="previous" scope="col" class="reports-num">Period before</th>
+          <th v-if="previous" scope="col" class="reports-num">Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in rows" :key="row.label" :class="row.tone">
+          <th scope="row">
+            {{ row.label }}
+            <small v-if="row.note">{{ row.note }}</small>
+          </th>
+          <td class="reports-num">{{ money(row.value) }}</td>
+          <td v-if="previous" class="reports-num reports-muted">{{ money(row.was) }}</td>
+          <td v-if="previous" class="reports-num"
+              :class="row.delta === 0 ? '' : (row.delta > 0 ? 'is-up' : 'is-down')">
+            <template v-if="row.delta === 0">&mdash;</template>
+            <template v-else>{{ row.delta > 0 ? "+" : "−" }}{{ money(Math.abs(row.delta)) }}</template>
+          </td>
+        </tr>
+      </tbody>
+    </table>
 
     <!-- The one figure a tenant could act wrongly on. Shipping cost exists only once a label is bought,
          so a period where most orders have not shipped reports a margin computed from the few that have.
@@ -64,7 +79,6 @@ const currency = ref("usd");
 
 const money = (cents) => formatMoney(Number(cents || 0), currency.value);
 const spec = computed(() => PERIODS.find((p) => p.key === period.value) || PERIODS[0]);
-const previousLabel = computed(() => (spec.value.days ? "the period before" : ""));
 
 async function fetchWindow(from, to) {
   const params = {};
@@ -97,32 +111,35 @@ async function load() {
   }
 }
 
-function delta(key, getter) {
-  if (!previous.value) return null;
-  return getter(summary.value) - getter(previous.value);
-}
 
-const cards = computed(() => {
-  const s = summary.value;
-  if (!s) return [];
-  const totals = s.totals || {};
-  const gross = (x) => Number((x.totals || {}).gross || 0);
-  return [
-    { label: "Gross", value: totals.gross, tone: "is-headline", delta: delta("gross", gross),
-      note: "Everything the buyer paid, postage included." },
-    { label: "Merchandise", value: s.merchandise_revenue,
-      note: "Gross minus what was charged to post it." },
-    { label: "Shipping collected", value: s.shipping_revenue },
-    { label: "Stripe fees", value: totals.stripe_fee, tone: "is-cost" },
-    { label: "Platform fees", value: totals.platform_fee, tone: "is-cost" },
-    { label: "Shipping paid", value: totals.shipping_cost, tone: "is-cost",
-      note: "Labels bought so far." },
-    { label: "Net", value: s.net, tone: "is-headline",
-      note: "Gross after Stripe and platform fees." },
-    { label: "Profit", value: s.profit, tone: "is-headline",
-      note: "Net after postage and cost of goods." },
-  ];
+// The statement, in the order it adds up: what came in, what was taken out, what is left.
+const LINES = [
+  { label: "Gross", pick: (s) => (s.totals || {}).gross,
+    note: "Everything the buyer paid, postage included." },
+  { label: "Merchandise", pick: (s) => s.merchandise_revenue,
+    note: "Gross minus what was charged to post it." },
+  { label: "Shipping collected", pick: (s) => s.shipping_revenue },
+  { label: "Stripe fees", pick: (s) => (s.totals || {}).stripe_fee, tone: "is-cost" },
+  { label: "Platform fees", pick: (s) => (s.totals || {}).platform_fee, tone: "is-cost" },
+  { label: "Shipping paid", pick: (s) => (s.totals || {}).shipping_cost, tone: "is-cost",
+    note: "Labels bought so far." },
+  { label: "Net", pick: (s) => s.net, tone: "is-total",
+    note: "Gross after Stripe and platform fees." },
+  { label: "Profit", pick: (s) => s.profit, tone: "is-total",
+    note: "Net after postage and cost of goods." },
+];
+
+const rows = computed(() => {
+  const now = summary.value;
+  if (!now) return [];
+  return LINES.map((line) => {
+    const value = Number(line.pick(now) || 0);
+    const was = previous.value ? Number(line.pick(previous.value) || 0) : 0;
+    return { label: line.label, note: line.note, tone: line.tone, value, was, delta: value - was };
+  });
 });
+
+const periodLabel = computed(() => spec.value.label);
 
 // Never a figure whose basis is partial without saying so.
 const shippingCaveat = computed(() => {

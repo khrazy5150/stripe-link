@@ -147,4 +147,11 @@ def group_parcels(group: list[dict[str, Any]] | None, *, products_by_id: dict[st
     if not lines:
         return []
     parcels = pack(packable_items(lines, products_by_id), boxes or [])
-    return [{**parcel, "contents": parcel_contents(parcel, products_by_id)} for parcel in parcels]
+    # `item_count` counts THINGS, which `contents` deliberately no longer does: it collapses repeats into
+    # "NAD Supplement x2", so counting its entries reports 4 items for a box holding 5. Stated here, from
+    # `packed_from` (one entry per unit), so no caller has to know that distinction or reach into the
+    # packer's internals to count units for itself.
+    return [{**parcel,
+             "contents": parcel_contents(parcel, products_by_id),
+             "item_count": len(parcel.get("packed_from") or [])}
+            for parcel in parcels]

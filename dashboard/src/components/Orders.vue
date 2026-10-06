@@ -227,21 +227,21 @@
                 class="orders-parcel-row">
               <td></td>
               <td colspan="7">
-                <p class="orders-parcel-intro">
-                  {{ order.fulfilment_group.order_ids.length }} orders to one address &mdash;
-                  {{ groupItemCount(order) }}
-                  {{ groupItemCount(order) === 1 ? "item" : "items" }} in
-                  {{ parcelsOf(order).length }}
-                  {{ parcelsOf(order).length === 1 ? "parcel" : "parcels" }}.
-                  <span v-if="groupMembers(order).length">
-                    Includes {{ groupMembers(order).slice(1).length }} post-purchase
-                    {{ groupMembers(order).slice(1).length === 1 ? "upsell" : "upsells" }}, already paid
-                    for and shipping free with this box.
-                  </span>
+                <!-- The ORDER count is gone. It said "3 orders" for four purchases, because a bump rides
+                     inside the checkout rather than being an order of its own -- a number the tenant had
+                     to reconcile against nothing, on a line about packing. What matters here is what goes
+                     in which box, and each parcel now says that for itself. -->
+                <p v-if="groupMembers(order).length > 1" class="orders-parcel-intro">
+                  Includes {{ groupMembers(order).slice(1).length }} post-purchase
+                  {{ groupMembers(order).slice(1).length === 1 ? "upsell" : "upsells" }}, already paid
+                  for and shipping free with this box.
                 </p>
                 <div v-for="(parcel, i) in parcelsOf(order)" :key="i" class="orders-parcel">
                   <div class="orders-parcel-what">
                     <strong>{{ parcel.box || "Custom box" }}</strong>
+                    <span class="orders-parcel-count">
+                      {{ parcelItems(parcel) }} {{ parcelItems(parcel) === 1 ? "item" : "items" }}
+                    </span>
                     <span class="orders-parcel-contents">{{ (parcel.contents || []).join(", ") }}</span>
                   </div>
                   <button type="button" class="primary-action orders-label-button"
@@ -411,10 +411,12 @@ function groupRefunded(order) {
   return members.reduce((sum, member) => sum + Number(member.amount_refunded || 0), 0);
 }
 
-// THINGS TO POST, which is what the parcel line is about. "2 orders" counts charges; a packer counts
-// items, and the two differ whenever a checkout carried an order bump -- 2 orders, 3 things in the box.
-function groupItemCount(order) {
-  return parcelsOf(order).reduce((count, parcel) => count + (parcel.contents || []).length, 0);
+// THINGS IN THIS BOX. Not `contents.length`: that list collapses repeats into "NAD Supplement x2", so
+// counting its entries reports 4 items for a box holding 5. The server states the real count beside it;
+// the fallback keeps older cached rows readable rather than showing nothing.
+function parcelItems(parcel) {
+  const counted = Number(parcel?.item_count || 0);
+  return counted || (parcel?.packed_from || []).length || (parcel?.contents || []).length;
 }
 function parcelsOf(order) {
   return order.fulfilment_group?.parcels || [];

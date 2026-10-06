@@ -7930,25 +7930,25 @@ a.orders-place { text-decoration: underline; }
 .orders-parcel-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .orders-parcel-contents { font-size: 13px; color: #555b6b; }
 
-/* Reports. The money cards read in the order a tenant asks: what came in, what was taken, what is left. */
+/* Reports. One statement that adds up, so it is laid out as one: revenue, costs, totals. */
 .reports-controls { display: flex; align-items: flex-end; gap: 0.75rem; }
-.reports-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
-  gap: 1rem;
-  margin-top: 1.25rem;
+.reports-table { margin-top: 1.25rem; width: 100%; }
+.reports-table th[scope="row"] { font-weight: 600; text-align: left; }
+.reports-table th[scope="row"] small { display: block; font-weight: 400; color: #64748b; font-size: 0.8rem; }
+/* Digits line up, which is the whole reason this is a table. */
+.reports-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.reports-muted { color: #64748b; }
+.reports-table .is-cost td:first-of-type { color: #b91c1c; }
+.reports-table .is-total { background: #f8faff; }
+.reports-table .is-total th[scope="row"], .reports-table .is-total td { font-weight: 800; }
+.reports-table .is-up { color: #047857; }
+.reports-table .is-down { color: #b91c1c; }
+
+/* A parcel line reads like a packing slip: box, how many things, then what they are. */
+.orders-parcel-count {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475569;
 }
-.reports-card {
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: var(--radius-md);
-  padding: 1.1rem 1.2rem;
-  background: #fff;
-}
-.reports-card.is-headline { border-color: #c7d2fe; background: #f8faff; }
-.reports-card.is-cost .reports-card-value { color: #b91c1c; }
-.reports-card-label { margin: 0; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
-.reports-card-value { margin: 0.35rem 0 0; font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.reports-card-note { margin: 0.4rem 0 0; font-size: 0.82rem; color: #64748b; line-height: 1.4; }
-.reports-card-delta { margin: 0.45rem 0 0; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
-.reports-card-delta.is-up { color: #047857; }
-.reports-card-delta.is-down { color: #b91c1c; }

@@ -162,3 +162,46 @@ class ThePackingSlipCountsRatherThanRepeatsTests(unittest.TestCase):
         contents = parcel_contents({"packed_from": ["b", "a", "b"]},
                                    {"a": {"name": "Gummies"}, "b": {"name": "Whey"}})
         self.assertEqual(contents, ["Whey x2", "Gummies"])
+
+
+class TheParcelStatesHowManyThingsAreInItTests(unittest.TestCase):
+    """"4 items" for a box holding 5.
+
+    `contents` deliberately collapses repeats into "NAD Supplement x2", so counting its entries
+    under-reports the moment anything is bought more than once -- which is exactly what a tier is. The
+    count comes from `packed_from`, which has one entry per unit, and the parcel states it rather than
+    leaving every caller to know that distinction (author, 2026-10-06: "it shows 4 items when it should
+    say 5 items").
+    """
+
+    BOXES = [{"name": "Large", "length": 14, "width": 11, "height": 8, "empty_weight": 0.6}]
+
+    def _product(self, product_id):
+        return {"product_id": product_id, "name": product_id, "product_type": "physical",
+                "fulfillment": {"item_dimensions": {"length_in": 2, "width_in": 2, "height_in": 2,
+                                                    "weight_lb": 0.3}}}
+
+    def test_a_repeated_item_counts_once_per_unit(self):
+        from stripe_link.domain.fulfilment_groups import group_parcels
+
+        products = {k: self._product(k) for k in ("gummies", "nad", "whey", "beta")}
+        order = {"order_id": "o1", "line_items": [
+            {"name": "gummies", "quantity": 1, "product_id": "gummies"},
+            {"name": "nad", "quantity": 1, "unit_quantity": 2, "product_id": "nad"},
+            {"name": "whey", "quantity": 1, "product_id": "whey"},
+            {"name": "beta", "quantity": 1, "product_id": "beta"},
+        ], "shipping_address": {"postal_code": "80204", "country": "US"}}
+        parcels = group_parcels([order], products_by_id=products, boxes=self.BOXES, index={})
+        self.assertEqual(sum(p["item_count"] for p in parcels), 5)
+        self.assertIn("nad x2", ", ".join(parcels[0]["contents"]))
+
+    def test_the_count_and_the_contents_can_disagree_and_that_is_the_point(self):
+        from stripe_link.domain.fulfilment_groups import group_parcels
+
+        products = {"nad": self._product("nad")}
+        order = {"order_id": "o1", "line_items": [
+            {"name": "nad", "quantity": 1, "unit_quantity": 3, "product_id": "nad"}],
+            "shipping_address": {"postal_code": "80204", "country": "US"}}
+        parcel = group_parcels([order], products_by_id=products, boxes=self.BOXES, index={})[0]
+        self.assertEqual(parcel["item_count"], 3)
+        self.assertEqual(len(parcel["contents"]), 1)

@@ -104,6 +104,18 @@ class TheScreenStatesTheCaveatTests(unittest.TestCase):
         """A month against a quarter is not a comparison."""
         self.assertIn("days * 2 * 86400", self.REPORTS)
 
+    def test_the_figures_are_a_table_not_cards(self):
+        """These numbers are one statement that adds up -- revenue, what was taken out, what is left.
+        A row of cards says they are eight unrelated figures; read down a column the arithmetic shows."""
+        self.assertIn("<table", self.REPORTS)
+        self.assertIn('scope="row"', self.REPORTS)
+        self.assertNotIn("reports-card", self.REPORTS)
+
+    def test_the_money_column_lines_its_digits_up(self):
+        """The whole reason for a table."""
+        self.assertIn("tabular-nums", (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8"))
+        self.assertIn("reports-num", self.REPORTS)
+
     def test_the_menu_item_is_no_longer_disabled(self):
         reports_button = self.APP.split("Reports\n", 1)[0].rsplit("<button", 1)[1]
         self.assertNotIn("disabled", reports_button)
