@@ -343,8 +343,8 @@
                     <label v-for="key in discoverabilitySections" :key="key" class="composition-row">
                       <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
                       <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
-                      <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal, builderHasPhysicalItems) ? 'is-recommended' : 'is-optional'">
-                        {{ defaultVisible(builderOfferType, key, builderGoal, builderHasPhysicalItems) ? "Recommended" : "Optional" }}
+                      <span class="composition-tag" :class="sectionRecommended(key) ? 'is-recommended' : 'is-optional'">
+                        {{ sectionRecommended(key) ? "Recommended" : "Optional" }}
                       </span>
                     </label>
                   </div>
@@ -2063,8 +2063,8 @@
               <label v-for="key in togglableSections" :key="key" class="composition-row">
                 <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
                 <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
-                <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal) ? 'is-recommended' : 'is-optional'">
-                  {{ defaultVisible(builderOfferType, key, builderGoal) ? "Recommended" : "Optional" }}
+                <span class="composition-tag" :class="sectionRecommended(key) ? 'is-recommended' : 'is-optional'">
+                  {{ sectionRecommended(key) ? "Recommended" : "Optional" }}
                 </span>
               </label>
             </div>
@@ -2736,6 +2736,20 @@ const leadFormPlaceholder = computed(() => {
   return { title: capture.title || "", description: capture.description || "" };
 });
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
+
+// Whether anything in this offer needs posting. Mirrors the renderer's own test (requires_shipping, then
+// product_type) so the builder and the server agree -- and it is what makes the shipping element default
+// ON, which is the only reason a postcode ever reaches the quote.
+//
+// Declared HERE, beside the products it reads, rather than beside the shipping warning that used to be
+// its only caller. `watch(() => [sectionVisible("shipping"), ...])` runs its getter immediately to collect
+// dependencies, and that getter now reaches this -- five lines before it was initialised, which is a
+// temporal dead zone, not a stale value.
+const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []).some((product) => {
+  const requires = product?.fulfillment?.requires_shipping;
+  if (typeof requires === "boolean") return requires;
+  return product?.product_type === "physical";
+}));
 const builderIntent = computed(() => offerIntent(builderOffer.value));
 // Post-purchase funnel gating (P3.5): the upsell/downsell/carousel copy only matters when the offer carries a
 // funnel; the thank-you copy applies to every transaction funnel. MAX_SEQUENTIAL_UPSELLS=4 → the grid/carousel
@@ -3018,14 +3032,26 @@ const previewPricesExist = computed(() =>
 function sectionKeyLabel(key) {
   return elementLabel(key);
 }
+// THE ONLY PLACE THIS COMPONENT ANSWERS "is it on by default". Composition grew a third axis
+// (ships_physical, after offer_type and goal) and threading it through five separate call sites missed
+// two of them -- `isSectionEnabled` and `toggleSection` -- which broke unticking in the worst possible
+// way: `toggleSection` compared the new value against a default computed WITHOUT the axis, decided that
+// unticking matched the default, and deleted the override instead of writing it. The real composer then
+// applied the real default, which is ON, so the element came back (2026-10-06).
+//
+// Call this, never `defaultVisible` directly. A fourth axis then costs one edit instead of five, and the
+// guard in tests/test_shipping_section_default.py keeps it that way.
+function sectionRecommended(key) {
+  return defaultVisible(builderOfferType.value, key, builderGoal.value, builderHasPhysicalItems.value);
+}
 function isSectionEnabled(key) {
   const override = builder.composition.overrides[key];
   if (override && typeof override.enabled === "boolean") return override.enabled;
-  return defaultVisible(builderOfferType.value, key, builderGoal.value);
+  return sectionRecommended(key);
 }
 async function toggleSection(key, enabled) {
-  // Only persist a deviation from the offer_type default; clearing back to default drops the override.
-  if (enabled === defaultVisible(builderOfferType.value, key, builderGoal.value)) {
+  // Only persist a deviation from the default; clearing back to default drops the override.
+  if (enabled === sectionRecommended(key)) {
     delete builder.composition.overrides[key];
   } else {
     builder.composition.overrides[key] = { enabled };
@@ -3381,15 +3407,6 @@ const shippingSectionWarning = computed(() => {
 
 // Re-ask when the toggle flips or the offer changes -- the answer depends on both.
 watch(() => [sectionVisible("shipping"), builderOffer.value?.offer_id], () => { checkShippingElement(); });
-
-// Whether anything in this offer needs posting. Mirrors the renderer's own test (requires_shipping, then
-// product_type) so the builder and the server agree -- and it is what makes the shipping element default
-// ON, which is the only reason a postcode ever reaches the quote.
-const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []).some((product) => {
-  const requires = product?.fulfillment?.requires_shipping;
-  if (typeof requires === "boolean") return requires;
-  return product?.product_type === "physical";
-}));
 
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const emptyStateText = computed(() => {

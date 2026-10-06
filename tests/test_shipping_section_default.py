@@ -96,3 +96,50 @@ class TheTwoRenderersAgreeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OneRuleOneCallSiteTests(unittest.TestCase):
+    """Unticking has to actually untick.
+
+    Composition grew a third axis (ships_physical, after offer_type and goal). Threading it through five
+    separate call sites in the builder missed two — `isSectionEnabled` and `toggleSection` — and the second
+    of those broke unticking in the worst available way: it compared the new value against a default
+    computed WITHOUT the axis, concluded that unticking matched the default, and DELETED the override
+    rather than writing it. The real composer then applied the real default, which is ON, so the element
+    came straight back (2026-10-06).
+
+    The component now answers the question in one place. These guard that.
+    """
+
+    VUE = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_builder_asks_the_question_in_exactly_one_place(self):
+        """A fourth axis should cost one edit, not five."""
+        self.assertEqual(self.VUE.count("defaultVisible("), 1,
+                         "call sectionRecommended(), never defaultVisible() directly")
+
+    def test_that_one_place_passes_every_axis(self):
+        block = self.VUE.split("function sectionRecommended", 1)[1].split("\n}", 1)[0]
+        for axis in ("builderOfferType", "builderGoal", "builderHasPhysicalItems"):
+            with self.subTest(axis=axis):
+                self.assertIn(axis, block)
+
+    def test_untick_and_recommended_read_the_same_default(self):
+        """`toggleSection` decides between writing an override and dropping it by comparing against the
+        default. If that comparison disagrees with the composer, unticking silently does nothing."""
+        for name in ("function isSectionEnabled", "async function toggleSection"):
+            with self.subTest(fn=name):
+                block = self.VUE.split(name, 1)[1].split("\n}", 1)[0]
+                self.assertIn("sectionRecommended(key)", block)
+
+    def test_the_axis_is_declared_before_anything_reads_it(self):
+        """`watch(() => [sectionVisible("shipping"), ...])` runs its getter immediately to collect
+        dependencies. A `const` declared after that line is a temporal dead zone, not a stale value — the
+        whole builder throws on setup."""
+        declared = self.VUE.index("const builderHasPhysicalItems")
+        # Matched on the WHOLE statement: the comment above the declaration quotes the watcher, and a
+        # looser needle finds the comment instead of the code it is warning about.
+        for reader in ("function sectionVisible", "function sectionRecommended",
+                       'watch(() => [sectionVisible("shipping"), builderOffer.value?.offer_id]'):
+            with self.subTest(reader=reader):
+                self.assertLess(declared, self.VUE.index(reader))
