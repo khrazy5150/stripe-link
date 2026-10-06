@@ -122,12 +122,28 @@ def excluded_sections(offer_type: str) -> set[str]:
     return set(_offer_type_rule(offer_type).get("excludes") or ())
 
 
-def default_visible(offer_type: str, key: str, goal: str = "") -> bool:
+# The shipping element cannot live in an offer_type's section list, because `single` and `bundle` cover
+# digital goods too and a shipping card on a download is nonsense. It is keyed on the one thing that
+# actually decides it: whether the offer ships something.
+SHIPS_PHYSICAL_SECTION = "shipping"
+
+
+def default_visible(offer_type: str, key: str, goal: str = "", ships_physical: bool = False) -> bool:
     """Whether a governed section key is visible by DEFAULT for this offer_type + goal (before overrides).
     Base sections from the offer_type, unioned with the sections the goal's packs enable -- minus anything
-    the offer_type declares impossible."""
+    the offer_type declares impossible.
+
+    **Shipping defaults ON for anything that ships**, like trust badges do for a sales page, and the tenant
+    unticks it if they do not want it. Default rather than forced, but the default matters more here than
+    anywhere else on the page: the element is the only thing that collects a postcode, a quote without one
+    returns `needs: postal_code`, and Stripe then gets no shipping option at all -- so the buyer pays
+    nothing to post and nobody is told. A real order shipped a Large box for $7.83 having collected $0 at
+    checkout, purely because its page had no shipping element (2026-10-06).
+    """
     if key in excluded_sections(offer_type):
         return False
+    if key == SHIPS_PHYSICAL_SECTION:
+        return bool(ships_physical)
     base = _offer_type_rule(offer_type).get("sections") or []
     return key in base or key in goal_sections(goal)
 
@@ -137,6 +153,7 @@ def is_section_visible(
     section_type: str,
     overrides: dict[str, Any] | None = None,
     goal: str = "",
+    ships_physical: bool = False,
 ) -> bool:
     """Final visibility for one section: override wins, else the offer_type + goal default; ungoverned
     sections (body elements) are visible whenever present."""
@@ -151,7 +168,7 @@ def is_section_visible(
     override = (overrides or {}).get(key)
     if isinstance(override, dict) and "enabled" in override:
         return bool(override.get("enabled"))
-    return default_visible(offer_type, key, goal)
+    return default_visible(offer_type, key, goal, ships_physical)
 
 
 def page_overrides(page: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +203,25 @@ def derived_head_sections(offer_type, overrides, goal, present) -> list[dict[str
         and key not in seen
         and is_section_visible(offer_type, key, overrides, goal)
     ]
+
+
+def derived_shipping_section(offer_type, overrides, goal, present, ships_physical) -> list[dict[str, Any]]:
+    """The shipping element, generated when the offer ships and the page has not got one.
+
+    Derived rather than written into `page.sections` for the same reason `structured_data` is: it carries
+    no tenant fields at all. `render_shipping_selector` emits an empty shell and fetches the countries and
+    the rates at page load, because a rate depends on destination and live carrier pricing and a published
+    page is an S3 artifact. There is nothing to author, so there is nothing to store.
+
+    The consequence that matters: a page published before this existed heals on its next publish, with no
+    re-save and no rebuild. Unticking it in Page Sections still wins -- that writes an override, and an
+    override outranks the default.
+    """
+    if not ships_physical or SHIPS_PHYSICAL_SECTION in {str(s.get("type") or "") for s in present}:
+        return []
+    if not is_section_visible(offer_type, SHIPS_PHYSICAL_SECTION, overrides, goal, ships_physical):
+        return []
+    return [{"id": SHIPS_PHYSICAL_SECTION, "type": SHIPS_PHYSICAL_SECTION}]
 
 
 # Page kinds whose section sequence is AUTHORED in code rather than composed from a goal: the funnel steps
@@ -293,8 +329,20 @@ def default_cta_label(offer: dict[str, Any]) -> str:
     return str(rules.get("default_cta_label") or "")
 
 
+def offer_ships_physical(offer: dict[str, Any] | None) -> bool:
+    """The offer's own say on whether it ships something, denormalised by the builder.
+
+    `compose_page` receives the OFFER and never its products -- publish runs from a stream holding only the
+    page -- which is the same constraint that put `lead_capture_action` and `pricing_model` on the offer.
+    The renderer passes the truth it can see (the products it loaded) on top, so an offer saved before this
+    field existed still composes correctly.
+    """
+    return bool((offer or {}).get("ships_physical"))
+
+
 def compose_page(
-    offer: dict[str, Any], page: dict[str, Any], page_type: str = "landing"
+    offer: dict[str, Any], page: dict[str, Any], page_type: str = "landing",
+    ships_physical: bool = False,
 ) -> list[dict[str, Any]]:
     """The Renderable Page Model: page.sections filtered to those the composer deems visible, then ORDERED.
 
@@ -308,10 +356,12 @@ def compose_page(
     offer_type = composition_key(offer or {})
     overrides = page_overrides(page)
     goal = page_goal(page)
+    ships_physical = bool(ships_physical or offer_ships_physical(offer))
     visible = [
         section for section in (page.get("sections") or [])
-        if is_section_visible(offer_type, str(section.get("type") or ""), overrides, goal)
+        if is_section_visible(offer_type, str(section.get("type") or ""), overrides, goal, ships_physical)
     ]
+    visible += derived_shipping_section(offer_type, overrides, goal, visible, ships_physical)
     visible += derived_head_sections(offer_type, overrides, goal, visible)
     if page_type in AUTHORED_PAGE_TYPES:
         return visible

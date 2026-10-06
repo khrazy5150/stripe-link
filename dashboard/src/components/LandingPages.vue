@@ -343,8 +343,8 @@
                     <label v-for="key in discoverabilitySections" :key="key" class="composition-row">
                       <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
                       <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
-                      <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal) ? 'is-recommended' : 'is-optional'">
-                        {{ defaultVisible(builderOfferType, key, builderGoal) ? "Recommended" : "Optional" }}
+                      <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal, builderHasPhysicalItems) ? 'is-recommended' : 'is-optional'">
+                        {{ defaultVisible(builderOfferType, key, builderGoal, builderHasPhysicalItems) ? "Recommended" : "Optional" }}
                       </span>
                     </label>
                   </div>
@@ -2962,7 +2962,8 @@ const breadcrumbOn = computed({
   set: (value) => { builder.breadcrumb = value; },
 });
 function sectionVisible(sectionType) {
-  return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides, builderGoal.value);
+  return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides,
+                          builderGoal.value, builderHasPhysicalItems.value);
 }
 // The page's goal is the second composition axis: offer_type sets the base sections, the goal unions in the
 // sections its capability packs enable (plans/LANDING_PAGE_GOAL_COMPOSITION.md). "" = a page from before
@@ -3346,8 +3347,6 @@ watch(
   },
   { immediate: true },
 );
-// Whether anything in this offer needs posting. Mirrors the renderer's own test (requires_shipping, then
-// product_type) so the builder and the server agree on when the section can render at all.
 // The shell's navigation. No vue-router in this app -- App.vue provides this (Orders.vue:385).
 const navigateTo = inject("navigateTo", null);
 
@@ -3383,6 +3382,9 @@ const shippingSectionWarning = computed(() => {
 // Re-ask when the toggle flips or the offer changes -- the answer depends on both.
 watch(() => [sectionVisible("shipping"), builderOffer.value?.offer_id], () => { checkShippingElement(); });
 
+// Whether anything in this offer needs posting. Mirrors the renderer's own test (requires_shipping, then
+// product_type) so the builder and the server agree -- and it is what makes the shipping element default
+// ON, which is the only reason a postcode ever reaches the quote.
 const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []).some((product) => {
   const requires = product?.fulfillment?.requires_shipping;
   if (typeof requires === "boolean") return requires;
@@ -3412,7 +3414,8 @@ function goalSeedLabels(goal) {
 // builder opens. Governed sections come from the composer; the goal's packs add their seeded content.
 const wizardSectionLabels = computed(() => {
   const offerType = deriveOfferType(selectedOffer.value);
-  const governed = recommendedSectionKeys(offerType, form.goal).map((key) => elementLabel(key));
+  const governed = recommendedSectionKeys(offerType, form.goal, builderHasPhysicalItems.value)
+    .map((key) => elementLabel(key));
   return [...governed, ...goalSeedLabels(form.goal)];
 });
 const siteFilter = ref("");  // "" = all, "__none__" = unattached, else a site_id

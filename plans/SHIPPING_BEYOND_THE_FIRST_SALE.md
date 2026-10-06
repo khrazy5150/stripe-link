@@ -278,6 +278,38 @@ the race that moved the baseline off the order in the first place. The disclosur
 so it DISCOVERS the accepted steps by walking until a gap; both paths must reach the same box, because the
 button states a price and the charge takes one.
 
+#### P1c — A page with no shipping element charges nothing ✅ (shipped 2026-10-06)
+
+The element is the only thing that collects a postcode. Without one the quote returns
+`{"ships": true, "options": [], "needs": "postal_code"}`, Stripe is handed no shipping option, and the
+buyer pays **nothing** to post — with no warning anywhere, on any screen, ever.
+
+Found on a real order: a Large box costing **$7.83** against **$0.00** collected at checkout. The page's
+sections were `brand_label, hero_media, hero, trust_badges, offer_price_selector, checkout_cta,
+refund_policy, legal_footer` — no shipping element, so no destination, so no quote. The upsell on the same
+order then correctly fell back to a standalone rate ($6.20), which is the documented safe direction when
+no baseline exists; the cumulative baseline (P1b) could not engage because there was no baseline at all.
+
+`shipping` was already a governed section and already in `default_order` — it was simply in no
+offer_type's default list, so it never appeared unless a tenant found and ticked it.
+
+**Now ON by default for anything that ships**, the author's call: *"like the trust badges. The tenant can
+choose to untick."* It cannot key on offer_type — `single` and `bundle` cover downloads, and a shipping
+card on a download is nonsense — so `default_visible` takes a `ships_physical` axis instead.
+
+**Derived rather than stored**, exactly as `structured_data` is: `render_shipping_selector` emits an empty
+shell and fetches countries and rates at page load, because a rate depends on destination and live carrier
+pricing while a published page is an S3 artifact. There is nothing to author, so there is nothing to
+store — and a page published before this existed heals on its **next publish, with no re-save**. Verified
+on the real page: `shipping` now composes between `offer_price_selector` and `checkout_cta`, and an
+override of `{enabled: false}` removes it.
+
+The renderer passes the truth it can see (any loaded product with `requires_shipping`); the offer also
+carries a denormalised `ships_physical`, because `compose_page` receives the OFFER and never its products
+and publish runs from a stream holding only the page — the same constraint that already put
+`lead_capture_action` and `pricing_model` on the offer. The composer ORs the two, so an offer saved before
+the field existed still composes right.
+
 ### P2 — Order-bump exposure ✅ (shipped with P0e)
 
 > Built as part of the rate estimator rather than the offer builder: the estimator already packs the

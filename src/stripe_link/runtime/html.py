@@ -2134,8 +2134,16 @@ def _render_page_body(
         TIP_INTERVAL_WORDS.get(str(recurring_tip.get("recurring_interval") or "month"),
                                TIP_INTERVAL_WORDS["month"])[0] if recurring_tip else ""
     )
+    # WHETHER THIS OFFER SHIPS, which decides the shipping element's default. Read from the products the
+    # renderer has already loaded rather than trusted from the offer alone, so a page whose offer predates
+    # the denormalised flag still composes right -- the composer ORs the two.
+    ships_physical = any(
+        (product.get("fulfillment") or {}).get("requires_shipping")
+        for product in (products_by_id or {}).values()
+    )
     composed_sections = compose_page(
-        composing_offer, page, str(_RENDER_STATE.get("page_type") or "landing"))
+        composing_offer, page, str(_RENDER_STATE.get("page_type") or "landing"),
+        ships_physical=ships_physical)
     # Each element declares a channel (plans/LANDING_PAGE_GOAL_COMPOSITION.md): "body" paints markup, "head"
     # emits meta/JSON-LD, "sidecar" writes its own artifact. Route by it rather than assuming everything is
     # body — a head section rendered into <main> would be visible junk, and vice versa.

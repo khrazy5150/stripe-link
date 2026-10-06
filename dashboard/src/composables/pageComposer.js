@@ -103,14 +103,25 @@ export function excludedSections(offerType) {
   return new Set(offerTypeRule(offerType).excludes || []);
 }
 
-export function defaultVisible(offerType, sectionType, goal = "") {
+// The shipping element cannot live in an offer_type's section list: `single` and `bundle` cover digital
+// goods too, and a shipping card on a download is nonsense. It keys on the one thing that decides it.
+// Mirrors SHIPS_PHYSICAL_SECTION / default_visible() in domain/composition.py.
+export const SHIPS_PHYSICAL_SECTION = "shipping";
+
+export function defaultVisible(offerType, sectionType, goal = "", shipsPhysical = false) {
   const key = sectionKey(sectionType);
   if (excludedSections(offerType).has(key)) return false;
+  // Default ON for anything that ships, like trust badges on a sales page -- and the tenant can untick
+  // it. The default matters more here than anywhere else on the page: this element is the only thing
+  // that collects a postcode, and without one the quote returns `needs: postal_code`, Stripe gets no
+  // shipping option, and the buyer pays nothing to post with nobody told. A real order shipped a $7.83
+  // parcel having collected $0 (2026-10-06).
+  if (key === SHIPS_PHYSICAL_SECTION) return Boolean(shipsPhysical);
   return (offerTypeRule(offerType).sections || []).includes(key) || goalSections(goal).has(key);
 }
 
 // Final visibility: override wins; else the offer_type + goal default; ungoverned body elements always show.
-export function isSectionVisible(offerType, sectionType, overrides, goal = "") {
+export function isSectionVisible(offerType, sectionType, overrides, goal = "", shipsPhysical = false) {
   const key = sectionKey(sectionType);
   if (!GOVERNED.has(key)) return true;
   // An exclusion outranks a tenant override too: everything else here is a preference, this is a
@@ -118,19 +129,19 @@ export function isSectionVisible(offerType, sectionType, overrides, goal = "") {
   if (excludedSections(offerType).has(key)) return false;
   const override = (overrides || {})[key];
   if (override && typeof override.enabled === "boolean") return override.enabled;
-  return defaultVisible(offerType, sectionType, goal);
+  return defaultVisible(offerType, sectionType, goal, shipsPhysical);
 }
 
 export function governedKeys() {
   return [...(rules.governed_sections || [])];
 }
 
-export function recommendedSectionKeys(offerType, goal = "") {
-  return (rules.governed_sections || []).filter((key) => defaultVisible(offerType, key, goal));
+export function recommendedSectionKeys(offerType, goal = "", shipsPhysical = false) {
+  return (rules.governed_sections || []).filter((key) => defaultVisible(offerType, key, goal, shipsPhysical));
 }
 
-export function optionalSectionKeys(offerType, goal = "") {
-  return (rules.governed_sections || []).filter((key) => !defaultVisible(offerType, key, goal));
+export function optionalSectionKeys(offerType, goal = "", shipsPhysical = false) {
+  return (rules.governed_sections || []).filter((key) => !defaultVisible(offerType, key, goal, shipsPhysical));
 }
 
 export function allowedCtas(offerType) {
