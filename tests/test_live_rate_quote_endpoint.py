@@ -143,11 +143,35 @@ class LiveQuoteTests(unittest.TestCase):
         self.quote()
         self.assertEqual(self.store.puts, 1)
 
-    def test_a_carrier_failure_is_named_and_never_rendered_as_free(self):
+    def test_an_unconnected_carrier_is_the_tenants_problem_not_the_buyers(self):
+        """`setup`, not `carrier`. A tenant who never connected a carrier is not a carrier having a bad
+        minute: the buyer can do nothing about it, so the page hides the section and posts free, and the
+        builder is told instead (author, 2026-10-06). Never `free` as a MODE either -- an unknown
+        rendered as free shipping is a promise the tenant did not make."""
         self.config = dict(LIVE_CONFIG, provider={"name": "mock", "api_key_ref": ""})
         body = self.quote()
-        self.assertEqual(body["needs"], "carrier")
+        self.assertEqual(body["needs"], "setup")
         self.assertEqual(body["rate_error"], "no_provider")
+        self.assertEqual(body["options"], [])
+        self.assertNotEqual(body["mode"], "free")
+
+    def test_a_carrier_having_a_bad_minute_is_still_named_to_the_buyer(self):
+        """The invariant the test above used to carry, now with a fixture that actually means it.
+
+        This is the case that must NOT be hidden. A transient rating failure on a real order would
+        otherwise ship it for nothing on the strength of a timeout -- so the buyer is told, and can retry.
+        """
+        # Patched where `live_rates_for` LOOKS IT UP -- it imports rate_parcels inside the function, so
+        # rebinding the name on handlers.shipping is a patch nothing reads.
+        import stripe_link.domain.shipping_rating as rating_module
+
+        real = rating_module.rate_parcels
+        rating_module.rate_parcels = lambda *a, **k: {"options": [], "error": "ProviderError: carrier down"}
+        try:
+            body = self.quote()
+        finally:
+            rating_module.rate_parcels = real
+        self.assertEqual(body["needs"], "carrier")
         self.assertEqual(body["options"], [])
         self.assertNotEqual(body["mode"], "free")
 
@@ -156,8 +180,10 @@ class LiveQuoteTests(unittest.TestCase):
         self.assertEqual(self.quote()["rate_error"], "no_ship_from")
 
     def test_an_unreadable_key_does_not_take_the_page_down(self):
+        """Still an answer rather than a 500 -- and a tenant-side one, so the buyer sees no section at
+        all rather than an error about an address that is perfectly fine."""
         body = self.quote(cipher=Cipher(key=None))
-        self.assertEqual(body["needs"], "carrier")
+        self.assertEqual(body["needs"], "setup")
         self.assertIn("key_unreadable", body["rate_error"])
 
     def test_rates_that_match_no_enabled_service_say_services_not_carrier(self):

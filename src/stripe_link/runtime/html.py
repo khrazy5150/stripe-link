@@ -3821,7 +3821,10 @@ def render_shipping_selector_script() -> str:
         "      carrier: 'We could not get shipping rates for this address right now.',",
         "      services: 'No shipping service is available to this address.',",
         "      box_price: 'No shipping option is available to this address yet.',",
-        "      zones: ''",
+        "      zones: '',",
+        # Never reached -- `setup` returns before the box is revealed -- but present so that a future
+        # branch which forgets to return finds an empty string rather than `undefined` painted at a buyer.
+        "      setup: ''",
         "    };",
         "    var subtotal = function(c){",
         "      var card = c.card; if (!card) return null;",
@@ -3920,7 +3923,7 @@ def render_shipping_selector_script() -> str:
         "      if (data === null) { say(reasons.carrier, 'error'); return; }",
         "      lastData = data;",
         "      if (!data.ships) return;",                          # nothing physical: stay hidden
-        "      if (data.needs === 'zones') return;",               # the tenant has configured nowhere to ship
+        "      if (data.needs === 'zones' || data.needs === 'setup') return;",               # the tenant has configured nowhere to ship
         "      if (!select.options.length) {",
         # NAMES, NOT CODES. Two countries could wear their codes; a catch-all zone expands to 233, and
         # "AD / AE / AF" is not a list anyone can shop from. `Intl.DisplayNames` resolves them in the

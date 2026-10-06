@@ -151,14 +151,23 @@ class QuoteTests(unittest.TestCase):
         self.assertEqual(body["options"], [])
         self.assertNotEqual(body["mode"], "free")
 
-    def test_a_live_zone_with_no_provider_still_says_carrier(self):
+    def test_a_live_zone_with_no_provider_says_setup_not_carrier(self):
+        """A tenant who never connected a carrier is not a carrier having a bad minute.
+
+        It used to answer `carrier`, which the page renders as "we could not get rates for this address" --
+        an error about the BUYER's address, for a problem only the tenant can fix and the buyer can do
+        nothing about. `setup` is hidden from the buyer entirely and surfaced in the builder instead
+        (author, 2026-10-06: "I don't want the buyer to see the shipping element unless everything is set
+        up"). `rate_error` still names which piece is missing, because the builder has to say.
+        """
         self.config = dict(CONFIG, zones=[
             {"destinations": [{"country": "US"}], "rule": {"type": "live"}},
             {"destinations": [{"country": "*"}], "rule": {"type": "free"}}])
         body = self.quote("US", postal_code="80202")
-        self.assertEqual(body["needs"], "carrier")
+        self.assertEqual(body["needs"], "setup")
         self.assertEqual(body["rate_error"], "no_provider")
         self.assertEqual(body["options"], [])
+        self.assertNotEqual(body["mode"], "free", "still not a promise of free shipping")
 
     def test_an_unpriced_box_says_box_price_and_names_the_reason(self):
         self.config = dict(CONFIG, boxes=[{"name": "Small", "length": 6, "width": 4, "height": 4,

@@ -3392,6 +3392,15 @@ async function checkShippingElement() {
   }
 }
 
+// WHAT THE BUYER IS NOT BEING TOLD. Setup failures are hidden from the buyer on purpose -- they can do
+// nothing about them, and an error where a price should be is worse than no section at all -- so the
+// tenant is the only one who can hear about it, and this is the only place they can.
+const SHIPPING_SETUP_WARNINGS = {
+  no_provider: "you have not connected a shipping carrier yet",
+  no_ship_from: "you have not set a ship-from address yet",
+  key_unreadable: "your carrier credentials could not be opened",
+};
+
 const shippingSectionWarning = computed(() => {
   if (!sectionVisible("shipping")) return "";
   const quote = shippingQuote.value;
@@ -3401,6 +3410,14 @@ const shippingSectionWarning = computed(() => {
   }
   if (quote.needs === "zones") {
     return "Shipping options is on, but you have no shipping zones yet, so buyers will not see it.";
+  }
+  if (quote.needs === "setup") {
+    const reason = String(quote.rate_error || "").split(":")[0];
+    const detail = SHIPPING_SETUP_WARNINGS[reason] || "shipping is not fully set up yet";
+    // The consequence, not just the cause: "buyers will not see it" understates what it costs. Nothing
+    // is collected for postage on any order placed this way, and nothing else says so.
+    return `Shipping options is on, but ${detail}, so buyers will not see it — and every order will `
+      + "ship with no postage collected.";
   }
   return "";
 });

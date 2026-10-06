@@ -425,6 +425,19 @@ def _shipping_actuals_repo(mode):
     return shipping_actuals_repository(mode=mode)
 
 
+# A rating failure the TENANT has to fix, as opposed to one the carrier is having. The distinction is
+# the whole of it: a tenant who has not finished setting shipping up should show the buyer nothing and
+# post for free, while a carrier having a bad minute must still say so -- hiding that would silently ship
+# a real order for nothing on the strength of a timeout.
+SETUP_RATE_ERRORS = ("no_provider", "no_ship_from", "key_unreadable")
+
+
+def is_setup_error(error: str) -> bool:
+    """Whether this `live_rates_for` error means "not set up yet" rather than "not available now"."""
+    reason = str(error or "")
+    return any(reason == known or reason.startswith(f"{known}:") for known in SETUP_RATE_ERRORS)
+
+
 def live_rates_for(config, tenant_id, *, parcels, destination, secret_cipher):
     """Live carrier rates for a BUYER's parcels, to a BUYER's address.
 

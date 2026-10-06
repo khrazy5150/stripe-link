@@ -129,15 +129,20 @@ class TheBuyerSeesFreeNotAnErrorTests(unittest.TestCase):
         self.assertGreater(body["options"][0]["amount"], 0)
         self.assertNotIn("unmeasured", body)
 
-    def test_a_real_carrier_failure_is_still_an_error_with_a_retry(self):
+    def test_an_unconnected_carrier_goes_quiet_rather_than_loud(self):
         # The distinction that makes P0a a refinement rather than a reversal: ours and transient stays
         # loud; theirs and structural goes quiet.
+        #
+        # This test stated that principle and then contradicted it: `no_provider` is theirs and
+        # structural -- a carrier nobody connected -- yet it asserted the loud answer. It now asserts the
+        # quiet one (2026-10-06). `mode` is still never "free": the page hides the section and posts for
+        # nothing, but nowhere does it PROMISE free shipping, which is a different claim.
         self.product = product(weight_lb=1.0,
                                item_dimensions={"length_in": 3.3, "width_in": 5, "height_in": 1.8,
                                                 "weight_lb": 2.5})
         self.config = dict(LIVE_CONFIG, provider={"name": "mock", "api_key_ref": ""})
         body = self.quote()
-        self.assertEqual(body["needs"], "carrier")
+        self.assertEqual(body["needs"], "setup")
         self.assertEqual(body["rate_error"], "no_provider")
         self.assertNotEqual(body["mode"], "free")
 

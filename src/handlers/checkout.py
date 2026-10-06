@@ -782,7 +782,17 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
             if rated["error"]:
                 # Named, never swallowed. "We could not get rates" is a truthful thing to show a buyer;
                 # an empty list rendered as free shipping is not.
-                payload["needs"] = "carrier"
+                #
+                # But WHOSE problem it is decides who hears about it. A carrier having a bad minute is
+                # worth telling the buyer -- hiding it would ship a real order for nothing on the
+                # strength of a timeout. A tenant who never connected a carrier, never set a ship-from
+                # address, or whose key will not open is a different thing entirely: the buyer can do
+                # nothing about it, and an error where a price should be is worse than no section at all.
+                # The page hides it and posts free; the BUILDER is where that gets said, because the
+                # tenant is the only one who can fix it (author, 2026-10-06).
+                from handlers.shipping import is_setup_error
+
+                payload["needs"] = "setup" if is_setup_error(rated["error"]) else "carrier"
                 payload["rate_error"] = rated["error"]
                 return json_response(payload)
             live_options = rated["options"]
