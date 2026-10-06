@@ -101,9 +101,21 @@ def _weight(unit: dict[str, Any]) -> float:
     A DECLARED package's weight wins and is not added to the item's. The form asks for "Package Dimensions
     -> Weight (pounds)", which is the weight of the thing as shipped, box included -- adding the item's
     weight on top would bill the contents twice.
+
+    **Never less than the thing inside it**, which is arithmetic rather than a safety margin: a box cannot
+    make its contents lighter. A real catalogue declared a 26.5 lb packed weight for a 37 lb scooter and
+    a 1 lb packed weight for 2 lb of whey, inherited from a builder that wrote a default package onto
+    every physical product; the declared figure outranked the item's own, so those parcels were rated
+    light and the carrier would have re-billed the difference weeks later (found 2026-10-06).
+
+    The bare weight is also the last fallback, so a product with no declared package still has a weight.
+    Zero is the one answer a parcel must never have -- a carrier refuses a zero-weight label or re-bills
+    it after it is paid for -- and zero is what this returned before the default package stopped
+    answering for everything.
     """
     package = unit.get("package") or {}
-    return _first_positive(package.get("weight"), unit.get("weight"), unit.get("weight_lb"))
+    packed = _first_positive(package.get("weight"), unit.get("weight"), unit.get("weight_lb"))
+    return max(packed, _first_positive(unit.get("item_weight")))
 
 
 def _item_weight(unit: dict[str, Any]) -> float:

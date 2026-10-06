@@ -404,6 +404,19 @@ export const useProductsStore = defineStore("products", {
   },
 });
 
+function declaredPackage(form, isShippable) {
+  // Absent unless the product ships in its own box AND every field is filled. A partial box is worse
+  // than none: the packer would rate a parcel from numbers the tenant never finished entering.
+  if (!isShippable || !form.ships_alone) return { weight_lb: null, dimensions: null };
+  const sides = [form.length_in, form.width_in, form.height_in].map((value) => Number(value || 0));
+  const packed = Number(form.weight_lb || 0);
+  if (sides.some((side) => !(side > 0)) || !(packed > 0)) return { weight_lb: null, dimensions: null };
+  return {
+    weight_lb: packed,
+    dimensions: { length_in: sides[0], width_in: sides[1], height_in: sides[2] },
+  };
+}
+
 export async function buildProductDocument(form) {
   const now = Math.floor(Date.now() / 1000);
   const productId = form.product_id || localId("local");
@@ -469,12 +482,17 @@ export async function buildProductDocument(form) {
     fulfillment: {
       requires_shipping: isPhysical && !isLeadGen,
       ship_from: null,
-      weight_lb: isPhysical && !isLeadGen ? Number(form.weight_lb || 1) : null,
-      dimensions: {
-        length_in: isPhysical && !isLeadGen ? Number(form.length_in || 10) : null,
-        width_in: isPhysical && !isLeadGen ? Number(form.width_in || 8) : null,
-        height_in: isPhysical && !isLeadGen ? Number(form.height_in || 4) : null,
-      },
+      // THE DECLARED BOX, and ONLY when the tenant opted into one. This used to be written for every
+      // physical product, defaulted to 10x8x4 at 1 lb when the fields were empty -- and the fields are
+      // hidden unless "Always ships in its own box" is ticked, so the tenant could neither see those
+      // numbers nor the warning about them. 12 of 13 products in one real catalogue carried that
+      // inherited default, and because a declared packed weight outranks the item's own, a scooter
+      // weighing 37 lb was being rated at the default-derived 26.5 (found 2026-10-06).
+      //
+      // No defaults now: a box nobody described is absent, and the packer works the parcel out from the
+      // item's own size instead -- which is what it does better anyway, because it can then put two
+      // things bought together in one parcel.
+      ...declaredPackage(form, isPhysical && !isLeadGen),
       // The product's OWN size, distinct from the box above. Written only when the tenant actually
       // entered all three: a partial item size packs into a box chosen from nonsense, and there is no
       // sensible default for "how big is this thing" the way there is for "what box do you use".

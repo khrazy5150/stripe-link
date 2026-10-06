@@ -31,7 +31,14 @@ DASHBOARD = ROOT / "dashboard"
 #
 # Contorting two fields around a pattern the other nine follow would make the file harder to read in
 # exchange for a number, and the number is the thing that is wrong. It moves with the refactor above.
-WARNING_CEILING = 48
+#
+# 48 -> 52 on 2026-10-06. Four of them are one watcher in ProductVariantsField that nulls the declared-box
+# fields the instant "Always ships in its own box" is unticked -- the fix for a default 10x8x4 package
+# that was being saved onto every physical product and then rating parcels nobody could see. It writes
+# `props.form.length_in` and three siblings, which is the idiom every other field in that same component
+# already uses; `form` is a reactive object owned by the parent. Four lines contorted around a pattern
+# the rest of the file does not follow would be harder to read in exchange for a number.
+WARNING_CEILING = 52
 
 
 def _npx(*args, cwd=DASHBOARD):

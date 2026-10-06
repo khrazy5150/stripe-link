@@ -96,9 +96,15 @@
         <p class="field-hint">Packed weight is the whole thing as it ships — box included.</p>
         <!-- A parcel cannot weigh less than what is inside it. Seen in real data: 1 lb packed on an item
              weighing 2.5 lb, which nothing rejected. -->
-        <p v-if="packedWeightTooLight" class="keys-status-banner warning">
+        <p v-if="packedWeightTooLight" class="keys-status-banner warning is-prose">
           Packed weight ({{ form.weight_lb }} lb) is less than the item itself ({{ form.item_weight_lb }} lb).
           The box cannot weigh less than what goes in it.
+        </p>
+        <!-- A PARTIAL box is worse than none: it would be saved, hidden behind this checkbox, and then
+             rate parcels from numbers nobody finished entering. Nothing is stored until all four are in. -->
+        <p v-else-if="declaredBoxIncomplete" class="keys-status-banner warning is-prose">
+          Fill in all four and this product will always ship in this box. Until then nothing is saved for
+          it and we work the parcel out from the item's own size.
         </p>
       </template>
     </template>
@@ -182,6 +188,24 @@ watch(
 );
 
 /** A parcel cannot weigh less than its contents. Only meaningful once both numbers exist. */
+// CLEARED THE MOMENT IT IS UNTICKED. These four numbers are only read when the product ships in its own
+// box, and the fields are hidden otherwise -- so anything left behind is invisible to the tenant and
+// still live to the packer. That is exactly how a catalogue came to carry a 10x8x4 default box on 12 of
+// 13 products, one of them declaring a 26.5 lb packed weight for a 37 lb scooter (2026-10-06).
+watch(() => props.form.ships_alone, (ticked, wasTicked) => {
+  if (ticked || wasTicked === undefined) return;
+  props.form.length_in = null;
+  props.form.width_in = null;
+  props.form.height_in = null;
+  props.form.weight_lb = null;
+});
+
+const declaredBoxIncomplete = computed(() => {
+  if (!props.form.ships_alone) return false;
+  const values = [props.form.length_in, props.form.width_in, props.form.height_in, props.form.weight_lb];
+  return values.some((value) => !(Number(value) > 0));
+});
+
 const packedWeightTooLight = computed(() => {
   const packed = Number(props.form.weight_lb);
   const item = Number(props.form.item_weight_lb);

@@ -843,13 +843,19 @@ def validate_product_document(document: dict[str, Any]) -> None:
     ship_from = fulfillment.get("ship_from")
     if ship_from is not None and not isinstance(ship_from, dict):
         raise DocumentValidationError("Product fulfillment.ship_from must be an object when provided.")
+    # THE DECLARED BOX. `None` is the ordinary case: most products do not ship in a box of their own, and
+    # the packer works their parcel out from the item's size together with whatever else is in the order.
+    # It used to be mandatory, which is why the builder invented a 10x8x4 default to satisfy it -- a box
+    # the tenant never chose, could not see (the fields are hidden unless the product ships alone), and
+    # which then outranked the item's real size and weight.
     dimensions = fulfillment.get("dimensions")
-    if not isinstance(dimensions, dict):
-        raise DocumentValidationError("Product fulfillment.dimensions must be an object.")
-    for field in ["length_in", "width_in", "height_in"]:
-        if field not in dimensions:
-            raise DocumentValidationError(f"Product fulfillment.dimensions.{field} must be provided.")
-        optional_non_negative_number(dimensions, field, f"Product fulfillment.dimensions.{field}")
+    if dimensions is not None:
+        if not isinstance(dimensions, dict):
+            raise DocumentValidationError("Product fulfillment.dimensions must be an object or null.")
+        for field in ["length_in", "width_in", "height_in"]:
+            if field not in dimensions:
+                raise DocumentValidationError(f"Product fulfillment.dimensions.{field} must be provided.")
+            optional_non_negative_number(dimensions, field, f"Product fulfillment.dimensions.{field}")
     # The product's OWN size, distinct from the box above. Optional: a tenant who only ever ships one
     # thing at a time never needs it, and a multi-item order simply falls back to one parcel per item.
     item_dimensions = fulfillment.get("item_dimensions")

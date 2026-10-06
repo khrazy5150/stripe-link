@@ -316,7 +316,12 @@ def packable_items(lines: list[dict[str, Any]], products_by_id: dict[str, dict[s
         for source, target in (("length_in", "length"), ("width_in", "width"), ("height_in", "height")):
             if own.get(source):
                 item[target] = own[source]
-        declared = fulfillment.get("dimensions") or {}
+        # ONLY when the tenant opted in. The builder wrote a default 10x8x4 package onto every physical
+        # product, and the fields that would have shown it are hidden unless "Always ships in its own box"
+        # is ticked -- so a box nobody chose, and nobody could see, was dictating parcels. Gated here as
+        # well as in the builder because the stale documents already exist, and this makes them inert
+        # without waiting for anything to be re-saved.
+        declared = (fulfillment.get("dimensions") or {}) if fulfillment.get("ships_alone") else {}
         if all(declared.get(field) for field in ("length_in", "width_in", "height_in")):
             item["package"] = {
                 "length": declared["length_in"], "width": declared["width_in"], "height": declared["height_in"],
