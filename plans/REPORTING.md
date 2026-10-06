@@ -87,7 +87,26 @@ One screen, date-ranged, reading `/ledger`. Sections in the order a tenant actua
 1. **Money** ✅ shipped 2026-10-06 — gross, merchandise, shipping collected, Stripe and platform fees,
    shipping paid, net, profit; period-selectable, compared against the same length of time immediately
    before. Filtering is server-side on `occurred_at`. The Reports menu item is no longer disabled.
-2. **What sold** — revenue and units by product, then by offer. Needs 2a (shipped) and 2c.
+2. **What sold** ✅ shipped 2026-10-06 — revenue, units and orders by product, with the order-bump share
+   called out, ranked by revenue.
+
+   **It could not be grouped on `entry.product_id`.** That names the order's PRIMARY product while
+   `gross` is the whole order, so a bump's revenue lands on the headline product and the bump reads as
+   never having sold: Creatine Gummies $2,700.55 against $320.38 of its own lines, and a bump that had
+   genuinely sold $28.90 reading zero. 20 of 73 orders had more than one line.
+
+   So each sale entry now records `lines[]` — product, price, units, gross, and whether it was a bump —
+   and the endpoint rolls them up. Money is still added up in exactly one place; a report that summed
+   line revenue for itself would be a second ledger.
+
+   Two double-counts surfaced only because the total had to reconcile: an **upsell**'s `amount_total` is
+   postage-inclusive while that postage is also shipping revenue ($449.12 over across 39 upsells), and a
+   **bump surcharge** sits inside its line's price and in shipping revenue too ($1.50). Both are now
+   subtracted, and lines + unitemised + shipping equals gross to the cent — $8,026.95 on real data.
+
+   Sales with no breakdown are reported as **"Not itemised"** rather than spread across products or
+   dropped: a product table whose rows do not add up to the money table is worse than one that says which
+   part it cannot place. All 73 entries were backfilled, so that row is currently $0.00.
 3. **Funnel** — checkout vs bump vs upsell revenue, take-up rate per step. `entry.source` already
    separates upsells; bumps need `is_order_bump` rolled up from the order's line items.
 4. **Shipping** — collected vs paid, per the coverage caveat in 2b. The one report that pays for itself:
@@ -111,6 +130,5 @@ One screen, date-ranged, reading `/ledger`. Sections in the order a tenant actua
 1. ✅ **Backfill 2a** — 67 entries filled from their orders.
 2. ✅ **2c** — tier recorded, and a packing bug fixed with it.
 3. ✅ Report 1 (**Money**).
-4. Report 2 (**What sold**) — now unblocked: the ledger carries product and offer, and orders carry the
-   tier. This is the next one.
+4. ✅ Report 2 (**What sold**) — shipped 2026-10-06, and it needed more than the backfill.
 5. Reports 3–5 (**Funnel**, **Shipping**, **Export**) as wanted.

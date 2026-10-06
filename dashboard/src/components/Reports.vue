@@ -53,6 +53,56 @@
          Said beside the number, never silently corrected. -->
     <p v-if="shippingCaveat" class="keys-status-banner warning is-prose">{{ shippingCaveat }}</p>
 
+    <!-- WHAT SOLD. Grouped from the LINES of each sale, never from the entry's primary product: that
+         names one product while the gross is the whole order, so a bump's revenue lands on the headline
+         product and the bump reads as having never sold. -->
+    <section v-if="sold.length" class="reports-section">
+      <h2>What sold</h2>
+      <table class="data-table reports-table">
+        <thead>
+          <tr>
+            <th scope="col">Product</th>
+            <th scope="col" class="reports-num">Revenue</th>
+            <th scope="col" class="reports-num">Units</th>
+            <th scope="col" class="reports-num">Orders</th>
+            <th scope="col" class="reports-num">Avg / order</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in sold" :key="row.key">
+            <th scope="row">
+              {{ row.name }}
+              <small v-if="row.bump_gross">{{ money(row.bump_gross) }} of this as an order bump</small>
+            </th>
+            <td class="reports-num">{{ money(row.gross) }}</td>
+            <td class="reports-num">{{ row.units }}</td>
+            <td class="reports-num">{{ row.orders }}</td>
+            <td class="reports-num reports-muted">{{ money(Math.round(row.gross / row.orders)) }}</td>
+          </tr>
+          <!-- Sales with no breakdown, named rather than spread across products or quietly dropped: a
+               product table whose rows do not add up to the money table is worse than one that says
+               which part it cannot place. -->
+          <tr v-if="unitemised" class="reports-muted">
+            <th scope="row">
+              Not itemised
+              <small>Sales recorded before line detail existed.</small>
+            </th>
+            <td class="reports-num">{{ money(unitemised) }}</td>
+            <td class="reports-num">&mdash;</td>
+            <td class="reports-num">&mdash;</td>
+            <td class="reports-num">&mdash;</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="is-total">
+            <th scope="row">Merchandise + postage = gross</th>
+            <td class="reports-num">{{ money(soldTotal + unitemised) }}</td>
+            <td class="reports-num" colspan="3">+ {{ money(summary.shipping_revenue) }} shipping</td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+
     <p v-if="summary && !entryCount" class="field-hint">No sales in this period.</p>
   </section>
 </template>
@@ -140,6 +190,12 @@ const rows = computed(() => {
 });
 
 const periodLabel = computed(() => spec.value.label);
+
+// Presented, not derived: the rollup is the server's, so money is added up in exactly one place.
+const sold = computed(() => ((summary.value?.what_sold || {}).products || [])
+  .map((row) => ({ ...row, key: row.product_id || row.name, name: row.name || row.product_id })));
+const unitemised = computed(() => Number((summary.value?.what_sold || {}).unitemised_gross || 0));
+const soldTotal = computed(() => sold.value.reduce((sum, row) => sum + Number(row.gross || 0), 0));
 
 // Never a figure whose basis is partial without saying so.
 const shippingCaveat = computed(() => {

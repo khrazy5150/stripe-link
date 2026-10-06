@@ -5,6 +5,7 @@ from typing import Any
 from stripe_link.domain import tips
 from stripe_link.domain.opportunities import (
     SERVICE_SELECTION_CHOICE,
+    STAGE_CHECKOUT,
     STAGE_LANDING,
     service_selection,
     stage_opportunities,
@@ -222,34 +223,61 @@ class ResolvedOfferItem:
     default_fulfiller_id: str = ""
 
 
-def offer_price_tiers(offer: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    """`{local_price_id: {quantity, label}}` for every price the offer offers as a choice.
+def offer_price_index(offer: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """`{local_price_id: {product_id, quantity?, label?}}` for every price this offer can sell.
 
-    A tiered offer sells 1 / 2 / 3 of a thing as three **Prices of the same product**, so Stripe's line
-    item says `quantity: 1` and carries the product's name whichever the buyer picked. Nothing in the
-    Stripe payload distinguishes them -- which is why an order could not say which tier sold, and "which
-    tier converts" is most of why a tenant builds a tiered offer at all.
+    Two jobs, one pass, because both need the same walk of the offer and the offer is read once per order.
 
-    The OFFER is the whole answer: `selectable_prices` already carries both the size and the tenant's own
-    words for it. No product read is needed.
+    **Which tier sold.** A tiered offer prices 1 / 2 / 3 of a thing as three Prices of the same product,
+    so Stripe's line item says `quantity: 1` and carries the product's name whichever the buyer picked.
+    `selectable_prices` is the only place that says otherwise, and it carries the tenant's own words for
+    it. **The label belongs to the (offer, price) PAIR, not the price** -- `price_NxQYoPLerzo` is "1 Item"
+    in one offer and "Every day" in another (real data, 2026-10-06) -- which is why it is resolved here
+    rather than stamped onto the Stripe Price at sync time.
 
-    **The label belongs to the (offer, price) PAIR, not to the price**, which is why it cannot be stamped
-    onto the Stripe Price at sync time. Proven in real data 2026-10-06: `price_NxQYoPLerzo` is "1 Item" in
-    one offer and "Every day" in another. Stamp it and the second offer's orders would describe themselves
-    with the first offer's words.
+    **Which product a line sold.** An order's line items name a product and carry a Stripe price; they do
+    not carry OUR product id, so a ledger entry could only ever be attributed to the order's PRIMARY
+    product. With the whole order's gross against it, that is not an approximation, it is wrong: Creatine
+    Gummies read as $2,700.55 earned where its own lines total $320.38, and a bump product that had
+    genuinely sold $28.90 read as zero because it is never primary (measured 2026-10-06).
+
+    Covers CHECKOUT-stage opportunities as well as landing items, because an order bump is exactly the
+    line that was being mis-attributed.
     """
-    tiers: dict[str, dict[str, Any]] = {}
+    index: dict[str, dict[str, Any]] = {}
+
+    def record(price_id: str, product_id: str, *, quantity: Any = None, label: Any = None) -> None:
+        price_id = str(price_id or "")
+        if not price_id:
+            return
+        entry = index.setdefault(price_id, {})
+        if product_id:
+            entry["product_id"] = str(product_id)
+        if quantity is not None:
+            entry["quantity"] = max(1, int(quantity or 1))
+        label = str(label or "").strip()
+        if label:
+            entry["label"] = label
+
     for item in (offer or {}).get("items") or []:
+        product_id = str(item.get("product_id") or "")
         for choice in item.get("selectable_prices") or []:
-            price_id = str(choice.get("price_id") or "")
-            if not price_id:
-                continue
-            tier: dict[str, Any] = {"quantity": max(1, int(choice.get("quantity") or 1))}
-            label = str(choice.get("label") or "").strip()
-            if label:
-                tier["label"] = label
-            tiers[price_id] = tier
-    return tiers
+            record(choice.get("price_id"), product_id,
+                   quantity=choice.get("quantity") or 1, label=choice.get("label"))
+        # An item with one fixed price has no `selectable_prices` to walk.
+        record(item.get("price_id"), product_id)
+
+    for bump in stage_opportunities(offer or {}, STAGE_CHECKOUT):
+        record(bump.get("price_id"), str(bump.get("product_id") or ""))
+
+    return index
+
+
+def offer_price_tiers(offer: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """The tier half of `offer_price_index`, kept for callers that only want size and label."""
+    return {price_id: {k: v for k, v in entry.items() if k in ("quantity", "label")}
+            for price_id, entry in offer_price_index(offer).items()
+            if "quantity" in entry or "label" in entry}
 
 
 def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: Any) -> dict[str, dict[str, Any]]:

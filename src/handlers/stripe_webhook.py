@@ -719,18 +719,17 @@ def persist_checkout_session_completed(
 
     fees = true_up_fees(fee_breakdown_from_session(session, billing_config_loader), actual_fees)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
-    # WHICH TIER THE BUYER CHOSE, from the offer that offered it. One read, and only when the session
-    # names an offer -- `selectable_prices` carries both the size and the tenant's own label, so nothing
-    # else needs loading. Best-effort: an order whose offer has been deleted records its lines exactly as
+    # WHAT EACH LINE ACTUALLY SOLD, from the offer that sold it: the product behind the price, the tier
+    # size, and the tenant's own label for it. One read, and only when the session names an offer. Best-effort: an order whose offer has been deleted records its lines exactly as
     # it did before, rather than failing over a descriptive field.
     tiers = {}
     offer_id = str((session.get("metadata") or {}).get("offer_id") or "")
     if offer_id and os.environ.get("OFFERS_TABLE"):
         try:
-            from stripe_link.domain.pricing import offer_price_tiers
+            from stripe_link.domain.pricing import offer_price_index
             from stripe_link.repositories.documents import offers_repository
 
-            tiers = offer_price_tiers(offers_repository(mode=mode).get(tenant_id, offer_id))
+            tiers = offer_price_index(offers_repository(mode=mode).get(tenant_id, offer_id))
         except Exception as exc:  # noqa: BLE001 - a label must never cost an order
             print(f"[webhook] tier labels unavailable for {offer_id}: {type(exc).__name__}: {exc}")
     order_record = order_record_from_session(session, tenant_id, now, fees, line_items=line_items,
@@ -1993,7 +1992,8 @@ def bump_postage_collected(line_items: list[dict[str, Any]] | None, surcharges: 
 
 
 def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_price_ids: set[str],
-                                 currency: str, tiers: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+                                 currency: str, tiers: dict[str, dict[str, Any]] | None = None,
+                                 bump_postage: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """Normalize Stripe line items into the order's line_items, flagging which were pre-purchase order bumps
     (their Stripe price id was offered as an optional_item). plans/SALES_FUNNELS.md P2.
 
@@ -2026,11 +2026,23 @@ def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_p
             "stripe_price_id": stripe_price_id,
             "is_order_bump": bool(stripe_price_id) and stripe_price_id in bump_price_ids,
             **({"price_id": local_price_id} if local_price_id else {}),
+            # WHICH PRODUCT this line sold. Without it a ledger entry can only be attributed to the
+            # order's PRIMARY product, and with the whole order's gross against it that is not an
+            # approximation but a wrong answer: Creatine Gummies read as $2,700.55 earned where its own
+            # lines total $320.38, while a bump that had genuinely sold $28.90 read as zero because it is
+            # never primary (measured 2026-10-06).
+            **({"product_id": tier["product_id"]} if tier.get("product_id") else {}),
             # The UNITS this one line represents -- 2, for a "2 Items" tier that Stripe calls quantity 1.
             # Written only when the offer says so, because a 1 nobody chose is indistinguishable from the
             # Stripe quantity already on the line.
             **({"unit_quantity": tier["quantity"]} if int(tier.get("quantity") or 1) > 1 else {}),
             **({"tier_label": tier["label"]} if tier.get("label") else {}),
+            # HOW MUCH OF THIS LINE IS POSTAGE. An order bump's shipping surcharge is folded into the
+            # price Stripe charges, so it arrives inside this line's total -- and it is ALSO recorded as
+            # shipping revenue. Counted in both places a product report over-states merchandise by
+            # exactly the surcharge, which is how a reconciliation came out $1.50 heavy (2026-10-06).
+            **({"shipping_amount": (bump_postage or {}).get(stripe_price_id, 0) * max(1, int(line.get("quantity") or 1))}
+               if (bump_postage or {}).get(stripe_price_id) else {}),
         })
     return items
 
@@ -2418,8 +2430,9 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
     created = int(session.get("created") or now)
     session_id = session.get("id", "")
     bump_price_ids = {pid for pid in str(metadata.get("order_bump_ids") or "").split(",") if pid}
+    bump_postage = bump_postage_from_metadata(metadata.get("order_bump_shipping"))
     resolved_line_items = order_line_items_from_stripe(
-        line_items, bump_price_ids, session.get("currency") or "usd", tiers)
+        line_items, bump_price_ids, session.get("currency") or "usd", tiers, bump_postage)
     # POSTAGE THAT CAME IN THROUGH A BUMP LINE. An order bump is ticked on Stripe's hosted page after
     # `shipping_options` are fixed, so its parcel cost cannot be charged as shipping -- it is folded into
     # the bump's own price instead (domain/stripe_products.charged_unit_amount). Recorded separately here
@@ -2428,8 +2441,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
     # `application_fee_amount` checkout actually sent, so widening it would re-break the mismatch fixed on
     # 2026-10-01. The ledger adds the two together for `shipping_revenue`, which is where the question
     # "did postage pay for itself?" is actually asked.
-    bump_shipping = bump_postage_collected(
-        resolved_line_items, bump_postage_from_metadata(metadata.get("order_bump_shipping")))
+    bump_shipping = bump_postage_collected(resolved_line_items, bump_postage)
     shipping_address = destination_address_from_session(session)
     record = {
         "tenant_id": tenant_id,

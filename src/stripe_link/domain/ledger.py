@@ -45,6 +45,7 @@ def _entry(
     offer_id: str | None = None,
     product_id: str | None = None,
     customer: dict[str, Any] | None = None,
+    lines: list[dict[str, Any]] | None = None,
     stripe: dict[str, Any] | None = None,
     source: str = "webhook",
     description: str | None = None,
@@ -70,6 +71,12 @@ def _entry(
         document["offer_id"] = str(offer_id)
     if product_id:
         document["product_id"] = str(product_id)
+    # WHAT WAS IN THE SALE. `product_id` above is the order's PRIMARY product and `amounts.gross` is the
+    # whole order, so the two together attribute a bump's revenue to the headline product. Absent when
+    # the order could not be broken down, which a report must be able to tell apart from a product that
+    # genuinely earned nothing -- so it is omitted rather than written as [].
+    if lines:
+        document["lines"] = lines
     if customer:
         ref = {key: customer[key] for key in ("email", "name") if customer.get(key)}
         if ref:
@@ -297,6 +304,128 @@ def _fee_of(order: dict[str, Any], key: str) -> int:
     return int(order.get(key) or 0)
 
 
+def what_sold(entries: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Revenue and units per product, from the LINES of each sale.
+
+    Not from `entry.product_id`: that names the order's primary product while `gross` is the whole order,
+    so grouping on it hands a bump's revenue to the headline product and reports the bump as having never
+    sold. Measured on real data 2026-10-06 -- Creatine Gummies $2,700.55 against $320.38 of its own
+    lines, and a bump that had sold $28.90 reading zero.
+
+    `unitemised` is the gross of sales that carry no line breakdown, reported as its own figure rather
+    than spread across products or quietly dropped. A product report whose columns do not add up to the
+    money report is worse than one that says which part it cannot place.
+    """
+    products: dict[str, dict[str, Any]] = {}
+    unitemised = 0
+    for entry in entries or []:
+        if entry.get("entry_type") != "sale":
+            continue
+        lines = entry.get("lines")
+        if not lines:
+            unitemised += int((entry.get("amounts") or {}).get("gross") or 0)
+            continue
+        for line in lines:
+            # Keyed on the product where it is known and on the NAME where it is not, then merged below:
+            # a line whose price predates the catalogue index resolves only to a name, and leaving it on
+            # its own key lists one product twice with its revenue split between the rows.
+            key = str(line.get("product_id") or line.get("name") or "").strip() or "(unnamed)"
+            row = products.setdefault(key, {
+                "product_id": str(line.get("product_id") or ""),
+                "name": str(line.get("name") or ""),
+                "gross": 0, "units": 0, "orders": 0, "bump_gross": 0,
+            })
+            if not row["name"] and line.get("name"):
+                row["name"] = str(line["name"])
+            row["gross"] += int(line.get("gross") or 0)
+            row["units"] += max(1, int(line.get("units") or 1))
+            row["orders"] += 1
+            if line.get("order_bump"):
+                row["bump_gross"] += int(line.get("gross") or 0)
+    return {
+        "products": sorted(_merge_by_name(products.values()), key=lambda row: -row["gross"]),
+        "unitemised_gross": unitemised,
+    }
+
+
+def _merge_by_name(rows: Any) -> list[dict[str, Any]]:
+    """Fold name-only rows into the identified product of the same name.
+
+    One product listed twice with its revenue split between the rows is worse than either figure alone,
+    because both look like whole answers.
+    """
+    identified = {row["name"]: row for row in rows if row.get("product_id") and row.get("name")}
+    merged: list[dict[str, Any]] = []
+    for row in rows:
+        target = identified.get(row.get("name"))
+        if target is not None and target is not row and not row.get("product_id"):
+            for field in ("gross", "units", "orders", "bump_gross"):
+                target[field] += row[field]
+            continue
+        merged.append(row)
+    return merged
+
+
+def sale_lines(order: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Per-line revenue for a sale entry, or None when the order is not itemised.
+
+    None rather than `[]`: an order with no line items is one we cannot break down, which is a different
+    thing from an order that genuinely sold nothing, and a report must be able to tell them apart and say
+    so rather than quietly reporting a product as having earned zero.
+
+    `units` is what the buyer actually received -- a "3 Items" tier is three, however Stripe counts it.
+    """
+    lines = []
+    # POSTAGE THAT RIDES INSIDE A LINE. An order bump's shipping surcharge is folded into the price
+    # Stripe charges, so it is inside that line's total AND recorded as shipping revenue. Subtracted here
+    # so a product report counts merchandise only and still reconciles with the money report.
+    #
+    # Newer lines say so themselves. Older ones predate that, so the order's total is apportioned across
+    # the bump lines by their share -- which is exact for the one-bump case every real order has had, and
+    # never leaves postage sitting in merchandise.
+    bump_lines = [l for l in order.get("line_items") or [] if isinstance(l, dict) and l.get("is_order_bump")]
+    unstated = max(0, int(order.get("bump_shipping_amount") or 0)
+                   - sum(int(l.get("shipping_amount") or 0) for l in bump_lines))
+    bump_total = sum(int(l.get("amount_total") or 0) for l in bump_lines) or 1
+    for line in order.get("line_items") or []:
+        if not isinstance(line, dict):
+            continue
+        gross = int(line.get("amount_total") or 0)
+        postage = int(line.get("shipping_amount") or 0)
+        if not postage and unstated and line.get("is_order_bump"):
+            postage = round(unstated * gross / bump_total)
+        gross = max(0, gross - postage)
+        quantity = max(1, int(line.get("quantity") or 1))
+        units = quantity * max(1, int(line.get("unit_quantity") or 1))
+        entry: dict[str, Any] = {"gross": gross, "units": units}
+        for key in ("product_id", "price_id", "name"):
+            value = str(line.get(key) or "").strip()
+            if value:
+                entry[key] = value
+        if line.get("is_order_bump"):
+            entry["order_bump"] = True
+        lines.append(entry)
+    if lines:
+        return lines
+    # An upsell is a single product recorded in its own block rather than as line items, and it is a sale
+    # like any other -- leaving it unitemised would make every upsell invisible to a product report.
+    product = order.get("product") if isinstance(order.get("product"), dict) else {}
+    product_id = str(product.get("product_id") or "").strip()
+    if product_id:
+        # MERCHANDISE ONLY. An upsell's `amount_total` is what the card was charged, postage included,
+        # while `shipping_revenue` records that postage separately -- so taking the whole total here
+        # counts the postage twice and a product report stops reconciling with the money report. It was
+        # over by $449.12 across 39 upsells before this subtraction (2026-10-06). Stripe's own line items
+        # on the checkout path are already merchandise, which is why only this fallback needs it.
+        merchandise = max(0, int(order.get("amount_total") or 0)
+                          - int(order.get("shipping_amount") or 0)
+                          - int(order.get("bump_shipping_amount") or 0))
+        return [{"gross": merchandise, "units": 1, "product_id": product_id,
+                 **({"name": str(product.get("name"))} if product.get("name") else {}),
+                 **({"price_id": str(product.get("price_id"))} if product.get("price_id") else {})}]
+    return None
+
+
 def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
                           source: str = "webhook") -> dict[str, Any] | None:
     """Build a sale entry from a checkout order document. Returns None if there is no
@@ -335,6 +464,14 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
         # the bump price instead; counting only `shipping_amount` would book that money as merchandise and
         # report a shipping margin that is short by exactly the amount the tenant charged to cover postage.
         shipping_revenue=int(order.get("shipping_amount") or 0) + int(order.get("bump_shipping_amount") or 0),
+        # WHAT WAS IN IT. `product_id` above names the order's PRIMARY product and `gross` is the whole
+        # order, so by themselves they answer "which product earned this" wrongly whenever a buyer took
+        # more than one thing -- the headline product collects the bump's revenue and the bump reads as
+        # never having sold. 20 of 73 real orders had more than one line (2026-10-06).
+        #
+        # Recorded on the ENTRY rather than computed in a report, so money is still added up in exactly
+        # one place: a report that re-derived this from orders would be a second ledger.
+        lines=sale_lines(order),
         idempotency_key=f"sale:{key_ref}",
         order_id=order_id or None,
         # NESTED, which is where both order paths actually write them -- `attribution.offer_id` and

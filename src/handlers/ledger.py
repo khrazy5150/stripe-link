@@ -1,7 +1,7 @@
 from stripe_link.common import (
     error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event,
 )
-from stripe_link.domain.ledger import summarize
+from stripe_link.domain.ledger import summarize, what_sold
 from stripe_link.repositories.documents import RepositoryError, ledger_repository
 
 
@@ -49,6 +49,10 @@ def handler(event, context, repository=None):
     shipped = {str(entry.get("order_id") or "") for entry in entries
                if entry.get("entry_type") == "shipping_cost" and entry.get("order_id")}
     summary["shipping_cost_coverage"] = {"shipped": len(shipped), "sales": len(sales)}
+    # WHAT SOLD, rolled up here so the report presents figures rather than deriving them. A screen that
+    # summed line revenue for itself would be a second place that adds money up, which is the one thing
+    # plans/REPORTING.md §4 says reporting must not become.
+    summary["what_sold"] = what_sold(entries)
 
     return json_response({"entries": entries, "count": len(entries), "summary": summary})
 
