@@ -143,3 +143,39 @@ class OneRuleOneCallSiteTests(unittest.TestCase):
                        'watch(() => [sectionVisible("shipping"), builderOffer.value?.offer_id]'):
             with self.subTest(reader=reader):
                 self.assertLess(declared, self.VUE.index(reader))
+
+
+class NotOnPagesThatAlreadyKnowTheAddressTests(unittest.TestCase):
+    """A funnel step and a thank-you page must never get the shipping element.
+
+    Those pages already know where the parcel goes: the address came from the original Checkout Session,
+    which is also the ONLY address an upsell may use — `upsell_destination` refuses to take one from the
+    browser, because a destination on a client's word lets anyone with the funnel URL redirect someone
+    else's parcel. So asking again collects an answer nobody acts on.
+
+    It also reads as a blocker. On a real upsell page (2026-10-06) it rendered between the price and the
+    accept button, looking like a step the buyer had to complete before they could say yes — on the one
+    page in the funnel whose whole value is that accepting takes a single click. The postage those pages
+    do need to state is already on the button, as a delta.
+    """
+
+    def test_a_funnel_step_does_not_get_one(self):
+        self.assertNotIn("shipping", [
+            str(s.get("type")) for s in
+            compose_page(OFFER, page("hero", "checkout_cta"), "funnel_step", ships_physical=True)])
+
+    def test_a_thank_you_page_does_not_get_one(self):
+        self.assertNotIn("shipping", [
+            str(s.get("type")) for s in
+            compose_page(OFFER, page("hero"), "thank_you", ships_physical=True)])
+
+    def test_the_landing_page_still_does(self):
+        """The one page where nobody has given an address yet is the one that must ask."""
+        self.assertIn("shipping", composed(OFFER, page("hero", "checkout_cta"), True))
+
+    def test_an_authored_page_keeps_a_shipping_element_it_was_built_with(self):
+        """Withholding the DERIVED one is not the same as filtering an authored one out — the thank-you
+        page's own delivery card is placed by runtime/upsell_pages.py and must survive."""
+        composed_types = [str(s.get("type")) for s in
+                          compose_page(OFFER, page("hero", "shipping"), "thank_you", ships_physical=True)]
+        self.assertIn("shipping", composed_types)

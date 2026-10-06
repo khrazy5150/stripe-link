@@ -356,14 +356,22 @@ def compose_page(
     offer_type = composition_key(offer or {})
     overrides = page_overrides(page)
     goal = page_goal(page)
+    authored = page_type in AUTHORED_PAGE_TYPES
     ships_physical = bool(ships_physical or offer_ships_physical(offer))
     visible = [
         section for section in (page.get("sections") or [])
         if is_section_visible(offer_type, str(section.get("type") or ""), overrides, goal, ships_physical)
     ]
-    visible += derived_shipping_section(offer_type, overrides, goal, visible, ships_physical)
+    # NOT ON A FUNNEL STEP OR A THANK-YOU PAGE. The shipping element asks the buyer where to send it, and
+    # those pages already know -- the address came from the original Checkout Session, which is also the
+    # only address an upsell may use (`upsell_destination` refuses to take one from the browser). Asking
+    # again collects an answer nobody acts on, and on an upsell page it sits between the price and the
+    # button looking like a step the buyer must complete before they can accept. The postage those pages
+    # DO need to state is already on the button, as a delta.
+    if not authored:
+        visible += derived_shipping_section(offer_type, overrides, goal, visible, ships_physical)
     visible += derived_head_sections(offer_type, overrides, goal, visible)
-    if page_type in AUTHORED_PAGE_TYPES:
+    if authored:
         return visible
     return order_sections(visible, page.get("section_order") or (), goal)
 
