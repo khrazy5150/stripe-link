@@ -98,7 +98,7 @@ class Refunds(unittest.TestCase):
 class FromAnOrderDocument(unittest.TestCase):
     def order(self, **kwargs):
         base = {"tenant_id": "t1", "order_id": "order_1", "payment_intent_id": "pi_1",
-                "amount_total": 5795, "currency": "usd", "mode": "test", "created_at": 100}
+                "amount_total": 5795, "currency": "usd", "stripe_mode": "test", "created_at": 100}
         base.update(kwargs)
         return base
 

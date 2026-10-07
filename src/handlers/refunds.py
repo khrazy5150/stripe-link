@@ -99,7 +99,7 @@ def handler(
             request, tenant_id, now,
             requests_repo=requests_repo,
             orders_repo=orders_repo or orders_repository(mode=resolve_stripe_mode(event)),
-            refunds_repo=refunds_repo or refunds_repository(),
+            refunds_repo=refunds_repo or refunds_repository(mode=resolve_stripe_mode(event)),
             stripe_repo=stripe_repo or stripe_keys_repository(),
             secret_cipher=secret_cipher if secret_cipher is not None else KmsSecretCipher(),
             caller=caller,

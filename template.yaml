@@ -4598,28 +4598,18 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           AttributeType: S
-        - AttributeName: order_id
-          AttributeType: S
-        - AttributeName: created_at
+        - AttributeName: SK
           AttributeType: S
         - AttributeName: payment_intent_id
           AttributeType: S
       KeySchema:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           KeyType: HASH
-        - AttributeName: order_id
+        - AttributeName: SK
           KeyType: RANGE
       GlobalSecondaryIndexes:
-        - IndexName: CreatedAtIndex
-          KeySchema:
-            - AttributeName: tenant_id
-              KeyType: HASH
-            - AttributeName: created_at
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
         - IndexName: PaymentIntentIndex
           KeySchema:
             - AttributeName: payment_intent_id
@@ -4635,9 +4625,9 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           AttributeType: S
-        - AttributeName: refund_id
+        - AttributeName: SK
           AttributeType: S
         - AttributeName: stripe_refund_id
           AttributeType: S
@@ -4646,9 +4636,9 @@ Resources:
         - AttributeName: created_at
           AttributeType: "N"
       KeySchema:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           KeyType: HASH
-        - AttributeName: refund_id
+        - AttributeName: SK
           KeyType: RANGE
       GlobalSecondaryIndexes:
         - IndexName: StripeRefundIndex
@@ -4674,18 +4664,18 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           AttributeType: S
-        - AttributeName: entry_id
+        - AttributeName: SK
           AttributeType: S
         - AttributeName: order_id
           AttributeType: S
         - AttributeName: occurred_at
           AttributeType: "N"
       KeySchema:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           KeyType: HASH
-        - AttributeName: entry_id
+        - AttributeName: SK
           KeyType: RANGE
       GlobalSecondaryIndexes:
         - IndexName: OrderIndex
@@ -4753,14 +4743,14 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           AttributeType: S
-        - AttributeName: customer_id
+        - AttributeName: SK
           AttributeType: S
       KeySchema:
-        - AttributeName: tenant_id
+        - AttributeName: PK
           KeyType: HASH
-        - AttributeName: customer_id
+        - AttributeName: SK
           KeyType: RANGE
 
   DocumentEventsTable:

@@ -748,7 +748,7 @@ def persist_checkout_session_completed(
     invoices_repo = invoices_repo or (invoices_repository(mode=mode) if os.environ.get("INVOICES_TABLE") else None)
     notifications_repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
-    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
     invites_repo = invites_repo or (review_invites_repository(mode=mode) if os.environ.get("REVIEWS_TABLE") else None)
     carts_repo = carts_repo or (carts_repository(mode=mode) if os.environ.get("CARTS_TABLE") else None)
     if tip_tokens_repo is None and os.environ.get("CARTS_TABLE"):
@@ -1185,7 +1185,7 @@ def persist_appointment_paid(
     )
 
     ledger_written = False
-    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
     if ledger_repo and amount_total and payment_intent:
         try:
             ledger_repo.append(sale_entry(
@@ -1297,7 +1297,7 @@ def persist_invoice_event(
         payment["paid_at"] = now
         amount_paid = int(stripe_invoice.get("amount_paid") or 0)
         currency = str(stripe_invoice.get("currency") or (invoice.get("amounts") or {}).get("currency") or "usd")
-        ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+        ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
         if ledger_repo and amount_paid and payment_intent:
             try:
                 fees = fee_breakdown_from_session({"amount_total": amount_paid, "currency": currency, "metadata": metadata}, billing_config_loader)
@@ -1444,8 +1444,12 @@ def reconcile_charge_refunded(
     currency = str(order.get("currency") or "usd")
 
     now = int(now_fn())
-    refunds_repo = refunds_repo or (refunds_repository() if os.environ.get("REFUNDS_TABLE") else None)
-    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+    # The CHARGE's own livemode decides the mode, exactly as it does for the order this refund belongs to.
+    refund_mode = "live" if charge.get("livemode") else "test"
+    refunds_repo = refunds_repo or (refunds_repository(mode=refund_mode)
+                                    if os.environ.get("REFUNDS_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository(mode=refund_mode)
+                                  if os.environ.get("LEDGER_TABLE") else None)
     refunds = ((charge.get("refunds") or {}).get("data")) or []
     ledger_written = 0
     for refund in refunds:
@@ -2127,7 +2131,7 @@ def persist_subscription_renewal(
     orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
     notifications_repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
-    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
 
     fees = fee_breakdown_from_invoice(invoice, metadata, billing_config_loader)
     order_record = order_record_from_invoice(
@@ -2403,7 +2407,9 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "metadata": metadata,
         "fees": fees,
         # A STRING, matching order_record_from_session and the table's AttributeDefinitions: created_at is
-        # the range key of CreatedAtIndex and DynamoDB declares it as S. An int here is rejected outright
+        # a string by convention. It used to be the range key of CreatedAtIndex, which declared it as S;
+        # that index spanned both modes, nothing queried it, and it was dropped with the mode retrofit
+        # (plans/STRIPE_MODE_STORAGE.md). The type stays stable so stored orders stay comparable.
         # with "Type mismatch for Index Key created_at Expected: S Actual: N" -- the second way this record
         # took down every renewal on prod (2026-09-22), found only after fixing the first.
         "created_at": str(int(invoice.get("created") or now)),

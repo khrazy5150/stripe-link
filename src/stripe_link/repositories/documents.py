@@ -970,6 +970,48 @@ def dynamodb_safe_document(value: Any) -> Any:
     return value
 
 
+# THE TENANT+MODE PARTITION, shared by every table whose sort key is a real business identifier.
+#
+# The document family (products, pages, offers...) puts mode in its SORT key, because that key is already
+# synthetic -- `PRODUCT#live#id`. Orders cannot: their sort key IS `order_id`, a value written into Stripe
+# PaymentIntent metadata and used as the partition key of two GSIs. Prefixing it would leak the mode into
+# an identifier that travels to Stripe and joins three tables.
+#
+# So the mode goes in the PARTITION instead. `tenant_id` and `order_id` stay ordinary document fields --
+# stripped of nothing, readable by everything -- while the keys DynamoDB sorts on are synthetic and
+# carried alongside. Three things follow:
+#
+#   - `list_for_tenant` becomes a key condition rather than a FilterExpression, so DynamoDB reads only the
+#     rows of that mode instead of reading everything and charging for what it discards;
+#   - a GSI partitioned on this key is mode-scoped for free;
+#   - a read without a mode cannot silently return test money alongside real money, because there is no
+#     key that spans both.
+#
+# plans/STRIPE_MODE_STORAGE.md.
+KEY_PARTITION = "PK"
+KEY_SORT = "SK"
+
+
+def tenant_mode_pk(tenant_id: str, mode: str) -> str:
+    return f"TENANT#{str(tenant_id or '').strip()}#{normalize_stripe_mode(mode)}"
+
+
+def with_tenant_mode_keys(document: dict[str, Any], *, tenant_id: str, document_id: str,
+                          mode: str) -> dict[str, Any]:
+    """The document plus its synthetic keys and its mode stamp."""
+    return {**document,
+            KEY_PARTITION: tenant_mode_pk(tenant_id, mode),
+            KEY_SORT: str(document_id),
+            "stripe_mode": normalize_stripe_mode(mode)}
+
+
+def without_keys(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A stored item as the application sees it: synthetic keys removed, document fields untouched."""
+    if item is None:
+        return None
+    return {k: v for k, v in item.items() if k not in (KEY_PARTITION, KEY_SORT)}
+
+
 class TenantRangeRepository:
     def __init__(
         self,
@@ -985,8 +1027,9 @@ class TenantRangeRepository:
         self.table_name = table_name
         self.id_field = id_field
         self._table = table
-        # Orders/customers carry globally-unique ids (no cross-mode id reuse), so mode is a filtered ATTRIBUTE
-        # here rather than part of the key: stamp on write, filter list/get by mode (plans/STRIPE_MODE_DECOUPLING.md).
+        # Mode lives in the PARTITION key (see `tenant_mode_pk`), not in a filter. It was a filtered
+        # attribute until 2026-10-07: every read fetched both modes' rows and discarded one half AFTER
+        # being charged for it, which is cost that scales with the rows thrown away.
         #
         # Refused when absent, for the same reason the key-scoped repositories refuse it -- but the failure
         # here is worse. An unfiltered read does not miss quietly, it returns test money ALONGSIDE real
@@ -1012,41 +1055,37 @@ class TenantRangeRepository:
             raise RepositoryError("Document tenant_id is required.")
         if not document_id:
             raise RepositoryError(f"Document {self.id_field} is required.")
-        if self.mode is not None:
-            document = {**document, "stripe_mode": self.mode}
-        self.table.put_item(Item=document)
-        return document
+        stored = with_tenant_mode_keys(document, tenant_id=tenant_id, document_id=document_id,
+                                       mode=self.mode)
+        self.table.put_item(Item=stored)
+        return without_keys(stored)
 
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
-        response = self.table.get_item(Key={"tenant_id": tenant_id, self.id_field: document_id})
-        item = response.get("Item")
-        if not item:
-            return None
-        if self.mode is not None and normalize_stripe_mode(item.get("stripe_mode")) != self.mode:
-            return None
-        return item
+        response = self.table.get_item(Key={
+            KEY_PARTITION: tenant_mode_pk(tenant_id, self.mode), KEY_SORT: str(document_id)})
+        return without_keys(response.get("Item"))
 
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
-        from boto3.dynamodb.conditions import Attr, Key
+        from boto3.dynamodb.conditions import Key
 
-        kwargs: dict[str, Any] = {"KeyConditionExpression": Key("tenant_id").eq(tenant_id)}
-        if self.mode is not None:
-            kwargs["FilterExpression"] = Attr("stripe_mode").eq(self.mode)
-        return _query_all_pages(self.table, **kwargs)
+        items = _query_all_pages(self.table, KeyConditionExpression=Key(KEY_PARTITION).eq(
+            tenant_mode_pk(tenant_id, self.mode)))
+        return [without_keys(item) for item in items]
 
     def scan_type(self) -> list[dict[str, Any]]:
         """Cross-tenant scan of every document in this table, in this repo's mode. For periodic sweeps
         only -- it reads the whole table, and a request path must never call it.
 
-        The mode filter is NOT optional here, and the constructor already refuses a repo without one: an
+        A FilterExpression, not a key condition -- and correctly so: this spans tenants, so there is no
+        single partition to seek to. `list_for_tenant` gets the cheap path; a cross-tenant sweep cannot.
+
+        The filter is NOT optional, and the constructor already refuses a repo without a mode: an
         unfiltered scan does not fail quietly, it returns test money alongside real money. Same reasoning
         as `list_for_tenant`, and more important on a sweep, which writes."""
         from boto3.dynamodb.conditions import Attr
 
         items: list[dict[str, Any]] = []
-        request: dict[str, Any] = {}
-        if self.mode is not None:
-            request["FilterExpression"] = Attr("stripe_mode").eq(self.mode)
+        request: dict[str, Any] = {"FilterExpression": Attr("stripe_mode").eq(self.mode)}
         while True:
             response = self.table.scan(**request)
             items.extend(response.get("Items", []))
@@ -1054,7 +1093,7 @@ class TenantRangeRepository:
             if not last_evaluated_key:
                 break
             request["ExclusiveStartKey"] = last_evaluated_key
-        return items
+        return [without_keys(item) for item in items]
 
     def find_by_payment_intent(self, payment_intent_id: str) -> dict[str, Any] | None:
         """Resolve an order from a Stripe PaymentIntent via the PaymentIntentIndex GSI."""
@@ -1068,19 +1107,32 @@ class TenantRangeRepository:
             Limit=1,
         )
         items = response.get("Items", [])
-        return items[0] if items else None
+        # A GSI projects the base table's keys, so strip them here as well -- a caller must not be able to
+        # tell which read path an order arrived by.
+        return without_keys(items[0]) if items else None
 
 
 class RefundsRepository:
-    """Immutable refunds ledger keyed (tenant_id, refund_id), with GSIs to dedupe by
-    stripe_refund_id and list by order_id."""
+    """Immutable refunds ledger, partitioned by tenant AND mode, with GSIs to dedupe by
+    stripe_refund_id and list by order_id.
 
-    def __init__(self, table_name: str, *, table: Any | None = None):
+    It took no mode at all until 2026-10-07 -- the same gap as the ledger's, one table over, latent only
+    because the table was empty. A refund is money moving back; mixing test and live refunds is the same
+    error as mixing test and live sales, and it would have surfaced the first time anyone refunded a live
+    order.
+    """
+
+    def __init__(self, table_name: str, *, table: Any | None = None, mode: str | None = None):
         if not table_name:
             raise RepositoryError("Table name is required.")
         assert_jb_resource_name(table_name)
         self.table_name = table_name
         self._table = table
+        if mode is None:
+            raise RepositoryError(
+                "Refunds are Stripe-mode-scoped; pass mode='test' or mode='live'. "
+                "Omitting it would mix test refunds with real ones.")
+        self.mode = normalize_stripe_mode(mode)
 
     @property
     def table(self):
@@ -1091,21 +1143,29 @@ class RefundsRepository:
         return self._table
 
     def put(self, document: dict[str, Any]) -> dict[str, Any]:
-        if not str(document.get("tenant_id") or "").strip():
+        tenant_id = str(document.get("tenant_id") or "").strip()
+        refund_id = str(document.get("refund_id") or "").strip()
+        if not tenant_id:
             raise RepositoryError("Refund tenant_id is required.")
-        if not str(document.get("refund_id") or "").strip():
+        if not refund_id:
             raise RepositoryError("Refund refund_id is required.")
-        self.table.put_item(Item=dynamodb_safe_document(document))
-        return document
+        stored = with_tenant_mode_keys(dynamodb_safe_document(document), tenant_id=tenant_id,
+                                       document_id=refund_id, mode=self.mode)
+        self.table.put_item(Item=stored)
+        return without_keys(stored)
 
     def get(self, tenant_id: str, refund_id: str) -> dict[str, Any] | None:
-        response = self.table.get_item(Key={"tenant_id": tenant_id, "refund_id": refund_id})
-        return response.get("Item")
+        response = self.table.get_item(Key={
+            KEY_PARTITION: tenant_mode_pk(tenant_id, self.mode), KEY_SORT: str(refund_id)})
+        return without_keys(response.get("Item"))
 
     def list_for_order(self, order_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        items = _query_all_pages(self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id))
+        # Order ids carry no mode, so this GSI spans both and the filter stays here.
+        items = [without_keys(item) for item in _query_all_pages(
+            self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id))
+            if normalize_stripe_mode(item.get("stripe_mode")) == self.mode]
         items.sort(key=lambda item: int(item.get("created_at") or 0))
         return items
 
@@ -1120,11 +1180,13 @@ class RefundsRepository:
             Limit=1,
         )
         items = response.get("Items", [])
-        return items[0] if items else None
+        # A Stripe refund id is globally unique AND mode-implicit -- a live refund id cannot collide with
+        # a test one -- so a hit here needs no filter. Keys are still stripped.
+        return without_keys(items[0]) if items else None
 
 
-def refunds_repository(table: Any | None = None) -> RefundsRepository:
-    return RefundsRepository(os.environ.get("REFUNDS_TABLE", ""), table=table)
+def refunds_repository(table: Any | None = None, *, mode: str | None = None) -> RefundsRepository:
+    return RefundsRepository(os.environ.get("REFUNDS_TABLE", ""), table=table, mode=mode)
 
 
 class LedgerRepository:
@@ -1139,11 +1201,18 @@ class LedgerRepository:
         assert_jb_resource_name(table_name)
         self.table_name = table_name
         self._table = table
-        # Ledger entries already CARRY their mode (domain/ledger.py stamps "test"/"live" from the event's
-        # livemode). Nothing filtered on it, so a tenant's financial summary added test money to real money
-        # -- one prod endpoint serves both modes by design (plans/STRIPE_MODE_DECOUPLING.md P3), and the
-        # isolation that design depends on has to be enforced on the READ.
-        self.mode = normalize_stripe_mode(mode) if mode is not None else None
+        # Mode is in the PARTITION key now, and the stamp is `stripe_mode` -- the same name every other
+        # repository writes. It used to be a client-side filter on a field called `mode`, which is the
+        # drift that hid a live upsell recording itself as test money (plans/STRIPE_MODE_STORAGE.md §3).
+        #
+        # Still refused when absent: one endpoint serves both modes by design, so the isolation that
+        # design depends on has to be enforced on the READ, and a confident wrong total is worse than an
+        # error.
+        if mode is None:
+            raise RepositoryError(
+                "Ledger entries are Stripe-mode-scoped; pass mode='test' or mode='live'. "
+                "Omitting it would add test money to real money.")
+        self.mode = normalize_stripe_mode(mode)
 
     @property
     def table(self):
@@ -1153,37 +1222,40 @@ class LedgerRepository:
             self._table = boto3.resource("dynamodb").Table(self.table_name)
         return self._table
 
-    def _in_mode(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if self.mode is None:
-            return items
-        # An entry with no mode at all predates the stamp; treat it as test rather than let it into live
-        # money. Under-reporting real revenue is recoverable; reporting test money as real is not.
-        return [item for item in items if str(item.get("mode") or "test") == self.mode]
-
     def append(self, document: dict[str, Any]) -> dict[str, Any]:
-        if not str(document.get("tenant_id") or "").strip():
+        tenant_id = str(document.get("tenant_id") or "").strip()
+        entry_id = str(document.get("entry_id") or "").strip()
+        if not tenant_id:
             raise RepositoryError("Ledger entry tenant_id is required.")
-        if not str(document.get("entry_id") or "").strip():
+        if not entry_id:
             raise RepositoryError("Ledger entry entry_id is required.")
-        self.table.put_item(Item=dynamodb_safe_document(document))
-        return document
+        stored = with_tenant_mode_keys(dynamodb_safe_document(document), tenant_id=tenant_id,
+                                       document_id=entry_id, mode=self.mode)
+        self.table.put_item(Item=stored)
+        return without_keys(stored)
 
     def get(self, tenant_id: str, entry_id: str) -> dict[str, Any] | None:
-        response = self.table.get_item(Key={"tenant_id": tenant_id, "entry_id": entry_id})
-        return response.get("Item")
+        response = self.table.get_item(Key={
+            KEY_PARTITION: tenant_mode_pk(tenant_id, self.mode), KEY_SORT: str(entry_id)})
+        return without_keys(response.get("Item"))
 
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        items = self._in_mode(_query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id)))
+        items = [without_keys(item) for item in _query_all_pages(
+            self.table, KeyConditionExpression=Key(KEY_PARTITION).eq(
+                tenant_mode_pk(tenant_id, self.mode)))]
         items.sort(key=lambda item: int(item.get("occurred_at") or item.get("created_at") or 0))
         return items
 
     def list_for_order(self, order_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        items = self._in_mode(_query_all_pages(
-            self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id)))
+        # Order ids are globally unique and carry no mode, so this GSI spans both -- the filter stays
+        # here, on the one read that cannot be a partitioned key condition.
+        items = [without_keys(item) for item in _query_all_pages(
+            self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id))
+            if normalize_stripe_mode(item.get("stripe_mode") or item.get("mode")) == self.mode]
         items.sort(key=lambda item: int(item.get("occurred_at") or item.get("created_at") or 0))
         return items
 

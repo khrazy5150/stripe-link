@@ -58,7 +58,12 @@ def _entry(
         "entry_id": str(entry_id),
         "entry_type": entry_type,
         "occurred_at": int(occurred_at),
-        "mode": mode if mode in {"test", "live"} else "test",
+        # `stripe_mode`, the one name every repository stamps and filters on. It was `mode` here and
+        # `stripe_mode` everywhere else, and that single difference is what let a live upsell record
+        # itself as test money (plans/STRIPE_MODE_STORAGE.md §3). The repository stamps this field too,
+        # with the mode it was constructed for -- so a mismatch between the two is now impossible rather
+        # than merely unlikely.
+        "stripe_mode": mode if mode in {"test", "live"} else "test",
         "currency": str(currency or "usd").lower(),
         "amounts": amounts,
         "idempotency_key": str(idempotency_key),

@@ -731,7 +731,12 @@ def record_upsell_ledger_entry(order_record, ledger_repo=None):
     Best-effort. The money has moved and the order is written; a bookkeeping append must not undo that.
     """
     try:
-        repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+        # From the ORDER, which now declares its own mode -- the same field the entry will be stamped
+        # with, so the repository it is written through and the row it writes cannot disagree.
+        from stripe_link.domain.ledger import _order_mode
+
+        repo = ledger_repo or (ledger_repository(mode=_order_mode(order_record))
+                               if os.environ.get("LEDGER_TABLE") else None)
         if repo is None:
             return False
         # `source` is the ledger's provenance field and it defaults to "webhook", which is the one thing

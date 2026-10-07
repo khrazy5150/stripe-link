@@ -29,7 +29,7 @@ ORDER = {
     "stripe_fee": 300,
     "platform_fee": 500,
     "payment_intent_id": "pi_abc",
-    "mode": "live",
+    "stripe_mode": "live",
     "customer": {"email": "c@example.com", "name": "Casey"},
 }
 
@@ -54,7 +54,7 @@ class LedgerDomainTests(unittest.TestCase):
     def test_sale_entry_from_order(self):
         entry = sale_entry_from_order(ORDER, now_epoch=1_800_000_000)
         self.assertEqual(entry["entry_id"], "le_sale_pi_abc")
-        self.assertEqual(entry["mode"], "live")
+        self.assertEqual(entry["stripe_mode"], "live")
         self.assertEqual(entry["amounts"], {"gross": 7000, "stripe_fee": -300, "platform_fee": -500})
         self.assertEqual(entry["order_id"], "order_1")
         self.assertEqual(entry["customer_ref"], {"email": "c@example.com", "name": "Casey"})

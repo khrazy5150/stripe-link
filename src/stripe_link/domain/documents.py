@@ -2473,13 +2473,16 @@ def _ledger_amount_components() -> set[str]:
 
 
 def validate_ledger_entry(document: dict[str, Any]) -> None:
-    require_fields(document, ["schema_version", "document_type", "tenant_id", "entry_id", "entry_type", "occurred_at", "mode", "currency", "amounts", "idempotency_key"])
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "entry_id", "entry_type", "occurred_at", "stripe_mode", "currency", "amounts", "idempotency_key"])
     if document.get("document_type") != "ledger_entry":
         raise DocumentValidationError("Ledger entry document_type must be 'ledger_entry'.")
     if document.get("entry_type") not in _LEDGER_ENTRY_TYPES:
         raise DocumentValidationError("Ledger entry entry_type is invalid.")
-    if document.get("mode") not in {"test", "live"}:
-        raise DocumentValidationError("Ledger entry mode must be 'test' or 'live'.")
+    # `stripe_mode`, the one name every repository stamps and filters on. It was `mode` on this document
+    # and `stripe_mode` on every other, which is the drift that let a live upsell record itself as test
+    # money (plans/STRIPE_MODE_STORAGE.md).
+    if document.get("stripe_mode") not in {"test", "live"}:
+        raise DocumentValidationError("Ledger entry stripe_mode must be 'test' or 'live'.")
     amounts = document.get("amounts")
     if not isinstance(amounts, dict):
         raise DocumentValidationError("Ledger entry amounts must be an object.")

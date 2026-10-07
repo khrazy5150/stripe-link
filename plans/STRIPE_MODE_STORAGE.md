@@ -1,6 +1,6 @@
 # One way to store a Stripe mode
 
-**Status:** URGENT, not built. Cheapest possible moment — the tables are being wiped, so this is a schema
+**Status:** ✅ BUILT 2026-10-07, not yet deployed. Tables were truncated first (the prerequisite below). Cheapest possible moment — the tables are being wiped, so this is a schema
 decision rather than a migration.
 
 Sibling to `plans/STRIPE_MODE_DECOUPLING.md`, which settled *where mode comes from* (the request, not the
@@ -64,23 +64,33 @@ against the fixed one.
 
 Two names for one fact remains the cause, and this plan is the cure.
 
-## 4. What to change
+## 4. What changed ✅
 
-1. **One field name.** `stripe_mode` everywhere — it is the one the repositories already stamp. `mode`
+1. ✅ **One field name.** `stripe_mode` everywhere — it is the one the repositories already stamp. `mode`
    on an order document is retired. (On a Stripe *session*, `mode` means `payment`/`subscription`; the
    collision is itself an argument for the rename.)
-2. **Mode in the sort key for the tenant-range family**, matching the 14 document tables:
-   `SK = ORDER#{mode}#{order_id}`, and likewise for customers, refunds and ledger entries.
-3. **The GSIs need the same treatment or they reintroduce the problem.** They are the part to think
-   about, not the base table:
-   - `OrdersTable.CreatedAtIndex` (`tenant_id` + `created_at`) — a date-ranged report over one mode would
-     filter again. Prefix the partition: `GSI1PK = TENANT#{id}#{mode}`.
+2. ✅ **Mode in the PARTITION key for the tenant-range family** — `PK = TENANT#{tenant_id}#{mode}` — with
+   synthetic `PK`/`SK` attributes and `tenant_id`/`order_id` kept as ordinary document fields, stripped on
+   read exactly as the document family already does.
+
+   **Not the sort key**, which this plan originally said and which is wrong. For the document family the
+   SK is synthetic (`PRODUCT#live#id`) so mode costs nothing there. For orders the sort key *is*
+   `order_id` — a business identifier written into Stripe PaymentIntent metadata (`metadata[order_id]`)
+   and used as the partition key of **two** GSIs, `LedgerTable.OrderIndex` and `RefundsTable.OrderIndex`.
+   Prefixing it would leak the mode into a value that travels to Stripe and joins three tables. Caught
+   2026-10-07 before any code was written.
+
+   Putting it in the partition instead keeps `order_id` clean, makes `list_for_tenant` a key condition,
+   and makes `OrdersTable.CreatedAtIndex` mode-scoped for free because its partition key is the tenant.
+3. ✅ **The GSIs mostly fell out of (2) for free**, which is the second reason to prefer the partition key:
+   - `OrdersTable.CreatedAtIndex` (`tenant_id` + `created_at`) — becomes mode-scoped automatically once
+     the tenant key carries the mode.
    - `OrdersTable.PaymentIntentIndex` (`payment_intent_id`) — globally unique and mode-implicit. Leave it.
-   - `LedgerTable.OrderIndex` (`order_id` + `occurred_at`) — order ids are globally unique. Leave it.
+   - `LedgerTable.OrderIndex` (`order_id` + `occurred_at`) — order ids stay clean, so leave it.
    - `RefundsTable.StripeRefundIndex` — same. Leave it.
-4. **Keep the fail-safe.** `normalize_stripe_mode` must stay "anything not explicitly live is test".
+4. ✅ **Kept the fail-safe.** `normalize_stripe_mode` must stay "anything not explicitly live is test".
    Under-reporting real revenue is recoverable; reporting test money as real is not.
-5. **Keep the loud refusal.** A mode-scoped repository constructed without a mode already raises rather
+5. ✅ **Kept the loud refusal**, and extended it. A mode-scoped repository constructed without a mode already raises rather
    than reading a third, empty key space. That guard is why this was findable at all.
 
 ## 5. Why now
@@ -89,7 +99,10 @@ The tables are being wiped, so there is no migration to write, no dual-read wind
 same change after real tenants have volume means rewriting every order and ledger row's sort key — a
 migration that cannot be done in place, because the sort key is part of the primary key.
 
-**This is the last cheap moment.**
+**This is the last cheap moment** — but note what "cheap" rests on. A KeySchema change (new key
+attribute names) cannot be applied in place: CloudFormation REPLACES the table, and the data goes with
+it. So this is free only if the tables are wiped anyway, and it is a hard prerequisite rather than a
+convenience. **Sequence: wipe, then schema, then deploy, then live.**
 
 ## 6. Deliberately out of scope
 
@@ -97,3 +110,19 @@ migration that cannot be done in place, because the sort key is part of the prim
   payment-intent and by date, the ledger by order and by `occurred_at`. Table count is not the problem.
 - `plans/STRIPE_MODE_DECOUPLING.md`'s own phases. That plan decides which deployment serves which mode;
   this one only changes how a row records the answer.
+
+
+## 7. What it turned up on the way
+
+- **Refunds were not mode-scoped at all.** `RefundsRepository` took no `mode` parameter and nothing
+  filtered — the ledger's gap, one table over, latent only because the table was empty. It would have
+  surfaced the first time anyone refunded a live order. Now partitioned like the rest.
+- **Five ledger call sites were reading both modes**, and the loud constructor found every one of them
+  the moment it started refusing an absent mode. That is the refusal earning its keep rather than being
+  a nuisance.
+- **`OrdersTable.CreatedAtIndex` was dropped.** It partitioned on `tenant_id`, so it spanned both modes
+  by construction — and nothing queried it. An unused index that can only answer the wrong question is a
+  trap for whoever reaches for it next.
+- **The mode-isolation tests were passing vacuously.** Their fake table returned every row for any query,
+  which modelled a client-side filter well enough but cannot model a partition. Rewritten to partition,
+  and verified by pointing the repository at the wrong key and watching three tests fail.

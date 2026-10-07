@@ -121,7 +121,8 @@ class IndexedAttributeTests(unittest.TestCase):
         self.assertEqual(record["payment_intent_id"], "pi_1")
 
     def test_created_at_is_a_STRING_like_every_other_order(self):
-        # created_at is the range key of CreatedAtIndex and the table declares it as S. An int is rejected
+        # created_at is stored as a string by convention -- it was the range key of CreatedAtIndex,
+        # which was dropped with the mode retrofit. Kept stable so stored orders stay comparable
         # with "Type mismatch for Index Key created_at Expected: S Actual: N". order_record_from_session
         # stringifies it; this record was copied from a NEIGHBOURING one that does not.
         record = order_record_from_invoice(_invoice(), "t1", 100, {})

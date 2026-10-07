@@ -19,18 +19,53 @@ from stripe_link.repositories.documents import LedgerRepository
 
 
 class FakeTable:
+    """A table that PARTITIONS, because that is now where the isolation lives.
+
+    The previous fake returned every item for any query, which modelled the old mechanism well enough --
+    isolation was a client-side filter, so the fake only had to supply rows. It cannot model the new one:
+    a live query and a test query now address different partitions, and a fake that ignores the key
+    condition would let a broken repository pass by handing it everything.
+    """
+
     def __init__(self, items):
-        self.items = items
+        self.items = [dict(item) for item in items]
+
+    def _pk_wanted(self, kwargs):
+        condition = kwargs.get("KeyConditionExpression")
+        values = getattr(condition, "_values", None) or ()
+        for value in values:
+            if getattr(value, "name", None) == "PK":
+                continue
+            if isinstance(value, str) and value.startswith("TENANT#"):
+                return value
+        return None
 
     def query(self, **kwargs):
-        return {"Items": list(self.items)}
+        # A GSI query (OrderIndex) spans modes by design -- order ids are globally unique and carry no
+        # mode -- so it returns everything and the repository filters. The base-table query does not.
+        if kwargs.get("IndexName"):
+            return {"Items": list(self.items)}
+        wanted = self._pk_wanted(kwargs)
+        if wanted is None:
+            return {"Items": list(self.items)}
+        return {"Items": [i for i in self.items if i.get("PK") == wanted]}
 
 
-LIVE_SALE = {"tenant_id": "t1", "entry_id": "le_live", "mode": "live", "occurred_at": 20,
-             "amounts": {"gross": 10000}}
-TEST_SALE = {"tenant_id": "t1", "entry_id": "le_test", "mode": "test", "occurred_at": 10,
-             "amounts": {"gross": 500000}}
-LEGACY = {"tenant_id": "t1", "entry_id": "le_old", "occurred_at": 5, "amounts": {"gross": 700}}
+def stored(entry_id, mode, occurred_at, gross, *, tenant="t1", stamped=True):
+    """An entry as the repository actually writes it: synthetic keys alongside the document."""
+    item = {"tenant_id": tenant, "entry_id": entry_id, "occurred_at": occurred_at,
+            "amounts": {"gross": gross},
+            "PK": f"TENANT#{tenant}#{mode}", "SK": entry_id}
+    if stamped:
+        item["stripe_mode"] = mode
+    return item
+
+
+LIVE_SALE = stored("le_live", "live", 20, 10000)
+TEST_SALE = stored("le_test", "test", 10, 500000)
+# Written before the stamp existed. It still landed in the TEST partition, because `normalize_stripe_mode`
+# resolves anything that is not explicitly "live" to test -- the fail-safe direction.
+LEGACY = stored("le_old", "test", 5, 700, stamped=False)
 
 
 class LedgerModeTests(unittest.TestCase):
@@ -51,10 +86,21 @@ class LedgerModeTests(unittest.TestCase):
         self.assertNotIn("le_old", [e["entry_id"] for e in self._repo("live").list_for_tenant("t1")])
         self.assertIn("le_old", [e["entry_id"] for e in self._repo("test").list_for_tenant("t1")])
 
-    def test_no_mode_still_returns_everything(self):
-        # Internal callers that genuinely want the whole ledger are unaffected.
-        repo = LedgerRepository("jb-ledger-test", table=FakeTable([LIVE_SALE, TEST_SALE]), mode=None)
-        self.assertEqual(len(repo.list_for_tenant("t1")), 2)
+    def test_a_ledger_without_a_mode_is_refused(self):
+        """It used to return every mode's rows. With isolation in the partition key there is no key that
+        spans both, so "everything" is no longer a query -- and a caller that forgot the mode would get a
+        confident wrong total rather than an error. Every production call site now passes one."""
+        from stripe_link.repositories.documents import RepositoryError
+
+        with self.assertRaises(RepositoryError):
+            LedgerRepository("jb-ledger-test", table=FakeTable([LIVE_SALE]), mode=None)
+
+    def test_the_synthetic_keys_never_reach_the_caller(self):
+        """`PK`/`SK` are storage, not content. A caller must not be able to tell them from real fields."""
+        entry = self._repo("live").list_for_tenant("t1")[0]
+        self.assertNotIn("PK", entry)
+        self.assertNotIn("SK", entry)
+        self.assertEqual(entry["tenant_id"], "t1")
 
     def test_the_per_order_view_is_scoped_too(self):
         entries = self._repo("live").list_for_order("order_1")

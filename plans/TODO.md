@@ -2,7 +2,7 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
-## 🚨 URGENT — one Stripe mode, three storage mechanisms and two field names (found 2026-10-07)
+## ✅ FIXED 2026-10-07 — one Stripe mode, three storage mechanisms and two field names
 
 **Plan: `plans/STRIPE_MODE_STORAGE.md`** (written 2026-10-07). Sibling to `STRIPE_MODE_DECOUPLING.md`,
 which settled where mode comes FROM; this settles how it is stored and read.
