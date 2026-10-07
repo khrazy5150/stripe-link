@@ -408,6 +408,24 @@ limit and the deploy was refused outright. It rides `/shipping/rate-preview`, sp
 body key. **Until the template is slimmed (derived table names ~146KB, collapsed IAM ~100KB) no new
 endpoint can be added anywhere in this stack.**
 
+**Deleting tables does not buy a single byte** — measured 2026-10-06, because it is the obvious wrong guess
+and was acted on once. The limit applies to the *transformed template text*, not to anything in AWS. A
+table CloudFormation has already deleted weighs nothing, and the 67 orphan tables in this account are owned
+by other live stacks (`stripe-cart-stack-{dev,prod}`, and `image-processing-stack`, whose
+`image_processing_metadata` backs the media service this repo depends on) — hand-deleting them would buy
+nothing here and leave those stacks in drift. What the budget actually goes on, in this template:
+
+| source | count | expands to |
+|---|---|---|
+| `Api` event entries | 213 | 2 `Lambda::Permission` each, plus stage plumbing |
+| SAM policy templates | 265 | one full inline IAM statement each |
+| `Serverless::Function` | 74 | Function + Role + LogGroup each |
+
+`template.yaml` is only 218KB — 21% of the budget — so the expansion is the whole problem. The proven
+lever is the second row: consolidating the webhook role's 24 policy templates into 2 explicit statements
+took that one role from over the 10,240-byte inline-policy ceiling down to 3,914 bytes. Doing the same
+across the other 73 roles is the unblock, and it needs no behaviour change.
+
 Still open: the surcharge is per-bump and destination-blind. The deferred alternative below remains the
 only way to make it exact.
 
