@@ -216,6 +216,16 @@ exactly what the handler derives and they resolve the signing secret:
 |---|---|---|
 | silo | the URL **host** (`dev.` → sandbox, `prod.` → production) | the deployment, and so *which* Secrets Manager secret |
 | kind | the URL **path** — `/webhook/stripe-preview` → `preview`, else `stable` (`_webhook_kind`) | which key prefix |
+
+`preview` here is the **Stripe API version**, not the page-preview URLs the builder serves — an unlucky
+collision of words that has confused both of us. A destination is pinned to an API version and that version
+fixes the payload shape: this account is on `2026-05-27.preview`, which moved `subscription_details` under
+`parent`, dropped `invoice.subscription` and replaced `line.price` with `line.pricing.price_details`. The
+stack therefore carries two Connect routes on the same function — `/webhook/stripe-preview` (`preview`) and
+`/webhook/stripe` (`stable`) — each with its own signing secret so either version verifies. Only the
+preview route has destinations registered today; `/webhook/stripe` exists and nothing points at it.
+`/webhook/platform-billing` is a different Lambda that sets `WEBHOOK_KIND` directly rather than deriving it
+from the path.
 | mode | the dashboard mode the destination lives in, matched to `event.livemode` | which key suffix |
 
 The secret is then `whsec_{kind}_{mode}` inside that silo's secret, so the name states where to look:
