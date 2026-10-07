@@ -206,6 +206,44 @@ signature verification — without multiplying URLs.
 through its environment variables. Routing by URL would give a different address to the same code writing
 the same tables — which is why the membership guard, not the topology, is what provides isolation.
 
+### Naming the destinations: `<silo>-<kind>-<mode>` (2026-10-07)
+
+Stripe registers a destination **per dashboard mode**, so one URL per silo still means two registrations
+(test and live). Name every one of them `<silo>-<kind>-<mode>`, because those three coordinates are
+exactly what the handler derives and they resolve the signing secret:
+
+| coordinate | where it comes from | what it selects |
+|---|---|---|
+| silo | the URL **host** (`dev.` → sandbox, `prod.` → production) | the deployment, and so *which* Secrets Manager secret |
+| kind | the URL **path** — `/webhook/stripe-preview` → `preview`, else `stable` (`_webhook_kind`) | which key prefix |
+| mode | the dashboard mode the destination lives in, matched to `event.livemode` | which key suffix |
+
+The secret is then `whsec_{kind}_{mode}` inside that silo's secret, so the name states where to look:
+
+| name | URL | signs with |
+|---|---|---|
+| `sandbox-preview-test` | `dev…/webhook/stripe-preview` | dev secret → `whsec_preview_test` |
+| `sandbox-preview-live` | `dev…/webhook/stripe-preview` | dev secret → `whsec_preview_live` |
+| `production-preview-live` | `prod…/webhook/stripe-preview` | prod secret → `whsec_preview_live` |
+| `sandbox-platform-billing-test` | `dev…/webhook/platform-billing` | dev secret → `whsec_platform_billing_test` |
+| `production-platform-billing-live` | `prod…/webhook/platform-billing` | prod secret → `whsec_platform_billing_live` |
+
+Renaming is a label change only — it never rotates a signing secret. **Creating** one always does, so a
+destination that is deleted and recreated needs its new secret written to the key above before it will
+verify anything.
+
+**Why this is written down.** On 2026-10-07 the live `sandbox-preview-live` destination was deleted on the
+reasoning that "a dev URL has no business receiving live connected-account events". That is precisely
+backwards: every silo receives every live event and keeps only the ones stamped with its own silo, which is
+why a foreign event is declined with a 200 rather than an error. It had been registered unnamed, as a bare
+URL, which is what made it read as a misconfiguration. The next live sale was stamped `sandbox`, declined
+by production for the right reason, and recorded nowhere. **A destination's name must describe its silo,
+not its hostname.**
+
+Legacy `stripe-cart` destinations share this Stripe account and are distinguished only by their path:
+stripe-link uses `/webhook/` (singular), stripe-cart uses `/webhooks/` (plural). Prefix the latter `cart-`.
+One of them carries a tenant id in its path, which likewise looks deletable and is not.
+
 ## Today's topology, for the record
 
 **One endpoint total**, on production, serving both Stripe modes. Sandbox receives no Stripe traffic at
