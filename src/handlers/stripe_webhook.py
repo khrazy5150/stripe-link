@@ -161,6 +161,33 @@ def _event_data_object(stripe_event: dict[str, Any]) -> dict[str, Any]:
     return data_object if isinstance(data_object, dict) else {}
 
 
+def _reject(reason: str, *, kind: str = "", mode: str = "", stripe_event: Any = None,
+            detail: str = "") -> None:
+    """Say why a webhook was turned away, on ONE line, before returning the error.
+
+    Every rejection below this point used to be silent. `error_response` does not log, and the signature
+    check runs before the first structured log line, so a refused event left nothing behind but Lambda's
+    own START/END/REPORT. The consequence, measured 2026-10-07: Stripe retried LIVE events against both
+    deployments for nine days, counted 364 failures, disabled both endpoints, and the first anyone knew
+    was an email from Stripe. CloudWatch held 2,021 invocations and not one line saying any of them had
+    been refused.
+
+    Shaped like `silo_routing` so both can be queried the same way, and carrying the event id so a line
+    here can be matched against Stripe's own delivery log.
+    """
+    event = stripe_event if isinstance(stripe_event, dict) else {}
+    print(json.dumps({"webhook_rejected": {
+        "reason": reason,
+        "kind": kind,
+        "mode": mode,
+        "event_id": str(event.get("id") or ""),
+        "event_type": str(event.get("type") or ""),
+        "livemode": bool(event.get("livemode")),
+        "account": str(event.get("account") or ""),
+        **({"detail": detail} if detail else {}),
+    }}))
+
+
 def handler(
     event,
     context,
@@ -209,6 +236,7 @@ def handler(
     if method == "OPTIONS":
         return json_response({})
     if method != "POST":
+        _reject("method_not_allowed", detail=str(method))
         return error_response("Method not allowed.", 405, code="method_not_allowed")
 
     kind = _webhook_kind(event)
@@ -227,13 +255,17 @@ def handler(
     try:
         stripe_event = json.loads(body)
     except json.JSONDecodeError as exc:
+        _reject("invalid_json", kind=kind, detail=str(exc)[:120])
         return error_response(f"Invalid JSON body: {exc}", 400, code="invalid_json")
     if not isinstance(stripe_event, dict):
+        _reject("payload_not_an_object", kind=kind)
         return error_response("Stripe webhook payload must be an object.", 400, code="invalid_json")
 
     mode = _mode_from_livemode(stripe_event)
     secret = webhook_secret_loader(kind, mode)
     if not secret:
+        # The one rejection a redeploy can fix, and the one most likely to hit a whole mode at once.
+        _reject("signing_secret_not_configured", kind=kind, mode=mode, stripe_event=stripe_event)
         return error_response(
             f"Stripe {kind} webhook signing secret is not configured for {mode}.",
             500,
@@ -242,6 +274,10 @@ def handler(
 
     signature_header = header_value(event, "Stripe-Signature")
     if not _signature_is_valid(body=body, signature_header=signature_header, secret=secret, now_fn=now_fn):
+        # THE ONE THAT COST NINE DAYS. A stored secret that does not match the endpoint's own rejects
+        # every event of that mode, identically and forever, and said nothing at all.
+        _reject("invalid_signature", kind=kind, mode=mode, stripe_event=stripe_event,
+                detail="no Stripe-Signature header" if not signature_header else "secret mismatch or stale timestamp")
         return error_response("Stripe webhook signature verification failed.", 400, code="invalid_signature")
 
     account_id = str(stripe_event.get("account") or "").strip()
@@ -250,6 +286,8 @@ def handler(
         try:
             tenant_document = (repository or stripe_keys_repository()).find_by_connect_account_id(account_id, mode)
         except RepositoryError as exc:
+            _reject("tenant_lookup_failed", kind=kind, mode=mode, stripe_event=stripe_event,
+                    detail=str(exc)[:120])
             return error_response(str(exc), 500, code="repository_error")
 
     tenant_id = str((tenant_document or {}).get("tenant_id") or "").strip() or _metadata_tenant_id(stripe_event)
