@@ -125,3 +125,44 @@ class TheLineIsQueryableTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ARotatedSecretHealsItselfTests(unittest.TestCase):
+    """A recreated Stripe destination gets a NEW signing secret, and the cache has no TTL.
+
+    Measured 2026-10-07: `jb-stripe-webhook-dev` ran 12 invocations in an hour with zero cold starts,
+    because the sweeps share its Lambda and keep it warm. The existing refresh only fires when a key is
+    ABSENT, so a key that is present but stale is served from cache indefinitely -- and every event it
+    refuses counts toward Stripe disabling the endpoint for a second time.
+    """
+
+    def test_it_re_reads_once_before_refusing_and_then_accepts(self):
+        rotated = "whsec_rotated_value"
+        # No `account`, so the handler never reaches a repository -- this test is about the signature
+        # gate alone, and a tenant lookup would need table config it has no business depending on.
+        body = json.dumps({"id": "evt_rotated_1", "type": "customer.created", "livemode": True,
+                           "data": {"object": {}}}, separators=(",", ":"))
+        seen = []
+
+        def loader(kind, mode, refresh=False):
+            seen.append(refresh)
+            return rotated if refresh else "whsec_the_old_one"
+
+        response, rejections = call(body, signature=signed(body, secret=rotated), loader=loader)
+        self.assertEqual(response["statusCode"], 200, response)
+        self.assertEqual(rejections, [], "a rotated secret is not a rejection")
+        self.assertEqual(seen, [False, True], "it must try the cache first, then re-read exactly once")
+
+    def test_a_genuinely_bad_signature_is_still_refused_after_the_re_read(self):
+        body = LIVE_EVENT
+        response, rejections = call(body, signature=signed(body, secret="whsec_not_ours"),
+                                    loader=lambda kind, mode, refresh=False: SECRET)
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual([r["reason"] for r in rejections], ["invalid_signature"])
+
+    def test_a_loader_that_cannot_re_read_still_refuses_cleanly(self):
+        body = LIVE_EVENT
+        response, rejections = call(body, signature=signed(body, secret="whsec_not_ours"),
+                                    loader=lambda kind, mode: SECRET)
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual([r["reason"] for r in rejections], ["invalid_signature"])

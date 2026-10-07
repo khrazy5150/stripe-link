@@ -95,7 +95,15 @@ def get_platform_secret_key(mode: str, env_fallback: Optional[str] = None) -> Op
     return None
 
 
-def get_platform_webhook_secret(kind: str, mode: str, env_fallback: Optional[str] = None) -> Optional[str]:
+def get_platform_webhook_secret(kind: str, mode: str, env_fallback: Optional[str] = None,
+                                *, refresh: bool = False) -> Optional[str]:
+    """`refresh=True` re-reads Secrets Manager before answering.
+
+    The cache has no TTL, and the existing refresh only fires when a key is ABSENT. A key that is present
+    but STALE -- which is what a rotated signing secret is -- is served from cache for as long as the
+    container lives, and this function's container is kept warm indefinitely by the sweeps that share it.
+    The caller that knows the value is wrong is the signature check, so it asks.
+    """
     kind = (kind or "stable").lower()
     # "platform_billing" is the platform-account Stripe Billing webhook (the tenant SaaS subscription); "preview"/
     # "stable" are the Connect webhooks. An unknown kind falls back to "stable" (plans/SAAS_BILLING_PAYWALL.md).
@@ -106,7 +114,7 @@ def get_platform_webhook_secret(kind: str, mode: str, env_fallback: Optional[str
     if mode not in ("test", "live"):
         mode = "test"
 
-    payload = _load_secret_payload()
+    payload = _load_secret_payload(refresh=refresh)
     keys = [
         f"whsec_{kind}_{mode}",
         f"stripe_webhook_secret_{kind}_{mode}",

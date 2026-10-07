@@ -161,6 +161,18 @@ def _event_data_object(stripe_event: dict[str, Any]) -> dict[str, Any]:
     return data_object if isinstance(data_object, dict) else {}
 
 
+def _reloaded_webhook_secret(loader, kind: str, mode: str) -> str | None:
+    """The signing secret, re-read from source. `None` if this loader cannot re-read.
+
+    Injected loaders (tests, and any caller supplying its own) take `(kind, mode)` and hold no cache, so
+    there is nothing stale for them to refresh -- a TypeError here means the question did not apply.
+    """
+    try:
+        return loader(kind, mode, refresh=True)
+    except TypeError:
+        return None
+
+
 def _reject(reason: str, *, kind: str = "", mode: str = "", stripe_event: Any = None,
             detail: str = "") -> None:
     """Say why a webhook was turned away, on ONE line, before returning the error.
@@ -274,11 +286,22 @@ def handler(
 
     signature_header = header_value(event, "Stripe-Signature")
     if not _signature_is_valid(body=body, signature_header=signature_header, secret=secret, now_fn=now_fn):
-        # THE ONE THAT COST NINE DAYS. A stored secret that does not match the endpoint's own rejects
-        # every event of that mode, identically and forever, and said nothing at all.
-        _reject("invalid_signature", kind=kind, mode=mode, stripe_event=stripe_event,
-                detail="no Stripe-Signature header" if not signature_header else "secret mismatch or stale timestamp")
-        return error_response("Stripe webhook signature verification failed.", 400, code="invalid_signature")
+        # A ROTATED secret is indistinguishable from a forged one here, so re-read Secrets Manager once
+        # before refusing. The cache has no TTL and the sweeps keep this container warm for hours, so
+        # without this an endpoint recreated in Stripe keeps failing against the old secret long after the
+        # new one is saved -- and every failure counts toward Stripe disabling the endpoint again.
+        refreshed = _reloaded_webhook_secret(webhook_secret_loader, kind, mode) if signature_header else None
+        if refreshed and refreshed != secret and _signature_is_valid(
+                body=body, signature_header=signature_header, secret=refreshed, now_fn=now_fn):
+            print(json.dumps({"webhook_secret_refreshed": {"kind": kind, "mode": mode,
+                                                           "event_id": str(stripe_event.get("id") or "")}}))
+            secret = refreshed
+        else:
+            # THE ONE THAT COST NINE DAYS. A stored secret that does not match the endpoint's own rejects
+            # every event of that mode, identically and forever, and said nothing at all.
+            _reject("invalid_signature", kind=kind, mode=mode, stripe_event=stripe_event,
+                    detail="no Stripe-Signature header" if not signature_header else "secret mismatch or stale timestamp")
+            return error_response("Stripe webhook signature verification failed.", 400, code="invalid_signature")
 
     account_id = str(stripe_event.get("account") or "").strip()
     tenant_document = None
