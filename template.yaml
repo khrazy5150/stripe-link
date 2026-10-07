@@ -16,6 +16,15 @@ Parameters:
     AllowedValues:
       - jb
     Description: Prefix used to isolate stripe-link resources from stripe-cart.
+  MoneyTableSuffix:
+    Type: String
+    Default: ""
+    Description: >-
+      Transient rename slot for the four mode-keyed money tables (orders, customers, ledger, refunds).
+      Normally empty. CloudFormation cannot replace a custom-named resource while the target name is still
+      occupied, so changing their KeySchema on an environment that already has them takes two deploys:
+      one with a suffix (old name freed), then one back to the default (plain name recreated). Only ever
+      non-empty for the duration of that shuffle, and only for the environment being migrated.
   PlatformHostingDomain:
     Type: String
     Default: jbay.uk
@@ -4597,7 +4606,7 @@ Resources:
       # neither can be read without naming a mode. The rename that carried this key-schema change is
       # over: CloudFormation refuses to replace a custom-named resource only while the target name is
       # still occupied, and the pre-retrofit tables are gone, so the names are plain again.
-      TableName: !Sub "${ProjectPrefix}-orders-${Environment}"
+      TableName: !Sub "${ProjectPrefix}-orders${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -4624,7 +4633,7 @@ Resources:
   RefundsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${ProjectPrefix}-refunds-${Environment}"
+      TableName: !Sub "${ProjectPrefix}-refunds${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -4663,7 +4672,7 @@ Resources:
   LedgerTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${ProjectPrefix}-ledger-${Environment}"
+      TableName: !Sub "${ProjectPrefix}-ledger${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -4742,7 +4751,7 @@ Resources:
   CustomersTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${ProjectPrefix}-customers-${Environment}"
+      TableName: !Sub "${ProjectPrefix}-customers${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
