@@ -4593,6 +4593,10 @@ Resources:
   OrdersTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      # PK = TENANT#<tenant_id>#<stripe_mode>, so a tenant's test and live money cannot collide and
+      # neither can be read without naming a mode. The rename that carried this key-schema change is
+      # over: CloudFormation refuses to replace a custom-named resource only while the target name is
+      # still occupied, and the pre-retrofit tables are gone, so the names are plain again.
       TableName: !Sub "${ProjectPrefix}-orders-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
