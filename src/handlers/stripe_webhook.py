@@ -64,6 +64,7 @@ from stripe_link.repositories.documents import (
     coupons_repository,
     customers_repository,
     dynamodb_safe_document,
+    with_tenant_mode_keys,
     fulfillers_repository,
     invoices_repository,
     ledger_repository,
@@ -733,6 +734,34 @@ def _bump_redemption_counter(repo, tenant_id: str, document_id: str) -> None:
         print(f"[webhook] redemption counter not bumped for {document_id}: {type(exc).__name__}: {exc}")
 
 
+def _claim_order(orders_table, order_record: dict[str, Any], *, tenant_id: str, mode: str) -> bool:
+    """Write the order, returning whether THIS delivery is the one that wrote it.
+
+    The conditional put is the idempotency claim: exactly one delivery wins, so the receipt, notification
+    and ledger entry each fire once however many times Stripe retries. It is a RAW put rather than a
+    repository call because the repository has no way to express that condition.
+
+    Raw is why it broke. The mode retrofit moved these tables to PK/SK and converted the repositories, but
+    a put that never goes through one keeps writing the old shape -- DynamoDB answered "Missing the key PK
+    in the item" and the order of a live sale was lost. The guard had to move too: `order_id` used to be
+    the sort key, so `attribute_not_exists(order_id)` meant "no such item"; now only PK says that.
+    """
+    from botocore.exceptions import ClientError
+
+    item = with_tenant_mode_keys(order_record, tenant_id=tenant_id,
+                                 document_id=order_record.get("order_id"), mode=mode)
+    try:
+        orders_table.put_item(
+            Item=dynamodb_safe_document(item),
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+        return True
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False  # a concurrent delivery already claimed this order
+        raise
+
+
 def persist_checkout_session_completed(
     stripe_event: dict[str, Any],
     *,
@@ -820,18 +849,10 @@ def persist_checkout_session_completed(
 
     first_delivery = True
     if orders_table:
-        from botocore.exceptions import ClientError
-        try:
-            orders_table.put_item(
-                Item=dynamodb_safe_document(order_record),
-                ConditionExpression="attribute_not_exists(order_id)",
-            )
+        if _claim_order(orders_table, order_record, tenant_id=tenant_id, mode=mode):
             written.append("order")
-        except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                first_delivery = False  # a concurrent delivery already claimed this order
-            else:
-                raise
+        else:
+            first_delivery = False  # a concurrent delivery already claimed this order
     elif orders_repo and order_id:  # no raw table (unit tests): best-effort non-atomic probe
         try:
             first_delivery = orders_repo.get(tenant_id, order_id) is None
@@ -2168,18 +2189,10 @@ def persist_subscription_renewal(
     written: list[str] = []
     first_delivery = True
     if orders_table:
-        from botocore.exceptions import ClientError
-        try:
-            orders_table.put_item(
-                Item=dynamodb_safe_document(order_record),
-                ConditionExpression="attribute_not_exists(order_id)",
-            )
+        if _claim_order(orders_table, order_record, tenant_id=tenant_id, mode=mode):
             written.append("order")
-        except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                first_delivery = False
-            else:
-                raise
+        else:
+            first_delivery = False
     elif orders_repo:
         try:
             first_delivery = orders_repo.get(tenant_id, order_id) is None
