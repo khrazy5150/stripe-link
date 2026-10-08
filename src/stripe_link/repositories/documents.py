@@ -1107,9 +1107,21 @@ class TenantRangeRepository:
             Limit=1,
         )
         items = response.get("Items", [])
-        # A GSI projects the base table's keys, so strip them here as well -- a caller must not be able to
-        # tell which read path an order arrived by.
-        return without_keys(items[0]) if items else None
+        if not items:
+            return None
+        # PaymentIntentIndex is KEYS_ONLY, so the query returns the base-table keys and nothing else: the
+        # row itself still has to be fetched. This was invisible until the mode retrofit, because the old
+        # keys WERE `tenant_id` + `order_id` -- a keys-only projection happened to carry everything a
+        # caller needed to identify the order. Now the keys are PK/SK and stripping them leaves a stub
+        # with neither, so `orders_repo.put` on the result raised "Document tenant_id is required" and a
+        # live refund never reached the ledger.
+        stub = items[0]
+        if KEY_PARTITION not in stub or KEY_SORT not in stub:
+            return without_keys(stub)  # a projection that already carries the document
+        found = self.table.get_item(Key={KEY_PARTITION: stub[KEY_PARTITION], KEY_SORT: stub[KEY_SORT]})
+        item = found.get("Item")
+        # The keys are stripped either way, so a caller cannot tell which read path an order arrived by.
+        return without_keys(item) if item else None
 
 
 class RefundsRepository:
