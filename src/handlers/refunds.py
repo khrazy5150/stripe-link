@@ -45,8 +45,19 @@ ACTIONS = {"approve", "reject", "execute", "received"}
 
 
 def _action(event) -> str:
-    resource = str((event or {}).get("resource") or "")
-    tail = resource.rstrip("/").rsplit("/", 1)[-1]
+    """The action this request is asking for, from the route's `{action}` path parameter.
+
+    It used to come from the tail of `resource`, which for `/refunds/{refund_request_id}/{action}` is the
+    literal string "{action}" -- so every approve and reject answered "Unsupported refund action." for as
+    long as the route has existed. The tests passed because their fixture interpolated the action into
+    `resource` while leaving the id a template, a shape API Gateway cannot produce.
+
+    The `resource` tail is still honoured, for a route that names its action in the path.
+    """
+    action = str(path_params(event).get("action") or "").strip().lower()
+    if action in ACTIONS:
+        return action
+    tail = str((event or {}).get("resource") or "").rstrip("/").rsplit("/", 1)[-1]
     return tail if tail in ACTIONS else ""
 
 

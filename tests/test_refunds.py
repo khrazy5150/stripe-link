@@ -48,8 +48,13 @@ class RefundHandlerTests(unittest.TestCase):
     def call(self, action, request_id="rr_1", stripe=None, body=None):
         event = {
             "httpMethod": "POST",
-            "resource": f"/refunds/{{refund_request_id}}/{action}",
-            "pathParameters": {"refund_request_id": request_id},
+            # Exactly what API Gateway sends for `/refunds/{refund_request_id}/{action}`: `resource` is the
+            # TEMPLATE and the real values arrive in pathParameters. The old fixture put the action into
+            # `resource` and the id in pathParameters, a shape the gateway never produces -- which is why a
+            # handler that read the action off `resource` passed here and 404'd every refund in production.
+            "resource": "/refunds/{refund_request_id}/{action}",
+            "path": f"/refunds/{request_id}/{action}",
+            "pathParameters": {"refund_request_id": request_id, "action": action},
             "queryStringParameters": {"tenant_id": "t1"},
         }
         if body is not None:
