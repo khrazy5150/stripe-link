@@ -91,6 +91,7 @@ from stripe_link.domain.connect_sync import (
     site_domain_verified,
 )
 from stripe_link.kms_secrets import KmsSecretCipher
+from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import checkout_credentials
 from stripe_link.stripe_platform_secrets import get_platform_webhook_secret
 
@@ -220,6 +221,7 @@ def handler(
     ledger_repo=None,
     # Tests short-circuit the balance-transaction lookup the way `line_items_fetcher` does.
     actual_fees_fetcher=None,
+    refunds_fetcher=None,
     user_profiles_repo=None,
     sites_repo=None,
     tip_tokens_repo=None,
@@ -354,7 +356,10 @@ def handler(
     persistence = {}
     if event_type == "charge.refunded" and tenant_id:
         persistence = reconcile_charge_refunded(
-            stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo, refunds_repo=refunds_repo, now_fn=now_fn,
+            stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo, refunds_repo=refunds_repo,
+            # The payload has no `charge.refunds` on this API version, so listing them needs the tenant's
+            # own credentials -- the same ones the fee lookup resolves, threaded the same way.
+            stripe_repo=repository, secret_cipher=secret_cipher, refunds_fetcher=refunds_fetcher, now_fn=now_fn,
         )
     elif event_type == "charge.dispute.created" and tenant_id:
         persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, mode=mode,
@@ -1418,6 +1423,48 @@ def record_sale_ledger_entry(order: dict[str, Any], ledger_repo, now: int) -> bo
         return False
 
 
+def _refunds_for_charge(charge: dict[str, Any], tenant_id: str, *, repository=None, secret_cipher=None,
+                        fetcher=None) -> list[dict[str, Any]]:
+    """The refunds on this charge, from the payload if it carries them, else from Stripe.
+
+    `charge.refunds` is NOT in the webhook payload on 2026-05-27.preview -- verified from the stored
+    payload of evt_3UO4bm21lLbLd4Y513V9tcf9, whose charge has `amount_refunded: 145` and `refunded: true`
+    and no `refunds` key at all. The ledger loop reads `charge.refunds.data`, so it iterated nothing, the
+    reconciliation reported `ledger_written: 0` and returned 200, and a refunded live order kept its sale
+    entry with no reversal. Replaying the event cannot fix that: the payload is the same every time.
+
+    Same credential resolution as `_actual_fees_for_session`. Never raises -- a refund that cannot be
+    listed leaves the ledger incomplete, which is bad, but failing the delivery would make Stripe retry
+    an event that will never succeed and eventually disable the endpoint.
+    """
+    existing = ((charge.get("refunds") or {}).get("data")) or []
+    if existing:
+        return list(existing)
+    if not int(charge.get("amount_refunded") or 0):
+        return []
+    charge_id = str(charge.get("id") or "").strip()
+    if not charge_id:
+        return []
+    if fetcher is not None:
+        try:
+            return list(fetcher(charge_id) or [])
+        except Exception:  # noqa: BLE001
+            return []
+    mode = "live" if charge.get("livemode") else "test"
+    try:
+        stripe_repo = repository or stripe_keys_repository()
+        stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
+        api_key, stripe_account = checkout_credentials(
+            tenant_id, mode, stripe_keys, secret_cipher or KmsSecretCipher())
+        if not api_key:
+            return []
+        listed = stripe_request("GET", "/refunds", api_key=api_key, stripe_account=stripe_account,
+                                params={"charge": charge_id, "limit": 100})
+        return list((listed or {}).get("data") or [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def record_refund_ledger_entry(ledger_repo, *, tenant_id: str, order: dict[str, Any], refund: dict[str, Any], payment_intent: str, charge_id: str, now: int) -> bool:
     """Best-effort append of a refund entry. Idempotent (deterministic entry id per stripe refund)."""
     try:
@@ -1466,6 +1513,9 @@ def reconcile_charge_refunded(
     orders_repo=None,
     refunds_repo=None,
     ledger_repo=None,
+    stripe_repo=None,
+    secret_cipher=None,
+    refunds_fetcher=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
     """Reflect a Stripe refund on the local order and append ledger rows.
@@ -1494,7 +1544,8 @@ def reconcile_charge_refunded(
                                     if os.environ.get("REFUNDS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository(mode=refund_mode)
                                   if os.environ.get("LEDGER_TABLE") else None)
-    refunds = ((charge.get("refunds") or {}).get("data")) or []
+    refunds = _refunds_for_charge(charge, tenant_id, repository=stripe_repo, secret_cipher=secret_cipher,
+                                  fetcher=refunds_fetcher)
     ledger_written = 0
     for refund in refunds:
         stripe_refund_id = str(refund.get("id") or "").strip()
