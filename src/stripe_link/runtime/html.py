@@ -8267,7 +8267,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            const cartApiBase = cartEndpoint.replace(/\\/cart$/, '');",
         "            const cartPageId = listicle.dataset.pageId || '';",
         "            if (listicle.dataset.hasPostCheckout === 'true' && cartApiBase && cartPageId) {",
-        "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId); nextp.set('origin', window.location.origin);",
+        "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId); nextp.set('mode', cartMode); nextp.set('origin', window.location.origin);",
         "              cartSuccessUrl = `${cartApiBase}/pages/${cartPageId}/post-checkout/next?${nextp.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
         "            }",
         # A coupon the visitor applied on the page rides along with the CART too, not just the single-offer
@@ -8381,6 +8381,12 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # Carry the buyer's current host so the router redirects the funnel back to the SAME host (platform host
         # or custom domain), never leaking them off the host they entered on (plans/PLATFORM_HOSTNAME_SERVING.md
         # Slice 3). The server validates it against the Site's known origins before honoring it.
+        # The funnel step is a LOOKUP in the buyer's Stripe mode: post_checkout resolves the mode from this
+        # request and reads pages/offers/products in it. `resolve_stripe_mode` defaults to TEST when it is
+        # absent (fail-safe, so a forgetful caller cannot touch live data), which made a live funnel search
+        # `PAGE#test#...` for a page stored at `PAGE#live#...` and answer "Page not found." A test purchase
+        # matched the default and worked, so only live buyers ever saw it.
+        "        next.set('mode', cta.dataset.checkoutMode || 'test');",
         "        next.set('origin', window.location.origin);",
         "        return `${cta.dataset.checkoutApiBaseUrl}/pages/${funnelPageId || cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}`;",
         "      };",
@@ -8390,6 +8396,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const next = new URLSearchParams();",
         "          next.set('outcome', 'accept');",
         "          if (cta.dataset.checkoutTenantId) next.set('tenant_id', cta.dataset.checkoutTenantId);",
+        "          next.set('mode', cta.dataset.checkoutMode || 'test');",  # the funnel step is a lookup in this mode
         "          next.set('origin', window.location.origin);",  # keep the funnel on the buyer's entry host (Slice 3)
         # Append the Stripe placeholder UNENCODED — URLSearchParams would percent-encode the braces and Stripe
         # would never substitute the real Checkout Session id (it looks for the literal {CHECKOUT_SESSION_ID}).
@@ -8883,6 +8890,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          next.set('step_id', `${ppSurface}_carousel`);",
         "          if (ppTenant) next.set('tenant_id', ppTenant);",
         "          if (ppSession) next.set('session_id', ppSession);",
+        "          next.set('mode', ppMode);",  # the funnel step is a lookup in this mode
         "          next.set('origin', window.location.origin);",  # keep the carousel funnel on the buyer's host (Slice 3)
         "          return `${ppApi}/pages/${ppPage}/post-checkout/next?${next.toString()}`;",
         "        };",
