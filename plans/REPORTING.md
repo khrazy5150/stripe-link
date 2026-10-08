@@ -132,3 +132,31 @@ One screen, date-ranged, reading `/ledger`. Sections in the order a tenant actua
 3. ✅ Report 1 (**Money**).
 4. ✅ Report 2 (**What sold**) — shipped 2026-10-06, and it needed more than the backfill.
 5. Reports 3–5 (**Funnel**, **Shipping**, **Export**) as wanted.
+
+## 6. The Dashboard's "Net Revenue" card contradicts the ledger (found 2026-10-08)
+
+The headline card on the Dashboard is wrong twice over, and in the direction that flatters. Measured on
+four real live transactions — two $1.45 sales, both fully refunded:
+
+| | |
+|---|---|
+| Dashboard "Net Revenue" | **$2.90** |
+| ledger, and Stripe's own Net volume | **−$0.88** |
+
+`dashboard.js` `revenueCents()` sums `amounts.amount_paid` across orders. So it is **gross**, not net — no
+fee is subtracted, though the order carries `fees.platform_fee` and `fees.stripe_fee` — and it **never
+reads refunds**, though `amount_refunded` sits on the same document. Two refunded sales therefore read as
+$2.90 of revenue that no longer exists. The label says "Net Revenue" and the subtitle "From paid
+invoices", and neither is true: it is gross, and they are orders.
+
+**The fix is small, because the right answer already exists.** `Reports.vue` reads `/ledger`, which nets
+fees and reverses refunds and reconciled to Stripe to the penny on these same four transactions. The
+Dashboard card should read the same source rather than re-deriving a second, worse answer from orders.
+
+Two things to settle while doing it:
+
+- **Say which number it is.** Gross, net-of-fees and net-of-fees-and-refunds are three different figures a
+  tenant cares about. The card should name the one it shows, per §4's rule about figures whose basis is
+  not stated.
+- **An order is not an invoice.** `state.invoices` holds orders, and "Total Orders: 2" counts the same
+  list. The naming predates the split and misleads anyone reading the getter.
