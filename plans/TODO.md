@@ -1369,6 +1369,29 @@ usage, which moved a real page +18 PageSpeed points.
 
 The original entry follows.
 
+### LOW — Junior Bay as an MCP server for Claude (noted 2026-10-09)
+
+Expose the platform as Model Context Protocol tools so a tenant can operate their store conversationally:
+what sold, which orders, build me a landing page for this product. Full write-up in
+**`plans/MCP_SERVER.md`**.
+
+**Why it fits better than it sounds.** 34 JSON schemas and a JSON-first architecture, and
+`plans/AI_AND_COMMERCE_ARCHITECTURE.md` already locks "AI page-gen emits schema-valid JSON not HTML" —
+MCP is the delivery surface for something already designed. It also needs no new API Gateway resources,
+so unlike every other integration it does not wait on the SAM transform limit.
+
+**The prerequisite is Phase 2 of `plans/API_AUTHENTICATION.md`** — the authorizer, which that plan says is
+all that remains. An MCP server is an authentication product: "let a third party act on a tenant's behalf"
+cannot ship while a caller who knows a `tenant_id` is that tenant. Not a reason to defer the idea so much
+as a reason it is useful, since it gives Phase 2 a consumer.
+
+**Phased read-only → drafts → nothing that moves money.** No refunds, no live price changes, ever. A
+republish is what fixed the funnel on 2026-10-08 and a misfired one is what served a buyer the wrong page;
+an agent with a refund button is a liability.
+
+LOW because the platform is pre-launch and the core payment path was only verified end-to-end on
+2026-10-09. Revisit when tenants ask for it.
+
 ### LOW — adding a font is five manual steps across three repos (noted 2026-09-08)
 
 Registering a new family means: upload the WOFF2; add it to `fonts-api/src/font_definitions.py` and deploy
