@@ -1,0 +1,59 @@
+{
+  "account": "acct_f15454c2e4a95f09",
+  "api_version": "2026-05-27.preview",
+  "context": "acct_f15454c2e4a95f09",
+  "created": 1791354567,
+  "data": {
+    "object": {
+      "address": {
+        "city": "REDACTED",
+        "country": "US",
+        "line1": "REDACTED",
+        "line2": "REDACTED",
+        "postal_code": "00000",
+        "state": "REDACTED"
+      },
+      "balance": 0,
+      "created": 1790227725,
+      "currency": "usd",
+      "customer_account": null,
+      "default_source": null,
+      "delinquent": false,
+      "description": null,
+      "discount": null,
+      "email": "buyer@example.test",
+      "id": "cus_a30931890fd5905c",
+      "invoice_prefix": "2DPUJTYK",
+      "invoice_settings": {
+        "custom_fields": null,
+        "default_payment_method": null,
+        "footer": null,
+        "rendering_options": null
+      },
+      "livemode": false,
+      "metadata": {},
+      "name": "REDACTED",
+      "next_invoice_sequence": 15,
+      "object": "customer",
+      "phone": null,
+      "preferred_locales": [
+        "en-US"
+      ],
+      "shipping": null,
+      "tax_exempt": "none",
+      "test_clock": null
+    },
+    "previous_attributes": {
+      "next_invoice_sequence": 14
+    }
+  },
+  "id": "evt_5013b40839926c93",
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 1,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "customer.updated"
+}

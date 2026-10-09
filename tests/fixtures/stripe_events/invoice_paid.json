@@ -1,0 +1,205 @@
+{
+  "account": "acct_f15454c2e4a95f09",
+  "api_version": "2026-05-27.preview",
+  "context": "acct_f15454c2e4a95f09",
+  "created": 1791441043,
+  "data": {
+    "object": {
+      "account_country": "US",
+      "account_name": "REDACTED",
+      "account_tax_ids": null,
+      "amount_due": 19792,
+      "amount_overpaid": 0,
+      "amount_paid": 19792,
+      "amount_remaining": 0,
+      "amount_shipping": 0,
+      "application": "ca_TbP9X8xdC1FYAAoMB15aLTi9fJmIC0J4",
+      "attempt_count": 1,
+      "attempted": true,
+      "auto_advance": false,
+      "automatic_tax": {
+        "disabled_reason": null,
+        "enabled": false,
+        "liability": null,
+        "provider": null,
+        "status": null
+      },
+      "automatically_finalizes_at": null,
+      "billing_reason": "subscription_cycle",
+      "collection_method": "charge_automatically",
+      "created": 1791437381,
+      "currency": "usd",
+      "custom_fields": null,
+      "customer": "cus_a30931890fd5905c",
+      "customer_account": null,
+      "customer_address": {
+        "city": "REDACTED",
+        "country": "US",
+        "line1": "REDACTED",
+        "line2": "REDACTED",
+        "postal_code": "00000",
+        "state": "REDACTED"
+      },
+      "customer_email": "buyer@example.test",
+      "customer_name": "REDACTED",
+      "customer_phone": null,
+      "customer_shipping": null,
+      "customer_tax_exempt": "none",
+      "customer_tax_ids": [],
+      "default_payment_method": null,
+      "default_source": null,
+      "default_tax_rates": [],
+      "description": null,
+      "discounts": [],
+      "due_date": null,
+      "effective_at": 1791441038,
+      "ending_balance": 0,
+      "footer": null,
+      "from_invoice": null,
+      "hosted_invoice_url": "https://example.test/redacted",
+      "id": "in_4dd17283aa861ec0",
+      "invoice_pdf": "https://example.test/redacted",
+      "issuer": {
+        "type": "self"
+      },
+      "last_finalization_error": null,
+      "latest_revision": null,
+      "lines": {
+        "data": [
+          {
+            "amount": 19792,
+            "currency": "usd",
+            "description": "REDACTED",
+            "discount_amounts": [],
+            "discountable": true,
+            "discounts": [],
+            "id": "il_d355d419193c147f",
+            "invoice": "in_4dd17283aa861ec0",
+            "livemode": false,
+            "metadata": {
+              "clientID": "586173f0-40a1-7053-d421-453cf1de68d0",
+              "client_id": "586173f0-40a1-7053-d421-453cf1de68d0",
+              "offer_id": "offer_aA3u3qIj8vq",
+              "page_id": "page_OYDApRAdx6Z",
+              "product_name": "120 minute massage",
+              "silo": "sandbox",
+              "tenant_id": "586173f0-40a1-7053-d421-453cf1de68d0"
+            },
+            "object": "line_item",
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": null,
+                "proration": false,
+                "proration_details": {
+                  "credited_items": null
+                },
+                "subscription": "sub_e24ee763979cfb35",
+                "subscription_item": "si_02c33244730f58c7"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791523725,
+              "start": 1791437325
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_4689d2487275c7d9",
+                "product": "prod_a494dd3e220c09f2"
+              },
+              "type": "price_1086346bcec08734",
+              "unit_amount_decimal": "19792"
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": 19792,
+            "taxes": []
+          }
+        ],
+        "has_more": false,
+        "object": "list",
+        "total_count": 1,
+        "url": "/v1/invoices/in_4dd17283aa861ec0/lines"
+      },
+      "livemode": false,
+      "metadata": {},
+      "next_payment_attempt": null,
+      "number": "2DPUJTYK-0015",
+      "object": "invoice",
+      "on_behalf_of": null,
+      "parent": {
+        "quote_details": null,
+        "subscription_details": {
+          "metadata": {
+            "clientID": "586173f0-40a1-7053-d421-453cf1de68d0",
+            "client_id": "586173f0-40a1-7053-d421-453cf1de68d0",
+            "offer_id": "offer_aA3u3qIj8vq",
+            "page_id": "page_OYDApRAdx6Z",
+            "product_name": "120 minute massage",
+            "silo": "sandbox",
+            "tenant_id": "586173f0-40a1-7053-d421-453cf1de68d0"
+          },
+          "subscription": "sub_e24ee763979cfb35"
+        },
+        "type": "subscription_details"
+      },
+      "payment_settings": {
+        "default_mandate": null,
+        "payment_method_options": {
+          "acss_debit": null,
+          "bancontact": null,
+          "billie": null,
+          "blik": null,
+          "card": {
+            "request_three_d_secure": "automatic"
+          },
+          "customer_balance": null,
+          "konbini": null,
+          "payto": null,
+          "pix": null,
+          "sepa_debit": null,
+          "upi": null,
+          "us_bank_account": null
+        },
+        "payment_method_types": null
+      },
+      "period_end": 1791437325,
+      "period_start": 1791350925,
+      "post_payment_credit_notes_amount": 0,
+      "pre_payment_credit_notes_amount": 0,
+      "receipt_number": null,
+      "rendering": null,
+      "shipping_cost": null,
+      "shipping_details": null,
+      "starting_balance": 0,
+      "statement_descriptor": null,
+      "status": "paid",
+      "status_transitions": {
+        "finalized_at": 1791441038,
+        "marked_uncollectible_at": null,
+        "paid_at": 1791441038,
+        "voided_at": null
+      },
+      "subtotal": 19792,
+      "subtotal_excluding_tax": 19792,
+      "test_clock": null,
+      "total": 19792,
+      "total_discount_amounts": [],
+      "total_excluding_tax": 19792,
+      "total_pretax_credit_amounts": [],
+      "total_taxes": [],
+      "webhooks_delivered_at": 1791437381
+    }
+  },
+  "id": "evt_134bb22770efc3a3",
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 3,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "invoice.paid"
+}

@@ -1,0 +1,163 @@
+{
+  "account": "acct_f15454c2e4a95f09",
+  "api_version": "2026-05-27.preview",
+  "context": "acct_f15454c2e4a95f09",
+  "created": 1791417449,
+  "data": {
+    "object": {
+      "adaptive_pricing": {
+        "enabled": true
+      },
+      "after_expiration": null,
+      "allow_promotion_codes": null,
+      "allowed_payment_method_types": null,
+      "amount_subtotal": 145,
+      "amount_total": 145,
+      "automatic_tax": {
+        "address_collection_precision": null,
+        "enabled": false,
+        "liability": null,
+        "provider": null,
+        "status": null
+      },
+      "billing_address_collection": "required",
+      "branding_settings": {
+        "background_color": "#ffffff",
+        "border_style": "rounded",
+        "button_color": "#0074d4",
+        "display_name": "REDACTED",
+        "font_family": "default",
+        "icon": null,
+        "logo": null
+      },
+      "cancel_url": "https://quill.jbay.be/digital-marketing-101",
+      "client_reference_id": null,
+      "client_secret": null,
+      "collected_information": null,
+      "consent": null,
+      "consent_collection": null,
+      "created": 1791416985,
+      "currency": "usd",
+      "currency_conversion": null,
+      "custom_fields": [],
+      "custom_text": {
+        "after_submit": null,
+        "shipping_address": null,
+        "submit": null,
+        "terms_of_service_acceptance": null
+      },
+      "customer": null,
+      "customer_account": null,
+      "customer_creation": "if_required",
+      "customer_details": {
+        "address": {
+          "city": "REDACTED",
+          "country": "US",
+          "line1": "REDACTED",
+          "line2": "REDACTED",
+          "postal_code": "REDACTED",
+          "state": "REDACTED"
+        },
+        "business_name": null,
+        "email": "buyer@example.test",
+        "individual_name": null,
+        "name": "REDACTED",
+        "phone": null,
+        "tax_exempt": "none",
+        "tax_ids": []
+      },
+      "customer_email": null,
+      "discounts": [],
+      "expires_at": 1791503384,
+      "id": "cs_live_a1ie9DblQwvbBpvm7PEmxMiGKTxPgTjNfMeRTj7RtCN0YGU2U7yh6kPlVI",
+      "integration_identifier": null,
+      "invoice": null,
+      "invoice_creation": {
+        "enabled": false,
+        "invoice_data": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": null,
+          "metadata": {},
+          "rendering_options": null
+        }
+      },
+      "livemode": true,
+      "locale": null,
+      "managed_payments": {
+        "enabled": false
+      },
+      "metadata": {
+        "clientID": "586173f0-40a1-7053-d421-453cf1de68d0",
+        "client_id": "586173f0-40a1-7053-d421-453cf1de68d0",
+        "funnel_id": "",
+        "offer_id": "offer_5cKRIcce6gC",
+        "order_bump_ids": "",
+        "page_id": "page_xuePD8RMInv",
+        "post_checkout_entry": "thank_you",
+        "price_id": "price_d631eb5d0264c710",
+        "product_id": "local_vwwhS4DSabx",
+        "product_name": "Digital Marketing 101",
+        "product_type": "digital",
+        "silo": "sandbox",
+        "tenant_id": "586173f0-40a1-7053-d421-453cf1de68d0",
+        "tenant_plan": "basic"
+      },
+      "mode": "payment",
+      "object": "checkout.session",
+      "origin_context": null,
+      "payment_intent": "pi_631942b49c6de7fa",
+      "payment_link": null,
+      "payment_method_collection": "if_required",
+      "payment_method_configuration_details": {
+        "id": "pmc_1ThISx21lLbLd4Y5Vivc0Smy",
+        "parent": "pmc_1SeCMEEcxlWjis9iDgZaHJrg"
+      },
+      "payment_method_options": {
+        "card": {
+          "request_three_d_secure": "automatic"
+        }
+      },
+      "payment_method_types": [
+        "card",
+        "klarna",
+        "link",
+        "cashapp"
+      ],
+      "payment_status": "paid",
+      "permissions": null,
+      "phone_number_collection": {
+        "enabled": false
+      },
+      "recovered_from": null,
+      "saved_payment_method_options": null,
+      "setup_intent": null,
+      "shipping_address_collection": null,
+      "shipping_cost": null,
+      "shipping_options": [],
+      "status": "complete",
+      "submit_type": null,
+      "subscription": null,
+      "success_url": "https://dev.juniorbay.com/pages/page_xuePD8RMInv/post-checkout/next?outcome=accept&tenant_id=586173f0-40a1-7053-d421-453cf1de68d0&origin=https%3A%2F%2Fquill.jbay.be&session_id={CHECKOUT_SESSION_ID}",
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "ui_mode": "hosted_page",
+      "url": null,
+      "wallet_options": null
+    }
+  },
+  "id": "evt_055b3aaf4025a6f9",
+  "livemode": true,
+  "object": "event",
+  "pending_webhooks": 4,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "checkout.session.completed"
+}
