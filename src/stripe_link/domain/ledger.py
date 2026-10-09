@@ -542,6 +542,8 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
         counts[entry_type] = counts.get(entry_type, 0) + 1
     # Deliberately names its inputs rather than summing `totals`: `shipping_revenue` is already inside
     # `gross`, so a blanket sum would count the postage twice.
+    refunded = sum(abs(int((entry.get("amounts") or {}).get("gross") or 0))
+                   for entry in entries if str(entry.get("entry_type") or "") == "refund")
     net = totals["gross"] + totals["stripe_fee"] + totals["platform_fee"]
     profit = net + totals["cogs"] + totals["shipping_cost"] - totals["tax"]
     return {
@@ -569,4 +571,13 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "merchandise_revenue": totals["gross"] - totals["shipping_revenue"],
         "shipping_cost": totals["shipping_cost"],
         "counts": counts,
+        # WHAT WENT BACK, stated rather than left to be inferred. `gross` is already net of refunds, so a
+        # reader cannot recover this by subtraction, and the figure is the one that explains an otherwise
+        # baffling headline: four $1.45 sales netting $1.14 reads as an error until the $2.90 that was
+        # refunded is on screen beside it.
+        #
+        # It does not reconcile to a simple multiple either, and that is the point of showing it: a
+        # refunded order still destroyed its fees, so two standing orders out of four do NOT net twice
+        # one order's payout. Only naming both numbers makes the gap legible.
+        "refunded": refunded,
     }

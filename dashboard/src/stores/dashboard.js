@@ -46,16 +46,45 @@ export const useDashboardStore = defineStore("dashboard", {
       return Boolean(this.ledger?.summary);
     },
 
+    // Sales and refunds from the SAME source as revenue, so the two cards cannot be computed on
+    // different bases. They were: revenue was net of refunds and the order count was not, which is why
+    // four orders appeared to produce $1.14 with nothing on screen to explain it.
+    //
+    // The headline is orders that STAND. The gross count and the refund count are both named underneath,
+    // because a refunded order still happened — it had a customer and a product and support — and the
+    // card that hides it is the card we just fixed.
+    saleCount() {
+      return Number(this.ledger?.summary?.counts?.sale ?? 0);
+    },
+
+    refundCount() {
+      return Number(this.ledger?.summary?.counts?.refund ?? 0);
+    },
+
+    refundedCents() {
+      return Number(this.ledger?.summary?.refunded ?? 0);
+    },
+
     stats(state) {
       return {
-        orders: state.invoices.length,
+        orders: this.revenueKnown ? this.saleCount - this.refundCount : state.invoices.length,
+        // ONLY the refund clause, or "". The environment label belongs to the component, which is where
+        // every other card gets it -- returning it from here duplicated that knowledge and dropped it
+        // the moment a tenant had no refunds.
+        ordersMeta: this.refundCount
+          ? `${this.saleCount} placed · ${this.refundCount} refunded`
+          : "",
         revenue: this.revenueKnown ? money(this.revenueCents) : "—",
         // Say which figure this is. Gross, net-of-fees and net-of-fees-and-refunds are three different
         // numbers a tenant cares about, and the old subtitle named a source ("paid invoices") rather
         // than the measure, while the title claimed the one it was not.
-        revenueMeta: this.revenueKnown
-          ? "After Stripe and platform fees, less refunds"
-          : "Could not load the ledger",
+        // Name the refunded amount when there is one. It is the figure that turns a baffling headline
+        // into an explained one, and it cannot be recovered from `net` by subtraction.
+        revenueMeta: !this.revenueKnown
+          ? "Could not load the ledger"
+          : this.refundedCents
+            ? `After fees · less ${money(this.refundedCents)} refunded`
+            : "After Stripe and platform fees",
         customers: state.customers.length,
         products: state.products.length,
       };

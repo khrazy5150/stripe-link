@@ -29,9 +29,14 @@
           </svg>
         </div>
         <div class="stats-content">
-          <span class="stats-label">Total Orders</span>
+          <span class="stats-label">Orders</span>
           <strong class="stats-value">{{ store.loading && !store.loaded ? "--" : store.stats.orders }}</strong>
-          <span class="stats-meta">Lifetime &bull; {{ environmentLabel }}</span>
+          <!-- Names the refunds when there are any, so this card and Net Revenue are visibly on the same
+               basis. Four orders netting $1.14 reads as a bug until "2 refunded" is beside it. -->
+          <span class="stats-meta">
+            <template v-if="store.stats.ordersMeta">{{ store.stats.ordersMeta }}</template>
+            <template v-else>Lifetime &bull; {{ environmentLabel }}</template>
+          </span>
         </div>
       </article>
 
