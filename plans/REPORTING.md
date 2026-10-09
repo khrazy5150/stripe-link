@@ -133,7 +133,7 @@ One screen, date-ranged, reading `/ledger`. Sections in the order a tenant actua
 4. ✅ Report 2 (**What sold**) — shipped 2026-10-06, and it needed more than the backfill.
 5. Reports 3–5 (**Funnel**, **Shipping**, **Export**) as wanted.
 
-## 6. The Dashboard's "Net Revenue" card contradicts the ledger (found 2026-10-08)
+## 6. The Dashboard's "Net Revenue" card contradicted the ledger — FIXED 2026-10-09
 
 The headline card on the Dashboard is wrong twice over, and in the direction that flatters. Measured on
 four real live transactions — two $1.45 sales, both fully refunded:
@@ -148,6 +148,18 @@ fee is subtracted, though the order carries `fees.platform_fee` and `fees.stripe
 reads refunds**, though `amount_refunded` sits on the same document. Two refunded sales therefore read as
 $2.90 of revenue that no longer exists. The label says "Net Revenue" and the subtitle "From paid
 invoices", and neither is true: it is gross, and they are orders.
+
+**FIXED 2026-10-09.** The card now reads `/ledger`'s own `summary.net` — the same source
+`Reports.vue` always used, which nets Stripe's fee and the platform fee and carries refunds as negative
+entries. `paidInvoices` is deleted rather than left behind, so nothing implies orders are still a
+revenue source. The subtitle names the measure ("After Stripe and platform fees, less refunds") instead
+of a source, and a failed ledger load shows "—" rather than a silent 0, because "you have made no money"
+is a worse lie than the one being fixed.
+
+Guarded by `tests/test_dashboard_revenue_source.py` — a source-level check, since the dashboard has no
+JS test runner.
+
+The original note follows.
 
 **The fix is small, because the right answer already exists.** `Reports.vue` reads `/ledger`, which nets
 fees and reverses refunds and reconciled to Stripe to the penny on these same four transactions. The

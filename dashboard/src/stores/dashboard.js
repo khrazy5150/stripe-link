@@ -26,26 +26,36 @@ export const useDashboardStore = defineStore("dashboard", {
     customers: [],
     invoices: [],
     notifications: [],
+    ledger: null,
   }),
 
   getters: {
-    paidInvoices(state) {
-      return state.invoices.filter((invoice) => {
-        return invoice.status === "paid" || Number(invoice.amounts?.amount_paid || 0) > 0;
-      });
+    // NET of Stripe's fee, the platform fee and every refund — the ledger's own `net`, which is what
+    // Stripe's "Net volume" shows and what the tenant's bank balance moves by.
+    //
+    // This used to sum `amount_paid` across orders, which made it GROSS and blind to refunds. Four
+    // $1.45 sales with two refunded read as $5.80 of revenue that no longer existed; the ledger said
+    // $1.14 and matched Stripe exactly. The card was labelled "Net Revenue" throughout.
+    revenueCents() {
+      return Number(this.ledger?.summary?.net ?? 0);
     },
 
-    revenueCents() {
-      return this.paidInvoices.reduce((sum, invoice) => {
-        return sum + Number(invoice.amounts?.amount_paid || invoice.amounts?.total || 0);
-      }, 0);
+    // Whether the figure above can be trusted. The ledger call is best-effort like every other load
+    // here, and a silent 0 would read as "you have made no money" rather than "we could not ask".
+    revenueKnown() {
+      return Boolean(this.ledger?.summary);
     },
 
     stats(state) {
       return {
         orders: state.invoices.length,
-        revenue: money(this.revenueCents),
-        revenueMeta: this.paidInvoices.length ? "From paid invoices" : "No paid invoices yet",
+        revenue: this.revenueKnown ? money(this.revenueCents) : "—",
+        // Say which figure this is. Gross, net-of-fees and net-of-fees-and-refunds are three different
+        // numbers a tenant cares about, and the old subtitle named a source ("paid invoices") rather
+        // than the measure, while the title claimed the one it was not.
+        revenueMeta: this.revenueKnown
+          ? "After Stripe and platform fees, less refunds"
+          : "Could not load the ledger",
         customers: state.customers.length,
         products: state.products.length,
       };
@@ -83,23 +93,29 @@ export const useDashboardStore = defineStore("dashboard", {
       this.customers = [];
       this.invoices = [];
       this.notifications = [];
+      this.ledger = null;
     },
 
     async load() {
       this.loading = true;
       this.error = "";
       try {
-        const [products, customers, invoices, notifications] = await Promise.all([
+        const [products, customers, invoices, notifications, ledger] = await Promise.all([
           apiRequest("/products").catch(() => ({ products: [] })),
           apiRequest("/customers").catch(() => ({ customers: [] })),
           apiRequest("/invoices").catch(() => ({ invoices: [] })),
           apiRequest("/notifications").catch(() => ({ notifications: [] })),
+          // The ledger is the only source that nets fees and reverses refunds. Summing orders instead
+          // reported $5.80 of revenue on four $1.45 sales, two of them fully refunded, when the true
+          // figure was $1.14 (measured 2026-10-09, and it agreed with Stripe to the penny).
+          apiRequest("/ledger").catch(() => null),
         ]);
 
         this.products = products.products || [];
         this.customers = customers.customers || [];
         this.invoices = invoices.invoices || [];
         this.notifications = notifications.notifications || [];
+        this.ledger = ledger || null;
         this.loaded = true;
       } catch (error) {
         this.error = error.message;
