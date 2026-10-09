@@ -219,6 +219,15 @@
                 <button v-if="!order.fulfilment?.shipment" type="button" class="link-action orders-mark-shipped"
                         title="Already posted it yourself? Record it and send the buyer their tracking."
                         @click.stop="shipping = order">Mark shipped</button>
+                <!-- Until now the only route to a refund was the BUYER finding their purchase-management
+                     page and asking. Most of them email or phone instead, and the tenant had no way to
+                     act on that without talking someone through finding a link they were sent once. -->
+                <button v-if="canRefund(order)" type="button" class="link-action orders-issue-refund"
+                        :disabled="refunding === order.order_id"
+                        title="Refund this order to the buyer's card."
+                        @click.stop="refundError = ''; pendingRefund = order">
+                  {{ refunding === order.order_id ? "Refunding…" : "Issue refund" }}
+                </button>
               </td>
             </tr>
             <!-- ONE LINE, ONE LABEL. Each parcel names its box and what goes in it, so the row reads like
@@ -295,6 +304,27 @@
     <MarkShippedModal v-if="shipping" :order="shipping" :carriers="carriers" :saving="shippingSaving"
                       :error="shippingError" @close="shipping = null" @shipped="submitShipped" />
 
+    <!-- Behind a confirm, like the Refunds screen's own execute. This moves real money and cannot be
+         undone, and the button sits one row away from "Mark shipped". -->
+    <ConfirmDialog
+      :open="!!pendingRefund"
+      danger
+      title="Issue refund?"
+      confirm-label="Issue refund"
+      :busy="!!refunding"
+      @cancel="pendingRefund = null"
+      @confirm="issueRefund"
+    >
+      <template v-if="pendingRefund">
+        Refund {{ formatMoney(pendingRefund.amount_total || 0, pendingRefund.currency) }} to
+        {{ pendingRefund.customer?.email || "the buyer" }}? This cannot be undone, and Stripe does not
+        return its fee.
+        <!-- The dialog stays OPEN on failure and says why. Setting an error nobody renders is how a
+             refusal becomes a button that silently does nothing. -->
+        <p v-if="refundError" class="keys-status-banner error">{{ refundError }}</p>
+      </template>
+    </ConfirmDialog>
+
     <div v-if="handoverKind" class="modal-backdrop" @click.self="handoverKind = ''">
       <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="handoverTitle">
         <header class="modal-card-header">
@@ -345,6 +375,7 @@ import { computed, inject, reactive, ref } from "vue";
 import { apiRequest } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { formatEpochDate } from "../utils/format";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import MarkShippedModal from "./orders/MarkShippedModal.vue";
 import OrderDetailDrawer from "./orders/OrderDetailDrawer.vue";
 import {
@@ -636,6 +667,38 @@ async function buySelected() {
 }
 
 const shipping = ref(null);
+const pendingRefund = ref(null);
+const refunding = ref("");
+const refundError = ref("");
+
+// A row with money still on it. An order already fully refunded has nothing left to return, and one
+// with no payment intent was never charged through Stripe.
+function canRefund(order) {
+  const paid = Number(order?.amount_total || 0);
+  const back = Number(order?.amount_refunded || 0);
+  return Boolean(order?.payment_intent_id) && paid > 0 && back < paid;
+}
+
+async function issueRefund() {
+  const order = pendingRefund.value;
+  if (!order) return;
+  refunding.value = order.order_id;
+  refundError.value = "";
+  try {
+    await apiRequest(`/orders/${encodeURIComponent(order.order_id)}/refund`, {
+      method: "POST",
+      body: { reason: "Refunded by the seller" },
+    });
+    pendingRefund.value = null;
+    // Reload rather than patching the row: the refund also moves the ledger, the order aggregates and
+    // the Refunds queue, and a locally-edited row would disagree with all three.
+    await load();
+  } catch (error) {
+    refundError.value = error.message || "The refund could not be issued.";
+  } finally {
+    refunding.value = "";
+  }
+}
 const shippingSaving = ref(false);
 const shippingError = ref("");
 

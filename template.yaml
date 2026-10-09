@@ -3847,7 +3847,8 @@ Resources:
                 - ses:SendEmail
                 - ses:SendRawEmail
               Resource: "*"
-        # Decrypting the tenant's shipping-provider key to ask the carrier about an address.
+        # Decrypting the tenant's shipping-provider key to ask the carrier about an address, and the
+        # tenant's STRIPE key to issue a refund the seller asked for from the Orders screen.
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -3859,6 +3860,21 @@ Resources:
               Condition:
                 StringEquals:
                   kms:EncryptionContext:service: stripe-link
+        # A seller-initiated refund goes through the same pipeline as a customer's request, so it writes
+        # the request (NotificationsTable holds refund_request documents), records the refund, and needs
+        # the tenant's Stripe credentials to call Stripe at all.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefundsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref StripeKeysTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref StripePlatformSecretArn
       Events:
         OrdersList:
           Type: Api
@@ -3883,6 +3899,12 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /orders/{order_id}/ship
+            Method: POST
+        OrdersRefund:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders/{order_id}/refund
             Method: POST
   AppConfigTable:
     Type: AWS::DynamoDB::Table

@@ -63,6 +63,10 @@ def handler(event, context, repository=None, products_repo=None, shipments_repo=
     if method == "POST" and _is_validate_path(event):
         return validate_addresses(event, repository, mode, shipping_config_repo=shipping_config_repo,
                                   secret_cipher=secret_cipher, now_fn=now_fn)
+    if method == "POST" and _is_refund_path(event):
+        if not order_id:
+            return error_response("An order id is required.", code="missing_order")
+        return refund_order(event, repository, order_id, mode, now_fn=now_fn)
     if method == "POST":
         if not order_id:
             return error_response("An order id is required.", code="missing_order")
@@ -354,6 +358,89 @@ def _stamp_references(orders) -> None:
         reference = mapping.get(str(order.get("order_id") or ""))
         if reference:
             order["short_ref"] = reference
+
+
+def _is_refund_path(event) -> bool:
+    """`resource` is the TEMPLATE for a parameterised route, so match on its tail either way.
+
+    Reading the ACTUAL path would work here too, but `resource` is what API Gateway sends and the refunds
+    handler was broken for three months by assuming otherwise (`/refunds/{id}/{action}` arrives with the
+    literal "{action}"). Checking both is the honest version.
+    """
+    path = str((event or {}).get("resource") or (event or {}).get("path") or "")
+    return path.rstrip("/").endswith("/refund")
+
+
+def refund_order(event, repository, order_id, mode, *, now_fn=None,
+                 requests_repo=None, refunds_repo=None, stripe_repo=None, secret_cipher=None,
+                 caller=None, credentials_fn=None):
+    """Refund an order the TENANT chose to refund, from the Orders screen.
+
+    Until now the only route to a refund was the customer finding their purchase-management page and
+    asking, which the tenant then approved. That is the wrong default: most customers email or phone,
+    and the tenant had no way to act on it without talking them through finding a link.
+
+    **It creates a REQUEST and executes it, rather than calling Stripe directly.** The request is the
+    audit trail -- the Refunds screen, the ledger entry, the reconciliation and the notification all hang
+    off it -- and a second path to the money that skipped it would leave refunds that no report could
+    see. `initiated_by` is what distinguishes this from the customer's ask.
+
+    **It is born approved.** The approve step exists to decide a CLAIM, and a tenant clicking "Issue
+    refund" on their own order has decided. Routing it through `new` would make them answer their own
+    request on another screen.
+
+    **The return gate does not apply.** `can_release_refund` holds money back until goods come back; the
+    person it protects is the tenant, and they are the one asking. Forcing them to mark a return received
+    before refunding their own customer would be the software arguing with its owner.
+    """
+    from handlers.refunds import _execute
+    from stripe_link.stripe_client import stripe_request
+    from stripe_link.stripe_platform_secrets import checkout_credentials
+    from stripe_link.domain.purchase_lookup import refund_request_doc
+    from stripe_link.ids import generate_id
+    from stripe_link.repositories.documents import (refund_requests_repository, refunds_repository,
+                                                    stripe_keys_repository)
+
+    now = int((now_fn or time.time)())
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+
+    try:
+        order = repository.get(tenant_id, order_id)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+    if not order:
+        return error_response("Order not found.", status_code=404, code="not_found")
+
+    body = parse_json_body(event) if (event or {}).get("body") else {}
+    request = refund_request_doc({**order, "tenant_id": tenant_id},
+                                 reason=str((body or {}).get("reason") or "Refunded by the seller"),
+                                 now=now, request_id=f"rr_{generate_id()}")
+    request["status"] = "approved"
+    request["initiated_by"] = "tenant"
+    request["approved_at"] = now
+    # No snapshot: nothing is being withheld pending a return, so recording a policy that will never be
+    # consulted would only invite someone to consult it.
+    request["policy_snapshot"] = {"return_required": False, "reason": "refunded by the seller",
+                                  "keep_it": False, "products": []}
+
+    requests_repo = requests_repo or refund_requests_repository()
+    try:
+        requests_repo.put(request)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+
+    return _execute(
+        request, tenant_id, now,
+        requests_repo=requests_repo,
+        orders_repo=repository,
+        refunds_repo=refunds_repo or refunds_repository(mode=mode),
+        stripe_repo=stripe_repo or stripe_keys_repository(),
+        secret_cipher=secret_cipher if secret_cipher is not None else KmsSecretCipher(),
+        caller=caller or stripe_request,
+        credentials_fn=credentials_fn or checkout_credentials,
+    )
 
 
 def _is_validate_path(event) -> bool:
