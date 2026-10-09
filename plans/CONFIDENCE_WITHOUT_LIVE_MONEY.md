@@ -55,7 +55,7 @@ fixture encoding a belief that had expired. Re-run the capture script after any 
 **Scrubbing note:** the first pass left an account id embedded in a hosted-invoice URL — whole-string id
 matching was not enough. Found by grepping the output for a known id, which is the check to repeat.
 
-### 2. Mode-parity tests — NOT BUILT
+### 2. Mode-parity tests — DONE 2026-10-08
 
 Run each scenario twice, `mode=test` and `mode=live`, and assert identical behaviour. Any divergence is
 a bug by definition. This single harness would have caught the funnel defect, which is the only
@@ -78,7 +78,7 @@ The recurring cause. Three were fixed on 2026-10-08:
 Others certainly remain. The rule: **a fake that cannot fail the way production fails is not a test, it
 is a description of a world we invented.**
 
-### 4. Exercise every scenario in test mode — NOT DONE
+### 4. Exercise every scenario in test mode — AUTOMATED 2026-10-08, manual rehearsal still open
 
 Stripe test mode is free and complete. Combined with (2), results transfer. The paths that have NEVER
 run against live Stripe, as of 2026-10-08:
@@ -100,6 +100,17 @@ The expensive part of 2026-10-08 was time, not money.
 
 ## Related
 
-The fifth defence is detection rather than prevention: **nothing noticed that Stripe had taken money we
-never recorded.** A reconciliation sweep comparing recent Stripe charges against orders would have caught
-the lost sale on day one, whatever its cause. Not built.
+### 5. Notice money we never recorded — DONE 2026-10-08
+
+Detection rather than prevention: **nothing noticed that Stripe had taken money we never recorded.** Both
+lost sales were found by the operator reading the Stripe dashboard a day later.
+
+`domain/orphan_charges.py`, run as a third pass on the sweep that already executes every five minutes
+(no new Lambda and no new route — the stack is at the transform limit). It reads the direction nothing
+else does: Stripe's charges, not our orders, so it can find a sale we never heard of. A deleted endpoint,
+a stale secret, a silo mismatch and a bug not yet written all surface as the same sentence.
+
+Deliberate choices: a refunded charge still counts (the money moved twice, the books owe both); a failing
+orders read reports nothing rather than claiming every sale vanished; notifications are keyed by charge
+id so a repeating sweep does not repeat the alarm; and the pass never raises, because fee reconciliation
+has real work to do.
