@@ -128,16 +128,17 @@ class ItRefundsThroughTheNormalPipeline(unittest.TestCase):
         _r, requests, _f = call()
         self.assertEqual(requests.saved[0]["initiated_by"], "tenant")
 
-    def test_it_is_born_approved_so_nobody_answers_their_own_request(self):
-        """It must never sit at `new`, which would ask the tenant to answer their own request."""
+    def test_it_never_sits_at_new_waiting_for_its_own_author(self):
+        """Approval decides a CLAIM. A seller refunding their own order has decided, so the request
+        must not land in the queue for them to answer on another screen."""
         _r, requests, _f = call()
-        self.assertEqual(requests.saved[0]["status"], "approved")
-        self.assertNotIn("new", [s["status"] for s in requests.saved])
+        self.assertNotIn("new", [s["status"] for s in requests.saved[1:]],
+                         "after approval it must never be back at `new`")
 
-    def test_the_return_gate_does_not_hold_the_sellers_own_refund(self):
-        """can_release_refund protects the tenant; the tenant is the one asking."""
-        _r, requests, _f = call()
-        self.assertFalse(requests.saved[0]["policy_snapshot"]["return_required"])
+    def test_a_download_needs_no_return_so_the_money_goes_straight_back(self):
+        _r, requests, refunds = call()
+        self.assertFalse(requests.saved[-1]["policy_snapshot"]["return_required"])
+        self.assertTrue(refunds.saved, "nothing to wait for, so it should have refunded")
 
     def test_the_sellers_reason_is_recorded_when_given(self):
         _r, requests, _f = call(body={"reason": "Customer phoned"})
@@ -196,3 +197,85 @@ class TheOrdersScreenOffersIt(unittest.TestCase):
         source = self._source()
         issue = source[source.index("async function issueRefund"):]
         self.assertIn("await load()", issue[:issue.index("}\n")+400])
+
+
+class APhysicalOrderStillWaitsForTheGoods(unittest.TestCase):
+    """The first version of this button forced `approved` and refunded immediately, which would have
+    put the money back while the goods were still with the buyer.
+
+    The two-step flow on the Refunds screen exists for exactly that, and the protection is for the
+    SELLER. Collapsing it to one click is right for a download and wrong for a parcel, so the decision
+    is delegated to `_approve` — the same function the Refunds screen uses — rather than assumed.
+    """
+
+    def _call_physical(self):
+        class Products:
+            def list_for_tenant(self, _tenant):
+                return [{
+                    "product_id": "prod_1", "name": "A Heavy Thing",
+                    "refund_policy": {"return_method": "return_required"},
+                    "fulfillment": {"requires_shipping": True},
+                }]
+
+        order = {**ORDER, "line_items": [{"product_id": "prod_1", "quantity": 1, "amount_total": 145}]}
+        event = {"httpMethod": "POST", "resource": "/orders/{order_id}/refund",
+                 "pathParameters": {"order_id": "ord_1"},
+                 "queryStringParameters": {"tenant_id": "t_1", "mode": "live"}}
+        requests_repo, refunds_repo = FakeRequests(), FakeRefunds()
+        stripe_calls = []
+        response = refund_order(
+            event, FakeOrders(order), "ord_1", "live", now_fn=lambda: 1781230000,
+            products_repo=Products(), requests_repo=requests_repo, refunds_repo=refunds_repo,
+            stripe_repo=FakeKeys(), secret_cipher=None,
+            caller=lambda *a, **k: stripe_calls.append(1) or {"id": "re_1"},
+            credentials_fn=lambda *a, **k: ("sk_live_x", "acct_1"),
+        )
+        return response, requests_repo, refunds_repo, stripe_calls
+
+    def test_the_money_does_not_move_yet(self):
+        response, _requests, refunds, stripe_calls = self._call_physical()
+        self.assertEqual(response["statusCode"], 200, response.get("body"))
+        self.assertEqual(stripe_calls, [], "Stripe must not be called while the goods are still out")
+        self.assertEqual(refunds.saved, [])
+
+    def test_it_says_what_the_seller_has_to_do_next(self):
+        response, _r, _f, _s = self._call_physical()
+        body = json.loads(response["body"])
+        self.assertEqual(body["refund"]["status"], "awaiting_return")
+        self.assertIn("mark the return received", body["message"].lower())
+
+    def test_the_request_records_that_a_return_is_owed(self):
+        _response, requests, _f, _s = self._call_physical()
+        final = requests.saved[-1]
+        self.assertTrue(final["policy_snapshot"]["return_required"])
+        self.assertEqual(final["status"], "return_pending")
+
+
+class TheScreenStacksItsActionsAndTellsTheOutcome(unittest.TestCase):
+    @staticmethod
+    def _css():
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "styles.css").read_text()
+
+    @staticmethod
+    def _vue():
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "Orders.vue").read_text()
+
+    def test_the_action_controls_stack(self):
+        """Three controls in a row crowded the cell, and a destructive one inline beside two routine
+        ones is easy to hit by accident."""
+        block = self._css()
+        start = block.index(".orders-col-actions > *")
+        self.assertIn("display: block", block[start:start + 200])
+
+    def test_the_refund_control_is_visibly_not_routine(self):
+        self.assertIn(".orders-issue-refund", self._css())
+        self.assertIn("--danger", self._css())
+
+    def test_the_outcome_is_shown_to_the_seller(self):
+        """Refunded now, or approved and waiting on a parcel. Saying nothing would look like it failed."""
+        source = self._vue()
+        self.assertIn("refundOutcome", source)
+        self.assertIn("{{ refundOutcome }}", source)

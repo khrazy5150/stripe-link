@@ -7515,7 +7515,35 @@ button:disabled {
 }
 
 .orders-col-order { min-width: 24rem; }
-.orders-col-actions { text-align: right; white-space: nowrap; }
+/* STACKED, not in a row. Three controls side by side crowded the cell and pushed the table wide, and
+   a destructive action sitting inline beside two routine ones is easy to hit by accident. Each sits on
+   its own line, right-aligned with the column. */
+.orders-col-actions {
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.orders-col-actions > * {
+  display: block;
+  width: fit-content;
+  margin-left: auto;
+}
+
+.orders-col-actions > * + * {
+  margin-top: 0.45rem;
+}
+
+/* The one control here that moves money. Readable rather than shouting -- it is an available action,
+   not a warning -- but visibly not the same kind of thing as "Mark shipped". */
+.orders-issue-refund {
+  color: var(--danger, #c0392b);
+}
+
+.orders-issue-refund:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 
 .orders-id {
   display: inline-block;

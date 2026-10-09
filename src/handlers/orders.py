@@ -66,7 +66,8 @@ def handler(event, context, repository=None, products_repo=None, shipments_repo=
     if method == "POST" and _is_refund_path(event):
         if not order_id:
             return error_response("An order id is required.", code="missing_order")
-        return refund_order(event, repository, order_id, mode, now_fn=now_fn)
+        return refund_order(event, repository, order_id, mode, now_fn=now_fn,
+                            products_repo=products_repo)
     if method == "POST":
         if not order_id:
             return error_response("An order id is required.", code="missing_order")
@@ -371,7 +372,7 @@ def _is_refund_path(event) -> bool:
     return path.rstrip("/").endswith("/refund")
 
 
-def refund_order(event, repository, order_id, mode, *, now_fn=None,
+def refund_order(event, repository, order_id, mode, *, now_fn=None, products_repo=None,
                  requests_repo=None, refunds_repo=None, stripe_repo=None, secret_cipher=None,
                  caller=None, credentials_fn=None):
     """Refund an order the TENANT chose to refund, from the Orders screen.
@@ -393,7 +394,7 @@ def refund_order(event, repository, order_id, mode, *, now_fn=None,
     person it protects is the tenant, and they are the one asking. Forcing them to mark a return received
     before refunding their own customer would be the software arguing with its owner.
     """
-    from handlers.refunds import _execute
+    from handlers.refunds import _approve, _execute
     from stripe_link.stripe_client import stripe_request
     from stripe_link.stripe_platform_secrets import checkout_credentials
     from stripe_link.domain.purchase_lookup import refund_request_doc
@@ -417,19 +418,34 @@ def refund_order(event, repository, order_id, mode, *, now_fn=None,
     request = refund_request_doc({**order, "tenant_id": tenant_id},
                                  reason=str((body or {}).get("reason") or "Refunded by the seller"),
                                  now=now, request_id=f"rr_{generate_id()}")
-    request["status"] = "approved"
     request["initiated_by"] = "tenant"
-    request["approved_at"] = now
-    # No snapshot: nothing is being withheld pending a return, so recording a policy that will never be
-    # consulted would only invite someone to consult it.
-    request["policy_snapshot"] = {"return_required": False, "reason": "refunded by the seller",
-                                  "keep_it": False, "products": []}
 
     requests_repo = requests_repo or refund_requests_repository()
     try:
         requests_repo.put(request)
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
+
+    # THE SAME RULEBOOK AS THE REFUNDS SCREEN, by calling the same function. `_approve` decides whether
+    # these goods have to come back and records the policy as it stands right now, landing the request at
+    # `approved` or at `return_pending`.
+    #
+    # Skipping it and forcing `approved` was the first version of this, and it was wrong for a physical
+    # order: it would have put the money back while the goods were still with the buyer, removing a
+    # protection that exists for the SELLER. A download has nothing to return, so for that case the two
+    # steps collapse to one click, which is what this screen is for.
+    _approve(requests_repo, request, tenant_id, {}, now,
+             orders_repo=repository, products_repo=products_repo, mode=mode)
+
+    if str(request.get("status") or "") != "approved":
+        # Approved, but the money waits. Say so plainly and leave the release on the Refunds screen,
+        # which is where marking a return received already lives.
+        return json_response({
+            "refund_request": request,
+            "refund": {"status": "awaiting_return"},
+            "message": "Refund approved. These items must come back before the money goes out — "
+                       "mark the return received on the Refunds screen to release it.",
+        })
 
     return _execute(
         request, tenant_id, now,

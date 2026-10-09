@@ -72,6 +72,10 @@
         </ul>
       </div>
 
+      <!-- A refund has two outcomes and the seller has to be told which one happened: the money went
+           back, or it is approved and waiting on a parcel. -->
+      <p v-if="refundOutcome" class="keys-status-banner">{{ refundOutcome }}</p>
+
       <div v-if="!orders.length" class="product-empty-state">
         {{ loaded ? "No orders found." : "Loading orders..." }}
       </div>
@@ -670,6 +674,7 @@ const shipping = ref(null);
 const pendingRefund = ref(null);
 const refunding = ref("");
 const refundError = ref("");
+const refundOutcome = ref("");
 
 // A row with money still on it. An order already fully refunded has nothing left to return, and one
 // with no payment intent was never charged through Stripe.
@@ -684,12 +689,17 @@ async function issueRefund() {
   if (!order) return;
   refunding.value = order.order_id;
   refundError.value = "";
+  refundOutcome.value = "";
   try {
-    await apiRequest(`/orders/${encodeURIComponent(order.order_id)}/refund`, {
+    const result = await apiRequest(`/orders/${encodeURIComponent(order.order_id)}/refund`, {
       method: "POST",
       body: { reason: "Refunded by the seller" },
     });
     pendingRefund.value = null;
+    // TWO OUTCOMES, and the seller has to be told which. A download refunds on the spot; goods that
+    // must come back are approved and the money waits, which is the protection the Refunds screen's
+    // two-step flow exists for. Saying nothing would look like the refund silently failed.
+    refundOutcome.value = result?.message || "";
     // Reload rather than patching the row: the refund also moves the ledger, the order aggregates and
     // the Refunds queue, and a locally-edited row would disagree with all three.
     await load();
