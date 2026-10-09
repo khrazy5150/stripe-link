@@ -21,6 +21,7 @@ import time
 
 from stripe_link.domain.fee_reconciliation import _whole, drift, due, fees_of, settled
 from stripe_link.domain.ledger import sale_entry_from_order
+from stripe_link.domain.orphan_charges import charge_window, orphans, summarize
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (ledger_repository, notifications_repository,
                                                 orders_repository, shipments_repository,
@@ -35,7 +36,7 @@ MODES = ("test", "live")
 
 def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=None,
             secret_cipher=None, fetch_fees=None, true_up=None, now_fn=None, modes=MODES,
-            shipments_repo=None, notifications_repo=None):
+            shipments_repo=None, notifications_repo=None, list_charges=None):
     """Reconcile both Stripe modes. Returns a per-mode tally, which is also what the logs carry."""
     from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
 
@@ -61,8 +62,101 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
         tally[mode]["overdue_notified"] = _notify_overdue(
             mode, now, orders_repo=orders_for_mode, shipments_repo=shipments_repo,
             notifications_repo=notifications_repo)
+        # A THIRD PASS, and the only one that reads the other direction. The two above walk our orders
+        # and ask Stripe about them, so neither can ever find a sale we never recorded -- which is
+        # exactly what happened twice on 2026-10-07, and was caught by the operator reading the Stripe
+        # dashboard by eye a day later. This asks Stripe what it charged and reports what we do not hold.
+        tally[mode]["orphan_charges"] = _report_orphan_charges(
+            mode, now, orders_repo=orders_for_mode, stripe_repo=stripe_repo,
+            secret_cipher=secret_cipher, list_charges=list_charges,
+            notifications_repo=notifications_repo)
     logger.info("order sweep: %s", tally)
     return tally
+
+
+def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher, list_charges=None,
+                           notifications_repo=None):
+    """Ask Stripe what it charged, and report anything the orders table does not hold.
+
+    Per TENANT, because charges live on the connected account and the credentials are per tenant. The
+    tenants are taken from the Stripe-keys table, which is the only place that knows who is connected --
+    an orders scan cannot enumerate them, and a tenant whose every sale went missing would be invisible
+    to one.
+
+    Never raises. This is a reporting pass bolted onto a sweep that has real work to do; a Stripe outage
+    must not stop fees being reconciled.
+    """
+    from stripe_link.stripe_client import stripe_request
+
+    out = {"tenants": 0, "charges": 0, "orphans": 0, "amount": 0, "failed": 0}
+    if stripe_repo is None:
+        return out
+    lister = list_charges or (lambda **kwargs: stripe_request("GET", "/charges", **kwargs))
+    created_gte, created_lte = charge_window(now)
+    try:
+        connected = [row for row in (stripe_repo.scan_type() or [])
+                     if str(row.get("mode") or "") == mode and row.get("connect_account_id")]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("orphan sweep could not list %s tenants: %s: %s", mode, type(exc).__name__, exc)
+        return dict(out, failed=1)
+
+    for row in connected:
+        tenant_id = str(row.get("tenant_id") or "")
+        if not tenant_id:
+            continue
+        out["tenants"] += 1
+        try:
+            api_key, account = checkout_credentials(tenant_id, mode, row, secret_cipher)
+            if not api_key:
+                out["failed"] += 1
+                continue
+            listed = lister(api_key=api_key, stripe_account=account,
+                            params={"created[gte]": created_gte, "created[lte]": created_lte, "limit": 100})
+            charges = list((listed or {}).get("data") or [])
+            out["charges"] += len(charges)
+            found = orphans(charges, order_for_payment_intent=orders_repo.find_by_payment_intent)
+            if not found:
+                continue
+            out["orphans"] += len(found)
+            out["amount"] += sum(int(f.get("amount") or 0) for f in found)
+            # LOUD, because the whole point is that the previous two went unnoticed for a day. The
+            # summary carries the charge ids so the operator can open them directly rather than hunting.
+            logger.error("UNRECORDED STRIPE MONEY tenant=%s mode=%s %s",
+                         tenant_id, mode, summarize(found))
+            _notify_orphans(notifications_repo, tenant_id, mode, found, now)
+        except Exception as exc:  # noqa: BLE001 - one tenant's failure is not another's
+            out["failed"] += 1
+            logger.warning("orphan sweep failed for %s (%s): %s: %s",
+                           tenant_id, mode, type(exc).__name__, exc)
+    return out
+
+
+def _notify_orphans(notifications_repo, tenant_id, mode, found, now):
+    """One notification per CHARGE, keyed by its id so a repeating sweep does not repeat the alarm."""
+    if notifications_repo is None:
+        return
+    for fact in found:
+        charge_id = str(fact.get("charge_id") or "")
+        if not charge_id:
+            continue
+        try:
+            notifications_repo.put({
+                "tenant_id": tenant_id,
+                "notification_id": f"orphan_charge_{charge_id}",
+                "document_type": "notification",
+                "kind": "unrecorded_charge",
+                "severity": "critical",
+                "title": "A payment was taken that we have no order for",
+                "body": (f"Stripe charged {fact.get('amount')} {str(fact.get('currency') or '').upper()} "
+                         f"({charge_id}) in {mode} mode and this account holds no order for it."),
+                "stripe_mode": mode,
+                "charge_id": charge_id,
+                "payment_intent_id": fact.get("payment_intent_id"),
+                "amount": fact.get("amount"),
+                "created_at": now,
+            })
+        except Exception as exc:  # noqa: BLE001 - the log line above is the durable record
+            logger.warning("could not notify orphan %s: %s: %s", charge_id, type(exc).__name__, exc)
 
 
 def _reconcile_mode(mode, now, *, orders_repo, ledger_repo, stripe_repo, secret_cipher, fetch_fees, true_up):
