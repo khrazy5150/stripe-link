@@ -1472,16 +1472,22 @@ def publish_page_document(
             )
             _write_funnel_artifact(str(up_page["page_id"]), up_html, f"upsell_{entry['sequence']}")
 
-    # A funnel needs a terminus: synthesize the thank-you screen (Universal Bundle, no price) alongside the
-    # upsells so accept-through and decline both land on a real "Thank you" at {page_id}__thank_you instead of
-    # the landing page. P3.5 makes its copy editable.
-    if upsell_entries:
-        ty_page, ty_offer = synthesize_thank_you_page(page, offer)
-        ty_html = render_page(
-            ty_page, ty_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
-            robots=NOINDEX_ROBOTS, site=site, page_type="thank_you",
-        )
-        _write_funnel_artifact(str(ty_page["page_id"]), ty_html, "thank_you")
+    # A funnel needs a terminus: synthesize the thank-you screen (Universal Bundle, no price) so every path
+    # through the funnel lands on a real "Thank you" at {page_id}__thank_you instead of the landing page.
+    # P3.5 makes its copy editable.
+    #
+    # Written for EVERY published page, not only one with upsells. It was gated on `upsell_entries` until
+    # 2026-10-08, which meant an offer with a thank-you configured and no upsells rendered nothing, and its
+    # buyer was bounced to `?checkout=success` at the end of a real purchase -- while the builder's Purchase
+    # Flow said "ALWAYS -> Thank-you page" and its Live Preview showed the screen. The builder was promising
+    # something publish never produced, and only a live sale revealed it. The artifact is small, noindex, and
+    # unreachable unless the router sends someone to it, so there is nothing to gain by withholding it.
+    ty_page, ty_offer = synthesize_thank_you_page(page, offer)
+    ty_html = render_page(
+        ty_page, ty_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
+        robots=NOINDEX_ROBOTS, site=site, page_type="thank_you",
+    )
+    _write_funnel_artifact(str(ty_page["page_id"]), ty_html, "thank_you")
 
     # Remove stale context artifacts for contexts that are no longer enabled (e.g. Sale toggled off) so
     # /sale //flash-sale stop serving. Best-effort — a delete of a missing key is a harmless no-op.

@@ -251,15 +251,29 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
 
     next_page_id = destination["page_id"]
     next_step_id = destination.get("step_id", "")
-    # A dangling or unpublished thank-you page (the editor can reference one that was never created/published)
-    # would 404 the buyer at the very end of the funnel. Fall back to the entry page's success state — its
-    # artifact is always published — rather than dead-ending them (P3.5 makes the thank-you page real).
+    # The editor can reference a thank-you page that was never created as a Page document -- it configures
+    # one and previews it, but the document behind `thank_you_page.page_id` need not exist. When it does
+    # not, use the SYNTHESIZED screen at {page_id}__thank_you, which publish now writes for every page and
+    # which renders the very copy the editor shows.
+    #
+    # Bouncing to the entry page's `?checkout=success` used to be the only option here, and it is what a
+    # real buyer got on 2026-10-08: the funnel said "ALWAYS -> Thank-you page", and they were returned to
+    # the landing page they had just bought from. It stays as the last resort, for a page published before
+    # the artifact became unconditional -- those heal on their next publish.
     if next_step_id == "thank_you":
         try:
             thanks = repository.get(tenant_id, next_page_id) if next_page_id else None
         except RepositoryError:
             thanks = None
         if not thanks or thanks.get("status") != "published":
+            synthesized = _next_page_url(site, tenant_id, f"{page_id}__thank_you", pages_domain,
+                                         origin_host, mode=mode)
+            if synthesized:
+                query = {"session_id": session_id} if session_id else {}
+                if query:
+                    sep = "&" if "?" in synthesized else "?"
+                    synthesized = f"{synthesized}{sep}{urlencode(query)}"
+                return redirect_response(synthesized)
             entry_url = _next_page_url(site, tenant_id, page_id, pages_domain, origin_host, mode=mode)
             if not entry_url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")

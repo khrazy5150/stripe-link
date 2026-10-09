@@ -224,12 +224,19 @@ class PostCheckoutHandlerTests(unittest.TestCase):
         self.assertEqual(location.path, "/page_thank_you/index.html")
         self.assertEqual(location.query, "")
 
-    def test_unpublished_thank_you_falls_back_to_entry_success(self):
-        # Legacy (no offer-derived upsells) path: a dangling/unpublished thank-you must not 404 the buyer.
+    def test_unpublished_thank_you_uses_the_synthesized_screen(self):
+        """A thank-you the editor configured but never created as a Page document.
+
+        It must land on the synthesized terminus, not back on the page the buyer just bought from.
+        Bouncing to `?checkout=success` was the old behaviour and a real buyer got it on 2026-10-08,
+        at the end of a funnel whose builder said "ALWAYS -> Thank-you page". Publish now writes
+        {page_id}__thank_you for every page, so there is a real screen to send them to.
+        """
         self.repository.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "draft"})
         location = urlparse(self.call(outcome="accept", step_id="upsell_1")["headers"]["Location"])
-        self.assertEqual(location.path, "/page_entry/index.html")
-        self.assertEqual(parse_qs(location.query)["checkout"], ["success"])
+        self.assertEqual(location.path, "/page_entry__thank_you/index.html")
+        self.assertNotIn("checkout", parse_qs(location.query),
+                         "the buyer must not be returned to the landing page's success state")
 
     def test_external_thank_you_url_redirects_directly(self):
         self.repository.put(entry_page(thank_you_page={"url": "https://example.com/thanks"}))

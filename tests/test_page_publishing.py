@@ -194,10 +194,14 @@ class PagePublishingTests(unittest.TestCase):
             checkout_url="https://checkout.stripe.com/c/pay/demo",
         )
 
-        self.assertEqual([put["Key"] for put in self.s3.puts], ["preview/tenant_demo/page_simple_coffee/index.html"])
+        # Every published page also gets the synthesized funnel terminus, so a buyer who reaches the end
+        # of a funnel lands on a real "Thank you" rather than back on the page they just bought from.
+        self.assertEqual([put["Key"] for put in self.s3.puts],
+                         ["preview/tenant_demo/page_simple_coffee/index.html",
+                          "preview/tenant_demo/page_simple_coffee__thank_you/index.html"])
         self.assertIn(b"Simple Coffee", self.s3.puts[0]["Body"])
         self.assertIn(b"https://checkout.stripe.com/c/pay/demo", self.s3.puts[0]["Body"])
-        self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
+        self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview", "preview:thank_you"])
         self.assertIsNone(result["invalidation"])
 
     def test_publish_writes_preview_context_artifact_for_enabled_sale_on_a_draft(self):
@@ -628,7 +632,7 @@ class PagePublishingTests(unittest.TestCase):
                 environment="dev",
             )
 
-        self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
+        self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview", "preview:thank_you"])
         html = self.s3.puts[0]["Body"].decode("utf-8")
         self.assertIn("https://prod.juniorbay.com/checkout?", html)  # the configured base, not an env-split host
         self.assertNotIn("dev.juniorbay.com/checkout", html)
@@ -804,6 +808,8 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual([put["Key"] for put in self.s3.puts], [
             "preview/tenant_demo/page_simple_coffee/index.html",
             "page_simple_coffee/index.html",
+            "preview/tenant_demo/page_simple_coffee__thank_you/index.html",
+            "page_simple_coffee__thank_you/index.html",
         ])
         self.assertEqual(result["invalidation"]["paths"], ["/page_simple_coffee/index.html"])
         self.assertEqual(self.cloudfront.invalidations[0]["DistributionId"], "DIST123")
@@ -856,7 +862,7 @@ class PagePublishingTests(unittest.TestCase):
             )
 
         self.assertEqual(result, {"batchItemFailures": []})
-        self.assertEqual(len(self.s3.puts), 1)
+        self.assertEqual(len(self.s3.puts), 2)  # the page, plus its synthesized thank-you terminus
         self.assertEqual(self.s3.puts[0]["Key"], "preview/tenant_demo/page_simple_coffee/index.html")
 
     def test_a_page_whose_offer_is_gone_is_dropped_not_retried(self):
@@ -931,7 +937,8 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual(result, {"batchItemFailures": []})
         self.assertEqual(
             [put["Key"] for put in self.s3.puts],
-            ["preview/tenant_demo/page_simple_coffee/index.html"],
+            ["preview/tenant_demo/page_simple_coffee/index.html",
+             "preview/tenant_demo/page_simple_coffee__thank_you/index.html"],
             "the page behind the poison record must still render",
         )
 
@@ -1011,7 +1018,8 @@ class PagePublishingTests(unittest.TestCase):
         # ...then the re-render cleans up the now-disabled /sale //flash-sale sibling artifacts.
         self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/sale/index.html"), deletes)
         self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/flash-sale/index.html"), deletes)
-        self.assertEqual([put["Key"] for put in self.s3.puts], ["preview/tenant_demo/page_simple_coffee/index.html"])
+        self.assertEqual([put["Key"] for put in self.s3.puts],
+                         ["preview/tenant_demo/page_simple_coffee/index.html", "preview/tenant_demo/page_simple_coffee__thank_you/index.html"])
 
     def test_stream_handler_reports_failed_records(self):
         event = {
