@@ -261,6 +261,9 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         self.product = _load("product-creatine-gummies.json")
         self.products_by_id = {self.product["product_id"]: self.product}
         self.offer = {
+            # Ships something: these tests cover the shipping ETA element, which a digital-only offer
+            # no longer renders at all.
+            "ships_physical": True,
             "offer_id": "offer_main", "tenant_id": "tenant_demo", "stripe_mode": "test",
             "presentation": {"brand": "JuniorBay"},
             "funnel": {"upsells": [{"product_id": self.product["product_id"], "price_id": "price_upsell_1bottle"}]},

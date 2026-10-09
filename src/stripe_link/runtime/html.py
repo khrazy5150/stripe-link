@@ -5534,8 +5534,20 @@ def _shipping_eta_island() -> str:
         "        .then(function(r){ return r.json(); })",
         "        .then(function(body){",
         "          var promise = (body && body.delivery) || null;",
-        # `{}` is a real answer: this order has no parcel, so the element must go rather than linger.
-        "          if (!promise || !Object.keys(promise).length) { box.remove(); return; }",
+        # `{}` is a real answer: this order has no parcel, so the element must go rather than linger --
+        # AND so must any card whose text depends on an arrival date. Returning here left
+        # "Your order is expected to arrive {{arrival}}." on screen with the token unsubstituted, which
+        # a buyer of a digital product saw on a live purchase (2026-10-09). A card that needs a delivery
+        # date is a shipping card whatever it is titled; substituting a vague phrase would still leave
+        # "Wait for Your Package" above a download.
+        "          if (!promise || !Object.keys(promise).length) {",
+        "            box.remove();",
+        "            Array.prototype.forEach.call(document.querySelectorAll('.sl-next-step'), function(card){",
+        "              var p = card.querySelector('p');",
+        "              if (p && p.textContent.indexOf('{{arrival}}') >= 0) card.remove();",
+        "            });",
+        "            return;",
+        "          }",
         "          var line = box.querySelector('.sl-ship-eta-line');",
         "          if (line && promise.sentence) { line.textContent = promise.sentence; }",
         "          if (promise.service) {",

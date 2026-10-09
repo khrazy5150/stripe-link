@@ -26,7 +26,7 @@ class ItComesFirstTests(unittest.TestCase):
         page = {"theme": {}}
         if page_override:
             page["post_checkout"] = {"thank_you_page": page_override}
-        rendered, _offer = synthesize_thank_you_page(page, {"offer_id": "o1", "tenant_id": "t1"})
+        rendered, _offer = synthesize_thank_you_page(page, {"offer_id": "o1", "tenant_id": "t1", "ships_physical": True})
         return [s["type"] for s in rendered["sections"]]
 
     def test_it_sits_between_the_subheadline_and_the_message(self):
@@ -44,7 +44,7 @@ class ItComesFirstTests(unittest.TestCase):
     def test_the_tenant_owns_the_icon_and_title(self):
         page = {"theme": {}, "post_checkout": {"thank_you_page": {
             "shipping_eta_icon": "🚚", "shipping_eta_title": "On its way"}}}
-        rendered, _ = synthesize_thank_you_page(page, {"offer_id": "o1", "tenant_id": "t1"})
+        rendered, _ = synthesize_thank_you_page(page, {"offer_id": "o1", "tenant_id": "t1", "ships_physical": True})
         card = next(s for s in rendered["sections"] if s["type"] == "shipping_eta")
         self.assertEqual((card["icon"], card["title"]), ("🚚", "On its way"))
 

@@ -11,6 +11,7 @@ stored per-page at page.post_checkout.upsell_scaffold; a missing scaffold falls 
 from copy import deepcopy
 from typing import Any
 
+from stripe_link.domain.composition import offer_ships_physical
 from stripe_link.runtime.html import format_money
 
 # Default customer-facing copy for a post-purchase upsell screen. {{ upsell_price }} in accept_label is
@@ -427,7 +428,14 @@ def synthesize_thank_you_page(
     # opened this page to find out, and burying it under a paragraph of reassurance is how it ends up
     # unread. The element is emitted for every page; the island removes it when the order turns out to
     # have no parcel, because only the ORDER knows that and this page is one artifact serving everyone.
-    if config.get("enable_shipping_eta", True):
+    # ...unless the offer ships NOTHING, in which case the page can say so at render time and should.
+    # The island's removal exists because one artifact serves every buyer of a MIXED offer and only the
+    # order knows whether that buyer gets a parcel. A digital-only offer has no such ambiguity: nobody
+    # who buys it will ever get one. Emitting the element anyway put a package card in front of a buyer
+    # of a digital product and showed the tenant one in the builder preview, where there is no order to
+    # remove it (reported 2026-10-08, then seen live on a real purchase 2026-10-09).
+    ships = offer_ships_physical(source_offer)
+    if config.get("enable_shipping_eta", True) and ships:
         sections.append({"id": "shipping-eta", "type": "shipping_eta",
                          "icon": config.get("shipping_eta_icon") or "📦",
                          "title": config.get("shipping_eta_title") or "Shipping",
@@ -437,6 +445,12 @@ def synthesize_thank_you_page(
         sections.append({"id": "content", "type": "content_block", "blocks": [{"title": "", "text": config["message"]}]})
     if config.get("enable_next_steps"):
         cards = [c for c in (config.get("next_steps") or []) if isinstance(c, dict) and (c.get("title") or c.get("desc"))]
+        if not ships:
+            # A card whose text depends on an arrival date is a shipping card whatever it is titled, and
+            # for an offer that ships nothing it can only ever say the wrong thing. Dropping it beats
+            # substituting the token with a vague phrase: "Wait for Your Package" is wrong for a download
+            # no matter what sentence follows it.
+            cards = [c for c in cards if "{{arrival}}" not in str(c.get("desc") or "")]
         if cards:
             sections.append({"id": "next-steps", "type": "next_steps",
                              "title": config.get("next_steps_title") or "What's Next?", "cards": cards})
