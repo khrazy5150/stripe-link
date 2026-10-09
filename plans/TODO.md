@@ -1369,6 +1369,30 @@ usage, which moved a real page +18 PageSpeed points.
 
 The original entry follows.
 
+### The textable voucher — a card terminal that is a link (noted 2026-10-09, client request)
+
+A cash-only service business with no POS wants to take cards. The request arrived as "a textable coupon";
+the need is card acceptance without hardware or a merchant account. Full write-up in
+**`plans/TEXTABLE_VOUCHER.md`**.
+
+**Mostly already built.** Published page on a free `*.jbay.be` host, business NAP, `offer.discount`, and
+a `buy` CTA. "Dumb" vs "smart" is the `call` vs `buy` CTA type the composition design already enumerates.
+Payment happens AFTER the service from the same link, which dissolves both redemption and
+chargeback-before-delivery — paying is redeeming.
+
+**Missing: two things.** A real `expires_at` with SERVER-SIDE enforcement (`offer.context` is a
+deprecated enum with no date), and a compare-at render (`~~$80~~ $70`) in the shared price card. Days.
+
+**Build it as a `voucher` GOAL**, not a document type — `Coupon` already means a Stripe discount code
+with `stripe_coupon_id`, and a second Coupon would be ambiguous in the UI and in every conversation after.
+
+**Do first, costing nothing:** get her live on what exists — Stripe connected, service priced, page
+published, link texted. Warn her that Stripe IS the merchant account (self-serve, no hardware), that it
+will verify her and a cash business often has loose ends, and that ~$2.33 of a $70 service goes in fees
+with none of Stripe's returned on a refund.
+
+Priority unset — a real client is waiting, so this is the author's call rather than mine.
+
 ### LOW — Junior Bay as an MCP server for Claude (noted 2026-10-09)
 
 Expose the platform as Model Context Protocol tools so a tenant can operate their store conversationally:
