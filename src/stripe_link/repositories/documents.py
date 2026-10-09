@@ -898,6 +898,31 @@ class StripeKeysRepository:
         response = self.table.get_item(Key=self._key(key_value, mode))
         return response.get("Item")
 
+    def connected(self, mode: str) -> list[dict[str, Any]]:
+        """Every tenant with a Connect account in this mode.
+
+        The orphan-charge sweep needs to ask Stripe what it charged, and charges live on the CONNECTED
+        account — so it has to enumerate who is connected. An orders scan cannot do that: a tenant whose
+        every sale went missing would have no orders to be found by, which is precisely the case the
+        sweep exists for.
+
+        Paginated, because a scan returns one page and a sweep that silently saw the first 1MB of tenants
+        would under-report missing money — the one failure this whole pass is meant to prevent.
+        """
+        from boto3.dynamodb.conditions import Attr
+
+        request: dict[str, Any] = {
+            "FilterExpression": Attr(self.mode_field).eq(self._mode(mode)) & Attr("connect_account_id").exists(),
+        }
+        rows: list[dict[str, Any]] = []
+        while True:
+            response = self.table.scan(**request)
+            rows.extend(response.get("Items", []))
+            last = response.get("LastEvaluatedKey")
+            if not last:
+                return rows
+            request["ExclusiveStartKey"] = last
+
     def find_by_connect_account_id(self, account_id: str, mode: str = "test") -> dict[str, Any] | None:
         account_id = str(account_id or "").strip()
         if not account_id:

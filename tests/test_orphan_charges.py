@@ -117,10 +117,34 @@ class TheSweepPassReportsAndNotifies(unittest.TestCase):
             def find_by_payment_intent(self, payment_intent):
                 return {"order_id": "ord"} if payment_intent == "pi_known" else None
 
-        class Keys:
-            def scan_type(self):
-                return [{"tenant_id": "t_1", "mode": "live", "connect_account_id": "acct_1"},
-                        {"tenant_id": "t_2", "mode": "test", "connect_account_id": "acct_2"}]
+        # The REAL repository over a fake table, not a fake repository. The first version of this test
+        # invented a `scan_type()` the real class does not have, so it passed while the deployed sweep
+        # logged `AttributeError` every five minutes -- the exact fake-that-cannot-fail mistake this
+        # codebase keeps paying for. A fake must stand in for the real interface, not describe one.
+        from stripe_link.repositories.documents import StripeKeysRepository
+
+        class FakeKeysTable:
+            ROWS = [
+                {"tenant_id": "t_1", "mode": "live", "connect_account_id": "acct_1"},
+                {"tenant_id": "t_2", "mode": "test", "connect_account_id": "acct_2"},
+                {"tenant_id": "t_3", "mode": "live"},  # connected to nothing; must be skipped
+            ]
+
+            def scan(self, **kwargs):
+                condition = kwargs.get("FilterExpression")
+                return {"Items": [r for r in self.ROWS if condition and _matches(condition, r)]}
+
+        def _matches(condition, row):
+            """Good enough for the two attributes `connected()` filters on."""
+            text = str(condition.get_expression() if hasattr(condition, "get_expression") else condition)
+            wanted_live = "live" in text
+            if row.get("mode") != ("live" if wanted_live else "test"):
+                return False
+            return bool(row.get("connect_account_id"))
+
+        class Keys(StripeKeysRepository):
+            def __init__(self):
+                super().__init__("jb-stripe-keys-test", key_field="tenant_id", table=FakeKeysTable())
 
         self.notifications_repo = Notifications(self.notifications)
         self.orders_repo = Orders()

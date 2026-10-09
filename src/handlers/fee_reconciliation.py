@@ -94,8 +94,7 @@ def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher
     lister = list_charges or (lambda **kwargs: stripe_request("GET", "/charges", **kwargs))
     created_gte, created_lte = charge_window(now)
     try:
-        connected = [row for row in (stripe_repo.scan_type() or [])
-                     if str(row.get("mode") or "") == mode and row.get("connect_account_id")]
+        connected = stripe_repo.connected(mode) or []
     except Exception as exc:  # noqa: BLE001
         logger.warning("orphan sweep could not list %s tenants: %s: %s", mode, type(exc).__name__, exc)
         return dict(out, failed=1)
