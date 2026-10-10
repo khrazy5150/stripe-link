@@ -189,14 +189,14 @@
             </button>
           </div>
 
-          <div v-else class="onboarding-step">
+          <div v-else-if="wizardStep === 3" class="onboarding-step">
             <template v-if="otherEnvironmentConfigured">
               <p>
                 You're all set — <strong>{{ environmentLabel }}</strong> and
                 <strong>{{ otherEnvironmentLabel }}</strong> are both connected.
               </p>
               <div class="onboarding-actions-row">
-                <button type="button" class="primary-action" @click="closeWizard">Done</button>
+                <button type="button" class="primary-action" @click="wizardStep = 4">Next</button>
               </div>
             </template>
             <template v-else>
@@ -207,11 +207,30 @@
                 <button type="button" class="primary-action" @click="configureOtherEnvironment">
                   Configure {{ otherEnvironmentLabel }}
                 </button>
-                <button type="button" class="secondary-action" @click="closeWizard">
+                <button type="button" class="secondary-action" @click="wizardStep = 4">
                   Not now
                 </button>
               </div>
             </template>
+          </div>
+
+          <div v-if="wizardStep === 4" class="onboarding-step">
+            <p>
+              Add a photo or logo for your store. Buyers see it on your pages and in your emails.
+              <strong>Optional</strong> — you can add it later in Preferences.
+            </p>
+            <StoreAvatarField
+              :model-value="profileStore.storeAvatarUrl"
+              :uploader="uploadImage"
+              :busy="avatarBusy"
+              :error="avatarError"
+              @update:model-value="saveAvatar"
+            />
+            <div class="onboarding-actions-row">
+              <button type="button" class="primary-action" :disabled="avatarBusy" @click="closeWizard">
+                {{ profileStore.storeAvatarUrl ? "Done" : "Skip for now" }}
+              </button>
+            </div>
           </div>
 
           <div v-if="wizardError" class="keys-status-banner error">{{ wizardError }}</div>
@@ -222,7 +241,11 @@
 </template>
 
 <script setup>
+import StoreAvatarField from "./shared/StoreAvatarField.vue";
 import WizardSteps from "./shared/WizardSteps.vue";
+import { apiRequest } from "../api/client";
+import { uploadImage } from "../api/uploads";
+import { useProfileStore } from "../stores/profile";
 import { computed, onMounted, ref, watch } from "vue";
 import { useDashboardStore } from "../stores/dashboard";
 import { useStripeKeysStore } from "../stores/stripeKeys";
@@ -241,12 +264,34 @@ const props = defineProps({
 const emit = defineEmits(["switch-environment"]);
 const store = useDashboardStore();
 const stripeKeys = useStripeKeysStore();
+const profileStore = useProfileStore();
 const wizardOpen = ref(false);
 // Named steps for the shared rail. Names, not numbers: "Step 2 of 4" tells you how far
 // along you are and nothing about what is left.
-const WIZARD_STEPS = ["Authorize", "Confirm", "Finish"];
+// "Photo" is last and OPTIONAL. It is here rather than left to Preferences because a tenant who is
+// asked once, while they are already setting things up, will do it — and one who is not will never go
+// looking for it. The store avatar is what buyers see on every page, so an empty one is a cost.
+const WIZARD_STEPS = ["Authorize", "Confirm", "Finish", "Photo"];
 const wizardStep = ref(1);
 const wizardError = ref("");
+const avatarBusy = ref(false);
+const avatarError = ref("");
+
+// Saved through the STORE, not a local copy: the topbar pill reads profileStore.storeAvatarUrl, and a
+// second copy here would leave it showing the old photo until a reload — the same stale-second-copy
+// shape Preferences already hit and fixed.
+async function saveAvatar(url) {
+  avatarError.value = "";
+  avatarBusy.value = true;
+  try {
+    const body = await apiRequest("/tenant/avatar", { method: "PUT", body: { avatar_url: url } });
+    profileStore.storeAvatarUrl = body.avatar_url || "";
+  } catch (err) {
+    avatarError.value = err.message || "Could not save the photo.";
+  } finally {
+    avatarBusy.value = false;
+  }
+}
 
 const connectDocument = computed(() => stripeKeys.connectCard?.stripe_connect || {});
 const connectStatus = computed(() => String(connectDocument.value.connect_status || "not_connected"));
@@ -289,6 +334,7 @@ const setupWarning = computed(() => {
 const wizardTitle = computed(() => {
   if (wizardStep.value === 1) return `Authorize ${props.environmentLabel} Stripe`;
   if (wizardStep.value === 2) return "Confirm your Stripe connection";
+  if (wizardStep.value === 4) return "Add your store photo";
   return otherEnvironmentConfigured.value ? "Setup complete" : `Configure ${otherEnvironmentLabel.value} environment`;
 });
 

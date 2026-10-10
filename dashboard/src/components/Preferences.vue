@@ -67,18 +67,19 @@
       <div class="dashboard-card-body">
       <p class="field-note">
         Shown on every page that has not overridden it — checkout pages and link pages alike. Pages reference
-        this image rather than copying it, so updating it here updates them all. A square image works best;
-        it is shown as a circle.
+        this image rather than copying it, so updating it here updates them all. Crop it to the circle here —
+        any shape of photo will do.
       </p>
-      <div class="builder-avatar-row">
-        <img v-if="storeAvatarUrl" :src="storeAvatarUrl" class="builder-avatar-preview" alt="" />
-        <input ref="storeAvatarInput" type="file" accept="image/*" hidden @change="onStoreAvatarPicked" />
-        <button class="secondary-action compact" type="button" :disabled="storeAvatarBusy" @click="storeAvatarInput?.click()">
-          {{ storeAvatarBusy ? "Uploading..." : (storeAvatarUrl ? "Replace avatar" : "Upload avatar") }}
-        </button>
-        <button v-if="storeAvatarUrl" class="secondary-action compact" type="button" :disabled="storeAvatarBusy" @click="clearStoreAvatar">Remove</button>
-      </div>
-      <small v-if="storeAvatarError" class="builder-upload-error">{{ storeAvatarError }}</small>
+      <!-- The SAME field onboarding uses. This was a bare file input that centre-cropped whatever it
+           was given and told the tenant "a square image works best" — asking them to do the cropping in
+           their head, while the cropper sat unused one directory away. -->
+      <StoreAvatarField
+        :model-value="storeAvatarUrl"
+        :uploader="uploadImage"
+        :busy="storeAvatarBusy"
+        :error="storeAvatarError"
+        @update:model-value="saveStoreAvatar"
+      />
       </div>
     </section>
 
@@ -175,6 +176,7 @@
 <script setup>
 import { computed, reactive, ref } from "vue";
 import { apiRequest, getAuthSession, getTenantId } from "../api/client";
+import StoreAvatarField from "./shared/StoreAvatarField.vue";
 import { uploadImage } from "../api/uploads";
 import { useProfileStore } from "../stores/profile";
 
@@ -197,7 +199,6 @@ const fontForm = reactive({ family: "", weight: "400", licence: false });
 const fontToRemove = ref(null);
 
 const profileStore = useProfileStore();
-const storeAvatarInput = ref(null);
 // Read THROUGH the store, not into a local ref. The topbar pill renders profileStore.storeAvatarUrl, so a
 // card holding its own copy meant removing the avatar cleared the card and left the pill showing it until
 // the page was reloaded -- the same stale-second-copy shape as every other drift bug here.
@@ -228,23 +229,7 @@ async function saveStoreAvatar(url) {
   }
 }
 
-async function onStoreAvatarPicked(event) {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  if (!file) return;
-  storeAvatarError.value = "";
-  storeAvatarBusy.value = true;
-  try {
-    const { url } = await uploadImage(file);
-    await saveStoreAvatar(url);
-  } catch (err) {
-    storeAvatarError.value = err.message || "Avatar upload failed.";
-  } finally {
-    storeAvatarBusy.value = false;
-  }
-}
 
-const clearStoreAvatar = () => saveStoreAvatar("");
 
 async function loadFonts() {
   // Store fonts live on the tenant profile, not in this screen's user-scoped document, so they load
