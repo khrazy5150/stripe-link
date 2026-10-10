@@ -408,6 +408,11 @@ limit and the deploy was refused outright. It rides `/shipping/rate-preview`, sp
 body key. **Until the template is slimmed (derived table names ~146KB, collapsed IAM ~100KB) no new
 endpoint can be added anywhere in this stack.**
 
+**MEASURED 2026-10-09: 993,953 of 1,000,000 bytes, 6,047 of headroom — see
+`plans/TRANSFORM_BUDGET.md`.** The estimates below ("derived table names ~146KB, collapsed IAM ~100KB")
+were guesses and the first is wrong: all 46 tables are 3% of the template. The real weight is 84
+environment variables on every one of 74 functions, 36% of the budget. That plan supersedes this note.
+
 **Deleting tables does not buy a single byte** — measured 2026-10-06, because it is the obvious wrong guess
 and was acted on once. The limit applies to the *transformed template text*, not to anything in AWS. A
 table CloudFormation has already deleted weighs nothing, and the 67 orphan tables in this account are owned

@@ -1369,6 +1369,29 @@ usage, which moved a real page +18 PageSpeed points.
 
 The original entry follows.
 
+### The stack is 99.4% full — 6,047 bytes left (measured 2026-10-09)
+
+`993,953 / 1,000,000`, read from the deployed stack with `get-template --template-stage Processed`. One
+more route fits. Not two. Full write-up in **`plans/TRANSFORM_BUDGET.md`**.
+
+**Neither hypothesis was right.** All 46 tables are **3%** of the template, so deleting them buys 31KB
+and they are all in use. 14 of 72 functions were never invoked in 30 days, but they are `registration`,
+`booking`, `custom-domains`, `reviews-public` — features nobody has used yet on a pre-launch stack, not
+dead code.
+
+**The problem is 84 environment variables on every function** — 4,887 bytes each, **362,538 total, 36%
+of the budget**. `jb-support-contact` carries the names of all 46 tables. Measured by the repository
+factories each handler actually calls, the median handler needs **2** table vars and the heaviest
+(`stripe_webhook`) needs 22. Moving them out of `Globals` is worth **~267KB (27%)**, taking headroom
+from 6KB to ~270KB.
+
+**Tractable because the analysis exists**: `tests/test_table_grants.py` already computes which handler
+reaches which table transitively, and caught exactly what `OrdersFunction` needed when the refund route
+landed. Incremental, heaviest first, every deploy strictly smaller.
+
+**The risk**: a missing env var is a RUNTIME failure, not a deploy failure. Extend the grant test to env
+vars BEFORE converting anything — a conversion that outruns its test is how this becomes an outage.
+
 ### The textable voucher — a card terminal that is a link (noted 2026-10-09, client request)
 
 A cash-only service business with no POS wants to take cards. The request arrived as "a textable coupon";
