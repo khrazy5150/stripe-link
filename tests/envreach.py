@@ -36,8 +36,23 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 
-# `os.environ.get("X")`, `os.environ["X"]`, `environ.get("X")` — every shape this codebase uses.
+# `os.environ.get("X")`, `os.environ["X"]`, `environ.get("X")` — the literal shape.
 _ENV_CALL = re.compile(r'(?:os\.)?environ(?:\.get)?\(?\[?\s*["\'](\w+)["\']')
+
+# NOT EVERY READ NAMES ITS VARIABLE AT THE CALL SITE, and the ones that do not are exactly the reads
+# whose absence would be a silent outage. Three real shapes in this codebase:
+#
+#   handlers/admin_delete_test_data.py   for env_name in _PK_TABLES: os.environ.get(env_name, "")
+#   handlers/sites.py                    _ips("CLOUDFLARE_APEX_IPV4")   # literal through a local fn
+#   stripe_link/stripe_platform_secrets  os.environ.get(f"STRIPE_SECRET_KEY_{mode.upper()}")
+#
+# So any bare SCREAMING_SNAKE string literal in a file counts as a candidate name, and an f-string read
+# contributes its literal PREFIX, which then matches every declared variable beginning with it. Both
+# over-collect wildly -- and harmlessly, because `required()` intersects the result with the names the
+# template actually declares. Over-collecting costs a few bytes of env var; missing one of these costs an
+# outage in a dev-only wipe tool or, worse, in Stripe credential resolution.
+_BARE_NAME = re.compile(r'["\']([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)["\']')
+_ENV_FSTRING_PREFIX = re.compile(r'(?:os\.)?environ(?:\.get)?\(?\[?\s*f["\']([A-Z][A-Z0-9_]*_)\{')
 
 
 def _module_name(path: pathlib.Path) -> str:
@@ -53,8 +68,18 @@ REPOSITORIES = SRC / "stripe_link" / "repositories"
 
 
 def _env_reads(node: ast.AST) -> set[str]:
-    """Env var names read anywhere inside this AST node."""
-    return set(_ENV_CALL.findall(ast.unparse(node))) if node is not None else set()
+    """Env var names read anywhere inside this AST node, literal or indirect."""
+    if node is None:
+        return set()
+    return _names_in(ast.unparse(node))
+
+
+def _names_in(source: str) -> set[str]:
+    """Every env var name this source could read: literal calls, bare names, f-string prefixes."""
+    found = set(_ENV_CALL.findall(source))
+    found |= set(_BARE_NAME.findall(source))
+    found |= {f"{prefix}*" for prefix in _ENV_FSTRING_PREFIX.findall(source)}
+    return found
 
 
 def factory_envs() -> dict[str, set[str]]:
@@ -97,16 +122,16 @@ def direct_envs(path: pathlib.Path, *, factories: dict[str, set[str]] | None = N
     """
     source = path.read_text(encoding="utf-8")
     if factories is None or REPOSITORIES not in path.parents:
-        return set(_ENV_CALL.findall(source))
+        return _names_in(source)
     try:
         tree = ast.parse(source)
     except SyntaxError:  # pragma: no cover
-        return set(_ENV_CALL.findall(source))
+        return _names_in(source)
     inside_definitions: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             inside_definitions |= _env_reads(node)
-    return set(_ENV_CALL.findall(source)) - inside_definitions
+    return _names_in(source) - inside_definitions
 
 
 def called_names(path: pathlib.Path) -> set[str]:
@@ -247,4 +272,12 @@ def required(function_module: str, reachable: dict[str, set[str]], declared: set
     switches that default when absent). Those are not Phase 2's business: the question is only which of
     the DECLARED variables must keep being declared for this function.
     """
-    return reachable.get(function_module, set()) & declared
+    reached = reachable.get(function_module, set())
+    # Expand the f-string prefixes recorded as `PREFIX_*`. `STRIPE_SECRET_KEY_TEST` never appears as a
+    # literal anywhere, so without this a function resolving Stripe credentials would be stripped of the
+    # only variable that holds them.
+    concrete = {name for name in reached if not name.endswith("*")}
+    for wildcard in (name for name in reached if name.endswith("*")):
+        prefix = wildcard[:-1]
+        concrete |= {name for name in declared if name.startswith(prefix)}
+    return concrete & declared

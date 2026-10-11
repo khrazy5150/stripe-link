@@ -146,5 +146,52 @@ class WhatPhase2WouldSave(unittest.TestCase):
                         f"needed {needed} of {now} slots; Phase 2 stops being worth the risk above ~35%")
 
 
+class IndirectReadsAreSeen(unittest.TestCase):
+    """The reads that do NOT name their variable at the call site.
+
+    These are the silent-outage class: an analysis that only understands `environ.get("X")` would strip
+    them, the template would deploy, and the failure would arrive with the first request that took the
+    branch. All three shapes below are real and in this codebase.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.template = (ROOT / "template.yaml").read_text(encoding="utf-8")
+        cls.reachable = envreach.reach()
+        cls.declared = envreach.global_env_names(cls.template)
+
+    def test_a_name_taken_from_a_module_level_list(self):
+        """`for env_name in _PK_TABLES: os.environ.get(env_name, "")` — the dev-only wipe tool. Strip
+        these and it silently deletes nothing, reporting success."""
+        reached = self.reachable["handlers.admin_delete_test_data"]
+        for name in ("ORDERS_TABLE", "PAGES_TABLE", "PRODUCTS_TABLE"):
+            self.assertIn(name, reached, name)
+
+    def test_a_literal_passed_through_a_local_function(self):
+        """`_ips("CLOUDFLARE_APEX_IPV4")` in handlers/sites.py."""
+        self.assertIn("CLOUDFLARE_APEX_IPV4", self.reachable["handlers.sites"])
+
+    def test_an_fstring_prefix_expands_against_the_declared_names(self):
+        """`os.environ.get(f"STRIPE_SECRET_KEY_{mode.upper()}")`. Those particular names are not template
+        variables -- they come from Secrets Manager -- so this asserts the MECHANISM on a prefix that is
+        declared, rather than asserting a vacuous empty set."""
+        expanded = envreach.required("x", {"x": {"STRIPE_CLIENT_ID_*"}}, self.declared)
+        self.assertEqual(expanded, {"STRIPE_CLIENT_ID_LIVE", "STRIPE_CLIENT_ID_TEST"})
+
+    def test_the_connect_handlers_keep_every_client_id_variant(self):
+        """Read as three separate literals, and all three are needed: test, live, and the legacy
+        unsuffixed fallback. Losing the fallback breaks Connect for anyone on the older config."""
+        need = envreach.required("handlers.stripe_connect", self.reachable, self.declared)
+        for name in ("STRIPE_CLIENT_ID", "STRIPE_CLIENT_ID_LIVE", "STRIPE_CLIENT_ID_TEST"):
+            self.assertIn(name, need, name)
+
+    def test_over_collecting_cannot_leak_an_undeclared_name(self):
+        """Bare SCREAMING_SNAKE literals are collected wholesale, which is safe only because `required`
+        intersects with what the template declares. If that intersection went away, the guard would start
+        demanding variables that do not exist."""
+        need = envreach.required("handlers.orders", self.reachable, self.declared)
+        self.assertTrue(need <= self.declared)
+
+
 if __name__ == "__main__":
     unittest.main()
