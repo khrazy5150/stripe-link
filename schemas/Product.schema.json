@@ -97,6 +97,11 @@
       "minLength": 1,
       "description": "Merchant-specific stock keeping unit. Optional; when absent, structured data falls back to product_id as the identifier."
     },
+    "unit_cost": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "What the tenant PAID to acquire one unit, in the smallest currency unit. Cost of goods, not a sale price. ABSENT MEANS UNKNOWN, never zero: the ledger reports profit only when every line of a sale has one, because a missing cost silently inflates margin. A planned InventoryLot (plans/INVENTORY_COST_BASIS.md) would derive this from a batch; today the tenant types it."
+    },
     "condition": {
       "type": "string",
       "enum": [

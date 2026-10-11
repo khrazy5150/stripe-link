@@ -30,6 +30,7 @@ from stripe_link.domain.documents import DocumentValidationError, validate_appoi
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price, settled_breakdown
 from stripe_link.delegation import apply_delegation
+from stripe_link.domain import cogs
 from stripe_link.domain.ledger import (
     dispute_entry_from_event,
     refund_entry as build_ledger_refund_entry,
@@ -2573,6 +2574,14 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
     # 2026-10-01. The ledger adds the two together for `shipping_revenue`, which is where the question
     # "did postage pay for itself?" is actually asked.
     bump_shipping = bump_postage_collected(resolved_line_items, bump_postage)
+    # WHAT THE GOODS COST US. The bump price ids are passed because an order bump is ticked after the
+    # session was created: checkout stamped what each bump WOULD cost, and only now do we know which the
+    # buyer took. A bump with no stamped cost makes the whole sale's margin unknowable, which is the point
+    # of tracking `unknown_lines` rather than just summing what we happen to have.
+    purchased_bumps = [(item.get("stripe_price_id"), item.get("quantity"))
+                       for item in resolved_line_items
+                       if item.get("is_order_bump") and item.get("stripe_price_id")]
+    sale_costs = cogs.from_metadata(metadata, purchased_bumps=purchased_bumps)
     shipping_address = destination_address_from_session(session)
     record = {
         "tenant_id": tenant_id,
@@ -2622,6 +2631,16 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         # baseline any later shipping-cost variance is measured against. Absent when no quote priced the
         # sale, rather than a block of empty strings claiming one.
         **agreed_shipping(metadata, shipping_address),
+        # COST OF GOODS, frozen at the sale. `ledger.sale_entry` has accepted a `cogs` argument since the
+        # ledger was written and nothing ever supplied one, so `profit` has been revenue-minus-fees
+        # wearing the word "profit" -- and `Reports.vue` showed it (plans/MONEY_ACROSS_SILOS.md P2).
+        #
+        # `known` travels WITH the amount and is the more important half: absent costs are not zero costs,
+        # and a margin computed over products nobody has costed is the inflated-margin lie in a nicer
+        # font. Every order written before this shipped reports `known: false`, correctly.
+        "costs": {"cogs": int(sale_costs["cogs"]),
+                  "unknown_lines": int(sale_costs["unknown_lines"]),
+                  "known": bool(sale_costs["known"])},
         "product": {
             "product_id": metadata.get("product_id", ""),
             "price_id": metadata.get("price_id", ""),

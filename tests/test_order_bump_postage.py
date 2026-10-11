@@ -42,11 +42,12 @@ def _products(surcharge=49):
 class BumpSurchargeResolutionTests(unittest.TestCase):
     def test_the_resolver_reports_the_surcharge_alongside_the_price(self):
         bumps = order_bump_optional_items(_offer(), _products(49), "test")
-        self.assertEqual(bumps, [(BUMP_PRICE, "pr_bump", 49)])
+        self.assertEqual(bumps, [(BUMP_PRICE, "pr_bump", 49, None)],
+                         "the 4th element is the unit COST, unknown on this fixture")
 
     def test_a_bump_without_a_surcharge_reports_zero(self):
         bumps = order_bump_optional_items(_offer(), _products(None), "test")
-        self.assertEqual(bumps, [(BUMP_PRICE, "pr_bump", 0)])
+        self.assertEqual(bumps, [(BUMP_PRICE, "pr_bump", 0, None)])
 
 
 class BumpPostageMetadataTests(unittest.TestCase):

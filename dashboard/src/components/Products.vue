@@ -331,6 +331,7 @@
           <section v-if="wizardStepKey === 'identifiers'" class="wizard-panel">
             <p class="wizard-lede">How should shoppers and search engines identify this? <em>(optional)</em></p>
             <ProductIdentifiersField :form="form" sku-open @sku-edited="skuTouched = true" />
+            <ProductUnitCostField v-model="form.unit_cost" :unit-amount="editorUnitAmount" :currency="editorCurrency" />
             <ProductTagsField :tags="form.tags" />
           </section>
 
@@ -404,6 +405,8 @@
           </label>
 
           <ProductIdentifiersField :form="form" @sku-edited="skuTouched = true" />
+
+          <ProductUnitCostField v-model="form.unit_cost" :unit-amount="editorUnitAmount" :currency="editorCurrency" />
 
           <!-- Intent alone decides whether payment is collected: "I want a payment" enables the payment
                gateway (Stripe sync); "capture a lead" turns it off. The old "Enable Payment Gateway" toggle
@@ -599,7 +602,7 @@
 <script setup>
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { apiRequest, getStripeMode, toAssetCdnUrl } from "../api/client";
-import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, unitCostToInput, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
@@ -622,6 +625,7 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ProductCategoryField from "./products/ProductCategoryField.vue";
 import ServiceWizard from "./services/ServiceWizard.vue";
 import ProductIdentifiersField from "./products/ProductIdentifiersField.vue";
+import ProductUnitCostField from "./products/ProductUnitCostField.vue";
 import { useRefundPolicyStore } from "../stores/refundPolicy";
 import ProductImagesField from "./products/ProductImagesField.vue";
 import ProductTagsField from "./products/ProductTagsField.vue";
@@ -637,6 +641,20 @@ const editingProduct = ref(null);
 // A SKU is an identifier, so it is generated once and then left alone. It follows the name only while a NEW
 // product is still being named; once the product exists, renaming it must never re-identify it.
 const skuTouched = ref(false);
+// The default price, in cents, purely so the cost field can show a live margin as the tenant types.
+// `sales_price` is dollars at form level; the component formats cents, so convert once here rather than
+// teaching the component about this form's units.
+const editorUnitAmount = computed(() => {
+  const prices = form.value?.prices || [];
+  const price = prices[form.value?.default_price_index ?? 0] || prices[0] || {};
+  const amount = Number(price.sales_price || 0);
+  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : 0;
+});
+const editorCurrency = computed(() => {
+  const prices = form.value?.prices || [];
+  return (prices[form.value?.default_price_index ?? 0] || prices[0] || {}).currency || "usd";
+});
+
 const showCreateModal = ref(false);
 
 // --- Product creation wizard (plans/LEAD_GEN_PAGES.md §10) ---
@@ -998,6 +1016,7 @@ function defaultProductForm() {
     product_type: "physical",
     product_category: "",
     sku: "",
+    unit_cost: "",
     condition: "new",
     brand: "",
     mpn: "",
@@ -1124,6 +1143,9 @@ function productFormFromDocument(product) {
     product_type: productType,
     product_category: product.product_category || "",
     sku: product.sku || "",
+    // Dollars as a STRING, so a product with no recorded cost loads as blank rather than
+    // as "0" -- which would silently promote "unknown" to "free" on the next save.
+    unit_cost: unitCostToInput(product.unit_cost),
     condition: product.condition || "new",
     brand: product.brand || "",
     mpn: product.mpn || "",

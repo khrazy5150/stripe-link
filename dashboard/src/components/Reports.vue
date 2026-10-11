@@ -37,11 +37,18 @@
             {{ row.label }}
             <small v-if="row.note">{{ row.note }}</small>
           </th>
-          <td class="reports-num">{{ money(row.value) }}</td>
-          <td v-if="previous" class="reports-num reports-muted">{{ money(row.was) }}</td>
+          <td class="reports-num">
+            <template v-if="row.known">{{ money(row.value) }}</template>
+            <span v-else class="reports-unknown" title="Not enough information">&mdash;</span>
+          </td>
+          <td v-if="previous" class="reports-num reports-muted">
+            <template v-if="row.wasKnown">{{ money(row.was) }}</template>
+            <span v-else class="reports-unknown">&mdash;</span>
+          </td>
           <td v-if="previous" class="reports-num"
-              :class="row.delta === 0 ? '' : (row.delta > 0 ? 'is-up' : 'is-down')">
-            <template v-if="row.delta === 0">&mdash;</template>
+              :class="!row.deltaKnown || row.delta === 0 ? '' : (row.delta > 0 ? 'is-up' : 'is-down')">
+            <template v-if="!row.deltaKnown">&mdash;</template>
+            <template v-else-if="row.delta === 0">&mdash;</template>
             <template v-else>{{ row.delta > 0 ? "+" : "−" }}{{ money(Math.abs(row.delta)) }}</template>
           </td>
         </tr>
@@ -175,7 +182,16 @@ const LINES = [
     note: "Labels bought so far." },
   { label: "Net", pick: (s) => s.net, tone: "is-total",
     note: "Gross after Stripe and platform fees." },
+  // PROFIT IS WITHHELD RATHER THAN GUESSED. `cogs` was a declared ledger component that nothing ever
+  // supplied, so this row has been showing `net` under the word "Profit" since Reports shipped -- the
+  // same shape as the Dashboard's "Net Revenue" summing gross. Now the server says whether every sale in
+  // the period had a recorded cost, and a period containing one uncosted sale has no profit figure to
+  // show: the arithmetic would be short by an unknown amount and inflated in the flattering direction.
   { label: "Profit", pick: (s) => s.profit, tone: "is-total",
+    known: (s) => Boolean(s.profit_known),
+    unknownNote: (s) => (Number(s.uncosted_sales || 0)
+      ? `${s.uncosted_sales} ${Number(s.uncosted_sales) === 1 ? "sale has" : "sales have"} no cost recorded. Add "What this costs you" to those products.`
+      : "Add what your products cost you to see profit."),
     note: "Net after postage and cost of goods." },
 ];
 
@@ -185,7 +201,18 @@ const rows = computed(() => {
   return LINES.map((line) => {
     const value = Number(line.pick(now) || 0);
     const was = previous.value ? Number(line.pick(previous.value) || 0) : 0;
-    return { label: line.label, note: line.note, tone: line.tone, value, was, delta: value - was };
+    // A row may refuse to state its value. `known` is absent on every other line, which reads as
+    // knowable -- only a line that can be unsupportable has to say so.
+    const known = line.known ? line.known(now) : true;
+    const wasKnown = line.known ? (previous.value ? line.known(previous.value) : false) : true;
+    return {
+      label: line.label,
+      note: known ? line.note : (line.unknownNote ? line.unknownNote(now) : line.note),
+      tone: line.tone, value, was, delta: value - was, known, wasKnown,
+      // A delta between two figures is meaningless if either is unknown, and showing one would imply
+      // both were measured.
+      deltaKnown: known && wasKnown,
+    };
   });
 });
 
@@ -208,3 +235,9 @@ const shippingCaveat = computed(() => {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.reports-unknown {
+  opacity: 0.55;
+}
+</style>

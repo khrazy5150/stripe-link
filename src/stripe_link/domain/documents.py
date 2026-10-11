@@ -816,6 +816,10 @@ def validate_product_document(document: dict[str, Any]) -> None:
     require_string(document, "product_category", "Product product_category")
     # Both optional: they enrich structured data (sku, itemCondition) and pages without them still render.
     optional_string(document, "sku", "Product sku")
+    # COST OF GOODS per unit. Absent means UNKNOWN, not zero -- `optional_non_negative_int` permits 0 for
+    # the genuinely free (a digital download with no licence fee), and the two must stay distinguishable
+    # because the ledger reports profit only when every line of a sale carries one.
+    optional_non_negative_int(document, "unit_cost", "Product unit_cost")
     if document.get("condition") is not None:
         require_enum(document, "condition", set(PRODUCT_CONDITIONS), "Product condition")
     # Merchant-listing identifiers (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-06). All optional; brand is the

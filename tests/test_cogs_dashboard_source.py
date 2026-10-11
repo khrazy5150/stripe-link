@@ -1,0 +1,122 @@
+"""The dashboard side of COGS: a cost can be entered, and an unsupportable profit is not shown.
+
+There is no JS test runner in this repo, so these are static guards in the same shape as
+`test_dashboard_revenue_source.py`. A real unit test would be better; a static guard is better than
+nothing and costs no toolchain.
+
+The thing being defended is one rule in two places: **blank is not zero.** The form holds dollars as a
+STRING so `""` and `"0"` stay different, and the payload omits the key entirely rather than sending 0 —
+because the ledger reads an absent cost as "unknown" and a zero as "genuinely free", and sending the
+wrong one hands the tenant an inflated margin with full confidence.
+"""
+import pathlib
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+STORE = ROOT / "stores" / "products.js"
+FIELD = ROOT / "components" / "products" / "ProductUnitCostField.vue"
+FORM = ROOT / "components" / "Products.vue"
+REPORTS = ROOT / "components" / "Reports.vue"
+
+
+class TheTenantCanRecordACost(unittest.TestCase):
+    def test_the_field_exists_and_is_reachable_from_both_forms(self):
+        """The wizard and the edit form, or tenants who created a product earlier can never cost it."""
+        self.assertTrue(FIELD.exists())
+        self.assertEqual(FORM.read_text().count("<ProductUnitCostField"), 2,
+                         "the create wizard AND the edit form")
+
+    def test_it_asks_in_the_tenants_words_not_the_ledgers(self):
+        text = FIELD.read_text()
+        self.assertIn("What this costs you", text)
+        self.assertNotIn("COGS", text.replace("cogs", ""), "'cost of goods sold' is our jargon")
+
+    def test_it_says_the_cost_is_private(self):
+        """A seller asked to type their margin into a web form deserves to be told who sees it."""
+        self.assertIn("never shown to customers", FIELD.read_text())
+
+
+class BlankIsNotZero(unittest.TestCase):
+    def test_the_converter_returns_undefined_for_blank(self):
+        body = _function(STORE.read_text(), "unitCostCents")
+        self.assertIn("return undefined", body)
+        self.assertIn('=== ""', body, "blank is tested for explicitly")
+
+    def test_the_payload_omits_the_key_rather_than_sending_zero(self):
+        text = STORE.read_text()
+        self.assertIn("unitCostCents(form.unit_cost) === undefined ? {} : { unit_cost:", text,
+                      "an unanswered cost must not reach the document at all")
+
+    def test_the_shared_cents_helper_is_not_used_for_this(self):
+        """`cents()` in stores/pricing.js coerces "" to 0, which is exactly the bug here."""
+        body = _function(STORE.read_text(), "unitCostCents")
+        self.assertNotIn("cents(", body.replace("unitCostCents(", ""))
+
+    def test_loading_a_product_with_no_cost_shows_blank(self):
+        body = _function(STORE.read_text(), "unitCostToInput")
+        self.assertIn('return ""', body)
+        self.assertIn("undefined", body, "absent must not render as 0.00")
+
+    def test_the_form_defaults_to_blank(self):
+        self.assertIn('unit_cost: "",', FORM.read_text(),
+                      "a new product starts uncosted, not free")
+
+    def test_the_tenant_is_told_how_to_say_genuinely_free(self):
+        """Otherwise 'why is Profit blank' is a support question with no discoverable answer."""
+        # Whitespace-collapsed: the copy is line-wrapped in the template, and a guard that breaks when a
+        # sentence is re-flowed tests the indentation rather than the message.
+        self.assertIn("costs you nothing", _words(FIELD.read_text()))
+
+
+class ProfitIsWithheldNotGuessed(unittest.TestCase):
+    def test_the_profit_row_declares_when_it_is_knowable(self):
+        text = REPORTS.read_text()
+        self.assertIn("profit_known", text)
+        self.assertIn("uncosted_sales", text)
+
+    def test_an_unknown_value_renders_a_dash_not_a_number(self):
+        text = REPORTS.read_text()
+        self.assertIn("row.known", text)
+        self.assertIn("reports-unknown", text)
+
+    def test_the_delta_is_also_withheld(self):
+        """A change between two figures is meaningless if either is unknown, and showing one would imply
+        both were measured."""
+        self.assertIn("deltaKnown", REPORTS.read_text())
+
+    def test_the_note_tells_the_tenant_what_to_do(self):
+        self.assertIn("no cost recorded", REPORTS.read_text())
+
+    def test_other_rows_are_unaffected(self):
+        """`known` is absent on every other line and must read as knowable, or the whole report blanks."""
+        self.assertIn("line.known ? line.known(now) : true", REPORTS.read_text())
+
+
+def _words(text):
+    """The text with runs of whitespace collapsed, so an assertion survives re-wrapping."""
+    return " ".join(text.split())
+
+
+def _function(text, name):
+    """The body of a JS function, so an assertion cannot be satisfied by a comment elsewhere."""
+    start = text.index(f"function {name}(")
+    depth, opened = 0, text.index("{", start)
+    for index in range(opened, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[opened:index + 1]
+    raise AssertionError(f"could not find the body of {name}")
+
+
+class TheGuardCanFail(unittest.TestCase):
+    def test_extracting_a_function_body_really_works(self):
+        body = _function(STORE.read_text(), "unitCostCents")
+        self.assertTrue(body.startswith("{") and body.endswith("}"), body[:60])
+        self.assertLess(len(body), 500, "this should be the function, not half the file")
+
+
+if __name__ == "__main__":
+    unittest.main()

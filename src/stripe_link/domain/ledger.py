@@ -49,6 +49,7 @@ def _entry(
     stripe: dict[str, Any] | None = None,
     source: str = "webhook",
     description: str | None = None,
+    cogs_known: bool = False,
     now_epoch: int | None = None,
 ) -> dict[str, Any]:
     document: dict[str, Any] = {
@@ -92,6 +93,12 @@ def _entry(
             document["stripe"] = refs
     if description:
         document["description"] = description
+    # WRITTEN ONLY WHEN TRUE, so absent reads as "we do not know what these goods cost" -- which is the
+    # honest answer for every entry written before P2 and for every sale containing a product nobody has
+    # costed. A stored `false` would say the same thing in more bytes; what must never happen is a
+    # default of `true`, which would declare the whole back catalogue fully costed.
+    if cogs_known:
+        document["cogs_known"] = True
     return document
 
 
@@ -107,6 +114,7 @@ def sale_entry(
     platform_fee: int = 0,
     tax: int = 0,
     cogs: int = 0,
+    cogs_known: bool = False,
     shipping_revenue: int = 0,
     idempotency_key: str,
     **kwargs: Any,
@@ -128,8 +136,34 @@ def sale_entry(
     )
     return _entry(
         tenant_id=tenant_id, entry_id=entry_id, entry_type="sale", occurred_at=occurred_at,
-        mode=mode, currency=currency, amounts=amounts, idempotency_key=idempotency_key, **kwargs,
+        mode=mode, currency=currency, amounts=amounts, idempotency_key=idempotency_key,
+        cogs_known=bool(cogs_known), **kwargs,
     )
+
+
+
+def _cogs_of(order: dict[str, Any]) -> int:
+    """`order.costs.cogs`, or 0. Zero here means "nothing known", and `_cogs_known` is what says which."""
+    costs = order.get("costs")
+    if not isinstance(costs, dict):
+        return 0
+    try:
+        return abs(int(costs.get("cogs") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _cogs_known(order: dict[str, Any]) -> bool:
+    """Whether every line of this sale had a recorded unit cost.
+
+    Defaults to FALSE for an order with no `costs` block, which is every order written before P2 shipped.
+    Defaulting the other way would declare the entire pre-existing history fully costed and hand every
+    tenant a profit figure equal to their revenue -- the bug, re-introduced as a migration default.
+    """
+    costs = order.get("costs")
+    if not isinstance(costs, dict):
+        return False
+    return bool(costs.get("known"))
 
 
 def shipping_cost_entry(
@@ -497,6 +531,19 @@ def sale_entry_from_order(order: dict[str, Any], *, now_epoch: int,
         # the bump price instead; counting only `shipping_amount` would book that money as merchandise and
         # report a shipping margin that is short by exactly the amount the tenant charged to cover postage.
         shipping_revenue=int(order.get("shipping_amount") or 0) + int(order.get("bump_shipping_amount") or 0),
+        # COST OF GOODS, from the snapshot the sale froze (`order.costs`, stamped through Stripe metadata
+        # at checkout -- plans/MONEY_ACROSS_SILOS.md P2). `cogs` has been a declared amount component
+        # since this module was written and NOTHING ever supplied one, so `profit` was `net` and
+        # `Reports.vue` displayed it as profit.
+        #
+        # Read off the ORDER rather than passed in, because the order is already the single source every
+        # other amount here comes from, and a second channel for one component is how two numbers start
+        # disagreeing.
+        cogs=_cogs_of(order),
+        # ...and whether that figure is COMPLETE. Carried as a flag on the entry, not folded into the
+        # amount, because an incomplete COGS is not a smaller COGS -- it is an unanswerable question, and
+        # `summarize` must refuse to state a profit rather than state an inflated one.
+        cogs_known=_cogs_known(order),
         # WHAT WAS IN IT. `product_id` above names the order's PRIMARY product and `gross` is the whole
         # order, so by themselves they answer "which product earned this" wrongly whenever a buyer took
         # more than one thing -- the headline product collects the bump's revenue and the bump reads as
@@ -546,10 +593,23 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
                    for entry in entries if str(entry.get("entry_type") or "") == "refund")
     net = totals["gross"] + totals["stripe_fee"] + totals["platform_fee"]
     profit = net + totals["cogs"] + totals["shipping_cost"] - totals["tax"]
+    # IS THAT PROFIT FIGURE SUPPORTABLE? Only if every sale in the period had a recorded cost for every
+    # line. Where one did not, `cogs` is short by an unknown amount and `profit` is correspondingly
+    # inflated -- so the figure is returned (a caller may still want the arithmetic) alongside the flag
+    # that says whether it may be SHOWN. `Reports.vue` reads the flag and renders a dash.
+    #
+    # Counted over SALES only: a refund has no cost of goods to know, and requiring a flag on one would
+    # make any refunded period permanently unknowable.
+    sales = [entry for entry in entries if str(entry.get("entry_type") or "") == "sale"]
+    uncosted = sum(1 for entry in sales if not entry.get("cogs_known"))
     return {
         "totals": totals,
         "net": net,
         "profit": profit,
+        # False when nothing was sold at all, because "no data" is not "fully costed" -- a tenant's first
+        # visit should not be told their profit is zero with authority.
+        "profit_known": bool(sales) and uncosted == 0,
+        "uncosted_sales": uncosted,
         "tax_liability": totals["tax"],
         # What the buyer paid for postage. The margin needs BOTH halves, and `shipping_cost` has no source
         # until a carrier label is bought (plans/SHIPPING_CHARGES.md), so it is **None when unknowable**

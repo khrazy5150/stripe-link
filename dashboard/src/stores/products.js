@@ -124,6 +124,28 @@ export function priceSummary(price) {
   return parts.length ? parts.join(" · ") : "No price";
 }
 
+// --- acquisition cost ------------------------------------------------------------------------------
+// Dollars-string <-> cents, with BLANK PRESERVED. Everything else in this file can lean on `cents()`
+// from the pricing store, which coerces "" to 0; this one must not, because a product nobody has costed
+// has to stay distinguishable from one that genuinely costs nothing (plans/MONEY_ACROSS_SILOS.md P2).
+
+/** `undefined` when the tenant has not answered, otherwise non-negative cents. */
+export function unitCostCents(value) {
+  const text = String(value ?? "").trim();
+  if (text === "") return undefined;
+  const amount = Number(text);
+  if (!Number.isFinite(amount) || amount < 0) return undefined;
+  return Math.round(amount * 100);
+}
+
+/** Cents -> the dollars string the form shows. `""` for a product with no cost recorded. */
+export function unitCostToInput(cents) {
+  if (cents === null || cents === undefined || cents === "") return "";
+  const amount = Number(cents);
+  if (!Number.isFinite(amount) || amount < 0) return "";
+  return (amount / 100).toFixed(2);
+}
+
 export function formatMoney(cents, currency = "usd") {
   if (cents === undefined || cents === null || cents === "") return "No price";
   return new Intl.NumberFormat("en-US", {
@@ -468,6 +490,11 @@ export async function buildProductDocument(form) {
     ...(isPhysical && String(form.brand || "").trim() ? { brand: String(form.brand).trim() } : {}),
     ...(isPhysical && String(form.mpn || "").trim() ? { mpn: String(form.mpn).trim() } : {}),
     ...(isPhysical && String(form.gtin || "").trim() && isValidGtin(form.gtin) ? { gtin: String(form.gtin).trim() } : {}),
+    // OMITTED when the tenant has not answered, never sent as 0. The ledger reads an absent cost as
+    // "unknown" and refuses to state a profit; sending 0 would claim the goods were free and hand the
+    // tenant an inflated margin with full confidence. Not restricted to physical goods -- a digital
+    // product can carry a per-sale licence fee, and a service has labour.
+    ...(unitCostCents(form.unit_cost) === undefined ? {} : { unit_cost: unitCostCents(form.unit_cost) }),
     // Omitted entirely when the tenant has not overridden it, so the server applies their default rather
     // than the browser inventing one.
     ...(refundPolicy(form) ? { refund_policy: refundPolicy(form) } : {}),

@@ -43,6 +43,7 @@ from stripe_link.domain.coupon_rules import is_platform_evaluated, lines_from_re
 from stripe_link.stripe_coupons import create_disposable_coupon
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.error_pages import render_error_page
+from stripe_link.domain import cogs
 from stripe_link.repositories.documents import (
     coupon_grants_repository,
     coupons_repository,
@@ -570,7 +571,12 @@ def order_bump_optional_items(offer, products_by_id, key_mode):
             print(f"[checkout] skipping order bump product='{bump.get('product_id')}' price='{bump.get('price_id')}' "
                   f"— not Stripe-synced for mode '{key_mode}' (optional_items require a synced price)")
             continue
-        bumps.append((stripe_price_id, str(bump.get("price_id") or ""), int(price.get("shipping_surcharge") or 0)))
+        # ...and what the unit COST us, which may legitimately be None (unknown). Carried on the tuple
+        # rather than resolved again elsewhere: a second pass over `stage_opportunities` + `find_price` +
+        # the mode check would be a second answer to "which bumps are offered", and the day the two
+        # disagree is the day a bump is priced for margin that was never actually offered.
+        bumps.append((stripe_price_id, str(bump.get("price_id") or ""),
+                      int(price.get("shipping_surcharge") or 0), cogs.unit_cost(product)))
     return bumps
 
 
@@ -1411,7 +1417,7 @@ def build_checkout_payload(
     # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same
     # session if the buyer adds them). plans/SALES_FUNNELS.md P2.
     order_bumps = order_bump_optional_items(offer, products_by_id, key_mode)
-    for index, (stripe_price_id, _price_id, _surcharge) in enumerate(order_bumps):
+    for index, (stripe_price_id, _price_id, _surcharge, _cost) in enumerate(order_bumps):
         payload[f"optional_items[{index}][price]"] = stripe_price_id
         payload[f"optional_items[{index}][quantity]"] = "1"
 
@@ -1468,16 +1474,32 @@ def build_checkout_payload(
     payload["metadata[funnel_id]"] = ""
     # The bumps' STRIPE price ids offered, so fulfillment can flag which completed line items were bumps
     # (what was actually purchased comes from the session's line_items). plans/SALES_FUNNELS.md P2.
-    payload["metadata[order_bump_ids]"] = ",".join(sid for sid, _price_id, _surcharge in order_bumps)
+    payload["metadata[order_bump_ids]"] = ",".join(sid for sid, _price_id, _surcharge, _cost in order_bumps)
     # ...and how much of each bump's price is POSTAGE, so the order can record it as shipping revenue
     # rather than product revenue. Stamped here because this is the last moment both facts are in hand:
     # the webhook sees Stripe line items, which carry one amount and no idea what it is made of.
     #
     # Written only when some bump actually carries a surcharge, so the overwhelming majority of sessions
     # (digital offers, bumps that need no extra postage) carry no extra metadata key at all.
-    bump_postage = ",".join(f"{sid}:{surcharge}" for sid, _price_id, surcharge in order_bumps if surcharge)
+    bump_postage = ",".join(f"{sid}:{surcharge}" for sid, _price_id, surcharge, _cost in order_bumps if surcharge)
     if bump_postage:
         payload["metadata[order_bump_shipping]"] = bump_postage
+
+    # WHAT THESE GOODS COST US, stamped for the same reason the postage above is: this is the last moment
+    # the product documents are in hand. The webhook sees Stripe line items, which carry a price and no
+    # idea what was paid to acquire it -- and a later lookup would read TODAY's cost onto a sale that
+    # happened months ago, so a tenant correcting a cost would silently rewrite history.
+    #
+    # `unknown` is stamped too, and matters more than the total: it is how the ledger knows not to claim a
+    # profit figure it cannot support (plans/MONEY_ACROSS_SILOS.md P2). A session with nothing recorded
+    # carries no keys at all, which keeps the overwhelming majority of sessions clear of Stripe's 50-key
+    # ceiling.
+    cogs_total, cogs_unknown = cogs.items_cogs(resolved.get("items") or [], products_by_id)
+    for key, value in cogs.stamp(
+        cogs_total, cogs_unknown,
+        cogs.encode_bump_costs((sid, cost) for sid, _price_id, _surcharge, cost in order_bumps),
+    ).items():
+        payload[f"metadata[{key}]"] = value
 
     # Mirror the session's identifying metadata onto the SUBSCRIPTION, so every future renewal invoice can
     # say what it is for. A renewal is a fresh order the tenant must fulfil, and the cycle invoice Stripe
