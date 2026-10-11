@@ -877,7 +877,11 @@ def persist_checkout_session_completed(
         invoices_repo.put(invoice_record)
         written.append("invoice")
     if customer_record and customers_repo:
-        customers_repo.put(customer_record)
+        # MERGED, not put. `customer_record_from_session` builds a whole record with `total_orders: 1`
+        # and this was a plain put, so a repeat buyer's second purchase reset their lifetime value to
+        # the price of that purchase and discarded the first transaction. Every repeat-customer figure
+        # in the product was the most recent order wearing a cumulative name (found 2026-10-11).
+        customers_repo.put(_merged_customer(customers_repo, tenant_id, customer_record))
         written.append("customer")
     if notification_record and notifications_repo:
         notifications_repo.put(notification_record)
@@ -2195,6 +2199,7 @@ def persist_subscription_renewal(
     notifications_repo=None,
     products_repo=None,
     ledger_repo=None,
+    customers_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -2228,6 +2233,8 @@ def persist_subscription_renewal(
     notifications_repo = notifications_repo or (notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
+    customers_repo = customers_repo or (customers_repository(mode=mode)
+                                        if os.environ.get("CUSTOMERS_TABLE") else None)
 
     fees = fee_breakdown_from_invoice(invoice, metadata, billing_config_loader)
     order_record = order_record_from_invoice(
@@ -2264,6 +2271,24 @@ def persist_subscription_renewal(
         written.append("notification")
     if ledger_repo and record_sale_ledger_entry(order_record, ledger_repo, now):
         written.append("ledger_entry")
+
+    # THE CUSTOMER. Nothing here touched `customers` at all, so a subscriber never appeared on the
+    # Customers screen and one already there stopped growing after signup -- for a business whose
+    # revenue IS renewals, a customer list of people who once signed up (found 2026-10-11, from a
+    # Dashboard reading "Customers 0" beside eight orders).
+    #
+    # Best-effort: the money is recorded and the subscription is live. A customer aggregate that will
+    # not write is a reporting problem, and must not turn a renewal already banked into a failure
+    # Stripe keeps retrying.
+    if customers_repo:
+        try:
+            renewal_customer = customer_record_from_invoice(invoice, tenant_id, now)
+            if renewal_customer:
+                customers_repo.put(_merged_customer(customers_repo, tenant_id, renewal_customer))
+                written.append("customer")
+        except Exception as exc:  # noqa: BLE001 - see comment
+            print(f"[webhook] renewal customer not recorded for {order_id}: "
+                  f"{type(exc).__name__}: {exc}")
 
     receipt = send_order_receipt(
         order_record, tenant_id,
@@ -2770,6 +2795,88 @@ def customer_record_from_session(session: dict[str, Any], tenant_id: str, now: i
                 "created_at": int(session.get("created") or now),
                 "amount": amount,
                 "currency": session.get("currency") or "usd",
+                "attribution": attribution_from_metadata(metadata),
+            }
+        ],
+        "updated_at": now,
+    }
+
+
+
+def _merged_customer(customers_repo, tenant_id: str, incoming: dict[str, Any]) -> dict[str, Any]:
+    """`incoming` folded into whatever is already stored for this customer.
+
+    A failed read returns `incoming` unchanged rather than raising: losing a customer's history is bad,
+    and losing the SALE because their history could not be read is worse. The merge is idempotent, so a
+    read that fails once and succeeds on the retry does not double-count.
+    """
+    from stripe_link.domain.customers import merge_customer
+
+    customer_id = str((incoming or {}).get("customer_id") or "").strip()
+    if not customer_id:
+        return incoming
+    try:
+        existing = customers_repo.get(tenant_id, customer_id)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        # `print`, because this module has no `logger` -- and using one silently turned a handled
+        # AttributeError into a NameError raised from inside the handler, which took the whole checkout
+        # down instead of degrading. Caught by the suite, not by review.
+        print(f"[webhook] customer history unreadable for {customer_id}: {type(exc).__name__}: {exc}")
+        return incoming
+    return merge_customer(existing, incoming)
+
+
+def customer_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
+    """A customer record for a SUBSCRIPTION RENEWAL.
+
+    The renewal path wrote an order and a ledger entry and touched `customers` not at all, so a
+    subscriber never appeared in Customers and one who was already there stopped growing after signup.
+    For a business whose revenue IS renewals, that made the customer list a list of people who once
+    signed up (found 2026-10-11).
+
+    Deliberately mirrors `customer_record_from_session`: same keys, same shape, so `merge_customer` sees
+    one kind of thing. The identity comes from the Stripe customer id first -- a renewal always has one,
+    and it is stable across a buyer changing their email.
+    """
+    metadata = invoice_subscription_metadata(invoice)
+    stripe_customer_id = str(invoice.get("customer") or "").strip()
+    email = str(invoice.get("customer_email") or "")
+    customer_id = stripe_customer_id or (email.lower() if email else "")
+    if not customer_id:
+        return {}
+    amount = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
+    created = int(invoice.get("created") or invoice.get("period_end") or now)
+    return {
+        "schema_version": "2026-05-29",
+        "document_type": "customer",
+        "tenant_id": tenant_id,
+        "customer_id": customer_id,
+        "contact": {
+            "name": str(invoice.get("customer_name") or ""),
+            "email": email or "unknown",
+            "phone": str(invoice.get("customer_phone") or ""),
+        },
+        "summary": {
+            "total_orders": 1,
+            "lifetime_value": amount,
+            "currency": invoice.get("currency") or "usd",
+            "last_order_at": created,
+        },
+        "product_affinity": [
+            {
+                "product_id": metadata.get("product_id", ""),
+                "product_name": metadata.get("product_name", ""),
+            }
+        ],
+        "transaction_history": [
+            {
+                # The INVOICE id, which is what makes a redelivered renewal recognisable as one it has
+                # already counted.
+                "transaction_id": str(invoice.get("id") or ""),
+                "type": "subscription_cycle",
+                "created_at": created,
+                "amount": amount,
+                "currency": invoice.get("currency") or "usd",
                 "attribution": attribution_from_metadata(metadata),
             }
         ],
