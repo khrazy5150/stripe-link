@@ -513,7 +513,13 @@ question) does not; Reports splits the two rows. **The metadata half is DEFERRED
 it serves only P4, and giving `ShippingFunction` the Stripe grants costs ~1,151 bytes of the 6,047 left
 under the transform ceiling — a fifth of everything remaining, for a hypothetical report.
 
-Remaining: **P1** (`tenant.beta`), and P3's metadata half whenever P4 is actually wanted.
+**P1 — `tenant.beta`: BUILT 2026-10-11, dev + prod.** The staging question answered as a flag rather
+than a deployment. Two corrections to the plan: `tenant_entitlement_set` has FOUR return paths, and two
+of them grant `set(CAPABILITIES)` — so declaring an unreleased capability would have shipped it to every
+comped account and live trial immediately. `GENERAL_CAPABILITIES` closes that; `BETA_CAPABILITIES` is
+empty until a feature is deliberately made beta-only. Suspension still holds.
+
+Remaining on this plan: only P3's metadata half, whenever P4 is actually wanted.
 
 The rest, in order: a **`tenant.beta` grant field** unioned into `tenant_entitlement_set`, which is what
 "staging" actually wants — `ai_builder` is *already* a declared capability, and

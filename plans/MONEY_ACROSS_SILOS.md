@@ -329,8 +329,30 @@ on the day it is real.
 of them unpredicted, one of which meant the alarm had never fired at all. It was not waiting for
 production's first order — it was running.
 
-**P1 — the beta-grant field.** `tenant.beta`, unioned in `tenant_entitlement_set`, plus the ungated-call-
-site guard in the grant-test shape. This is what makes "staging" available at all, and it is a day.
+**P1 — the beta-grant field. BUILT 2026-10-11, dev + prod.** `tenant.beta`, unioned in
+`tenant_entitlement_set`, plus `BETA_CAPABILITIES` / `GENERAL_CAPABILITIES`.
+
+**Two things this plan got wrong, both found building it.**
+
+`tenant_entitlement_set` has **four** return paths, not one — comped, suspended, trial (live and
+expired), and everyone else. A grant unioned into the obvious one would simply be absent for most
+tenants.
+
+And two of those paths hand out `set(CAPABILITIES)`, the whole catalogue. So **merely declaring an
+unreleased capability would grant it to every comped account and every live trial on day one** — the one
+thing a beta must not do. `GENERAL_CAPABILITIES` (the catalogue minus what is beta-only) is now what
+"everything" means, and `BETA_CAPABILITIES` is empty today because everything declared has shipped.
+Adding a name to it is the act of making a feature beta-only.
+
+Deliberate: a **suspended** tenant gets no beta. The grant says which features exist, not whether the
+account is in good standing, and letting it through would make an unreleased feature the one thing a
+suspended tenant could still use.
+
+A typo is refused at write time rather than ignored, and the field is declared in
+`TenantProfile.schema.json` — which sets `additionalProperties: false`, so a field the Python validator
+accepts and the schema does not would pass one gate and fail the other.
+
+Union-only, so every existing tenant behaves exactly as before. No migration.
 
 **P2 — COGS at checkout. BUILT 2026-10-11.** Completes five of the six components.
 
