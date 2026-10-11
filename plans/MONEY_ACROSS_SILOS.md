@@ -278,6 +278,32 @@ an unrecognised stamp is not trusted, and a charge nothing can attribute is stil
 costs a look at the Stripe dashboard; a suppressed one costs a sale nobody records. That asymmetry is the
 only reason the filter is allowed to exist.
 
+### Verified against live data, not against the fakes
+
+Run on 2026-10-10 over the last 7 days of real charges on the connected account, with the real
+repositories against the real tables:
+
+```
+production  (jb-orders-prod)  ->   0 orphans of 20 charges     silo filter
+sandbox     (jb-orders-dev)   ->  14 orphans of 20 charges     all outside the 6h sweep window
+without either fix            ->  20 orphans of 20 charges, $3,500.43 "unrecorded"
+```
+
+**Every charge on the account was being reported as lost money.** The six the sandbox silo still holds —
+the subscription charges of 10-08 through 10-10 — are now all matched by invoice, which is the whole of
+what the sweep's 6-hour window ever sees. And it was not one charge: the account takes **two subscription
+charges every day** ($197.92 at 06:29 and $32.91 at 08:39), so the alarm was live for roughly half of
+every day, in both silos, and had been since subscriptions shipped.
+
+The 14 remaining are real absences with a mundane cause — they predate a **Delete test data** run, which
+is dev-only by design. They are far outside the sweep's window, so the deployed sweep never sees them.
+
+**A known interaction, recorded rather than fixed:** immediately after a tenant uses *Delete test data*,
+any surviving Stripe **test** charge inside the 6-hour window becomes a correct-but-useless orphan
+report — the money did move and our tables genuinely no longer hold it. Test mode only, dev only, and it
+ages out within six hours. Suppressing it would mean teaching the sweep about deletions, which is more
+machinery than the noise justifies.
+
 ### The residual gap, stated
 
 A **sandbox tenant's live subscription charge** is unstamped on the charge, and if its invoice is ever
