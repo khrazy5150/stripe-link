@@ -31,14 +31,24 @@ class EveryFunctionGetsWhatItReaches(unittest.TestCase):
     def setUpClass(cls):
         cls.template = (ROOT / "template.yaml").read_text(encoding="utf-8")
         cls.reachable = envreach.reach()
-        cls.declared = envreach.global_env_names(cls.template)
+        cls.declared = envreach.declared_env_names(cls.template)
         cls.functions = envreach.template_functions(cls.template)
 
     def test_no_function_is_short_a_variable_it_can_reach(self):
-        """THE guard. Everything else in this file exists to stop it passing vacuously."""
+        """THE guard. Everything else in this file exists to stop it passing vacuously.
+
+        **It passed vacuously once already.** `available` was `self.declared | <this function's own>`,
+        and `self.declared` is every name declared ANYWHERE in the template -- so a variable set on one
+        function counted as available to all 74. The guard reported nothing while six page-serving
+        functions were genuinely short of `FONTS_BUCKET`, which a live comparison against the deployed
+        Lambdas found instead.
+
+        What a function actually receives is `Globals` plus its own block. Nothing else.
+        """
         missing = []
+        globals_only = envreach.global_env_names(self.template)
         for function, module in sorted(self.functions.items()):
-            available = self.declared | envreach.function_env_names(self.template, function)
+            available = globals_only | envreach.function_env_names(self.template, function)
             for name in sorted(envreach.required(module, self.reachable, self.declared) - available):
                 missing.append(f"{function} ({module}) reads {name} but the template never declares it")
         self.assertEqual([], missing, "\n".join(missing))
@@ -48,10 +58,18 @@ class EveryFunctionGetsWhatItReaches(unittest.TestCase):
         self.assertIn("CheckoutFunction", self.functions)
         self.assertEqual(self.functions["CheckoutFunction"], "handlers.checkout")
 
-    def test_the_globals_parse_found_the_variables(self):
-        self.assertGreaterEqual(len(self.declared), 80, "Globals parse is broken")
+    def test_the_template_parse_found_the_variables(self):
+        """Across `Globals` AND the per-function blocks. Reading only `Globals` was right until Phase 2
+        moved the table names out of it, after which `ORDERS_TABLE` is declared on the eleven functions
+        that reach it and nowhere else."""
+        self.assertGreaterEqual(len(self.declared), 80, "template parse is broken")
         for name in ("ORDERS_TABLE", "PAGES_BUCKET", "PUBLIC_CHECKOUT_BASE_URL"):
             self.assertIn(name, self.declared)
+
+    def test_the_table_names_really_did_leave_globals(self):
+        """Phase 2's whole deliverable. A name back in `Globals` is carried by all 74 functions."""
+        still_global = {n for n in envreach.global_env_names(self.template) if n.endswith("_TABLE")}
+        self.assertEqual(set(), still_global)
 
 
 class TheAnalysisIsNotTriviallyEmpty(unittest.TestCase):
@@ -139,11 +157,18 @@ class WhatPhase2WouldSave(unittest.TestCase):
         reachable = envreach.reach()
         declared = envreach.global_env_names(template)
         functions = envreach.template_functions(template)
-        needed = sum(len(envreach.required(module, reachable, declared))
-                     for module in functions.values())
-        now = len(functions) * len(declared)
-        self.assertLess(needed, now * 0.35,
-                        f"needed {needed} of {now} slots; Phase 2 stops being worth the risk above ~35%")
+        # What the template carries NOW: names still in Globals, times every function, plus each
+        # function's own block.
+        still_global = envreach.global_env_names(template)
+        carried = len(still_global) * len(functions) + sum(
+            len(envreach.function_env_names(template, f)) for f in functions)
+        # The baseline Phase 2 improved on: every name that is global today, PLUS every table name
+        # (which was global before the move), carried by every function. Derived rather than hardcoded
+        # at 84, so adding a global variable moves the bar instead of breaking the test.
+        tables = {n for n in envreach.declared_env_names(template) if n.endswith("_TABLE")}
+        before = (len(still_global) + len(tables)) * len(functions)
+        self.assertLess(carried, before * 0.65,
+                        f"template carries {carried} env slots; before Phase 2 it was {before}")
 
 
 class IndirectReadsAreSeen(unittest.TestCase):
@@ -158,7 +183,7 @@ class IndirectReadsAreSeen(unittest.TestCase):
     def setUpClass(cls):
         cls.template = (ROOT / "template.yaml").read_text(encoding="utf-8")
         cls.reachable = envreach.reach()
-        cls.declared = envreach.global_env_names(cls.template)
+        cls.declared = envreach.declared_env_names(cls.template)
 
     def test_a_name_taken_from_a_module_level_list(self):
         """`for env_name in _PK_TABLES: os.environ.get(env_name, "")` — the dev-only wipe tool. Strip

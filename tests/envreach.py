@@ -253,16 +253,43 @@ def global_env_names(template: str) -> set[str]:
     return set(re.findall(r"^        (\w+):", variables.group(1), re.M))
 
 
+def declared_env_names(template: str) -> set[str]:
+    """Every env var name the template declares ANYWHERE -- `Globals` plus every function block.
+
+    `global_env_names` alone was the right question until Phase 2 moved the 42 table names onto the
+    functions that reach them. After that it returns the 42 that stayed, and intersecting the reach
+    analysis with it would quietly stop asking about every table in the stack.
+    """
+    names = set(global_env_names(template))
+    for function in template_functions(template):
+        names |= function_env_names(template, function)
+    return names
+
+
 def function_env_names(template: str, function: str) -> set[str]:
-    """Env var names declared on ONE function, which is empty until Phase 2 starts moving them."""
+    """Env var names declared on ONE function.
+
+    Stops at the first line that is not a variable, which matters more than it looks: the first version
+    matched `^          (\\w+):` across the whole remainder of the block and happily collected `Type` and
+    `Properties` out of the function's Events, because they sit at the same indentation. That
+    over-collects into the set of variables the guard considers AVAILABLE -- so a function could be short
+    a real variable and the guard would call it declared. A guard that fails open is worse than no guard.
+    """
     block = re.search(r"^  " + function + r":\n((?:    .*\n|\n)*)", template, re.M)
     if not block:
         return set()
-    variables = re.search(r"^      Environment:\n        Variables:\n((?:          .*\n|\n)*)",
-                          block.group(1), re.M)
-    if not variables:
+    start = re.search(r"^      Environment:\n        Variables:\n", block.group(1), re.M)
+    if not start:
         return set()
-    return set(re.findall(r"^          (\w+):", variables.group(1), re.M))
+    names = set()
+    for line in block.group(1)[start.end():].splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^          (\w+):", line)
+        if not match:
+            break  # indentation dropped out of the Variables block
+        names.add(match.group(1))
+    return names
 
 
 def required(function_module: str, reachable: dict[str, set[str]], declared: set[str]) -> set[str]:

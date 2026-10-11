@@ -72,11 +72,22 @@ class AppConfigGrantTests(unittest.TestCase):
         self.template = (ROOT / "template.yaml").read_text(encoding="utf-8")
         self.blocks = dict(re.findall(r"^  (\w+):\n((?:    .*\n|\n)*)", self.template, re.M))
 
-    def test_the_env_var_is_global_which_is_why_the_grant_must_be_checked(self):
-        # If this ever stops being global the premise changes and the test below is measuring the wrong risk.
+    def test_the_env_var_is_declared_somewhere_so_the_grant_still_matters(self):
+        """It used to assert APP_CONFIG_TABLE was in `Globals`, which was the premise until Phase 2 of
+        plans/TRANSFORM_BUDGET.md moved every table name onto the functions that reach it.
+
+        The risk narrowed rather than vanished. While the name was global, a function believed the table
+        was available, took the branch, and DynamoDB answered AccessDenied at the point of use -- and the
+        app-config read is wrapped in a swallow, so the tenant silently got code defaults. Now an
+        ungranted table is more often an absent NAME, which fails earlier and louder. But a function that
+        declares the table and was never granted it still fails the original way, so the grant check
+        below stays and simply needs the name to exist somewhere.
+        """
+        self.assertIn("APP_CONFIG_TABLE: !Ref", self.template)
         globals_block = re.search(r"^Globals:\n((?:  .*\n|\n)*)", self.template, re.M)
         self.assertIsNotNone(globals_block)
-        self.assertIn("APP_CONFIG_TABLE", globals_block.group(1))
+        self.assertNotIn("APP_CONFIG_TABLE:", globals_block.group(1),
+                         "a table name in Globals is carried by all 74 functions")
 
     def test_every_handler_that_reads_app_config_is_granted_it(self):
         readers = handlers_reading_app_config()

@@ -74,10 +74,13 @@ class TableGrantTests(unittest.TestCase):
     def setUp(self):
         self.template = (ROOT / "template.yaml").read_text(encoding="utf-8")
         self.blocks = dict(re.findall(r"^  (\w+):\n((?:    .*\n|\n)*)", self.template, re.M))
-        globals_block = re.search(r"^Globals:\n((?:  .*\n|\n)*)", self.template, re.M)
-        self.assertIsNotNone(globals_block, "template has no Globals section")
+        # EVERY table env var the template declares, wherever it is declared. This used to read only
+        # `Globals`, which was right until Phase 2 of plans/TRANSFORM_BUDGET.md moved all 42 table names
+        # onto the functions that reach them -- at which point the map went EMPTY and the grant check
+        # below silently had nothing to check. A guard that passes because it lost its input is worse
+        # than one that fails.
         self.env_to_table = dict(
-            re.findall(r"^\s+(\w+_TABLE):\s*!Ref\s+(\w+)\s*$", globals_block.group(1), re.M)
+            re.findall(r"^\s+(\w+_TABLE):\s*!Ref\s+(\w+)\s*$", self.template, re.M)
         )
         self.functions_by_module = {}
         for name, body in self.blocks.items():
@@ -85,10 +88,26 @@ class TableGrantTests(unittest.TestCase):
             if match:
                 self.functions_by_module.setdefault(match.group(1), []).append(name)
 
-    def test_the_env_vars_are_global_which_is_why_the_grant_must_be_checked(self):
-        # If tables stop being global, every function no longer believes it can reach every table and this
-        # test is measuring a risk that no longer exists.
-        self.assertGreater(len(self.env_to_table), 1, "no global table env vars found — the parse is broken")
+    def test_the_table_map_is_not_empty(self):
+        """The input to every check in this class. It silently emptied once already, when Phase 2 moved
+        the table names out of `Globals` and this map was still reading only that section."""
+        self.assertGreater(len(self.env_to_table), 30,
+                           "table env vars not found — the parse is broken and the grant check is vacuous")
+
+    def test_a_function_can_no_longer_assume_it_reaches_every_table(self):
+        """The ORIGINAL risk, now narrowed rather than gone.
+
+        While the names lived in `Globals`, every function received every name and so BELIEVED every
+        table was available: the code took the branch, built the repository, and DynamoDB answered
+        AccessDenied at the point of use rather than at deploy. Per-function names mean an ungranted
+        table is usually an absent name instead — a cheaper failure — but the grant check stays, because
+        a function that declares a table it was never granted still fails exactly the old way.
+        """
+        globals_block = re.search(r"^Globals:\n((?:  .*\n|\n)*)", self.template, re.M)
+        self.assertIsNotNone(globals_block, "template has no Globals section")
+        still_global = re.findall(r"^\s+(\w+_TABLE):", globals_block.group(1), re.M)
+        self.assertEqual([], still_global,
+                         "a table name back in Globals is paid by all 74 functions (TRANSFORM_BUDGET.md)")
 
     def test_every_handler_that_names_a_table_is_granted_it(self):
         missing = []
