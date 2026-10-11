@@ -327,7 +327,7 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
   // for the handful of calls that legitimately precede a session (the /auth/* family), rather than the client
   // keeping its own copy of the public-route list and letting it drift from the server's.
   if (!anonymous) {
-    if (!session?.access_token) {
+    if (!session?.id_token && !session?.access_token) {
       endSession();
       throw new UnauthenticatedError();
     }
@@ -342,7 +342,21 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
     headers: {
       "Content-Type": "application/json",
       "X-Stripe-Mode": stripeMode,
-      ...(active?.access_token ? { Authorization: `Bearer ${active.access_token}` } : {}),
+      // THE ID TOKEN, NOT THE ACCESS TOKEN. API Gateway's Cognito authorizer requires an identity token
+      // unless the authorizer declares AuthorizationScopes; given an access token it answers 401 before
+      // the Lambda runs. Sending the access token is what broke every private route the moment the
+      // authorizer was attached (2026-10-11): 35 4xx at the gateway, zero Lambda invocations, and a
+      // dashboard that looked logged in while every screen came back empty.
+      //
+      // It is also the better token to send. Only an ID token carries custom attributes, so
+      // `caller_tenant` can read `custom:client_id` -- the authoritative tenant -- instead of falling
+      // back to `sub`, which is correct today only because every user happens to own their tenant.
+      //
+      // `access_token` is the fallback for a session stored before this shipped; it will 401 and the
+      // refresh below mints a session carrying both.
+      ...(active?.id_token || active?.access_token
+        ? { Authorization: `Bearer ${active.id_token || active.access_token}` }
+        : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
