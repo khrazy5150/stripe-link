@@ -363,6 +363,17 @@ Resources:
     Properties:
       StageName: !Ref Environment
       EndpointConfiguration: REGIONAL
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+        # WITHOUT THIS, EVERY DASHBOARD REQUEST FAILS, for a reason that looks nothing like auth. SAM
+        # applies the DefaultAuthorizer to the CORS preflight OPTIONS it generates; a browser preflight
+        # carries no Authorization header, so the preflight 401s and the browser refuses the real request
+        # it was asking permission for. The preflight reveals nothing -- it answers which methods and
+        # headers are allowed, never any data.
+        AddDefaultAuthorizerToCorsPreflight: false
       Cors:
         AllowMethods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
         AllowHeaders: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
@@ -454,6 +465,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /health
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   ManifestFunction:
     Type: AWS::Serverless::Function
@@ -498,6 +511,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /manifest
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   AppConfigFunction:
     Type: AWS::Serverless::Function
@@ -552,6 +567,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /offers/resolve
             Method: POST
+            Auth:
+              Authorizer: NONE
 
   PriceCalculationFunction:
     Type: AWS::Serverless::Function
@@ -579,6 +596,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /prices/calculate
             Method: POST
+            Auth:
+              Authorizer: NONE
   BillingConnectCardFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -762,6 +781,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /leads
             Method: POST
+            Auth:
+              Authorizer: NONE
         LeadsList:
           Type: Api
           Properties:
@@ -813,30 +834,40 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart
             Method: POST
+            Auth:
+              Authorizer: NONE
         CartGet:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /cart
             Method: GET
+            Auth:
+              Authorizer: NONE
         CartItemPatch:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /cart/items/{line_id}
             Method: PATCH
+            Auth:
+              Authorizer: NONE
         CartItemDelete:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /cart/items/{line_id}
             Method: DELETE
+            Auth:
+              Authorizer: NONE
         CartUnsubscribe:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /cart/unsubscribe
             Method: GET
+            Auth:
+              Authorizer: NONE
   ReviewsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -963,12 +994,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /review
             Method: GET
+            Auth:
+              Authorizer: NONE
         ReviewSubmit:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /review
             Method: POST
+            Auth:
+              Authorizer: NONE
   ProductSyncFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1089,6 +1124,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /downloads/lead
             Method: POST
+            Auth:
+              Authorizer: NONE
   DownloadServeFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1125,6 +1162,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /download
             Method: GET
+            Auth:
+              Authorizer: NONE
   RefundsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1594,12 +1633,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /t/view
             Method: POST
+            Auth:
+              Authorizer: NONE
         TrackViewGet:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /t/view
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   # plans/CREATOR_LINK_POLICY.md §6. Public and unauthenticated by necessity -- the person best placed to
   # report a page is a stranger who landed on it -- which makes it an abuse surface itself. Guarded by a
@@ -1633,12 +1676,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /report
             Method: POST
+            Auth:
+              Authorizer: NONE
         ReportReasons:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /report
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   PagesFunction:
     Type: AWS::Serverless::Function
@@ -1841,6 +1888,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /pages/{page_id}/post-checkout/next
             Method: GET
+            Auth:
+              Authorizer: NONE
   CartCheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1925,6 +1974,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart/checkout
             Method: POST
+            Auth:
+              Authorizer: NONE
   CheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2011,6 +2062,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /checkout
             Method: GET
+            Auth:
+              Authorizer: NONE
         ShippingQuote:
           Type: Api
           Properties:
@@ -2022,12 +2075,16 @@ Resources:
             # (plans/SHIPPING_ELEMENT.md).
             Path: /shipping-quote
             Method: GET
+            Auth:
+              Authorizer: NONE
         CheckoutCreatePost:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /checkout
             Method: POST
+            Auth:
+              Authorizer: NONE
   # A supporter cancelling their own recurring tip, without an account (plans/PAY_WHAT_YOU_WANT.md 5g).
   # Public and unauthenticated: the opaque token in the link IS the credential, and the action behind it is
   # fail-safe -- the worst a leaked link does is stop a donation the supporter can start again.
@@ -2093,12 +2150,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /purchase/manage
             Method: GET
+            Auth:
+              Authorizer: NONE
         PurchaseManagePost:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /purchase/manage
             Method: POST
+            Auth:
+              Authorizer: NONE
   TipJarProvisionFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2183,6 +2244,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /tips/manage
             Method: GET
+            Auth:
+              Authorizer: NONE
   PaymentMethodsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2504,12 +2567,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /upsell/session
             Method: GET
+            Auth:
+              Authorizer: NONE
         UpsellCharge:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /upsell/charge
             Method: POST
+            Auth:
+              Authorizer: NONE
   PagePublishFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2642,6 +2709,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /register
             Method: POST
+            Auth:
+              Authorizer: NONE
         GetTenant:
           Type: Api
           Properties:
@@ -2682,18 +2751,24 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /auth/register
             Method: POST
+            Auth:
+              Authorizer: NONE
         AuthConfirm:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /auth/confirm
             Method: POST
+            Auth:
+              Authorizer: NONE
         AuthLogin:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /auth/login
             Method: POST
+            Auth:
+              Authorizer: NONE
         # Renew an access token from the refresh token the session already holds. Public by necessity: the
         # refresh token IS the credential (plans/API_AUTHENTICATION.md).
         AuthRefresh:
@@ -2702,18 +2777,24 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /auth/refresh
             Method: POST
+            Auth:
+              Authorizer: NONE
         AuthForgot:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /auth/forgot
             Method: POST
+            Auth:
+              Authorizer: NONE
         AuthReset:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /auth/reset
             Method: POST
+            Auth:
+              Authorizer: NONE
 
   StripeKeysFunction:
     Type: AWS::Serverless::Function
@@ -2787,6 +2868,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /stripe/connect/start
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   StripeConnectCallbackFunction:
     Type: AWS::Serverless::Function
@@ -2830,6 +2913,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /stripe/connect/callback
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   StripeConnectStatusFunction:
     Type: AWS::Serverless::Function
@@ -3045,12 +3130,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /webhook/stripe-preview
             Method: POST
+            Auth:
+              Authorizer: NONE
         StripeConnectWebhookStable:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /webhook/stripe
             Method: POST
+            Auth:
+              Authorizer: NONE
         # Fee reconciliation runs HERE rather than as its own function, for two reasons. The stack is at
         # CloudFormation's 1MB transform limit and a new function does not fit; and this is the right home
         # anyway -- the sweep does exactly what this handler already does to every other sale (read the
@@ -3135,6 +3224,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /webhook/platform-billing
             Method: POST
+            Auth:
+              Authorizer: NONE
   ConfigFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3270,6 +3361,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /custom-domains/resolve
             Method: GET
+            Auth:
+              Authorizer: NONE
   RoutesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3349,6 +3442,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /routes/resolve
             Method: GET
+            Auth:
+              Authorizer: NONE
   TestPageServeFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3382,24 +3477,32 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /published/{code}
             Method: GET
+            Auth:
+              Authorizer: NONE
         ServePageView:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /published/{code}/{view}
             Method: GET
+            Auth:
+              Authorizer: NONE
         ServePreview:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /preview/{code}
             Method: GET
+            Auth:
+              Authorizer: NONE
         ServePreviewView:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /preview/{code}/{view}
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   ExperimentsFunction:
     Type: AWS::Serverless::Function
@@ -3542,6 +3645,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /support/contact
             Method: POST
+            Auth:
+              Authorizer: NONE
   LegalFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3572,12 +3677,16 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /legal
             Method: GET
+            Auth:
+              Authorizer: NONE
         LegalPage:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /legal/{page_id}
             Method: GET
+            Auth:
+              Authorizer: NONE
   ExperimentsViewFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3603,6 +3712,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}/view
             Method: POST
+            Auth:
+              Authorizer: NONE
   ExperimentsResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3646,6 +3757,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}/resolve
             Method: GET
+            Auth:
+              Authorizer: NONE
   PreferencesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -4319,6 +4432,8 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /calendar/callback
             Method: GET
+            Auth:
+              Authorizer: NONE
         ConnectionStatus:
           Type: Api
           Properties:
@@ -4418,48 +4533,64 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /services/{service_id}/availability
             Method: GET
+            Auth:
+              Authorizer: NONE
         Reserve:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/reserve
             Method: POST
+            Auth:
+              Authorizer: NONE
         Checkout:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/checkout
             Method: POST
+            Auth:
+              Authorizer: NONE
         BookingPage:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /book/{service}
             Method: GET
+            Auth:
+              Authorizer: NONE
         ManageView:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/manage
             Method: GET
+            Auth:
+              Authorizer: NONE
         ManageCancel:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/manage/cancel
             Method: POST
+            Auth:
+              Authorizer: NONE
         ManageReschedule:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/manage/reschedule
             Method: POST
+            Auth:
+              Authorizer: NONE
         ManageSchedule:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/manage/schedule
             Method: POST
+            Auth:
+              Authorizer: NONE
 
   RemindersFunction:
     Type: AWS::Serverless::Function
