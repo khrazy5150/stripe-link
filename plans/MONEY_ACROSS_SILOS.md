@@ -187,61 +187,105 @@ source and a known direction of truth, rather than two stores that can disagree.
 
 ---
 
-## Part 4 — The cross-silo lost sale, and a latent false positive
+## Part 4 — The cross-silo lost sale — **BUILT 2026-10-10**
 
-### The bug, before prod takes its first order
+### It was not latent. It was firing, in both silos, every five minutes
 
-`domain/orphan_charges.py` and the third pass of the sweep in `handlers/fee_reconciliation.py`
-**do not consult the silo stamp at all.** The module docstring names a silo mismatch as one of the causes
-it reports, and then never reads one.
+The first draft of this plan predicted a false positive *"the day production takes its first order."*
+Reading what the deployed sweep was actually logging, within the hour, found it already happening:
 
-Today this is harmless because production has no sales. **The day production takes its first order, the
-sandbox silo's sweep will list that live charge, find no ledger entry in its own tables, and notify the
-operator that a sale was lost.** It was not. It landed correctly, in the other silo.
+```
+[ERROR] UNRECORDED STRIPE MONEY tenant=586173f0... mode=test
+        {'count': 1, 'amount': 19792, 'charges': ['ch_3UOtmw21lLbLd4Y50K7lDokj']}
+```
 
-The sweep runs **every 5 minutes** (`template.yaml`, `FeeReconciliationSweep` — five rather than fifteen
-because every charge measured was readable within 76–101s), inside `StripeWebhookFunction`. So this is
-not a once-a-day annoyance; it is a false alarm every five minutes, starting at the first real sale, on
-the notification channel that is supposed to mean *money went missing*. That is how an alert that matters
-gets trained into noise before its first true positive.
+in **`jb-stripe-webhook-prod` AND `jb-stripe-webhook-dev`**, every five minutes, over a **$197.92**
+charge that `jb-orders-dev` held as `order_in_1UOsq521lLbLd4Y50sXIDrlB`, `status: paid`,
+`amount_total: 19792`. **Nothing was lost.** Three independent defects stacked, and only one of them was
+the one this plan predicted.
 
-### The fix
+### Defect 1 — a subscription charge can never be matched by PaymentIntent
 
-Resolve the charge's silo and skip foreign ones. The resolver exists — `domain/silo_routing.py` has
-`stamp_from_event()` and `normalize_silo()`, and already reads the stamp from the several places this
-preview API version keeps it.
+The stored order has **no `payment_intent_id` field at all**. `order_record_from_invoice` keys on the
+invoice (`order_{invoice_id}`), and the sweep's only lookup was `find_by_payment_intent`. So **every
+subscription renewal that has ever been taken, and every one that ever will be, read as unrecorded
+money.** Subscriptions shipped 2026-09-15; this was waiting from that day.
 
-Three cases, and the third is the interesting one:
+Fixed by matching the invoice *first* — an invoice charge also has a PaymentIntent, one we never store,
+so asking the index about it returns nothing and looks exactly like a lost sale.
 
-| the charge | sandbox's sweep | production's sweep |
-|---|---|---|
-| stamped `sandbox` | **mine** — report if unheld | skip (foreign) |
-| stamped `production` | skip (foreign) | **mine** — report if unheld |
-| **unstamped** | **claim it** | **skip** |
+### Defect 2 — both silos list the same connected account
 
-The third row follows the documented read rule already implemented in `resolve_event_silo` — *unstamped
-means sandbox, never production* — and it happens to point the ambiguity at the silo where a false alarm
-is cheap. Keep that direction deliberately, and say why in the code, because it looks arbitrary and is
-not: **subscription-mode charges are permanently unstamped** (Part 2), so this row is not a legacy
-migration case that ages out. It is permanent traffic.
+The two `stripe-keys` tables are per-environment (`jb-stripe-keys-v2-dev` / `-prod`), so each sweep
+enumerates only its own tenants. **But they hold credentials for the same `acct_`,** because the tenant
+connected Stripe in both silos. So production enumerated its copy of the tenant, listed the sandbox
+silo's charges, and asked its own orders table about them.
 
-### The upside the author asked for
+Fixed by resolving ownership **with the same rule the webhook used when it chose where to write** —
+`silo_routing.event_belongs_here`'s own logic: the stamp if there is one, else `LEGACY_SILO_FOR_MODE`.
+Mirroring it is the whole point: *if the sweep and the writer disagree about ownership, the sweep reports
+as missing precisely the charges the writer correctly declined.*
 
-> We absolutely want to prevent the 'lost sale' issue. Now that you have fixed it, it would be nice to
-> take advantage of it across silos.
+**The first draft of this plan got that rule wrong.** It said the fallback was *"unstamped means
+sandbox, never production"* — that is the **read-side** default in `resolve_event_silo`. The **write
+side**, which is what decides where an order actually lands, uses the legacy correspondence: unstamped
+`test` → sandbox, unstamped **`live` → production**. Building the sweep on the read-side rule would have
+made it disagree with the writer on every unstamped live charge.
 
-Because Stripe is shared, each silo *can* see the other's charges — which means a charge stamped
-`production` that production's tables do not hold is a **genuinely detectable lost sale, visible from
-elsewhere.** Worth having. But route it correctly:
+### Defect 3 — the alarm was never wired
 
-- **A silo reports orphans for its own stamp**, to the tenant's notifications, as now.
-- **Unstamped-and-unheld escalates to the operator, not the tenant** — an unstamped live charge is
-  precisely the orphan hit on 2026-10-07, and no tenant can act on it.
-- **A silo does not notify about another silo's gap.** A notification that is usually somebody else's
-  problem gets ignored, and then it is ignored on the day it is real. If cross-silo visibility is wanted
-  later, it belongs in an operator-only report, not in a tenant's bell.
+`handler` defaults `notifications_repo` to `None` for injection. `_notify_overdue` resolves it lazily
+from `NOTIFICATIONS_TABLE`; **`_report_orphan_charges` did not.** So `_notify_orphans` took its
+`if notifications_repo is None: return` on every scheduled run since it shipped, and both notification
+tables held **zero** `orphan_charge_*` rows while the log had been screaming every five minutes.
 
----
+**The detection built to end the silence was itself silent.** Same shape as `refundError` set and never
+rendered, and as the fake that implemented a method the real repository lacked: the end of the path was
+never exercised.
+
+Note the ordering luck — had this been fixed first, turning the notifier on would have sent a *critical*
+tenant-visible alert about correctly-recorded money every five minutes, in both silos.
+
+### Where the stamp actually lives, verified
+
+A subscription charge carries **no metadata of its own** — `payment_intent_data[metadata][silo]`
+(`handlers/checkout.py:1525`) is **payment-mode only**, so the stamp never reaches a renewal's charge.
+It does reach the subscription, and the invoice carries the subscription's metadata:
+
+```
+charge.metadata                                        {}
+charge.invoice.parent.subscription_details.metadata    {... "silo": "sandbox" ...}
+```
+
+Reachable for free: **`expand[]=data.invoice` on the charges list** — the same one call, no extra round
+trips.
+
+### What shipped
+
+- `silo_routing.stamp_from_object(obj)` extracted; `stamp_from_event` delegates to it. One
+  implementation of *where is the stamp?*, because two readers would eventually disagree and the
+  disagreement would be invisible until a charge went unclaimed.
+- `orphan_charges`: `invoice_id_of`, `order_id_for_invoice`, `owning_silo`, `is_ours`; `orphans()` takes
+  `order_for_id`, `this_silo`, `mode`.
+- The sweep expands the invoice, passes its `SILO` (already deployed: `sandbox` / `production`), builds
+  the notifications repository, and reports `notified` in the tally so *found money, told nobody* cannot
+  hide again.
+- The fact and the notification now carry `silo`, `orphan_reason` and `invoice_id`, so a wrong alarm can
+  be **argued with** rather than merely believed.
+
+**The filter fails open in every direction**: a deployment that cannot name its silo reports everything,
+an unrecognised stamp is not trusted, and a charge nothing can attribute is still reported. A false alarm
+costs a look at the Stripe dashboard; a suppressed one costs a sale nobody records. That asymmetry is the
+only reason the filter is allowed to exist.
+
+### The residual gap, stated
+
+A **sandbox tenant's live subscription charge** is unstamped on the charge, and if its invoice is ever
+unreachable the legacy rule attributes it to production. The expansion closes this in practice, and the
+sweep now agrees with the writer in every case the writer can decide — which is the invariant that
+matters. Routing cross-silo visibility into an operator-only report, rather than a tenant's bell, remains
+future work: a notification that is usually somebody else's problem gets ignored, and then it is ignored
+on the day it is real.
 
 ## What this plan deliberately does not do
 
@@ -255,8 +299,9 @@ elsewhere.** Worth having. But route it correctly:
 
 ## Phasing
 
-**P0 — the silo-aware sweep.** Small, self-contained, and **it must land before production takes its
-first order.** A false "a sale was lost" every five minutes is worse than no sweep.
+**P0 — the silo-aware sweep. DONE 2026-10-10.** Not the small change it looked like: three defects, two
+of them unpredicted, one of which meant the alarm had never fired at all. It was not waiting for
+production's first order — it was running.
 
 **P1 — the beta-grant field.** `tenant.beta`, unioned in `tenant_entitlement_set`, plus the ungated-call-
 site guard in the grant-test shape. This is what makes "staging" available at all, and it is a day.

@@ -22,6 +22,7 @@ import time
 from stripe_link.domain.fee_reconciliation import _whole, drift, due, fees_of, settled
 from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.domain.orphan_charges import charge_window, orphans, summarize
+from stripe_link.silo import current_silo
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (ledger_repository, notifications_repository,
                                                 orders_repository, shipments_repository,
@@ -36,7 +37,7 @@ MODES = ("test", "live")
 
 def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=None,
             secret_cipher=None, fetch_fees=None, true_up=None, now_fn=None, modes=MODES,
-            shipments_repo=None, notifications_repo=None, list_charges=None):
+            shipments_repo=None, notifications_repo=None, list_charges=None, this_silo=None):
     """Reconcile both Stripe modes. Returns a per-mode tally, which is also what the logs carry."""
     from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
 
@@ -69,26 +70,38 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
         tally[mode]["orphan_charges"] = _report_orphan_charges(
             mode, now, orders_repo=orders_for_mode, stripe_repo=stripe_repo,
             secret_cipher=secret_cipher, list_charges=list_charges,
-            notifications_repo=notifications_repo)
+            notifications_repo=notifications_repo, this_silo=this_silo)
     logger.info("order sweep: %s", tally)
     return tally
 
 
 def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher, list_charges=None,
-                           notifications_repo=None):
-    """Ask Stripe what it charged, and report anything the orders table does not hold.
+                           notifications_repo=None, this_silo=None):
+    """Ask Stripe what it charged, and report anything THIS SILO should hold an order for and does not.
 
     Per TENANT, because charges live on the connected account and the credentials are per tenant. The
     tenants are taken from the Stripe-keys table, which is the only place that knows who is connected --
     an orders scan cannot enumerate them, and a tenant whose every sale went missing would be invisible
     to one.
 
+    **"Should hold" is not "does not hold", and conflating them made this pass cry wolf every five
+    minutes in both silos** (plans/MONEY_ACROSS_SILOS.md Part 4). Both deployments hold credentials for
+    the same connected account, so each lists the other's charges; the stamp decides whose a charge is,
+    by the same rule the webhook used to decide where to write it.
+
     Never raises. This is a reporting pass bolted onto a sweep that has real work to do; a Stripe outage
     must not stop fees being reconciled.
     """
     from stripe_link.stripe_client import stripe_request
 
-    out = {"tenants": 0, "charges": 0, "orphans": 0, "amount": 0, "failed": 0}
+    silo = this_silo if this_silo is not None else current_silo()
+    out = {"tenants": 0, "charges": 0, "orphans": 0, "amount": 0, "failed": 0, "silo": silo, "notified": 0}
+    # BUILD THE NOTIFICATIONS REPOSITORY, which this pass never did. `handler` has it defaulting to None
+    # for injection, `_notify_overdue` resolves it lazily, and this pass did not -- so `_notify_orphans`
+    # took the `is None` early return on every scheduled run and the alarm existed only as an ERROR log
+    # nobody was watching. The detection built to end the silence was itself silent (found 2026-10-10).
+    notifications_repo = notifications_repo or (notifications_repository(mode=mode)
+                                                if os.environ.get("NOTIFICATIONS_TABLE") else None)
     if stripe_repo is None:
         return out
     lister = list_charges or (lambda **kwargs: stripe_request("GET", "/charges", **kwargs))
@@ -109,20 +122,27 @@ def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher
             if not api_key:
                 out["failed"] += 1
                 continue
+            # `expand[]=data.invoice` costs nothing -- same one call -- and is the only way to reach a
+            # subscription charge's silo stamp, which lives on the invoice because `payment_intent_data`
+            # is payment-mode only and never reaches a renewal's charge.
             listed = lister(api_key=api_key, stripe_account=account,
-                            params={"created[gte]": created_gte, "created[lte]": created_lte, "limit": 100})
+                            params={"created[gte]": created_gte, "created[lte]": created_lte, "limit": 100,
+                                    "expand[]": "data.invoice"})
             charges = list((listed or {}).get("data") or [])
             out["charges"] += len(charges)
-            found = orphans(charges, order_for_payment_intent=orders_repo.find_by_payment_intent)
+            found = orphans(charges,
+                            order_for_payment_intent=orders_repo.find_by_payment_intent,
+                            order_for_id=lambda order_id, _t=tenant_id: orders_repo.get(_t, order_id),
+                            this_silo=silo, mode=mode)
             if not found:
                 continue
             out["orphans"] += len(found)
             out["amount"] += sum(int(f.get("amount") or 0) for f in found)
             # LOUD, because the whole point is that the previous two went unnoticed for a day. The
             # summary carries the charge ids so the operator can open them directly rather than hunting.
-            logger.error("UNRECORDED STRIPE MONEY tenant=%s mode=%s %s",
-                         tenant_id, mode, summarize(found))
-            _notify_orphans(notifications_repo, tenant_id, mode, found, now)
+            logger.error("UNRECORDED STRIPE MONEY tenant=%s mode=%s silo=%s %s",
+                         tenant_id, mode, silo, summarize(found))
+            out["notified"] += _notify_orphans(notifications_repo, tenant_id, mode, found, now, silo)
         except Exception as exc:  # noqa: BLE001 - one tenant's failure is not another's
             out["failed"] += 1
             logger.warning("orphan sweep failed for %s (%s): %s: %s",
@@ -130,10 +150,15 @@ def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher
     return out
 
 
-def _notify_orphans(notifications_repo, tenant_id, mode, found, now):
-    """One notification per CHARGE, keyed by its id so a repeating sweep does not repeat the alarm."""
+def _notify_orphans(notifications_repo, tenant_id, mode, found, now, silo="") -> int:
+    """One notification per CHARGE, keyed by its id so a repeating sweep does not repeat the alarm.
+
+    Returns how many were written, so "the sweep found money and told nobody" is visible in the tally
+    rather than inferable from its absence.
+    """
     if notifications_repo is None:
-        return
+        return 0
+    sent = 0
     for fact in found:
         charge_id = str(fact.get("charge_id") or "")
         if not charge_id:
@@ -150,12 +175,18 @@ def _notify_orphans(notifications_repo, tenant_id, mode, found, now):
                          f"({charge_id}) in {mode} mode and this account holds no order for it."),
                 "stripe_mode": mode,
                 "charge_id": charge_id,
+                # What the sweep DECIDED, so a wrong alarm can be argued with rather than just believed.
+                "silo": silo or fact.get("silo") or "",
+                "orphan_reason": fact.get("reason") or "",
+                "invoice_id": fact.get("invoice_id") or "",
                 "payment_intent_id": fact.get("payment_intent_id"),
                 "amount": fact.get("amount"),
                 "created_at": now,
             })
+            sent += 1
         except Exception as exc:  # noqa: BLE001 - the log line above is the durable record
             logger.warning("could not notify orphan %s: %s: %s", charge_id, type(exc).__name__, exc)
+    return sent
 
 
 def _reconcile_mode(mode, now, *, orders_repo, ledger_repo, stripe_repo, secret_cipher, fetch_fees, true_up):

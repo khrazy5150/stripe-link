@@ -470,18 +470,32 @@ Connect client-id pair.
 
 ## Data isolation
 
-### ⭐⭐ the money is cut in half by the silo boundary; a staging silo would make it worse — plan 2026-10-10
+### ⭐⭐ the money is cut in half by the silo boundary; a staging silo would make it worse — plan 2026-10-10 (P0 SHIPPED)
 
 Plan: **`plans/MONEY_ACROSS_SILOS.md`**. Four parts from one premise: **Stripe is the only store both
 silos genuinely share.** Raised by the author after a live sandbox sale proved invisible in production.
 
-**P0 is urgent and must land before production takes its first order.** `domain/orphan_charges.py` and
-the sweep's third pass never read the silo stamp, although the docstring names a silo mismatch as a cause
-they report. Production's first live charge will be listed by the sandbox silo's sweep, found absent from
-its tables, and reported as a lost sale — **every five minutes** (`FeeReconciliationSweep`), on the one
-channel that is supposed to mean money went missing. Fix: resolve the stamp via `silo_routing`, skip
-foreign charges, and keep *unstamped → sandbox* deliberately, because subscription-mode charges are
-permanently unstamped (`payment_intent_data` is payment-mode only, `checkout.py:1522`).
+**P0 — DONE 2026-10-10, and it was not latent.** The plan predicted a false positive "the day production
+takes its first order"; the logs showed it already firing in BOTH silos every five minutes over a
+**$197.92** charge that dev held as `order_in_1UOsq5...`, `status: paid`. Nothing was lost. **Three**
+defects, only one predicted:
+
+1. **No subscription charge could ever be matched.** Subscription orders are keyed `order_{invoice_id}`
+   and carry no `payment_intent_id`; the sweep's only lookup was the PaymentIntent index. Every renewal
+   since subscriptions shipped 2026-09-15 read as unrecorded money.
+2. **Both silos list the same connected account.** The `stripe-keys` tables are per-environment but hold
+   credentials for the same `acct_`. Fixed by mirroring the WRITE-side rule
+   (`event_belongs_here`: stamp, else `LEGACY_SILO_FOR_MODE`) — *not* the read-side "unstamped means
+   sandbox", which the first draft of the plan wrongly specified and which would have disagreed with the
+   writer on every unstamped live charge.
+3. **The alarm was never wired.** `_report_orphan_charges` never built a notifications repository, so
+   `_notify_orphans` returned early on every run since it shipped: both tables held zero
+   `orphan_charge_*` rows while the log screamed. The detection built to end the silence was itself
+   silent — the `refundError`-set-but-never-rendered shape again.
+
+The stamp is reachable for free via `expand[]=data.invoice`: a renewal's charge has empty metadata
+(`payment_intent_data` is payment-mode only) but its invoice carries
+`parent.subscription_details.metadata.silo`.
 
 The rest, in order: a **`tenant.beta` grant field** unioned into `tenant_entitlement_set`, which is what
 "staging" actually wants — `ai_builder` is *already* a declared capability, and

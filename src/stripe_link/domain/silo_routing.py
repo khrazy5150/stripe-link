@@ -29,14 +29,24 @@ UNRESOLVED = "unresolved"
 
 
 def stamp_from_event(event: dict[str, Any]) -> str:
-    """The silo WE wrote onto the object, wherever this API version keeps it.
+    """The silo WE wrote onto the event's object, wherever this API version keeps it."""
+    return stamp_from_object(((event or {}).get("data") or {}).get("object") or {})
+
+
+def stamp_from_object(obj: dict[str, Any]) -> str:
+    """The silo WE wrote onto a Stripe OBJECT, wherever this API version keeps it.
 
     Reads the same places `invoice_subscription_metadata` does, for the same reason: the account is on a
     preview API version that moved `subscription_details` under `parent`, and a resolver written against
     remembered field names resolves nothing and falls through to its default — which, for S4, is the
     difference between processing money and dropping it.
+
+    Takes a bare object rather than an event because the orphan sweep walks Stripe's `/charges` list,
+    where there is no event to unwrap. Same question, same places, one implementation — two readers of
+    "where is the stamp?" would eventually disagree, and the disagreement would be invisible until a
+    charge went unclaimed.
     """
-    obj = ((event or {}).get("data") or {}).get("object") or {}
+    obj = obj if isinstance(obj, dict) else {}
     metadata = obj.get("metadata")
     if isinstance(metadata, dict) and normalize_silo(metadata.get("silo")):
         return normalize_silo(metadata["silo"])
@@ -153,7 +163,7 @@ def routing_log(event: dict[str, Any], resolution: dict[str, Any], *, this_silo:
 
 __all__ = ["BY_DEFAULT", "BY_HOLDING", "BY_STAMP", "KNOWN_SILOS", "PRODUCTION", "SANDBOX", "UNRESOLVED",
            "event_belongs_here", "order_id_for_event", "resolve_event_silo", "routing_log",
-           "stamp_from_event"]
+           "stamp_from_event", "stamp_from_object"]
 
 
 # --- which deployment owns which event ---------------------------------------------------------------
