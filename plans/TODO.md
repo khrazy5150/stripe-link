@@ -470,6 +470,29 @@ Connect client-id pair.
 
 ## Data isolation
 
+### ⭐⭐ the money is cut in half by the silo boundary; a staging silo would make it worse — plan 2026-10-10
+
+Plan: **`plans/MONEY_ACROSS_SILOS.md`**. Four parts from one premise: **Stripe is the only store both
+silos genuinely share.** Raised by the author after a live sandbox sale proved invisible in production.
+
+**P0 is urgent and must land before production takes its first order.** `domain/orphan_charges.py` and
+the sweep's third pass never read the silo stamp, although the docstring names a silo mismatch as a cause
+they report. Production's first live charge will be listed by the sandbox silo's sweep, found absent from
+its tables, and reported as a lost sale — **every five minutes** (`FeeReconciliationSweep`), on the one
+channel that is supposed to mean money went missing. Fix: resolve the stamp via `silo_routing`, skip
+foreign charges, and keep *unstamped → sandbox* deliberately, because subscription-mode charges are
+permanently unstamped (`payment_intent_data` is payment-mode only, `checkout.py:1522`).
+
+The rest, in order: a **`tenant.beta` grant field** unioned into `tenant_entitlement_set`, which is what
+"staging" actually wants — `ai_builder` is *already* a declared capability, and
+`platform_subscription_sync.py:114` would silently wipe a flag stored in `entitlements`; then **COGS
+stamped at checkout** and **shipping cost written at label purchase**, which is what finally populates
+the two ledger components that have never had a source and makes `profit` a real number.
+
+A staging *deployment* is rejected with reasons: its tables start empty, so a tenant's staging work is
+stranded at graduation — the exact failure the author just hit, reproduced on purpose.
+
+
 ### ✅ FIXED 2026-09-26 — the webhook checked which silo an event belongs to, then bypassed the check (found 2026-09-23)
 
 Plan: **`plans/SILO_MODEL.md`**. S0–S5 shipped dev + prod 2026-09-26. The webhook now resolves the silo (stamp, then "do I hold this order?", then the legacy correspondence) and keeps only events that resolve to itself. Every silo registers its own Connect endpoint in both modes; verified live across all six mode/stamp combinations, exactly one silo keeping each. S2 was SKIPPED with evidence — see the plan.

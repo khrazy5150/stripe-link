@@ -114,3 +114,10 @@ Deliberate choices: a refunded charge still counts (the money moved twice, the b
 orders read reports nothing rather than claiming every sale vanished; notifications are keyed by charge
 id so a repeating sweep does not repeat the alarm; and the pass never raises, because fee reconciliation
 has real work to do.
+
+**One gap, found 2026-10-10 and urgent: this pass never reads the silo stamp**, although the docstring
+names a silo mismatch as one of the causes it reports. It is harmless only while production has no
+sales. Production's first live charge will be listed by the sandbox silo's sweep, found absent from its
+tables, and reported as a lost sale every five minutes — training the one channel that means *money went
+missing* into noise before its first true positive. Fix and the cross-silo upside:
+`plans/MONEY_ACROSS_SILOS.md` Part 4 (P0).

@@ -20,7 +20,11 @@ port it verbatim; it is single-merchant, raw-boto3, and scans full partitions).
 
 **Not built (the rest of this plan):**
 - **COGS + shipping-cost entries are never populated**, so `profit` is incomplete (only fees are netted).
-  Needs product-cost + shipping-cost inputs at sale time.
+  Needs product-cost + shipping-cost inputs at sale time. **Where those inputs come from is now
+  designed** — `plans/MONEY_ACROSS_SILOS.md` P2/P3: COGS stamped into the PaymentIntent's metadata at
+  checkout (an immutable snapshot, so correcting a product cost later cannot rewrite last month's
+  margin), shipping cost written by a metadata update when the carrier label is bought, which is the
+  first moment it is knowable.
 - **Order aggregates are NOT yet demoted to a derived cache** — orders still carry mutable
   `amount_paid`/`amount_refunded` authored by overwrite; the ledger runs *parallel*, not yet *canonical*
   (the core principle of this plan).
