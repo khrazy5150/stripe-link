@@ -1902,6 +1902,23 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Tenant profile billing_status is invalid.")
     if "billing_exempt" in document and not isinstance(document.get("billing_exempt"), bool):
         raise DocumentValidationError("Tenant profile billing_exempt must be a boolean.")
+    # BETA GRANTS: capabilities this tenant may use before they ship (plans/MONEY_ACROSS_SILOS.md P1).
+    # Its own field, never folded into `entitlements`, because the subscription webhook overwrites that
+    # one wholesale -- a grant stored there is wiped by the tenant's next Stripe event.
+    #
+    # Validated against the catalogue so a typo is refused at write time rather than silently granting
+    # nothing; an operator who sets `ai_buildr` should be told, not left wondering why the beta tester
+    # cannot see the feature.
+    if "beta" in document:
+        from stripe_link.domain.entitlements import CAPABILITIES
+
+        grants = document.get("beta")
+        if not isinstance(grants, list) or any(not isinstance(cap, str) for cap in grants):
+            raise DocumentValidationError("Tenant profile beta must be a list of capability names.")
+        unknown = sorted({cap for cap in grants if cap not in CAPABILITIES})
+        if unknown:
+            raise DocumentValidationError(
+                f"Tenant profile beta names unknown capabilities: {', '.join(unknown)}.")
     for field in ("billing_plan_key", "billing_price_id", "stripe_customer_id", "stripe_subscription_id"):
         optional_string(document, field, f"Tenant profile {field}")
     for field in ("current_period_end", "trial_ends_at"):

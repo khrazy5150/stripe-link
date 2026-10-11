@@ -38,6 +38,39 @@ CAPABILITIES: dict[str, dict[str, str]] = {
 FREE_TIER_CAPABILITIES: frozenset[str] = frozenset({"landing_pages", "sites", "collections"})
 
 
+# NOT GENERALLY AVAILABLE. A capability listed here is granted ONLY by an explicit per-tenant beta grant
+# (`tenant.beta`), never by a plan, never by the trial's full access, and never by a comped account.
+#
+# This is the answer to "can a tenant try a feature before it ships?" (plans/MONEY_ACROSS_SILOS.md P1).
+# The author's original idea was a staging DEPLOYMENT, which cannot work: a third silo starts with empty
+# tables, so a tenant's staging work would be stranded the day the feature graduated -- the exact failure
+# that prompted the question, rebuilt deliberately. A flag in production gives them the feature on their
+# real data, and graduating it is deleting a line from this set.
+#
+# EMPTY TODAY, and that is the correct starting state: every capability currently in CAPABILITIES has
+# shipped. Adding a name here is the act of making a feature beta-only.
+BETA_CAPABILITIES: frozenset[str] = frozenset()
+
+# What "everything" means for a comped account or a live trial. **Not `CAPABILITIES`**, which is the
+# whole catalogue including anything unreleased -- declaring a beta feature would otherwise hand it to
+# every exempt tenant and every trial on the day it was named, which is the one thing a beta must not do.
+GENERAL_CAPABILITIES: frozenset[str] = frozenset(set(CAPABILITIES) - BETA_CAPABILITIES)
+
+
+def beta_capabilities(tenant: dict[str, Any] | None) -> set[str]:
+    """The unreleased capabilities this tenant has been let into.
+
+    Read from `tenant.beta`, which is its OWN field for one specific reason: the subscription webhook
+    writes `updates["entitlements"] = plan_entitlements(plan)` -- a wholesale overwrite
+    (`platform_subscription_sync.py`). A beta grant stored there would be wiped by the tenant's next
+    Stripe event, silently, at a time nobody could predict and in the middle of whatever they were doing.
+
+    Filtered to known capabilities, so a typo grants nothing rather than something adjacent.
+    """
+    tenant = tenant or {}
+    return {cap for cap in (tenant.get("beta") or []) if cap in CAPABILITIES}
+
+
 class EntitlementError(RuntimeError):
     def __init__(self, capability: str):
         label = CAPABILITIES.get(capability, {}).get("label", capability)
@@ -64,15 +97,20 @@ def tenant_entitlement_set(tenant: dict[str, Any] | None, now: int | None = None
         profile, plus the free-tier floor (a canceled subscriber reverts to free, never to nothing).
     See plans/SAAS_BILLING_PAYWALL.md and plans/TODO.md (Pricing pivot)."""
     tenant = tenant or {}
+    beta = beta_capabilities(tenant)
     if tenant.get("billing_exempt"):
-        return set(CAPABILITIES)
+        return set(GENERAL_CAPABILITIES) | beta
     status = str(tenant.get("billing_status") or "trial")
     denormalized = {cap for cap in (tenant.get("entitlements") or []) if cap in CAPABILITIES}
     if status == "suspended":
+        # NO beta here, deliberately. Suspension is a hold on the whole account, and a beta grant is a
+        # statement about which features exist, not about whether the account is in good standing.
+        # Letting it through would make an unreleased feature the one thing a suspended tenant could use.
         return denormalized
     if status == "trial" and not tenant.get("stripe_subscription_id"):
-        return set(FREE_TIER_CAPABILITIES) if is_trial_expired(tenant, now) else set(CAPABILITIES)
-    return denormalized | FREE_TIER_CAPABILITIES
+        return ((set(FREE_TIER_CAPABILITIES) | beta) if is_trial_expired(tenant, now)
+                else set(GENERAL_CAPABILITIES) | beta)
+    return denormalized | FREE_TIER_CAPABILITIES | beta
 
 
 AI_BUILDER = "ai_builder"

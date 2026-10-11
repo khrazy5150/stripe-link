@@ -4,56 +4,178 @@
   "title": "TenantProfile",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "document_type", "tenant_id", "owner"],
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "owner"
+  ],
   "properties": {
-    "schema_version": { "type": "string", "const": "2026-05-29" },
-    "document_type": { "type": "string", "const": "tenant_profile" },
-    "tenant_id": { "type": "string", "minLength": 1 },
-    "business_name": { "type": "string" },
-    "owner_email": { "type": "string", "description": "Compatibility alias for owner.email." },
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "tenant_profile"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "business_name": {
+      "type": "string"
+    },
+    "owner_email": {
+      "type": "string",
+      "description": "Compatibility alias for owner.email."
+    },
     "owner": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["first_name", "last_name", "email"],
+      "required": [
+        "first_name",
+        "last_name",
+        "email"
+      ],
       "properties": {
-        "first_name": { "type": "string", "minLength": 1 },
-        "last_name": { "type": "string", "minLength": 1 },
-        "email": { "type": "string", "minLength": 1 },
-        "phone_number": { "type": "string" },
-        "email_verified": { "type": "boolean", "default": false },
-        "phone_verified": { "type": "boolean", "default": false },
-        "cognito_username": { "type": "string" }
+        "first_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "last_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "email": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phone_number": {
+          "type": "string"
+        },
+        "email_verified": {
+          "type": "boolean",
+          "default": false
+        },
+        "phone_verified": {
+          "type": "boolean",
+          "default": false
+        },
+        "cognito_username": {
+          "type": "string"
+        }
       }
     },
     "auth": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": { "type": "string", "enum": ["cognito", "local"], "default": "cognito" },
-        "status": { "type": "string", "enum": ["pending_confirmation", "confirmed", "disabled"], "default": "pending_confirmation" },
-        "confirmed_at": { "type": ["integer", "null"], "minimum": 0 }
+        "provider": {
+          "type": "string",
+          "enum": [
+            "cognito",
+            "local"
+          ],
+          "default": "cognito"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending_confirmation",
+            "confirmed",
+            "disabled"
+          ],
+          "default": "pending_confirmation"
+        },
+        "confirmed_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
       }
     },
-    "support_email": { "type": "string" },
+    "support_email": {
+      "type": "string"
+    },
     "brand": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "display_name": { "type": "string" },
-        "logo_url": { "type": "string" },
-        "primary_color": { "type": "string" }
+        "display_name": {
+          "type": "string"
+        },
+        "logo_url": {
+          "type": "string"
+        },
+        "primary_color": {
+          "type": "string"
+        }
       }
     },
-    "billing_status": { "type": "string", "enum": ["trial", "active", "past_due", "canceled", "suspended", "trial_expired"], "default": "trial" },
-    "trial_ends_at": { "type": "integer", "minimum": 0, "description": "Unix time the free platform trial ends (set at signup). While unsubscribed and before this, the tenant has full access; after, the hard subscribe wall." },
-    "tier_id": { "type": "string", "default": "basic" },
-    "billing_plan_key": { "type": "string", "description": "Which PlatformPlansTable plan the tenant is on (e.g. 'basic')." },
-    "billing_price_id": { "type": "string", "description": "The Stripe Price currently on the tenant's subscription; stored per-tenant so a later catalog price change never silently re-prices them." },
-    "billing_exempt": { "type": "boolean", "default": false, "description": "Comped tenant: always in good standing, no Stripe subscription, never charged (test accounts)." },
-    "stripe_customer_id": { "type": "string", "description": "Platform-account Stripe Customer for the tenant's SaaS subscription (NOT a Connect account)." },
-    "stripe_subscription_id": { "type": "string", "description": "Platform-account Stripe Subscription id for the tenant's SaaS plan." },
-    "current_period_end": { "type": "integer", "minimum": 0, "description": "Cached subscription current_period_end (unix) for UI / price-migration timing." },
-    "created_at": { "type": "integer", "minimum": 0 },
-    "updated_at": { "type": "integer", "minimum": 0 }
+    "billing_status": {
+      "type": "string",
+      "enum": [
+        "trial",
+        "active",
+        "past_due",
+        "canceled",
+        "suspended",
+        "trial_expired"
+      ],
+      "default": "trial"
+    },
+    "trial_ends_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix time the free platform trial ends (set at signup). While unsubscribed and before this, the tenant has full access; after, the hard subscribe wall."
+    },
+    "tier_id": {
+      "type": "string",
+      "default": "basic"
+    },
+    "billing_plan_key": {
+      "type": "string",
+      "description": "Which PlatformPlansTable plan the tenant is on (e.g. 'basic')."
+    },
+    "billing_price_id": {
+      "type": "string",
+      "description": "The Stripe Price currently on the tenant's subscription; stored per-tenant so a later catalog price change never silently re-prices them."
+    },
+    "billing_exempt": {
+      "type": "boolean",
+      "default": false,
+      "description": "Comped tenant: always in good standing, no Stripe subscription, never charged (test accounts)."
+    },
+    "beta": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Capabilities this tenant may use BEFORE they ship (plans/MONEY_ACROSS_SILOS.md P1). Operator-set. Deliberately separate from `entitlements`, which the subscription webhook overwrites wholesale \u2014 a grant stored there is wiped by the tenant's next Stripe event. Union-only at read time, so a tenant without this field behaves exactly as before and nothing needs migrating."
+    },
+    "stripe_customer_id": {
+      "type": "string",
+      "description": "Platform-account Stripe Customer for the tenant's SaaS subscription (NOT a Connect account)."
+    },
+    "stripe_subscription_id": {
+      "type": "string",
+      "description": "Platform-account Stripe Subscription id for the tenant's SaaS plan."
+    },
+    "current_period_end": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cached subscription current_period_end (unix) for UI / price-migration timing."
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
   }
 }
