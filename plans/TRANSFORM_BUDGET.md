@@ -1,4 +1,48 @@
-# The stack is 99.4% of the way to CloudFormation's ceiling
+# The stack WAS 99.4% of the way to CloudFormation's ceiling — Phase 1 + 2 DONE 2026-10-11
+
+```
+                        before        after
+transformed          993,953      861,615 bytes
+headroom               6,047      138,385 bytes   (23x)
+used                   99.4%        86.2%
+```
+
+**Phase 1** built the reach analysis (`tests/envreach.py`) and its guard (`tests/test_env_var_grants.py`)
+before changing anything, because a missing env var is a runtime failure. **Phase 2** moved all 42 table
+names out of `Globals` onto the functions that reach them. Both deployed to dev; **prod not yet**.
+
+Four things the plan did not predict:
+
+1. **The estimate of "median 2 table vars" was too optimistic and the first honest run said median 53** —
+   because `repositories/documents.py` reads 39 table names, one inside each factory, and 72 modules
+   import it. Attributing a factory's variables to its *callers* fixed it. The plan had already recorded
+   this exact error against an earlier estimate; it is easy to make twice.
+2. **One diagnostic endpoint set the floor for the whole stack.** `runtime_manifest` names every table,
+   bucket and distribution and lived in `stripe_link/common.py`, which every handler imports.
+   `handlers/manifest.py` was its only caller, always. Moving it took the median reach from 37 to 8 and
+   the projected saving from ~195KB to ~312KB.
+3. **Two sibling guards silently lost their input.** `test_table_grants.py` and `test_app_config_grants.py`
+   both built their table map from `Globals`; the moment the names left, the maps emptied and the IAM
+   checks had nothing to check. Both now read the whole template, and their premise tests assert the
+   inverse — that no table name has crept *back* into `Globals`.
+4. **The new guard was failing open.** `available` was every name declared anywhere in the template, so a
+   variable set on one function counted as available to all 74. It reported nothing while six
+   page-serving functions were genuinely short of `FONTS_BUCKET` — found by comparing the *deployed*
+   Lambdas against the analysis, a check that does not share the guard's blind spot. Fixed, after which
+   it names exactly those six.
+
+**What it unblocked immediately:** the Cognito authorizer, refused by CloudFormation that same morning
+and deployed to dev that afternoon (`plans/API_AUTHENTICATION.md`).
+
+**What remains, if ever needed:** the other 42 non-table variables are still global, worth a further
+~156KB. The plan's caution about them stands — they are read by name deep in domain modules — and at
+138KB of headroom there is no reason to take that risk yet.
+
+---
+
+# Original analysis
+
+
 
 **Status: NOT BUILT. Measured 2026-10-09.** Supersedes the guesses in
 `plans/SHIPPING_BEYOND_THE_FIRST_SALE.md` ("derived table names ~146KB, collapsed IAM ~100KB"), which

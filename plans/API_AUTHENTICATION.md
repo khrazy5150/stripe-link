@@ -212,7 +212,35 @@ instead of an argument.
 `DefaultAuthorizer`, `Auth: Authorizer: NONE` on the public routes, and `tenant_id_from_event` reading
 `requestContext.authorizer.claims` for private ones.
 
-### Phase 2 is BLOCKED by the transform ceiling — measured 2026-10-11
+### Phase 2 — AUTHORIZER DEPLOYED TO DEV 2026-10-11
+
+A Cognito authorizer with `DefaultAuthorizer`, `AddDefaultAuthorizerToCorsPreflight: false`, and
+`Auth: Authorizer: NONE` on the 60 public routes. Measured on dev immediately after:
+
+```
+private routes, no token    401   orders, ledger, config, notifications, customers, stripe/keys
+public routes, no token     200/400   reached the Lambda; the 400s are the handlers' own validation
+CORS preflight, no header   200
+```
+
+**It only fits because the env-var work landed first.** The identical change was refused this morning
+(see the measurement below). `plans/TRANSFORM_BUDGET.md` Phase 2 took the processed template from 993,953
+to 861,615 bytes, leaving 138,385 of headroom for something needing ~16,300.
+
+**The processed template was audited before executing**, and the audit was wrong the first time in a way
+worth recording. SAM emits `security: [{"NONE": []}]` as its *no-authorizer sentinel*. A check that reads
+any truthy `security` as a guard therefore reports all 60 public routes — checkout, the Stripe webhooks,
+login itself — as locked, which reads as a total outage. The template was correct; the check was not.
+Verify a sentinel by what it means, never by whether it is non-empty. The corrected audit: 145 methods
+guarded, 60 open and exactly the classified set, 163 preflights unguarded, zero holes.
+
+**Still to do:** `tenant_id_from_event` still falls back to the request on private routes. The authorizer
+closes the unauthenticated hole, which is the whole security boundary; ignoring the request body
+additionally stops an *authenticated* tenant naming another tenant, which requires a valid login and
+which the measurement found zero instances of. Worth doing with real claims in hand rather than blind,
+and prod is not yet deployed.
+
+### The ceiling that blocked it first — measured 2026-10-11
 
 **The authorizer does not fit.** Attempted in full: a `Cognito` authorizer on the RestApi with
 `DefaultAuthorizer`, `AddDefaultAuthorizerToCorsPreflight: false`, and `Auth: Authorizer: NONE` on all 60
