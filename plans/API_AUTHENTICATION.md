@@ -212,6 +212,56 @@ instead of an argument.
 `DefaultAuthorizer`, `Auth: Authorizer: NONE` on the public routes, and `tenant_id_from_event` reading
 `requestContext.authorizer.claims` for private ones.
 
+### Phase 2 is BLOCKED by the transform ceiling — measured 2026-10-11
+
+**The authorizer does not fit.** Attempted in full: a `Cognito` authorizer on the RestApi with
+`DefaultAuthorizer`, `AddDefaultAuthorizerToCorsPreflight: false`, and `Auth: Authorizer: NONE` on all 60
+public routes. CloudFormation refused the changeset outright:
+
+```
+Transform AWS::Serverless-2016-10-31 returned fragment exceeding 1000000 bytes
+```
+
+Source template grew 220,324 → 223,947 bytes (**+3,623**). At the measured 4.5× transform multiplier that
+is roughly **+16,300 bytes transformed**, against **6,047 bytes** of headroom
+(`plans/TRANSFORM_BUDGET.md`). The plan's note that the authorizer "costs no CloudFormation resources (it
+is method properties, not new resources)" is true and was the wrong thing to measure: the limit is on
+template TEXT, and 60 methods each gaining a `security` entry in the RestApi's swagger body is text.
+
+**So the env-var work in `plans/TRANSFORM_BUDGET.md` is a hard prerequisite for Phase 2, not an unrelated
+cleanup.** It reclaims ~267,000 bytes, which makes this a rounding error. Order: extend the grant test to
+env vars → move the 42 table names out of `Globals` → then attach the authorizer.
+
+**One detail not to lose when it is reattempted:** `AddDefaultAuthorizerToCorsPreflight: false` is
+mandatory. SAM otherwise applies the DefaultAuthorizer to the CORS preflight `OPTIONS` it generates, a
+browser preflight carries no `Authorization` header, so the preflight 401s and the browser refuses the
+real request it was asking permission for — every dashboard request fails, for a reason that looks
+nothing like auth.
+
+### What the 2026-10-11 measurement said
+
+Aggregated across every Lambda log group in both environments, 14 days:
+
+| verdict | dev | prod |
+|---|---|---|
+| `would_allow` | 9,264 | 2,124 |
+| `no_token` | 396 | 18 |
+| `tenant_mismatch` | **0** | **0** |
+| `unreadable_token` | **0** | **0** |
+
+**Zero mismatches is the number that matters** — no request has ever presented a token whose identity
+disagreed with the tenant it asked for, so enforcement breaks no legitimate authenticated traffic.
+
+The `no_token` traffic was one real finding and a tail of noise. `GET /shipping-quote` (323 in dev) was a
+**buyer-facing route classified private** — now fixed and guarded by a test that derives the buyer set
+from the page renderer. Every other entry is a dashboard route hit without a token (1–4 each:
+`/ai/config`, `/orders`, `/ledger`, `/config`, `/shipping/*`, …), which is pre-login traffic and operator
+probing; those are correctly private and should 401.
+
+Both stated prerequisites are MET and deployed: `POST /auth/refresh` answers in dev and prod, and
+`user_id == tenant_id` still holds for all six profiles (4 dev, 2 prod — re-measured 2026-10-11), which
+is what `caller_tenant`'s `sub` fallback rests on.
+
 ### Phase 2 — enforce, once the logs are quiet
 
 - A `Cognito` authorizer on the RestApi with `DefaultAuthorizer` set, and `Auth: Authorizer: NONE` on each

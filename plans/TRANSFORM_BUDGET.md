@@ -126,6 +126,20 @@ which alone is the bulk of the win.
 3. **Reassess.** If step 2 lands near its estimate, the ceiling stops being a design constraint and the
    remaining items (non-table config, the 219 permissions, the 202KB RestApi body) can wait.
 
+## It now blocks the API authorizer, which is a security boundary
+
+**Measured 2026-10-11.** `plans/API_AUTHENTICATION.md` Phase 2 was attempted in full and CloudFormation
+refused the changeset: `Transform AWS::Serverless-2016-10-31 returned fragment exceeding 1000000 bytes`.
+The authorizer adds +3,623 source bytes (60 public routes each gaining `Auth: Authorizer: NONE`), ~16,300
+transformed, against 6,047 of headroom.
+
+That plan's assumption — "it costs no CloudFormation resources (it is method properties, not new
+resources)" — is true and measures the wrong thing. The ceiling is on template TEXT, and 60 methods each
+gaining a `security` entry in the RestApi swagger body is text.
+
+**This moves the env-var work from cleanup to prerequisite.** Until it lands, `api_auth.py` keeps
+reporting `"enforced": false` and a caller who knows a `tenant_id` is that tenant.
+
 ## What this unblocks
 
 Every integration currently queued behind "no new routes": the CJ Dropshipping webhook
