@@ -502,8 +502,18 @@ since ledger.py was written, so `profit` equalled `net` and **`Reports.vue` show
 "Profit"**. The plan said COGS "is a product field" — it was not, so P2 included a schema decision
 (`Product.unit_cost`, cents, optional; agreed with the author). Absent is not zero at every layer, and
 Reports now renders a dash plus the count of uncosted sales rather than an inflated figure. Services count
-as unpriceable, not free. Remaining: **P3** (shipping cost written at label purchase, the sixth component)
-and **P1** (`tenant.beta`).
+as unpriceable, not free. 
+
+**P3 — shipping cost: LEDGER HALF BUILT 2026-10-11.** The plan did not know the outbound half already
+existed (`shipping.py:1397`, since labels shipped). What was missing was **returns**: `buy_return_label`
+bought labels and appended **no ledger entry at all**, so a tenant accepting returns had postage
+understated and profit overstated by their whole return-label spend. Recorded as `cost_adjustment`
+against the `shipping_cost` component so `profit` counts it and `shipping_margin` (an outbound-only
+question) does not; Reports splits the two rows. **The metadata half is DEFERRED with a measurement**:
+it serves only P4, and giving `ShippingFunction` the Stripe grants costs ~1,151 bytes of the 6,047 left
+under the transform ceiling — a fifth of everything remaining, for a hypothetical report.
+
+Remaining: **P1** (`tenant.beta`), and P3's metadata half whenever P4 is actually wanted.
 
 The rest, in order: a **`tenant.beta` grant field** unioned into `tenant_entitlement_set`, which is what
 "staging" actually wants — `ai_builder` is *already* a declared capability, and

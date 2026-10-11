@@ -384,11 +384,57 @@ Why metadata rather than a lookup at report time: it is an **immutable snapshot*
 cost next month must not retroactively rewrite last month's margin, and a product later deleted must not
 take its own history with it.
 
-**P3 — shipping cost at label purchase.** The metadata update, on the path that already buys the label.
-Completes the sixth, and `profit` becomes a real number for the first time.
+**P3 — shipping cost. LEDGER HALF BUILT 2026-10-11. Metadata half DEFERRED, with a measurement.**
 
-**P4 — the Stripe-derived view, if still wanted.** With P2 and P3 done, any silo can reconstruct a
-tenant's complete money from Stripe alone. Whether that becomes a screen, an operator tool, or just a
+**The plan did not know this was already mostly built.** `ledger.shipping_cost_entry` exists and
+`handlers/shipping.py:1397` has appended it on every outbound label purchase since labels shipped. So the
+sixth component already had a supplier — for outbound.
+
+### What was actually missing: returns
+
+`buy_return_label` (`shipping.py:1421`) bought labels with the same `mark_purchased`, the same `cost`
+block and the same carrier charge as the outbound path, and **appended no ledger entry at all.** A tenant
+who accepts returns had their postage understated and their profit overstated by exactly their
+return-label spend. Harmless while `profit` was structurally wrong; wrong the moment P2 made profit
+readable.
+
+**The modelling split this forced, which is the interesting part.** A return label is recorded as
+`cost_adjustment` against the `shipping_cost` **component**:
+
+- the *component* says what KIND of money it is — a dollar to a carrier is a dollar, so `profit` counts
+  it either way;
+- the *entry type* says WHY — and `shipping_margin` answers one narrow question, *"did what I charge for
+  postage cover what posting it cost?"*. A return has no postage revenue beside it, so counting it there
+  would show a tenant's outbound pricing losing money because a buyer sent something back.
+
+`summarize` now reports `shipping_revenue_cost` (outbound only) and `return_shipping_cost` separately,
+and Reports shows them as two rows — the return row hidden until there is one, because a permanent zero
+teaches a tenant to stop reading the statement. Its own `entry_id` prefix too: under the outbound prefix
+a return and an outbound label for the same order would collide, and the second write would replace the
+first rather than add to it.
+
+### Why the metadata half is deferred, measured rather than argued
+
+Writing shipping cost into Stripe metadata serves exactly one consumer: **P4**, which this plan already
+flags as possibly never worth building. The cost is not nominal:
+
+- `handlers/shipping.py` has **no Stripe dependency at all** today — no PaymentIntent, no credentials, no
+  `stripe_request`. It talks to carriers and our own tables. The change hands a shipping handler Stripe
+  credentials and a network call on the label path.
+- **Measured against the transform ceiling:** the webhook's role, which carries the StripeKeys read plus
+  `secretsmanager:GetSecretValue` plus KMS, is 7,625 bytes against the shipping role's 6,474 — about
+  **1,151 bytes**, from **6,047 bytes** of total remaining headroom (`plans/TRANSFORM_BUDGET.md`). That is
+  **a fifth of everything left**, and the budget plan's own words are *"roughly one more route fits. Not
+  two."*
+
+**So P3's stated goal is met and its mechanism is not built.** The goal was *"profit becomes a real
+number"*, and it now is: outbound labels (already), return labels (today), COGS (P2). Spending a fifth of
+the remaining ceiling to make a deferred report possible is the wrong trade while that report is
+hypothetical. Pick it up with P4, or after the env-var work in `plans/TRANSFORM_BUDGET.md` reclaims the
+~267KB that makes the question uninteresting.
+
+**P4 — the Stripe-derived view, if still wanted.** NOTE: this now also carries P3's deferred metadata
+half, without which a silo can reconstruct five of the six components from Stripe, not all six. Whether that becomes a screen, an operator tool, or just a
 reconciliation check is a decision better made once the data is actually complete — and it may turn out
 that P2/P3 were the whole value, and the view was never the point.
 
