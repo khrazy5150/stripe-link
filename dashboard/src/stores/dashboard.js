@@ -27,6 +27,11 @@ export const useDashboardStore = defineStore("dashboard", {
     invoices: [],
     notifications: [],
     ledger: null,
+    // WHICH LOADS FAILED. Every fetch below is best-effort so one dead endpoint cannot blank the whole
+    // screen -- but "best-effort" was implemented as `.catch(() => [])`, which renders a failed request
+    // as a confident zero. A tenant with a thousand products was one network blip from being told they
+    // had none, in the same typeface as the truth.
+    failed: {},
   }),
 
   getters: {
@@ -67,7 +72,13 @@ export const useDashboardStore = defineStore("dashboard", {
 
     stats(state) {
       return {
-        orders: this.revenueKnown ? this.saleCount - this.refundCount : state.invoices.length,
+        // The ledger when it answered; the invoice count as the legacy fallback; a dash when NEITHER
+        // came back. Without the last clause a dashboard whose every request failed reported a tidy
+        // zero orders beside a dash for revenue -- half the screen admitting it did not know and the
+        // other half asserting none.
+        orders: this.revenueKnown
+          ? this.saleCount - this.refundCount
+          : (state.failed.invoices ? "—" : state.invoices.length),
         // ONLY the refund clause, or "". The environment label belongs to the component, which is where
         // every other card gets it -- returning it from here duplicated that knowledge and dropped it
         // the moment a tenant had no refunds.
@@ -85,8 +96,13 @@ export const useDashboardStore = defineStore("dashboard", {
           : this.refundedCents
             ? `After fees · less ${money(this.refundedCents)} refunded`
             : "After Stripe and platform fees",
-        customers: state.customers.length,
-        products: state.products.length,
+        // A dash, not a zero, when the request did not come back. Same rule as Net Revenue above and
+        // the Profit row in Reports: a figure we could not obtain is not the figure zero, and guessing
+        // wrong in the flattering direction is no better than guessing wrong in the other one.
+        customers: state.failed.customers ? "—" : state.customers.length,
+        customersMeta: state.failed.customers ? "Could not load customers" : "",
+        products: state.failed.products ? "—" : state.products.length,
+        productsMeta: state.failed.products ? "Could not load products" : "",
       };
     },
 
@@ -142,22 +158,32 @@ export const useDashboardStore = defineStore("dashboard", {
       this.loading = true;
       this.error = "";
       try {
+        const failed = {};
+        // Still best-effort -- one dead endpoint must not blank the dashboard -- but the failure is now
+        // REMEMBERED, so the card can say "we could not ask" instead of "the answer is none".
+        const attempt = (key, request) => request.catch(() => {
+          failed[key] = true;
+          return {};
+        });
         const [products, customers, invoices, notifications, ledger] = await Promise.all([
-          apiRequest("/products").catch(() => ({ products: [] })),
-          apiRequest("/customers").catch(() => ({ customers: [] })),
-          apiRequest("/invoices").catch(() => ({ invoices: [] })),
-          apiRequest("/notifications").catch(() => ({ notifications: [] })),
+          attempt("products", apiRequest("/products")),
+          attempt("customers", apiRequest("/customers")),
+          attempt("invoices", apiRequest("/invoices")),
+          attempt("notifications", apiRequest("/notifications")),
           // The ledger is the only source that nets fees and reverses refunds. Summing orders instead
           // reported $5.80 of revenue on four $1.45 sales, two of them fully refunded, when the true
           // figure was $1.14 (measured 2026-10-09, and it agreed with Stripe to the penny).
-          apiRequest("/ledger").catch(() => null),
+          attempt("ledger", apiRequest("/ledger")),
         ]);
+        this.failed = failed;
 
         this.products = products.products || [];
         this.customers = customers.customers || [];
         this.invoices = invoices.invoices || [];
         this.notifications = notifications.notifications || [];
-        this.ledger = ledger || null;
+        // `attempt` resolves to {} on failure, so an unreachable ledger must not read as an empty one:
+        // `revenueKnown` keys on this being null, and {} would make it a confident $0.00.
+        this.ledger = failed.ledger ? null : (ledger || null);
         this.loaded = true;
       } catch (error) {
         this.error = error.message;

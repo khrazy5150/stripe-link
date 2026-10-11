@@ -63,7 +63,12 @@
         <div class="stats-content">
           <span class="stats-label">Customers</span>
           <strong class="stats-value">{{ store.loading && !store.loaded ? "--" : store.stats.customers }}</strong>
-          <span class="stats-meta">Lifetime &bull; {{ environmentLabel }}</span>
+          <!-- Says WHY the value is a dash. A dash on its own reads as "nothing here", which is the
+               same lie as the zero it replaced, only quieter. -->
+          <span class="stats-meta">
+            <template v-if="store.stats.customersMeta">{{ store.stats.customersMeta }}</template>
+            <template v-else>Lifetime &bull; {{ environmentLabel }}</template>
+          </span>
         </div>
       </article>
 
@@ -76,7 +81,12 @@
         <div class="stats-content">
           <span class="stats-label">Products</span>
           <strong class="stats-value">{{ store.loading && !store.loaded ? "--" : store.stats.products }}</strong>
-          <span class="stats-meta">Lifetime &bull; {{ environmentLabel }}</span>
+          <!-- Says WHY the value is a dash. A dash on its own reads as "nothing here", which is the
+               same lie as the zero it replaced, only quieter. -->
+          <span class="stats-meta">
+            <template v-if="store.stats.productsMeta">{{ store.stats.productsMeta }}</template>
+            <template v-else>Lifetime &bull; {{ environmentLabel }}</template>
+          </span>
         </div>
       </article>
     </div>
