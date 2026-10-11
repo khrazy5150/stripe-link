@@ -2444,6 +2444,7 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
     invoice.paid more than once, and both deliveries compute the same id and race for one conditional put.
     """
     metadata = invoice_subscription_metadata(invoice)
+    renewal_costs = cogs.from_metadata(metadata)
     subscription_id = invoice_subscription_id(invoice)
     renewal_destination = destination_address_from_invoice(invoice)
     invoice_id = str(invoice.get("id") or "")
@@ -2467,6 +2468,16 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "amount_total": amount,
         # Same liability, read from the invoice's own field (renewals price through Invoices, not Sessions).
         "tax_amount": int(invoice.get("tax") or 0),
+        # COST OF GOODS for a renewal, from the stamp mirrored onto the SUBSCRIPTION at sign-up -- the
+        # only metadata a Stripe-generated cycle invoice carries. A renewal has no order bumps (those are
+        # ticked once, on the hosted page), so the subscription's stamp is the whole answer.
+        #
+        # The figure is the cost at SIGN-UP, not at this cycle. That staleness is real and is the same one
+        # `plans/SMART_PRICING.md` §6 handles by notifying on cost drift; a slightly stale cost is a far
+        # better answer than a permanently blank Profit row for every subscription business.
+        "costs": {"cogs": int(renewal_costs["cogs"]),
+                  "unknown_lines": int(renewal_costs["unknown_lines"]),
+                  "known": bool(renewal_costs["known"])},
         "currency": str(invoice.get("currency") or "usd"),
         "mode": "live" if invoice.get("livemode") else "test",
         "stripe_mode": "live" if invoice.get("livemode") else "test",

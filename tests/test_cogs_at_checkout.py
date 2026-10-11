@@ -298,3 +298,51 @@ class TheSessionIsStampedWithIt(unittest.TestCase):
                     for key, value in payload.items() if key.startswith("metadata[")}
         self.assertEqual(cogs.from_metadata(metadata),
                          {"cogs": 1950, "unknown_lines": 0, "known": True})
+
+
+class ARenewalCarriesItToo(unittest.TestCase):
+    """A Stripe-generated cycle invoice carries ONLY what the subscription carries.
+
+    So without mirroring the stamp onto the subscription at sign-up, every subscription business would
+    have a permanently blank Profit row — the cost would be unknown on every renewal, forever. The figure
+    a renewal reports is therefore the cost at SIGN-UP: real staleness, the same one
+    `plans/SMART_PRICING.md` §6 handles by notifying on cost drift, and a far better answer than nothing.
+    """
+
+    def test_the_renewal_order_records_the_mirrored_cost(self):
+        from handlers.stripe_webhook import order_record_from_invoice
+        invoice = {
+            "id": "in_1", "amount_paid": 3291, "currency": "usd", "livemode": False,
+            "billing_reason": "subscription_cycle", "customer": "cus_1",
+            "parent": {"subscription_details": {
+                "subscription": "sub_1",
+                "metadata": {"tenant_id": "t1", "silo": "sandbox", "cogs": "650"}}},
+        }
+        record = order_record_from_invoice(invoice, "t1", 1, {}, names={})
+        self.assertEqual(record["costs"], {"cogs": 650, "unknown_lines": 0, "known": True})
+
+    def test_a_renewal_of_an_uncosted_subscription_is_unknown(self):
+        from handlers.stripe_webhook import order_record_from_invoice
+        invoice = {
+            "id": "in_2", "amount_paid": 3291, "currency": "usd", "livemode": False,
+            "billing_reason": "subscription_cycle", "customer": "cus_1",
+            "parent": {"subscription_details": {
+                "subscription": "sub_1", "metadata": {"tenant_id": "t1", "silo": "sandbox"}}},
+        }
+        record = order_record_from_invoice(invoice, "t1", 1, {}, names={})
+        self.assertFalse(record["costs"]["known"])
+
+    def test_the_renewal_order_feeds_the_ledger(self):
+        """The order is the single source every ledger amount comes from, so this closes the loop."""
+        from handlers.stripe_webhook import order_record_from_invoice
+        invoice = {
+            "id": "in_3", "amount_paid": 3291, "currency": "usd", "livemode": False,
+            "billing_reason": "subscription_cycle", "customer": "cus_1",
+            "parent": {"subscription_details": {
+                "subscription": "sub_1",
+                "metadata": {"tenant_id": "t1", "silo": "sandbox", "cogs": "650"}}},
+        }
+        record = order_record_from_invoice(invoice, "t1", 1, {}, names={})
+        entry = sale_entry_from_order(record, now_epoch=1)
+        self.assertEqual(entry["amounts"]["cogs"], -650)
+        self.assertTrue(entry["cogs_known"])

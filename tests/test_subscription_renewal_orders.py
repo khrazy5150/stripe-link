@@ -445,19 +445,35 @@ class CheckoutMirrorsMetadataTests(unittest.TestCase):
     import pathlib as _pathlib
     CHECKOUT = (_pathlib.Path(__file__).resolve().parents[1] / "src/handlers/checkout.py").read_text(encoding="utf-8")
 
+    def _block(self):
+        """The mirroring CODE after the anchor, with comment lines removed.
+
+        It used to be a flat 900-character slice, which broke the moment the block gained an explanatory
+        comment (2026-10-11, mirroring `cogs`) -- the guard was measuring prose length rather than
+        behaviour. Dropping comments first means a future comment cannot fail it and a future deletion
+        still can.
+        """
+        tail = self.CHECKOUT.split("Mirror the session's identifying metadata", 1)[1]
+        code = [line for line in tail.splitlines() if not line.lstrip().startswith("#")]
+        return "\n".join(code)[:900]
+
     def test_the_session_metadata_is_mirrored_onto_the_subscription(self):
         self.assertIn('subscription_data[metadata][{key}]', self.CHECKOUT)
 
     def test_it_only_applies_to_subscriptions(self):
-        block = self.CHECKOUT.split("Mirror the session's identifying metadata", 1)[1][:900]
-        self.assertIn('payload["mode"] == "subscription"', block)
+        self.assertIn('payload["mode"] == "subscription"', self._block())
 
     def test_the_keys_that_let_a_renewal_be_attributed_are_included(self):
-        block = self.CHECKOUT.split("Mirror the session's identifying metadata", 1)[1][:900]
         for key in ("offer_id", "page_id", "product_id", "tenant_id"):
-            self.assertIn(f'"{key}"', block, key)
+            self.assertIn(f'"{key}"', self._block(), key)
 
     def test_empty_values_are_not_sent(self):
         # Stripe handles a missing metadata key far better than an empty value.
-        block = self.CHECKOUT.split("Mirror the session's identifying metadata", 1)[1][:900]
-        self.assertIn("if value:", block)
+        self.assertIn("if value:", self._block())
+
+    def test_the_cost_of_goods_is_mirrored_too(self):
+        """Without this a subscription business has NO profit figure: a cycle invoice carries only what
+        the subscription carries, so an unmirrored cost is unknown on every renewal forever."""
+        block = self._block()
+        self.assertIn("cogs.TOTAL_KEY", block)
+        self.assertIn("cogs.UNKNOWN_KEY", block)
