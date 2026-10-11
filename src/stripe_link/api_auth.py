@@ -38,6 +38,16 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
     # --- A buyer purchasing from a published page ---
     ("GET", "/checkout"): "the published page's own checkout",
     ("POST", "/checkout"): "the published page's own checkout",
+    # FOUND BY THE PHASE 1 MEASUREMENT, 2026-10-11, which is exactly what it was for: 323 token-less
+    # calls in dev over 14 days, every one of them a buyer. The published page's shipping island fetches
+    # its rate from here on load (`runtime/html.py:3871`) -- a rate baked into the page starts rotting
+    # immediately, so the page has to ask. Enforcing with this private would have left every buyer with
+    # no postage rate, and the shipping element is the ONLY thing that collects a postcode: checkout
+    # would have silently charged $0 for postage, which has already cost one real $7.83 parcel.
+    #
+    # It is served by the CHECKOUT handler (`handlers/checkout.py:275`), whose own routes were public
+    # from the start -- the route was simply never added beside them.
+    ("GET", "/shipping-quote"): "the published page's shipping island asks for its own rate on load",
     ("GET", "/cart"): "a shopper's cart on a published page",
     ("POST", "/cart"): "a shopper's cart on a published page",
     ("PATCH", "/cart/items/{line_id}"): "changing a cart line",
@@ -164,17 +174,6 @@ def note_capability_decision(event: dict[str, Any], *, capability: str, tenant_i
         }}))
     except Exception:  # noqa: BLE001 - see docstring
         pass
-
-
-def verified_claims(event: dict[str, Any]) -> dict[str, Any]:
-    """Claims API Gateway has ALREADY verified, when an authorizer is attached.
-
-    This is the only trustworthy source of identity in a Lambda: the signature check happened upstream.
-    Empty until the authorizer is attached, which is why enforcement waits for it.
-    """
-    context = ((event or {}).get("requestContext") or {}).get("authorizer") or {}
-    claims = context.get("claims")
-    return claims if isinstance(claims, dict) else {}
 
 
 def unverified_claims(event: dict[str, Any]) -> dict[str, Any]:
