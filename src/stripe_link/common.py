@@ -131,11 +131,24 @@ def tenant_id_from_event(event: dict[str, Any], body: dict[str, Any] | None = No
     Every handler funnels through here, which is why the measurement below lives here rather than being
     repeated 63 times.
 
-    The verified branch never fires today -- no authorizer is attached, so `requestContext.authorizer.claims`
-    is always absent (plans/API_AUTHENTICATION.md Phase 2). It is written first anyway, because "authoritative
-    tenant resolution" has to be a code path before it can be a control: with it here, Phase 2 is attaching
-    the authorizer and deleting a fallback rather than re-deriving the tenant in 63 handlers. Until then the
-    request supplies it and `_log_auth_gap` records that it did.
+    **Since the authorizer landed (2026-10-11) the verified branch wins on every private route**, so the
+    request-supplied tenant below is no longer consulted there -- an authenticated caller naming a
+    different tenant is simply ignored. The fallback still serves the two cases that have nobody to ask:
+
+      * PUBLIC routes -- a buyer on a published page carries no token by design;
+      * INTERNAL invocations -- `{"internal_sync": True, ...}` and friends, delivered Lambda-to-Lambda
+        with no `requestContext` at all. (Those handlers read the tenant from the payload directly, so
+        they do not reach here; the carve-out is belt and braces.)
+
+    **A refusal was tried here and removed** (2026-10-11). The idea was to return nothing when a private
+    API route arrived with unreadable claims. It guards a case the authorizer already makes impossible --
+    every private route is behind `DefaultAuthorizer`, so a request that reaches this code got past it --
+    and it cost 385 tests, because this suite expresses a request as an event with a body `tenant_id` and
+    no claims. A control that cannot fire, bought with that, is negative value.
+
+    The alarm it would have raised already exists and is cheaper: a line here reading
+    `enforced: true, authoritative: false` is exactly "a private route resolved its tenant from the
+    request", and nothing else produces that combination.
     """
     from stripe_link.api_auth import resolved_tenant
 
@@ -186,7 +199,13 @@ def _log_auth_gap(event: dict[str, Any], claimed: str, *, authoritative: bool = 
             verdict = "would_allow"
         print(json.dumps({"api_auth": {
             "phase": "A1", "verdict": verdict, "method": method, "resource": resource,
-            "claimed_tenant": claimed, "token_tenant": caller, "enforced": False,
+            # WHETHER THIS REQUEST WAS ENFORCED. A hardcoded `False` was true while Phase 1 was only
+            # measuring; once the authorizer landed (2026-10-11) it became a field that says the opposite
+            # of what happened, in the log a reader would consult to find out whether it happened.
+            # Derived instead: a PRIVATE route that reached this code at all got past the authorizer.
+            "claimed_tenant": claimed, "token_tenant": caller,
+            "enforced": classify(event) == PRIVATE and bool(
+                event.get("httpMethod") or event.get("requestContext")),
             # Whether the tenant above was PROVEN or merely asserted. False on every request until an
             # authorizer is attached, and the number that says when enforcement is safe to turn on.
             "authoritative": bool(authoritative),
