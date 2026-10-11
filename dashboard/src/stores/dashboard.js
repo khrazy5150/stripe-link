@@ -90,15 +90,28 @@ export const useDashboardStore = defineStore("dashboard", {
       };
     },
 
+    // RECENT ORDERS, FROM THE LEDGER -- the same source as the Orders and Net Revenue cards above it.
+    // It used to read `state.invoices`, which is the INVOICES module: tenant-issued invoices, a
+    // different thing entirely. A tenant with eight orders and no invoices therefore saw an empty table
+    // headed "Recent Orders" sitting directly beneath a card reading "Orders 8" (reported 2026-10-11).
+    //
+    // Same shape of mistake as the revenue card that summed gross while calling itself net: a panel
+    // reading a different source than the number it sits under. Three panels, one source, so they
+    // cannot disagree.
     recentOrders(state) {
-      return [...state.invoices]
-        .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
+      const entries = (state.ledger?.entries || []).filter((entry) => entry.entry_type === "sale");
+      return entries
+        .sort((a, b) => Number(b.occurred_at || 0) - Number(a.occurred_at || 0))
         .slice(0, 10)
-        .map((invoice) => ({
-          date: date(invoice.created_at),
-          customer: invoice.customer?.name || invoice.customer?.email || "N/A",
-          amount: money(invoice.amounts?.total || invoice.amounts?.amount_due || 0),
-          product: invoice.line_items?.[0]?.description || invoice.description || invoice.invoice_id || "Invoice",
+        .map((entry) => ({
+          date: date(entry.occurred_at),
+          // A buyer who checked out as a guest has no name on file. "Guest" is what happened; "N/A"
+          // reads like something failed to load.
+          customer: entry.customer_ref?.name || entry.customer_ref?.email || "Guest",
+          // `gross` is what the buyer paid. The fee-netted figure belongs on the revenue card, not on a
+          // line that answers "what did this person spend?".
+          amount: money(entry.amounts?.gross || 0),
+          product: entry.lines?.[0]?.name || entry.description || "Order",
         }));
     },
 

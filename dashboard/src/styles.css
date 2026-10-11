@@ -734,6 +734,12 @@ main {
   color: var(--text);
 }
 
+.dashboard-table-note {
+  /* Spans every column: an empty state is one sentence, not a row of blank cells. */
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+
 .dashboard-table-row:first-child {
   border-top: 0;
 }

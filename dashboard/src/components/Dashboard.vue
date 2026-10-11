@@ -96,11 +96,19 @@
             <span>Amount</span>
             <span>Product</span>
           </div>
+          <!-- ONE message across the row, not four cells of debug output. These used to read
+               "Loading | Backend | -- | Fetching invoices" and "No invoices | Backend returned 0 | -- |
+               Create invoices to populate this table" -- so a tenant with eight orders was told, under a
+               card reading "Orders 8", that a backend had returned zero of something called invoices.
+               Spread across the four columns it also put "Backend returned 0" under CUSTOMER. -->
           <div v-if="store.loading && !store.loaded" class="dashboard-table-row muted-row">
-            <span>Loading</span><span>Backend</span><span>--</span><span>Fetching invoices</span>
+            <span class="dashboard-table-note">Loading your orders…</span>
+          </div>
+          <div v-else-if="store.error" class="dashboard-table-row muted-row">
+            <span class="dashboard-table-note">We couldn’t load your orders. Try Refresh.</span>
           </div>
           <div v-else-if="!store.recentOrders.length" class="dashboard-table-row muted-row">
-            <span>No invoices</span><span>Backend returned 0</span><span>--</span><span>Create invoices to populate this table</span>
+            <span class="dashboard-table-note">No orders yet. Your most recent ten will appear here.</span>
           </div>
           <div v-for="order in store.recentOrders" :key="`${order.date}-${order.product}-${order.amount}`" class="dashboard-table-row">
             <span>{{ order.date }}</span>
