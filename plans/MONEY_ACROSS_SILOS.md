@@ -332,8 +332,57 @@ production's first order — it was running.
 **P1 — the beta-grant field.** `tenant.beta`, unioned in `tenant_entitlement_set`, plus the ungated-call-
 site guard in the grant-test shape. This is what makes "staging" available at all, and it is a day.
 
-**P2 — COGS at checkout.** One metadata key on the PaymentIntent, per-line keys on line items, and the
-ledger entry populated from it. Completes five of the six components.
+**P2 — COGS at checkout. BUILT 2026-10-11.** Completes five of the six components.
+
+**The plan was wrong about the starting point.** It said *"COGS is known at checkout. It is a product
+field."* It was not a product field — Smart Pricing's cost model (`plans/SMART_PRICING.md` §2,
+`plans/INVENTORY_COST_BASIS.md`) is design-only, and neither `Product` nor `Offer` had anywhere to put a
+number. So P2 included a schema change, which is the one category `CLAUDE.md` says to ask about rather
+than guess. Decided with the author: **`Product.unit_cost`**, integer cents, optional — one fact about the
+thing, which does not change because it is sold as an upsell, and the field a future `InventoryLot` would
+derive into.
+
+**And it found a live misstatement.** `Reports.vue` has a **Profit** row, and with `cogs` structurally
+zero it has been showing revenue-net-of-fees under that word since Reports shipped — the same shape as the
+Dashboard's "Net Revenue" that was really gross (fixed 2026-10-09).
+
+### Absent is not zero
+
+The invariant the whole slice is built on. A tenant who has not recorded a cost is not a tenant with no
+costs, and treating unknown as zero fails in the direction a seller wants to believe:
+
+- the form holds dollars as a **string**, so `""` and `"0"` stay distinct all the way down;
+- the payload **omits** the key rather than sending `0`;
+- every layer carries the **count of lines it could not price**;
+- `summarize` answers `profit_known` / `uncosted_sales`, and Reports renders a **dash** plus *"2 sales
+  have no cost recorded"* rather than a figure short by an unknown amount.
+
+An order written before this shipped reports `known: false`, correctly. Defaulting the other way would
+have declared the entire back catalogue fully costed and handed every tenant a profit equal to their
+revenue — the bug, re-entering as a migration default.
+
+### What shipped
+
+| piece | where |
+|---|---|
+| `unit_cost` field + validation | `schemas/Product.schema.json`, `domain/documents.py` |
+| pure cost domain | `domain/cogs.py` (new) |
+| stamped into metadata | `handlers/checkout.py` (beside the `silo` and bump-postage stamps) |
+| frozen on the order | `handlers/stripe_webhook.py` → `order.costs` |
+| into the ledger entry | `domain/ledger.py` `_cogs_of` / `_cogs_known` |
+| profit withheld when unknowable | `domain/ledger.py` `summarize`, `Reports.vue` |
+| the tenant can enter it | `ProductUnitCostField.vue`, wizard **and** edit form |
+
+**Two judgement calls worth knowing.** A **service** line counts as unpriceable rather than free — labour
+cost has nowhere to live until `plans/SERVICES_IN_OFFERS.md`, and calling it zero would report a service
+business's entire revenue as profit. And **bump costs ride the same wire format as `order_bump_shipping`,
+multiplied by quantity**: a bump is ticked after the session exists, so checkout stamps what each *would*
+cost and the webhook adds up the ones taken. Summing the unit cost once understates COGS, which is the
+precise failure this component exists to stop.
+
+Why metadata rather than a lookup at report time: it is an **immutable snapshot**. A tenant who corrects a
+cost next month must not retroactively rewrite last month's margin, and a product later deleted must not
+take its own history with it.
 
 **P3 — shipping cost at label purchase.** The metadata update, on the path that already buys the label.
 Completes the sixth, and `profit` becomes a real number for the first time.

@@ -497,6 +497,14 @@ The stamp is reachable for free via `expand[]=data.invoice`: a renewal's charge 
 (`payment_intent_data` is payment-mode only) but its invoice carries
 `parent.subscription_details.metadata.silo`.
 
+**P2 — COGS at checkout: BUILT 2026-10-11.** `cogs` has been a declared ledger component with no supplier
+since ledger.py was written, so `profit` equalled `net` and **`Reports.vue` showed that under the word
+"Profit"**. The plan said COGS "is a product field" — it was not, so P2 included a schema decision
+(`Product.unit_cost`, cents, optional; agreed with the author). Absent is not zero at every layer, and
+Reports now renders a dash plus the count of uncosted sales rather than an inflated figure. Services count
+as unpriceable, not free. Remaining: **P3** (shipping cost written at label purchase, the sixth component)
+and **P1** (`tenant.beta`).
+
 The rest, in order: a **`tenant.beta` grant field** unioned into `tenant_entitlement_set`, which is what
 "staging" actually wants — `ai_builder` is *already* a declared capability, and
 `platform_subscription_sync.py:114` would silently wipe a flag stored in `entitlements`; then **COGS
