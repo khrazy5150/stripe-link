@@ -226,6 +226,70 @@ def shipping_cost_entry_from_shipment(
     )
 
 
+def return_shipping_cost_entry(
+    *,
+    tenant_id: str,
+    entry_id: str,
+    occurred_at: int,
+    mode: str,
+    currency: str,
+    shipping_cost: int,
+    idempotency_key: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """What the carrier charged for a RETURN label. Real money out, and nothing ever recorded it.
+
+    `buy_return_label` bought labels and wrote no ledger entry at all (found 2026-10-11), so a tenant who
+    accepts returns had their postage understated and their profit overstated by exactly their
+    return-label spend. Harmless while `profit` was structurally wrong anyway; not harmless now that P2
+    made it a figure a tenant can read.
+
+    **Why `cost_adjustment` and not `shipping_cost`.** The component says what KIND of money this is; the
+    entry type says WHY. Both write the `shipping_cost` component, so `profit` counts them equally -- a
+    dollar paid to a carrier is a dollar either way. But `shipping_margin` answers one narrow question,
+    *"did what I charge for postage cover what posting it cost?"*, and a return has no postage revenue
+    beside it. Counting one there would show a tenant their outbound pricing losing money because a buyer
+    sent something back, which is a different business problem wearing the wrong label.
+    """
+    return _entry(
+        tenant_id=tenant_id, entry_id=entry_id, entry_type="cost_adjustment", occurred_at=occurred_at,
+        mode=mode, currency=currency,
+        amounts=_clean_amounts(shipping_cost=-abs(int(shipping_cost))),
+        idempotency_key=idempotency_key,
+        description=kwargs.pop("description", "Return shipping label"),
+        **kwargs,
+    )
+
+
+def return_shipping_cost_entry_from_shipment(
+    shipment: dict[str, Any], order: dict[str, Any], *, now_epoch: int,
+) -> dict[str, Any] | None:
+    """Build it from a purchased return shipment. None when there is nothing to record.
+
+    Keyed on the shipment with its own `le_return_ship_` prefix, so a return label and an outbound label
+    for the same order cannot collide on one row -- which they would under the outbound prefix, and the
+    second write would silently replace the first rather than adding to it.
+    """
+    cost = (shipment or {}).get("cost") or {}
+    amount = int(cost.get("amount") or 0)
+    shipment_id = str((shipment or {}).get("shipment_id") or "").strip()
+    order_id = str((order or {}).get("order_id") or (shipment or {}).get("order_id") or "").strip()
+    key_ref = shipment_id or order_id
+    if not amount or not key_ref:
+        return None
+    return return_shipping_cost_entry(
+        tenant_id=str((order or {}).get("tenant_id") or (shipment or {}).get("tenant_id") or ""),
+        entry_id=f"le_return_ship_{key_ref}",
+        occurred_at=int((shipment or {}).get("purchased_at") or now_epoch),
+        mode="live" if (order or {}).get("mode") == "live" else "test",
+        currency=str(cost.get("currency") or (order or {}).get("currency") or "usd"),
+        shipping_cost=amount,
+        idempotency_key=f"return_shipping_cost:{key_ref}",
+        order_id=order_id or None,
+        now_epoch=now_epoch,
+    )
+
+
 def refund_entry(
     *,
     tenant_id: str,
@@ -602,6 +666,10 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
     # make any refunded period permanently unknowable.
     sales = [entry for entry in entries if str(entry.get("entry_type") or "") == "sale"]
     uncosted = sum(1 for entry in sales if not entry.get("cogs_known"))
+    # Only the entries that are ABOUT outbound postage, for `shipping_margin` below.
+    outbound_shipping_cost = sum(
+        int((entry.get("amounts") or {}).get("shipping_cost") or 0)
+        for entry in entries if str(entry.get("entry_type") or "") == "shipping_cost")
     return {
         "totals": totals,
         "net": net,
@@ -620,8 +688,17 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
         # authoritative, is structurally always wrong, and nobody can tell from reading it. Not worth
         # repeating in new code on the same day it was written up.
         "shipping_revenue": totals["shipping_revenue"],
-        "shipping_margin": (totals["shipping_revenue"] + totals["shipping_cost"]
-                            if totals["shipping_cost"] else None),
+        # SCOPED TO OUTBOUND LABELS. `totals["shipping_cost"]` includes return labels, which are recorded
+        # as `cost_adjustment` entries against the same component because a dollar to a carrier is a
+        # dollar. But this figure answers only "did what I charge for postage cover what posting it
+        # cost?", and a return has no postage revenue beside it -- summing it here would show a tenant's
+        # outbound pricing losing money because a buyer sent something back.
+        "shipping_revenue_cost": outbound_shipping_cost,
+        "shipping_margin": (totals["shipping_revenue"] + outbound_shipping_cost
+                            if outbound_shipping_cost else None),
+        # Stated separately, because "my postage pricing is fine and returns are eating me" and "my
+        # postage pricing is wrong" are different problems with different fixes.
+        "return_shipping_cost": totals["shipping_cost"] - outbound_shipping_cost,
         # THE SEGREGATION, stated rather than left for the reader to subtract. A tenant's accounting needs
         # to know what they sold apart from what they charged to post it: the two have different margins,
         # different tax treatment, and only one of them is what the platform takes its fee on.

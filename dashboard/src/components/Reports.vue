@@ -178,8 +178,18 @@ const LINES = [
   { label: "Shipping collected", pick: (s) => s.shipping_revenue },
   { label: "Stripe fees", pick: (s) => (s.totals || {}).stripe_fee, tone: "is-cost" },
   { label: "Platform fees", pick: (s) => (s.totals || {}).platform_fee, tone: "is-cost" },
-  { label: "Shipping paid", pick: (s) => (s.totals || {}).shipping_cost, tone: "is-cost",
-    note: "Labels bought so far." },
+  // SPLIT, because `totals.shipping_cost` now holds both outbound and return labels and this row said
+  // "Labels bought so far" while being the figure `Shipping collected` is meant to be read against. A
+  // tenant comparing the two would have been told their postage pricing was losing money whenever a
+  // buyer sent something back (plans/MONEY_ACROSS_SILOS.md P3).
+  { label: "Shipping paid", pick: (s) => s.shipping_revenue_cost, tone: "is-cost",
+    note: "Outbound labels bought so far — compare with Shipping collected." },
+  // Its own row, because "my postage pricing is wrong" and "returns are eating me" are different
+  // problems with different fixes. Hidden until there is one: a permanent £0 row teaches a tenant to
+  // stop reading the statement.
+  { label: "Return labels", pick: (s) => s.return_shipping_cost, tone: "is-cost",
+    hide: (s) => !Number(s.return_shipping_cost || 0),
+    note: "Return postage you paid for. Not part of shipping margin." },
   { label: "Net", pick: (s) => s.net, tone: "is-total",
     note: "Gross after Stripe and platform fees." },
   // PROFIT IS WITHHELD RATHER THAN GUESSED. `cogs` was a declared ledger component that nothing ever
@@ -198,7 +208,9 @@ const LINES = [
 const rows = computed(() => {
   const now = summary.value;
   if (!now) return [];
-  return LINES.map((line) => {
+  // A line may not apply to this tenant at all. `hide` is absent on every other line, which reads as
+  // always-shown.
+  return LINES.filter((line) => !(line.hide && line.hide(now))).map((line) => {
     const value = Number(line.pick(now) || 0);
     const was = previous.value ? Number(line.pick(previous.value) || 0) : 0;
     // A row may refuse to state its value. `known` is absent on every other line, which reads as

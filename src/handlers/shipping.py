@@ -337,6 +337,26 @@ def _sample_destination(from_address: dict, typed: dict) -> dict:
     return {**chosen, **typed}
 
 
+def record_return_shipping_cost_entry(order, shipment, *, now, ledger_repo=None):
+    """Append what the carrier charged for a RETURN label.
+
+    `buy_return_label` wrote no ledger entry at all (found 2026-10-11), so every return label a tenant
+    bought was money out that the books never saw -- understating postage and overstating profit by
+    exactly that spend. It did not matter while `profit` was structurally wrong; it matters now that P2
+    made profit a figure a tenant reads (plans/MONEY_ACROSS_SILOS.md P3).
+
+    Recorded as `cost_adjustment` against the `shipping_cost` component, so `profit` counts it and
+    `shipping_margin` does not -- see `return_shipping_cost_entry` for why that split is the honest one.
+
+    Returns True when written. **Never raises** -- the label is bought and the parcel is moving; a
+    bookkeeping append must not read to the tenant as a failed label.
+    """
+    from stripe_link.domain.ledger import return_shipping_cost_entry_from_shipment
+
+    return _append_shipping_cost(order, shipment, now=now, ledger_repo=ledger_repo,
+                                 build=return_shipping_cost_entry_from_shipment, label="return shipping")
+
+
 def record_shipping_cost_entry(order, shipment, *, now, ledger_repo=None):
     """Append what the carrier charged to the transaction ledger.
 
@@ -348,8 +368,20 @@ def record_shipping_cost_entry(order, shipment, *, now, ledger_repo=None):
     """
     from stripe_link.domain.ledger import shipping_cost_entry_from_shipment
 
+    return _append_shipping_cost(order, shipment, now=now, ledger_repo=ledger_repo,
+                                 build=shipping_cost_entry_from_shipment, label="shipping")
+
+
+def _append_shipping_cost(order, shipment, *, now, ledger_repo, build, label):
+    """The shared append. ONE body for outbound and return labels.
+
+    Extracted rather than copied: the original is twenty lines of repository resolution and
+    never-raise handling, and two copies of that would drift in the ways that matter -- the
+    `LEDGER_TABLE` guard, the mode the repository is constructed for, and the promise never to turn a
+    bought label into an error. Only the builder and the log noun differ.
+    """
     try:
-        entry = shipping_cost_entry_from_shipment(shipment, order, now_epoch=now)
+        entry = build(shipment, order, now_epoch=now)
         if not entry:
             return False
         repo = ledger_repo
@@ -362,7 +394,7 @@ def record_shipping_cost_entry(order, shipment, *, now, ledger_repo=None):
         repo.append(entry)
         return True
     except Exception as exc:  # noqa: BLE001
-        print(f"[shipping] shipping cost not recorded for order "
+        print(f"[shipping] {label} cost not recorded for order "
               f"{(order or {}).get('order_id')}: {type(exc).__name__}: {exc}")
         return False
 
@@ -1529,6 +1561,12 @@ def buy_return_label(event, repository, secret_cipher, *, orders_repo=None, ship
         saved = shipments.put(purchased)
     except RepositoryError as exc:
         return error_response(str(exc), code="shipment_not_saved")
+
+    # WHAT THE RETURN COST. Nothing recorded this until 2026-10-11: the outbound path has appended a
+    # ledger entry since labels existed, and this path -- the same `mark_purchased`, the same `cost`
+    # block, the same carrier charge -- appended nothing, so return postage was money out the books never
+    # saw. Best-effort, like every write after a label is bought.
+    record_return_shipping_cost_entry(order, saved, now=now)
 
     # The request remembers its label, so the screen can show the buyer's tracking without a second lookup.
     refund_request["return_shipment_id"] = shipment_id
