@@ -177,6 +177,7 @@ def save_shipping_config(event, repository, secret_cipher, products_repo=None):
         # and pasting a test key can no longer destroy a live one (domain/shipping_keys.py).
         document = prepare_provider_secret(document, existing, secret_cipher,
                                            stripe_mode=resolve_stripe_mode(event))
+        document = record_shipping_opt_out(document, existing)
         validate_shipping_config(document)
         saved = repository.put(document)
         # Readiness travels with every response so the screen never has to compute it from unsaved form
@@ -194,6 +195,28 @@ def save_shipping_config(event, repository, secret_cipher, products_repo=None):
         return error_response(str(exc), code="provider_key_mode_mismatch")
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_shipping_config")
+
+
+
+def record_shipping_opt_out(document, existing):
+    """Remember that the tenant turned shipping OFF, so a later connection test does not turn it back on.
+
+    Only a TRANSITION from on to off counts. A config that has always been off has never been decided
+    about -- the checkbox gated nothing until 2026-10-11, so every existing config carries `false` by
+    accident -- and treating that as a choice would freeze shipping off for everyone the moment this
+    shipped.
+
+    Ticking it back clears the opt-out, which is what makes the switch a switch rather than a trapdoor.
+    """
+    was_on = bool((existing or {}).get("enabled"))
+    now_on = bool((document or {}).get("enabled"))
+    if now_on:
+        document.pop("enabled_opt_out", None)
+    elif was_on:
+        document["enabled_opt_out"] = True
+    elif (existing or {}).get("enabled_opt_out"):
+        document["enabled_opt_out"] = True
+    return document
 
 
 def _looks_like_secret_ref(value: str) -> bool:
@@ -493,7 +516,16 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
     # still asks the provider rather than the slot.
     raw_provider["connection_status"] = status
     raw_provider["last_tested_at"] = now_fn()
-    saved = repository.put({**raw, "provider": raw_provider})
+    updated = {**raw, "provider": raw_provider}
+    # AUTO-ENABLE on a proven key. A tenant who has connected a carrier wants to ship; making them find
+    # a second checkbox to say so is a step that exists only because the software could not infer it.
+    # Skipped when they have deliberately turned it off -- that choice outranks the inference, and
+    # ticking it back is what clears it.
+    from stripe_link.domain.shipping import shipping_opted_out
+
+    if status == "connected" and not shipping_opted_out(updated):
+        updated["enabled"] = True
+    saved = repository.put(updated)
     return json_response({
         "shipping_config": redact_shipping_config(saved),
         "connection": {"status": status, "message": message, "carriers": carriers},
@@ -695,7 +727,14 @@ def live_rates_for(config, tenant_id, *, parcels, destination, secret_cipher):
     address, a carrier having a bad minute -- comes back as a reason, because the caller is a landing page
     and the honest answer there is "we could not get rates", never a 500 and never a silent zero.
     """
+    from stripe_link.domain.shipping import shipping_opted_out
     from stripe_link.domain.shipping_rating import rate_parcels
+
+    # FIRST, ahead of every "not configured yet" reason. The BUYER path never calls `label_readiness`,
+    # so this is the one place the off switch bites for them -- and a tenant who turned shipping off is
+    # not missing a provider, they made a decision. Reporting the decision is the truthful answer.
+    if shipping_opted_out(config):
+        return {"options": [], "error": "shipping_off"}
 
     provider_config = dict((config or {}).get("provider") or {})
     name = str(provider_config.get("name") or "")

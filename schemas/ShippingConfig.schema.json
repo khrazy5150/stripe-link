@@ -25,7 +25,12 @@
     },
     "enabled": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "description": "Whether this tenant offers shipping. Auto-ticked by a successful connection test -- a tenant who has connected a carrier wants to ship, and a second checkbox saying so is a step the software can infer. Until 2026-10-11 nothing read this field at all."
+    },
+    "enabled_opt_out": {
+      "type": "boolean",
+      "description": "The tenant DELIBERATELY turned shipping off, so a later connection test must not turn it back on. Written only on a transition from on to off, and cleared by ticking `enabled` again. Separate from `enabled: false` because that was the default of a checkbox that gated nothing, so every pre-existing config carries it by accident -- reading it as a decision would have switched shipping off for every tenant on deploy."
     },
     "test_mode": {
       "type": "boolean",

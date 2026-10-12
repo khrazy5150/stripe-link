@@ -488,6 +488,22 @@ def _and_more(names: list[str], shown: int = 3) -> str:
 
 
 
+
+def shipping_opted_out(config: dict[str, Any] | None) -> bool:
+    """Has the tenant DELIBERATELY turned shipping off?
+
+    Not `enabled is False`, and the difference is a migration that would otherwise have broken every
+    tenant on deploy. The "Enable shipping" checkbox was read by nothing until 2026-10-11 -- declared,
+    rendered, saved, and gating nothing -- so every config in existence carries `enabled: false` simply
+    because nobody ever ticked a box that did nothing. Treating that as a decision would have switched
+    shipping off for everyone who had it working.
+
+    So the gate reads the OPT-OUT, which is only ever written when a tenant unticks a box that was
+    ticked. Absent means "never decided", which behaves exactly as before.
+    """
+    return bool((config or {}).get("enabled_opt_out"))
+
+
 def _has_key_for_mode(provider: dict[str, Any], stripe_mode: str) -> bool:
     """A key this mode can actually use: its own slot, or a pre-split key whose prefix matches.
 
@@ -517,6 +533,11 @@ def label_readiness(config: dict[str, Any] | None, stripe_mode: str = "test") ->
     from stripe_link.domain import shipping_keys
 
     missing = []
+    if shipping_opted_out(config):
+        # FIRST, and alone: every other blocker is "finish setting this up", and listing them beside a
+        # deliberate off switch would read as a to-do list for something the tenant has already decided
+        # against.
+        return ["Shipping is turned off. Tick \u201cEnable shipping\u201d to offer rates and buy labels."]
     provider = config.get("provider") or {}
     if not provider.get("name"):
         missing.append("Choose a shipping provider.")

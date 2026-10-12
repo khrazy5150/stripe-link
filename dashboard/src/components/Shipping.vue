@@ -25,6 +25,18 @@
           <input v-model="form.enabled" type="checkbox" />
           <span>Enable shipping (rates and labels)</span>
         </label>
+        <!-- Says what the box DOES, and that it ticks itself. Until 2026-10-11 it gated nothing at all,
+             so a tenant had no way to learn its meaning from using it. -->
+        <p class="field-hint">
+          <template v-if="form.enabled">
+            Buyers see shipping rates and you can buy labels. Untick to stop offering shipping — we will
+            not turn it back on by itself.
+          </template>
+          <template v-else>
+            Shipping is off: buyers see no rates and labels cannot be bought. This ticks itself when a
+            carrier key passes its connection test.
+          </template>
+        </p>
         <!-- The "Test mode" checkbox lived here. It was saved, displayed, and read by nothing
              server-side, and it could not have worked: Shippo uses one base URL and decides the
              environment from the key's own prefix. The dashboard's TEST/LIVE toggle now selects which

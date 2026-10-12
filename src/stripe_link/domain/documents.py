@@ -2967,6 +2967,10 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
     # part of the form is backwards. Whether the config is COMPLETE enough to buy a label is a different
     # question, answered by label_readiness() rather than by refusing the save.
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider"])
+    optional_bool(document, "enabled", "Shipping config enabled")
+    # The DELIBERATE off switch, distinct from `enabled: false` -- see shipping.shipping_opted_out for
+    # why those are different facts and why conflating them would have broken every existing tenant.
+    optional_bool(document, "enabled_opt_out", "Shipping config enabled_opt_out")
     validate_enabled_services(document.get("enabled_services"))
     validate_shipping_zones(document.get("zones"), document.get("boxes"))
     validate_combined_shipping(document.get("combined_shipping"))
