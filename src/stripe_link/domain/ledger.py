@@ -666,6 +666,25 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
     # make any refunded period permanently unknowable.
     sales = [entry for entry in entries if str(entry.get("entry_type") or "") == "sale"]
     uncosted = sum(1 for entry in sales if not entry.get("cogs_known"))
+
+    # PROFIT ON THE PART WE CAN ACTUALLY ANSWER FOR.
+    #
+    # `profit_known` is all-or-nothing, and the cost of that is a month of silence: a tenant who starts
+    # recording costs today still sees a dash until every older sale in the window ages out, because the
+    # entries already written can never gain a cost. Reported 2026-10-12 on a real 30-day window where
+    # two costed sales sat behind eight that were not.
+    #
+    # So the same arithmetic, restricted to the sales that carry a cost, and reported WITH its scope.
+    # It is not an estimate of the whole: a caller that shows it without saying "on 2 of 10 sales" is
+    # misusing it, which is why the count travels beside it rather than being left to be derived.
+    costed = [entry for entry in sales if entry.get("cogs_known")]
+    costed_totals = {key: 0 for key in AMOUNT_COMPONENTS}
+    for entry in costed:
+        for key, value in (entry.get("amounts") or {}).items():
+            if key in costed_totals:
+                costed_totals[key] += int(value or 0)
+    costed_profit = (costed_totals["gross"] + costed_totals["stripe_fee"] + costed_totals["platform_fee"]
+                     + costed_totals["cogs"] + costed_totals["shipping_cost"] - costed_totals["tax"])
     # Only the entries that are ABOUT outbound postage, for `shipping_margin` below.
     outbound_shipping_cost = sum(
         int((entry.get("amounts") or {}).get("shipping_cost") or 0)
@@ -678,6 +697,10 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
         # visit should not be told their profit is zero with authority.
         "profit_known": bool(sales) and uncosted == 0,
         "uncosted_sales": uncosted,
+        # The scoped figure and the scope it applies to. Both, always, so neither can be shown alone.
+        "costed_profit": costed_profit if costed else None,
+        "costed_sales": len(costed),
+        "sale_count": len(sales),
         "tax_liability": totals["tax"],
         # What the buyer paid for postage. The margin needs BOTH halves, and `shipping_cost` has no source
         # until a carrier label is bought (plans/SHIPPING_CHARGES.md), so it is **None when unknowable**

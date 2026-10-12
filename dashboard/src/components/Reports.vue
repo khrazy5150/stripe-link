@@ -6,11 +6,15 @@
         <p class="screen-subtitle">What you sold, what it cost, and what is left.</p>
       </div>
       <div class="reports-controls">
-        <label>Period
-          <select v-model="period" @change="load">
-            <option v-for="p in PERIODS" :key="p.key" :value="p.key">{{ p.label }}</option>
-          </select>
-        </label>
+        <!-- Chips, not a select. Six windows that a tenant switches between constantly should be one
+             click each, and the current one should be visible without opening anything. -->
+        <div class="period-chips" role="group" aria-label="Reporting period">
+          <button v-for="p in PERIODS" :key="p.key" type="button" class="period-chip"
+                  :class="{ 'is-active': period === p.key }" :aria-pressed="period === p.key"
+                  :disabled="busy" @click="period = p.key; load()">
+            {{ p.label }}
+          </button>
+        </div>
         <button type="button" class="secondary-action" :disabled="busy" @click="load">
           {{ busy ? "Loading…" : "Reload" }}
         </button>
@@ -18,6 +22,28 @@
     </header>
 
     <div v-if="error" class="keys-status-banner error is-prose">{{ error }}</div>
+
+    <!-- THE THREE FIGURES SOMEBODY OPENS THIS SCREEN FOR, before the statement that derives them.
+         A report is scanned before it is read: what came in, what is left after the platforms take
+         their share, and what is actually mine. The table below still shows the arithmetic -- this is
+         the answer, not a replacement for the working. -->
+    <div v-if="summary" class="reports-headline">
+      <article v-for="card in headline" :key="card.label" class="reports-figure"
+               :class="{ 'is-lead': card.lead }">
+        <span class="reports-figure-label">{{ card.label }}</span>
+        <strong class="reports-figure-value" :class="{ 'is-unknown': !card.known }">
+          {{ card.known ? money(card.value) : "—" }}
+        </strong>
+        <span v-if="card.scope" class="reports-figure-scope">{{ card.scope }}</span>
+        <span v-else-if="card.known && previous" class="reports-figure-change"
+              :class="card.delta === 0 ? '' : (card.delta > 0 ? 'is-up' : 'is-down')">
+          <template v-if="card.delta === 0">No change</template>
+          <template v-else>{{ card.delta > 0 ? "▲" : "▼" }} {{ money(Math.abs(card.delta)) }}</template>
+          <span class="reports-figure-versus">vs previous</span>
+        </span>
+        <span v-else-if="card.hint" class="reports-figure-scope">{{ card.hint }}</span>
+      </article>
+    </div>
 
     <!-- A TABLE, not cards. These figures are one statement that adds up -- revenue, then what was taken
          out, then what is left -- and a row of cards says they are eight unrelated numbers. Read down the
@@ -79,6 +105,12 @@
           <tr v-for="row in sold" :key="row.key">
             <th scope="row">
               {{ row.name }}
+              <!-- Share of revenue, as a bar. "What sold" is a RANKING, and a column of numbers makes
+                   the reader do the comparison the screen exists to do for them. Width only -- no
+                   second colour, because the bar is context for the figure beside it, not a rival. -->
+              <span class="reports-share" aria-hidden="true">
+                <span class="reports-share-fill" :style="{ width: row.share + '%' }"></span>
+              </span>
               <small v-if="row.bump_gross">{{ money(row.bump_gross) }} of this as an order bump</small>
             </th>
             <td class="reports-num">{{ money(row.gross) }}</td>
@@ -120,6 +152,10 @@ import { apiRequest } from "../api/client";
 import { formatMoney } from "../stores/products";
 
 const PERIODS = [
+  // SHORT WINDOWS FIRST. 30 days was the shortest, which is coarse for a seller checking daily -- and
+  // it is the window that hides a freshly-costed sale behind a month of older uncosted ones.
+  { key: "today", label: "Today", days: 1 },
+  { key: "7d", label: "Last 7 days", days: 7 },
   { key: "30d", label: "Last 30 days", days: 30 },
   { key: "90d", label: "Last 90 days", days: 90 },
   { key: "12m", label: "Last 12 months", days: 365 },
@@ -197,12 +233,16 @@ const LINES = [
   // same shape as the Dashboard's "Net Revenue" summing gross. Now the server says whether every sale in
   // the period had a recorded cost, and a period containing one uncosted sale has no profit figure to
   // show: the arithmetic would be short by an unknown amount and inflated in the flattering direction.
-  { label: "Profit", pick: (s) => s.profit, tone: "is-total",
-    known: (s) => Boolean(s.profit_known),
-    unknownNote: (s) => (Number(s.uncosted_sales || 0)
-      ? `${s.uncosted_sales} ${Number(s.uncosted_sales) === 1 ? "sale has" : "sales have"} no cost recorded. Add "What this costs you" to those products.`
-      : "Add what your products cost you to see profit."),
-    note: "Net after postage and cost of goods." },
+  // PROFIT, scoped when it has to be. All-or-nothing cost a tenant a month of silence: start recording
+  // costs today and the figure still hides behind every older uncosted sale in the window, because an
+  // entry already written can never gain a cost. The partial answer is shown WITH its scope instead,
+  // which is the same shape as the shipping-coverage caveat two rows down.
+  { label: "Profit", pick: (s) => (s.profit_known ? s.profit : s.costed_profit), tone: "is-total",
+    known: (s) => Boolean(s.profit_known) || s.costed_profit !== null,
+    note: (s) => (s.profit_known
+      ? "Net after postage and cost of goods."
+      : `On ${s.costed_sales} of ${s.sale_count} sales — the rest have no cost recorded yet.`),
+    unknownNote: () => 'No costs recorded yet. Add "What this costs you" to your products.' },
 ];
 
 const rows = computed(() => {
@@ -219,7 +259,9 @@ const rows = computed(() => {
     const wasKnown = line.known ? (previous.value ? line.known(previous.value) : false) : true;
     return {
       label: line.label,
-      note: known ? line.note : (line.unknownNote ? line.unknownNote(now) : line.note),
+      note: known
+        ? (typeof line.note === "function" ? line.note(now) : line.note)
+        : (line.unknownNote ? line.unknownNote(now) : line.note),
       tone: line.tone, value, was, delta: value - was, known, wasKnown,
       // A delta between two figures is meaningless if either is unknown, and showing one would imply
       // both were measured.
@@ -228,11 +270,47 @@ const rows = computed(() => {
   });
 });
 
+// The three figures the headline band shows. Derived from the same summary the table reads, so the
+// band and the statement can never disagree -- the Dashboard learned that lesson the hard way when its
+// revenue card summed a different source than the table beneath it.
+const headline = computed(() => {
+  const now = summary.value;
+  if (!now) return [];
+  const was = previous.value;
+  const delta = (pick) => (was ? Number(pick(now) || 0) - Number(pick(was) || 0) : 0);
+  const scoped = !now.profit_known && now.costed_profit !== null;
+  return [
+    { label: "Gross", value: (now.totals || {}).gross, known: true,
+      delta: delta((s) => (s.totals || {}).gross) },
+    { label: "Net", value: now.net, known: true, delta: delta((s) => s.net),
+      hint: "After Stripe and platform fees" },
+    { label: "Profit", lead: true,
+      value: now.profit_known ? now.profit : now.costed_profit,
+      known: now.profit_known || now.costed_profit !== null,
+      delta: delta((s) => (s.profit_known ? s.profit : s.costed_profit) || 0),
+      // The scope replaces the change, deliberately: comparing a partial figure with a period whose
+      // coverage was different is a number nobody can act on.
+      scope: scoped ? `On ${now.costed_sales} of ${now.sale_count} sales` : "",
+      hint: 'Add "What this costs you" to your products' },
+  ];
+});
+
 const periodLabel = computed(() => spec.value.label);
 
 // Presented, not derived: the rollup is the server's, so money is added up in exactly one place.
-const sold = computed(() => ((summary.value?.what_sold || {}).products || [])
-  .map((row) => ({ ...row, key: row.product_id || row.name, name: row.name || row.product_id })));
+const sold = computed(() => {
+  const products = (summary.value?.what_sold || {}).products || [];
+  // Share is against the BIGGEST seller, not against total revenue: the question a ranking answers is
+  // "how does this compare with the leader", and scaling to the total leaves every bar a stub as soon
+  // as a tenant has a dozen products.
+  const leader = products.reduce((top, row) => Math.max(top, Number(row.gross || 0)), 0);
+  return products.map((row) => ({
+    ...row,
+    key: row.product_id || row.name,
+    name: row.name || row.product_id,
+    share: leader > 0 ? Math.max(2, Math.round((Number(row.gross || 0) / leader) * 100)) : 0,
+  }));
+});
 const unitemised = computed(() => Number((summary.value?.what_sold || {}).unitemised_gross || 0));
 const soldTotal = computed(() => sold.value.reduce((sum, row) => sum + Number(row.gross || 0), 0));
 

@@ -7964,19 +7964,179 @@ a.orders-place { text-decoration: underline; }
 .orders-parcel-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .orders-parcel-contents { font-size: 13px; color: #555b6b; }
 
-/* Reports. One statement that adds up, so it is laid out as one: revenue, costs, totals. */
-.reports-controls { display: flex; align-items: flex-end; gap: 0.75rem; }
-.reports-table { margin-top: 1.25rem; width: 100%; }
-.reports-table th[scope="row"] { font-weight: 600; text-align: left; }
-.reports-table th[scope="row"] small { display: block; font-weight: 400; color: #64748b; font-size: 0.8rem; }
-/* Digits line up, which is the whole reason this is a table. */
+/* ---- Reports -------------------------------------------------------------------------------------
+   One statement that adds up, laid out as one: what came in, what was taken out, what is left.
+
+   REBUILT 2026-10-12. The previous block hard-coded every size in rem while `html` runs at 62.5%
+   (1rem = 10px), so sizes written for a 16px root rendered at ~62% of their intent: row hints at 8px,
+   section headings at 11px. It also hard-coded six colours, none of which had a dark-mode answer.
+   Everything here is a type or colour TOKEN for that reason. */
+
+:root {
+  /* Money has three jobs on this screen and they are not the same as "success" and "error": an amount
+     coming in, an amount going out, and a subtotal. Named for the job so dark mode retunes them once. */
+  --money-out: #b42318;
+  --money-in: #067647;
+  --statement-rule: var(--line-strong);
+  --statement-total-bg: var(--accent-soft);
+}
+
+.reports-controls {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+}
+
+/* Six windows a tenant switches between constantly: one click each, current one visible without
+   opening anything. */
+.period-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.period-chip {
+  padding: 0.6rem 1.2rem;
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 0.4rem);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-label);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.period-chip:hover:not(:disabled) { color: var(--text); background: var(--bg); }
+.period-chip:disabled { cursor: default; opacity: 0.6; }
+
+.period-chip.is-active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: var(--weight-semibold);
+}
+
+.period-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The answer, before the working. */
+.reports-headline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 1.6rem;
+  margin-top: 2rem;
+}
+
+.reports-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+/* One figure carries the point of the screen; the others are context for it. */
+.reports-figure.is-lead {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+}
+
+.reports-figure-label {
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.reports-figure-value {
+  font-size: 3.2rem;
+  line-height: 1.1;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.reports-figure-value.is-unknown { color: var(--text-muted); font-weight: var(--weight-medium); }
+
+.reports-figure-change,
+.reports-figure-scope {
+  font-size: var(--text-hint);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.reports-figure-change.is-up { color: var(--money-in); font-weight: var(--weight-semibold); }
+.reports-figure-change.is-down { color: var(--money-out); font-weight: var(--weight-semibold); }
+.reports-figure-versus { color: var(--muted); font-weight: var(--weight-normal); margin-left: 0.4rem; }
+
+/* ---- the statement ---- */
+.reports-table { margin-top: 2rem; width: 100%; border-collapse: collapse; }
+
+.reports-table th[scope="col"] {
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.reports-table th[scope="row"] {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  padding: 1.1rem 0;
+}
+
+/* The reason a row exists, at a size somebody can actually read. It was 8px. */
+.reports-table th[scope="row"] small {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: var(--text-hint);
+  font-weight: var(--weight-normal);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.reports-table td { padding: 1.1rem 0 1.1rem 2rem; font-size: var(--text-body); }
+
+/* Digits line up, which is the whole reason this is a table and not cards. */
 .reports-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.reports-muted { color: #64748b; }
-.reports-table .is-cost td:first-of-type { color: #b91c1c; }
-.reports-table .is-total { background: #f8faff; }
-.reports-table .is-total th[scope="row"], .reports-table .is-total td { font-weight: 800; }
-.reports-table .is-up { color: #047857; }
-.reports-table .is-down { color: #b91c1c; }
+.reports-muted { color: var(--muted); }
+.reports-unknown { color: var(--text-muted); }
+
+.reports-table tbody tr + tr th[scope="row"],
+.reports-table tbody tr + tr td { border-top: 1px solid var(--line); }
+
+/* An amount leaving the business reads as one. */
+.reports-table .is-cost td:first-of-type { color: var(--money-out); }
+
+/* A subtotal, by the convention every statement uses: ruled off above, and heavier. */
+.reports-table .is-total th[scope="row"],
+.reports-table .is-total td {
+  font-weight: var(--weight-bold);
+  border-top: 2px solid var(--statement-rule) !important;
+  background: var(--statement-total-bg);
+}
+
+.reports-table .is-total th[scope="row"] { padding-left: 1.2rem; }
+.reports-table .is-total td:last-child { padding-right: 1.2rem; }
+
+/* Costs are stored NEGATIVE, so "up" is good for every row here without exception: a fee that moved
+   from -33 to -20 is a +13 delta and a smaller fee. One rule, no per-row semantics needed. */
+.reports-table .is-up { color: var(--money-in); font-weight: var(--weight-semibold); }
+.reports-table .is-down { color: var(--money-out); font-weight: var(--weight-semibold); }
 
 /* A parcel line reads like a packing slip: box, how many things, then what they are. */
 .orders-parcel-count {
@@ -7987,6 +8147,49 @@ a.orders-place { text-decoration: underline; }
   color: #475569;
 }
 
-.reports-section { margin-top: 2rem; }
-.reports-section h2 { margin: 0 0 0.25rem; font-size: 1.1rem; }
-.reports-table tfoot .is-total th, .reports-table tfoot .is-total td { border-top: 2px solid #cbd5e1; }
+/* Share of the leading product's revenue. Quiet by design: it is context for the number beside it. */
+.reports-share {
+  display: block;
+  width: min(18rem, 100%);
+  height: 0.4rem;
+  margin-top: 0.6rem;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.reports-share-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.reports-section { margin-top: 3.2rem; }
+
+.reports-section h2 {
+  margin: 0 0 0.4rem;
+  font-size: var(--text-card);
+  line-height: var(--leading-card);
+  font-weight: var(--weight-semibold);
+}
+
+.reports-table tfoot .is-total th,
+.reports-table tfoot .is-total td { border-top: 2px solid var(--statement-rule); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* Retuned for a dark ground: the light-mode reds and greens lose contrast on it. */
+    --money-out: #ff7b72;
+    --money-in: #3fb950;
+    --statement-total-bg: rgba(79, 70, 181, 0.18);
+  }
+}
+
+:root[data-theme="dark"] {
+  --money-out: #ff7b72;
+  --money-in: #3fb950;
+  --statement-total-bg: rgba(79, 70, 181, 0.18);
+}
+

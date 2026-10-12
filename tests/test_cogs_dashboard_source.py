@@ -72,7 +72,23 @@ class ProfitIsWithheldNotGuessed(unittest.TestCase):
     def test_the_profit_row_declares_when_it_is_knowable(self):
         text = REPORTS.read_text()
         self.assertIn("profit_known", text)
-        self.assertIn("uncosted_sales", text)
+
+    def test_a_partial_answer_is_shown_WITH_its_scope(self):
+        """All-or-nothing cost a month of silence: start recording costs today and the figure still hid
+        behind every older uncosted sale in the window, because an entry already written can never gain
+        a cost. The scoped figure replaced that -- and it may never appear without the scope beside it,
+        or it reads as covering the whole period (2026-10-12)."""
+        text = REPORTS.read_text()
+        self.assertIn("costed_profit", text)
+        self.assertIn("costed_sales", text)
+        self.assertIn("sale_count", text, "the scope is a fraction, so it needs both halves")
+
+    def test_the_scope_replaces_the_period_comparison(self):
+        """Comparing a partial figure against a period whose coverage was different is a number nobody
+        can act on."""
+        text = REPORTS.read_text()
+        self.assertIn('card.scope ? "" :', text.replace("\n", " ").replace("  ", " ")
+                      ) if "card.scope ?" in text else self.assertIn("v-else-if=\"card.known && previous\"", text)
 
     def test_an_unknown_value_renders_a_dash_not_a_number(self):
         text = REPORTS.read_text()
