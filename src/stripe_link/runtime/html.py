@@ -872,7 +872,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # already carries the ordering for anything that reads the page rather than looks at it.
     "    .sl-numbered-items{list-style:none;counter-reset:sl-num;margin:0 auto;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem}",
     "    .sl-numbered-item{counter-increment:sl-num;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1.6rem;padding:1.6rem 2rem;border:1px solid var(--sl-content-border);border-radius:1rem;background:var(--sl-card)}",
-    "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-accent);color:var(--sl-cta-text,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
+    "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-accent);color:var(--sl-accent-text,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
     "    .sl-numbered-text{margin:0;font-size:1.6rem;line-height:1.55;color:var(--sl-content-text)}",
     # PAGE RIBBON — an Attention Block. Uses the shared section override, so a tenant can make it break
     # the page deliberately; that is the entire point of an interruption.
@@ -1252,6 +1252,65 @@ def template_name(page: dict[str, Any]) -> str:
     return str((page.get("theme") or {}).get("template") or "universal_bundle")
 
 
+# Inks for text that sits ON a theme colour. Not pure black/white: #0b0b0b reads as ink rather than a
+# hole, and both are neutral enough not to fight any accent hue.
+_DARK_INK = "#0b0b0b"
+_LIGHT_INK = "#ffffff"
+
+
+def _relative_luminance(colour: str) -> float | None:
+    """WCAG relative luminance for `#rgb`, `#rrggbb` or `rgb(r,g,b)`. None when it is not a flat colour.
+
+    None matters: a gradient or a CSS variable is not something to guess a contrast against, and the
+    caller keeps the previous behaviour rather than inventing an answer.
+    """
+    raw = str(colour or "").strip().lower()
+    if raw.startswith("#"):
+        digits = raw[1:]
+        if len(digits) == 3:
+            digits = "".join(ch * 2 for ch in digits)
+        if len(digits) != 6 or any(ch not in "0123456789abcdef" for ch in digits):
+            return None
+        channels = [int(digits[i:i + 2], 16) for i in (0, 2, 4)]
+    elif raw.startswith("rgb"):
+        numbers = re.findall(r"\d+", raw)
+        if len(numbers) < 3:
+            return None
+        channels = [min(255, int(n)) for n in numbers[:3]]
+    else:
+        return None
+
+    def channel(value: int) -> float:
+        srgb = value / 255
+        return srgb / 12.92 if srgb <= 0.03928 else ((srgb + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (channel(c) for c in channels)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def readable_ink(background: str) -> str:
+    """The ink — dark or light — that reads best ON `background`.
+
+    **The numbered badge asked the wrong question.** It coloured its numeral with `cta_text`, which
+    answers *"what reads on the CTA gradient?"*, while sitting on `accent`. Those are different colours,
+    and on 2026-10-12 an audit of all sixteen presets found **twelve** failing WCAG AA on that badge --
+    `tiktok-dark` worst at **1.41:1**, white on `#00f2ea`, effectively invisible.
+
+    Deriving it from the accent's own luminance fixes every preset at once and, more importantly, means
+    a new preset cannot reintroduce the fault by picking a light accent. A preset that wants something
+    else can still set `accent_text` explicitly; this is only the default.
+
+    An unparseable background (a gradient, a `var()`) returns the light ink, which is what the badge used
+    before -- an unknown is not a licence to guess.
+    """
+    luminance = _relative_luminance(background)
+    if luminance is None:
+        return _LIGHT_INK
+    on_dark = (luminance + 0.05) / (_relative_luminance(_DARK_INK) + 0.05)
+    on_light = (_relative_luminance(_LIGHT_INK) + 0.05) / (luminance + 0.05)
+    return _DARK_INK if on_dark >= on_light else _LIGHT_INK
+
+
 def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     theme = page.get("theme") or {}
     preset_name = str(theme.get("preset") or "techno-green")
@@ -1282,6 +1341,9 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     tokens.setdefault("price_card_bg", tokens["card"])
     tokens.setdefault("price_card_border", tokens["border"])
     tokens.setdefault("price_card_selected_border", tokens["brand"])
+    # Text that sits ON the accent, which is not the same question as text on the CTA gradient. See
+    # `readable_ink`: twelve of sixteen presets failed WCAG AA while this borrowed `cta_text`.
+    tokens.setdefault("accent_text", readable_ink(tokens["accent"]))
     tokens.setdefault("price_radio", tokens["accent"])
     tokens.setdefault("price_title", tokens["text"])
     tokens.setdefault("price_description", tokens["muted"])
