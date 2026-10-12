@@ -8029,7 +8029,6 @@ a.orders-place { text-decoration: underline; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
   gap: 1.6rem;
-  margin-top: 2rem;
 }
 
 .reports-figure {
@@ -8080,7 +8079,20 @@ a.orders-place { text-decoration: underline; }
 .reports-figure-versus { color: var(--muted); font-weight: var(--weight-normal); margin-left: 0.4rem; }
 
 /* ---- the statement ---- */
-.reports-table { margin-top: 2rem; width: 100%; border-collapse: collapse; }
+
+/* A surface, like the figures above it. Without one the rows ran edge to edge and the Change column
+   ran off the right of the screen entirely. The horizontal scroll is for narrow windows: a statement
+   that adds up must not drop its last column to fit. */
+.reports-panel {
+  padding: 0.8rem 2.4rem 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+
+.reports-table { width: 100%; border-collapse: collapse; }
 
 .reports-table th[scope="col"] {
   font-size: var(--text-section);
@@ -8096,7 +8108,7 @@ a.orders-place { text-decoration: underline; }
   font-size: var(--text-body);
   font-weight: var(--weight-semibold);
   text-align: left;
-  padding: 1.1rem 0;
+  padding: 1.3rem 1.6rem 1.3rem 0.8rem;
 }
 
 /* The reason a row exists, at a size somebody can actually read. It was 8px. */
@@ -8109,7 +8121,10 @@ a.orders-place { text-decoration: underline; }
   color: var(--muted);
 }
 
-.reports-table td { padding: 1.1rem 0 1.1rem 2rem; font-size: var(--text-body); }
+.reports-table td { padding: 1.3rem 0.8rem 1.3rem 2.4rem; font-size: var(--text-body); }
+.reports-table th[scope="col"]:first-child { padding-left: 0.8rem; }
+.reports-table th[scope="col"]:last-child,
+.reports-table td:last-child { padding-right: 0.8rem; }
 
 /* Digits line up, which is the whole reason this is a table and not cards. */
 .reports-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -8130,8 +8145,10 @@ a.orders-place { text-decoration: underline; }
   background: var(--statement-total-bg);
 }
 
-.reports-table .is-total th[scope="row"] { padding-left: 1.2rem; }
-.reports-table .is-total td:last-child { padding-right: 1.2rem; }
+/* The tint is a band across the whole row, so it starts and ends where the panel's padding does
+   rather than stopping short of it. */
+.reports-table .is-total th[scope="row"] { border-radius: var(--radius-md) 0 0 var(--radius-md); }
+.reports-table .is-total td:last-child { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
 
 /* Costs are stored NEGATIVE, so "up" is good for every row here without exception: a fee that moved
    from -33 to -20 is a +13 delta and a smaller fee. One rule, no per-row semantics needed. */
@@ -8166,7 +8183,7 @@ a.orders-place { text-decoration: underline; }
   opacity: 0.55;
 }
 
-.reports-section { margin-top: 3.2rem; }
+.reports-section { display: grid; gap: 0.8rem; }
 
 .reports-section h2 {
   margin: 0 0 0.4rem;

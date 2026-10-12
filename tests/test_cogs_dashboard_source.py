@@ -136,3 +136,41 @@ class TheGuardCanFail(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportsSitsOnTheSamePageWrapperAsEveryOtherScreen(unittest.TestCase):
+    """Reports had no left or right padding, and its Change column ran off the right of the screen.
+
+    The cause was not a missing rule but a missing CLASS: it was the only component of 23 using
+    `class="screen"`, which is defined nowhere in styles.css. Every other screen uses `.page`, which
+    carries the 3.2rem page padding and the 2.4rem grid gap. So Reports inherited neither — it was not
+    styled differently, it was unstyled.
+    """
+
+    import pathlib as _pathlib
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    VIEW = (ROOT / "dashboard/src/components/Reports.vue").read_text(encoding="utf-8")
+    CSS = (ROOT / "dashboard/src/styles.css").read_text(encoding="utf-8")
+
+    def test_it_uses_the_wrapper_the_other_screens_use(self):
+        self.assertIn('<section class="page">', self.VIEW)
+        self.assertIn('<header class="page-header">', self.VIEW)
+
+    def test_it_uses_no_undefined_wrapper_class(self):
+        for ghost in ('class="screen"', 'class="screen-header"', 'class="screen-subtitle"',
+                      'class="page-subtitle"'):
+            self.assertNotIn(ghost, self.VIEW, f"{ghost} is defined nowhere in styles.css")
+
+    def test_every_wrapper_class_it_uses_actually_exists(self):
+        """The general form of the bug: a class that does not exist styles nothing and says nothing."""
+        import re
+        for name in ("page", "page-header", "reports-panel", "reports-headline", "period-chip"):
+            self.assertTrue(re.search(rf"\.{re.escape(name)}[\s,{{:]", self.CSS),
+                            f".{name} is used in the template but defined nowhere")
+
+    def test_the_statement_has_a_surface_to_sit_on(self):
+        """Edge-to-edge rows had nothing holding them, and the last column had nowhere to go."""
+        self.assertIn('<div v-if="summary" class="reports-panel">', self.VIEW)
+        panel = self.CSS[self.CSS.index(".reports-panel {"):][:400]
+        self.assertIn("padding:", panel)
+        self.assertIn("overflow-x: auto", panel, "a statement must not drop a column to fit")

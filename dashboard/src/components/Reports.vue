@@ -1,9 +1,9 @@
 <template>
-  <section class="screen">
-    <header class="screen-header">
+  <section class="page">
+    <header class="page-header">
       <div>
         <h1>Reports</h1>
-        <p class="screen-subtitle">What you sold, what it cost, and what is left.</p>
+        <p>What you sold, what it cost, and what is left.</p>
       </div>
       <div class="reports-controls">
         <!-- Chips, not a select. Six windows that a tenant switches between constantly should be one
@@ -48,7 +48,11 @@
     <!-- A TABLE, not cards. These figures are one statement that adds up -- revenue, then what was taken
          out, then what is left -- and a row of cards says they are eight unrelated numbers. Read down the
          column and the arithmetic is visible; laid out as cards it is not. -->
-    <table v-if="summary" class="data-table reports-table">
+    <!-- On a panel, like the figures above it. Edge-to-edge rows had nothing holding them and the
+         Change column ran off the right of the screen; a surface gives the statement its own margins
+         and somewhere to scroll sideways on a narrow one. -->
+    <div v-if="summary" class="reports-panel">
+    <table class="data-table reports-table">
       <thead>
         <tr>
           <th scope="col">Figure</th>
@@ -80,6 +84,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
 
     <!-- The one figure a tenant could act wrongly on. Shipping cost exists only once a label is bought,
          so a period where most orders have not shipped reports a margin computed from the few that have.
@@ -91,6 +96,7 @@
          product and the bump reads as having never sold. -->
     <section v-if="sold.length" class="reports-section">
       <h2>What sold</h2>
+      <div class="reports-panel">
       <table class="data-table reports-table">
         <thead>
           <tr>
@@ -140,6 +146,7 @@
           </tr>
         </tfoot>
       </table>
+      </div>
     </section>
 
     <p v-if="summary && !entryCount" class="field-hint">No sales in this period.</p>
