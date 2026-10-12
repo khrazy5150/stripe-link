@@ -151,8 +151,10 @@ def describe(tax_config: dict[str, Any] | None, *, connected: bool = True) -> di
     nobody can test. Three states, because the right thing to say genuinely differs:
 
     * **active** — say it is on, and stop nudging.
-    * **pending** — the most useful nudge there is: they started and did not finish, and Stripe will
-      name what is missing.
+    * **pending** — the DEFAULT for an account that has never set Stripe Tax up, as well as for one
+      that began and stopped. The two are indistinguishable from the status alone, so the words have to
+      fit both: never "you did not finish", only "it is not set up", plus whatever Stripe names as
+      missing.
     * **unknown** — say only that no tax is being collected. Never a word about whether any is due.
     """
     config = tax_config or {}
@@ -191,14 +193,26 @@ def describe(tax_config: dict[str, Any] | None, *, connected: bool = True) -> di
     if status == PENDING:
         missing = missing_labels(config)
         return {
-            "state": PENDING, "label": "Unfinished",
-            "headline": "Your Stripe Tax setup is not finished, so no sales tax is being collected.",
-            "detail": ("Stripe still needs your " + _join(missing) + "."
-                       if missing else "Stripe still needs some details before it can calculate tax."),
+            # "Not set up", NOT "Unfinished" (2026-10-12). `tax.settings` always exists and is `pending`
+            # by default for every account that has never touched Stripe Tax -- so `pending` is the
+            # STARTING state, not evidence of an abandoned attempt. This plan's own premise said
+            # *"the tenant started and did not finish"* and that is simply not what the status means;
+            # the first tenant to see it had never opened Stripe Tax at all.
+            #
+            # "Disabled" was considered and rejected: the switch sits directly below this badge, so two
+            # different kinds of "off" would wear the same word -- and "disabled" implies somebody turned
+            # it off rather than that it was never set up.
+            "state": PENDING, "label": "Not set up",
+            "headline": "Stripe Tax is not set up on your account, so no sales tax is being collected.",
+            "detail": ("Stripe needs your " + _join(missing) + " before it can calculate tax."
+                       if missing else "Stripe needs a few details before it can calculate tax."),
             "may_enable": False, "calculating": False,
         }
     return {
-        "state": UNKNOWN, "label": "Not enabled",
+        # "Not collecting" rather than "Not enabled", so it does not read as a near-duplicate of the
+        # `pending` badge beside it. This state is "we could not find out", and the only thing we can
+        # truthfully assert is that we are not adding tax.
+        "state": UNKNOWN, "label": "Not collecting",
         "headline": "No sales tax is being collected on your orders.",
         # The ONLY nudge this module makes, and it asks for the one action we can honestly ask for.
         # Monitoring is free, which is the fact that makes the suggestion worth making at all.

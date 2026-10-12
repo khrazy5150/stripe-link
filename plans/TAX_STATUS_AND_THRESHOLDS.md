@@ -50,7 +50,13 @@ status lookup inside checkout is a round trip on every sale to answer a question
 Three states worth distinguishing, because the right thing to say differs:
 
 - **active** — tax is being calculated. Say so, and stop nudging.
-- **pending / incomplete** — the tenant started and did not finish. That is the most valuable nudge of all.
+- **pending / incomplete** — ~~the tenant started and did not finish. That is the most valuable nudge of
+  all.~~ **WRONG, corrected 2026-10-12 against live data.** `tax.settings` **always exists** and is
+  `pending` by default for every account that has never touched Stripe Tax, so `pending` is the
+  **starting** state and not evidence of an abandoned attempt. The two cases are indistinguishable from
+  the status alone. The first tenant to see this screen had never opened Stripe Tax and was told their
+  setup was "Unfinished". The badge reads **"Not set up"** and the copy never says "you did not finish";
+  naming Stripe's `missing_fields` is still the useful part, and it fits both cases.
 - **absent / unreadable** — say nothing about their liability; say only that no tax is being collected.
 
 **VERIFY before relying:** the exact Tax Settings API response shape, and whether a **Standard OAuth**

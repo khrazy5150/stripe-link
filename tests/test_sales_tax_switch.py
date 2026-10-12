@@ -131,6 +131,26 @@ class TheWordsNeverClaimALiability(unittest.TestCase):
         config, _ = ts.apply_settings({}, settings("pending", missing=["head_office"]), 1)
         self.assertIn("head office address", ts.describe(config)["detail"])
 
+    def test_pending_does_not_claim_the_tenant_abandoned_a_setup(self):
+        """`tax.settings` always exists and is `pending` by DEFAULT for an account that never touched
+        Stripe Tax, so `pending` is the starting state rather than evidence of an attempt. This plan's own
+        premise -- "the tenant started and did not finish" -- was wrong, and the first tenant to see the
+        screen had never opened Stripe Tax at all."""
+        described = ts.describe(ts.apply_settings({}, settings("pending", missing=["head_office"]), 1)[0])
+        self.assertEqual(described["label"], "Not set up")
+        for phrase in ("unfinished", "not finished", "did not finish", "still needs"):
+            self.assertNotIn(phrase, (described["headline"] + " " + described["detail"]).lower(),
+                             "implies the tenant began something they may never have begun")
+
+    def test_the_two_off_states_do_not_wear_the_same_label(self):
+        """"Not set up" (Stripe has no setup) and "Not collecting" (we could not find out) are different
+        facts with different actions. "Disabled" was rejected for both: the switch sits directly below
+        this badge, so it would put two kinds of "off" under one word."""
+        pending = ts.describe(ts.apply_settings({}, settings("pending", missing=["head_office"]), 1)[0])
+        unknown = ts.describe(ts.apply_settings({}, None, 1)[0])
+        self.assertNotEqual(pending["label"], unknown["label"])
+        self.assertNotIn("disabled", (pending["label"] + unknown["label"]).lower())
+
     def test_a_calculating_tenant_is_told_why_some_orders_show_no_tax(self):
         """Stripe returns ZERO tax where there is no registration for the buyer's location. Unexplained,
         that reads as a bug; this is not a claim about where they owe anything."""
