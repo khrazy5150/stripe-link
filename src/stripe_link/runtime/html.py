@@ -248,7 +248,10 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "text": "#f5f3ff",
         "muted": "#b3a8cc",
         "brand": "#8b5cf6",
-        "accent": "#a855f7",
+        # Deep enough that `readable_ink` chooses WHITE on it (5.70) rather than near-black (3.91), which
+        # is what the author asked for on the numbered badges and the ribbon CTA -- and it matches the
+        # CTA gradient's first stop, so the purples on the page are one family rather than two.
+        "accent": "#7c3aed",
         # White, not the accent: the reference sets the headline in white and carries the purple in the
         # highlighted words and the CTA, which is what stops the page reading as uniformly violet.
         "headline": "#ffffff",
@@ -997,12 +1000,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-dl-dismiss{position:absolute;top:0.8rem;right:1rem;border:0;background:none;color:inherit;font-size:2.2rem;line-height:1;cursor:pointer;opacity:0.55}",
     "    .sl-ribbon-cta:disabled,.sl-dl-submit:disabled{opacity:0.6;cursor:default}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
-    "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
+    "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-content-text));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
     # The prefix is small and quiet: it qualifies the number without competing with it.
     "    .sl-bargain-prefix{display:block;font-size:1.6rem;font-weight:600;letter-spacing:0.02em;opacity:0.8}",
-    "    .sl-bargain-main{margin:0;font-family:var(--sl-font-heading);font-size:2.2rem;font-weight:700;color:var(--sl-section-ink,var(--sl-price-title))}",
-    "    .sl-bargain-sub{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-description));opacity:0.85}",
+    "    .sl-bargain-main{margin:0;font-family:var(--sl-font-heading);font-size:2.2rem;font-weight:700;color:var(--sl-section-ink,var(--sl-content-heading))}",
+    "    .sl-bargain-sub{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-content-text));opacity:0.85}",
     # --- Coupon -------------------------------------------------------------------------------------
     # A paper coupon, in the order those actually read: the picture of what you get, then the business whose
     # offer it is, then the value in the largest type on the ticket. Dashed edge because that is the whole

@@ -136,5 +136,83 @@ class CardContainersStateTheirOwnInk(unittest.TestCase):
         self.assertIn("--sl-card-text:#14101f", self.css())
 
 
+class ThePurpleCarriesWhiteText(unittest.TestCase):
+    """The author, seeing dark numerals on the purple badges: *"Make the font inside the purple color
+    white just like you did with the CTA."*
+
+    Not forced with an override. The accent was deepened to the CTA gradient's first stop, at which
+    point `readable_ink` CHOOSES white on its own -- white wins the contrast comparison at 5.70 against
+    near-black's 3.91. The request and the measurement agree rather than one overriding the other.
+    """
+
+    def test_the_badge_and_ribbon_ink_is_white(self):
+        self.assertEqual(tokens()["accent_text"], "#ffffff")
+
+    def test_white_is_the_derived_answer_not_an_override(self):
+        from stripe_link.domain.section_theme import readable_ink
+        self.assertEqual(readable_ink(tokens()["accent"]), "#ffffff")
+        self.assertNotIn("accent_text", UNIVERSAL_BUNDLE_THEME_PRESETS["royal-velvet"],
+                         "it must come from the derivation, so a future accent change stays honest")
+
+    def test_it_still_clears_aa(self):
+        t = tokens()
+        self.assertGreaterEqual(contrast_ratio(t["accent_text"], t["accent"]), AA)
+
+    def test_the_accent_matches_the_cta_gradient_start(self):
+        """So the purples on the page read as one family rather than two."""
+        t = tokens()
+        self.assertEqual(t["accent"], t["cta_from"])
+
+
+class ThePriceBlockSitsOnThePageNotOnACard(unittest.TestCase):
+    """`.sl-price-highlight` has `background:transparent` -- it renders on the page. Its rows used to
+    fall back to the PRICE CARD's tokens, which the element's own docstring justified as "cannot drift
+    from the price card beside it". That held while a card and the page shared one polarity. With a white
+    card on a dark page it put near-black "Today Only!" and dark-grey "Regular Price" on black.
+
+    For every other preset the swap is a no-op: price_regular/price_description and content_text all
+    default to `muted`, price_title and content_heading both to `text`.
+    """
+
+    def css(self):
+        return "\n".join(render_template_styles({"theme": {"preset": "royal-velvet"},
+                                                  "template": "universal_bundle"}))
+
+    def test_the_rows_fall_back_to_page_inks(self):
+        css = self.css()
+        for selector, token in ((".sl-bargain-regular{", "--sl-content-text"),
+                                (".sl-bargain-main{", "--sl-content-heading"),
+                                (".sl-bargain-sub{", "--sl-content-text")):
+            with self.subTest(selector=selector):
+                rule = next(line for line in css.splitlines() if selector in line)
+                self.assertIn(token, rule)
+                self.assertNotIn("--sl-price-", rule, "a page row must not ink from the card's tokens")
+
+    def test_today_only_is_white(self):
+        """The author named this row specifically."""
+        t = tokens()
+        self.assertEqual(t["content_heading"], "#ffffff")
+        self.assertGreater(contrast_ratio(t["content_heading"], t["background"]), 15)
+
+    def test_the_top_and_bottom_rows_are_light_grey(self):
+        t = tokens()
+        self.assertEqual(t["content_text"], "#b3a8cc")
+        self.assertGreaterEqual(contrast_ratio(t["content_text"], t["background"]), AA)
+
+    def test_the_amount_is_readable_as_large_text(self):
+        """clamp(4rem,10vw,6.4rem) is unambiguously large, where WCAG AA is 3.0."""
+        t = tokens()
+        self.assertGreaterEqual(contrast_ratio(t["price_amount"], t["background"]), 3.0)
+
+    def test_other_presets_are_unaffected_by_the_swap(self):
+        for name in UNIVERSAL_BUNDLE_THEME_PRESETS:
+            if name == "royal-velvet":
+                continue
+            with self.subTest(preset=name):
+                t = tokens(name)
+                self.assertEqual(t["price_regular"], t["content_text"])
+                self.assertEqual(t["price_title"], t["content_heading"])
+
+
 if __name__ == "__main__":
     unittest.main()
