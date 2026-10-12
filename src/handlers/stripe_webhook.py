@@ -345,6 +345,34 @@ def handler(
 
     signature_header = header_value(event, "Stripe-Signature")
     check = _signature_check(body=body, signature_header=signature_header, secret=secret, now_fn=now_fn)
+
+    # THE OTHER MODE'S SECRET, when this one does not verify. The secret is decided by WHICH ENDPOINT
+    # delivered the event; `mode` here is decided by the EVENT's `livemode`, and those are not the same
+    # thing. A connected account that authorised through LIVE OAuth and then works in test mode produces
+    # `livemode: false` events that the LIVE endpoint delivers, signed with the LIVE secret.
+    #
+    # Measured 2026-10-12: production verified 0 of 36 such events -- its only Connect source is a
+    # live-mode endpoint carrying test traffic -- while dev saw every event twice, once from each
+    # endpoint, passing the one it could match and rejecting its twin a second later.
+    #
+    # This does not weaken verification. Both candidates are OUR OWN endpoint secrets, and an event that
+    # matches neither is still refused. It only stops us assuming which of our endpoints sent it.
+    if not check["ok"] and check["reason"] == "secret_mismatch":
+        other_mode = "live" if mode == "test" else "test"
+        other = webhook_secret_loader(kind, other_mode)
+        if other and other != secret:
+            cross = _signature_check(body=body, signature_header=signature_header, secret=other,
+                                     now_fn=now_fn)
+            if cross["ok"]:
+                # LOGGED, because a silent cross-mode match hides a real fact about the deployment: an
+                # endpoint registered in one mode is carrying the other mode's traffic. The event's own
+                # `mode` is unchanged below -- only the SECRET came from elsewhere, and routing must keep
+                # following `livemode`.
+                print(json.dumps({"webhook_secret_cross_mode": {
+                    "kind": kind, "event_mode": mode, "secret_mode": other_mode,
+                    "event_id": str(stripe_event.get("id") or ""),
+                    "event_type": str(stripe_event.get("type") or "")}}))
+                secret, check = other, cross
     if not check["ok"]:
         # A ROTATED secret is indistinguishable from a forged one here, so re-read Secrets Manager once
         # before refusing. The cache has no TTL and the sweeps keep this container warm for hours, so

@@ -117,5 +117,89 @@ class SecretsManagerIsNotReReadForAStaleDelivery(unittest.TestCase):
         self.assertIn('if signature_header and not check["signature_matched"] else None', src)
 
 
+class AnEndpointMayCarryTheOtherModesTraffic(unittest.TestCase):
+    """The root cause of 16 dropped events a day, found 2026-10-12.
+
+    The signing secret is decided by WHICH ENDPOINT delivered the event. `mode` is decided by the
+    EVENT's `livemode`. Those are not the same thing: a connected account that authorised through LIVE
+    OAuth and then works in test mode produces `livemode: false` events that the LIVE endpoint delivers,
+    signed with the LIVE secret.
+
+    Measured: production verified **0 of 36** such events, because its only Connect source is a
+    live-registered endpoint carrying test traffic. Dev saw each event twice — once from each endpoint —
+    passing the copy it could match and rejecting its twin one second later.
+    """
+
+    def call(self, body, signature, loader):
+        import json as _json
+        from handlers.stripe_webhook import handler
+        event = {"httpMethod": "POST", "body": body,
+                 "headers": {"Stripe-Signature": signature}, "path": "/webhook/stripe-preview"}
+        return handler(event, None, webhook_secret_loader=loader, now_fn=lambda: NOW)
+
+    def body(self, livemode=False):
+        return json.dumps({"id": "evt_x", "type": "customer.created", "livemode": livemode,
+                           "data": {"object": {}}}, separators=(",", ":"))
+
+    def signed(self, body, secret):
+        ts = NOW
+        sig = hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+        return f"t={ts},v1={sig}"
+
+    def test_a_test_event_signed_with_the_LIVE_secret_is_accepted(self):
+        """The exact shape of the production failure."""
+        body = self.body(livemode=False)
+        secrets = {("preview", "test"): "whsec_test_one", ("preview", "live"): "whsec_live_one"}
+        seen = []
+
+        def loader(kind, mode, refresh=False):
+            seen.append(mode)
+            return secrets.get((kind, mode))
+
+        resp = self.call(body, self.signed(body, "whsec_live_one"), loader)
+        self.assertEqual(resp["statusCode"], 200, resp)
+        self.assertIn("live", seen, "it must have tried the other mode's secret")
+
+    def test_a_live_event_signed_with_the_TEST_secret_is_accepted(self):
+        """Symmetric, so the fix is not quietly one-directional."""
+        body = self.body(livemode=True)
+        secrets = {("preview", "test"): "whsec_test_one", ("preview", "live"): "whsec_live_one"}
+
+        def loader(kind, mode, refresh=False):
+            return secrets.get((kind, mode))
+
+        resp = self.call(body, self.signed(body, "whsec_test_one"), loader)
+        self.assertEqual(resp["statusCode"], 200, resp)
+
+    def test_an_event_matching_NEITHER_secret_is_still_refused(self):
+        """Trying both candidates does not weaken verification -- both are our own endpoint secrets."""
+        body = self.body()
+        secrets = {("preview", "test"): "whsec_test_one", ("preview", "live"): "whsec_live_one"}
+
+        def loader(kind, mode, refresh=False):
+            return secrets.get((kind, mode))
+
+        resp = self.call(body, self.signed(body, "whsec_forged"), loader)
+        self.assertEqual(resp["statusCode"], 400)
+
+    def test_a_stale_delivery_does_not_trigger_the_cross_mode_attempt(self):
+        """Gated on `secret_mismatch`. A delivery that is merely too old would fail against the other
+        mode's secret too, so trying it is pure waste on a retry that can never succeed."""
+        from handlers.stripe_webhook import _signature_check
+        stale = _signature_check(body=BODY, signature_header=header(age=9999), secret=SECRET,
+                                 now_fn=lambda: NOW)
+        self.assertEqual(stale["reason"], "stale_timestamp")
+        self.assertNotEqual(stale["reason"], "secret_mismatch")
+
+    def test_the_cross_mode_match_is_logged_not_silent(self):
+        """An endpoint registered in one mode carrying the other mode's traffic is a real fact about the
+        deployment. Accepting it quietly would hide the thing that took a day to find."""
+        import pathlib
+        src = (pathlib.Path(__file__).resolve().parents[1]
+               / "src" / "handlers" / "stripe_webhook.py").read_text()
+        self.assertIn("webhook_secret_cross_mode", src)
+        self.assertIn('"secret_mode": other_mode', src)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -151,7 +151,13 @@ class ARotatedSecretHealsItselfTests(unittest.TestCase):
         response, rejections = call(body, signature=signed(body, secret=rotated), loader=loader)
         self.assertEqual(response["statusCode"], 200, response)
         self.assertEqual(rejections, [], "a rotated secret is not a rejection")
-        self.assertEqual(seen, [False, True], "it must try the cache first, then re-read exactly once")
+        # The invariant is "exactly ONE re-read", not an exact call sequence. Since 2026-10-12 a
+        # same-mode miss also tries the OTHER mode's CACHED secret before paying for a refresh -- a
+        # live-registered endpoint can carry test traffic, and that check costs one HMAC and no network.
+        # Pinning the literal list made a cheaper, cached attempt look like a regression.
+        self.assertFalse(seen[0], "the cached secret is tried first")
+        self.assertEqual(seen.count(True), 1, "Secrets Manager is re-read exactly once")
+        self.assertTrue(seen[-1], "and the re-read is the last resort, after the cached attempts")
 
     def test_a_genuinely_bad_signature_is_still_refused_after_the_re_read(self):
         body = LIVE_EVENT
