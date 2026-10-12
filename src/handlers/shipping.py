@@ -485,6 +485,10 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
             raw_provider.pop("api_key_ref", None)
     slot = {**slot, "connection_status": status, "last_tested_at": now_fn()}
     raw_provider = shipping_keys.with_key_slot(raw_provider, mode, slot)
+    # Once BOTH modes have their own key the pre-split field has no reader left, and a stale secret
+    # reference sitting in a field that a cleared slot would fall back to is worth retiring on sight.
+    if all(shipping_keys.key_slot(raw_provider, m).get("api_key_ref") for m in shipping_keys.MODES):
+        raw_provider.pop("api_key_ref", None)
     # Kept at provider level too: it is what the current mode's screen reads, and `label_readiness`
     # still asks the provider rather than the slot.
     raw_provider["connection_status"] = status
