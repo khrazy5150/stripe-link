@@ -520,9 +520,43 @@ is what any sweep can afford:
 | `cogs` | metadata we stamped at checkout (P2) | ours |
 | `shipping_cost` | metadata we wrote at label purchase (P3) | ours |
 
-`tax` is accepted as an argument rather than pretended free. Zero is also the true answer for every
-tenant today, Stripe Tax being off — so `known` says which it is, instead of letting a correct zero and
-an unasked question look identical.
+`tax` is reached three ways, in descending authority, after the author's requirement that it *"work once
+the tenant enables tax collection"*:
+
+1. **the session** — Stripe's own figure, when a caller fetched one;
+2. **the invoice** — also Stripe's own, and **free**, because the sweep already expands `data.invoice`
+   for the silo stamp. This covers every renewal and needs no mirror. (`invoice.tax` is correct for the
+   pinned API `2024-06-20`; later versions rename it `total_taxes`.)
+3. **a mirrored metadata key** — ours, with Stripe's durability and none of its authority.
+
+Zero is also the true answer for every tenant today — so `known` says which it is, instead of letting a
+correct zero and an unasked question look identical.
+
+### What "tax works when enabled" required, layer by layer
+
+| layer | state |
+|---|---|
+| capture, one-off | **already worked** — `order_record_from_session` reads `total_details.amount_tax` |
+| capture, renewal | **already worked** — `order_record_from_invoice` reads `invoice.tax` |
+| ledger | **already worked** — `sale_entry_from_order` passes `tax`, and `profit` subtracts it |
+| **Reports** | **was missing. Built.** `summarize` has returned `tax_liability` since tax was first captured and **nothing displayed it** |
+| reconstruct, renewal | **built** — from the already-expanded invoice, free |
+| reconstruct, one-off | reader built; `sessions` is the intended supplier (see below) |
+| **enable collection** | **does not exist.** `automatic_tax` appears nowhere in `src/` |
+
+**The Reports gap was the real one.** `gross` INCLUDES the tax the buyer paid and `profit` subtracts it
+again, so **Net exceeded Profit by an amount with no row behind it** — the one thing a statement must
+never do. There is now a "Sales tax collected" row between Net and Profit, negative like every other row
+that leaves the tenant, hidden until there is some, and named as a **liability rather than income**: the
+tenant is holding someone else's money, and calling it either earnings or an expense would be wrong in a
+way an accountant would notice.
+
+**The one-off reconstruction gap, stated rather than papered over.** A charge does not carry its session.
+Mirroring the tax onto the PaymentIntent would need Stripe credentials threaded into
+`persist_checkout_session_completed` — the most critical path in the system — for a figure the ledger
+already holds; fetching the session on demand costs one call per charge, which an operator asking about
+one tenant and one period can afford and a five-minute sweep cannot. **The second is intended.** The
+metadata key is read now so that enabling tax does not also require changing the reader.
 
 ### Only the three are reconciled
 

@@ -135,6 +135,111 @@ class AChargeRebuildsAllSixComponents(unittest.TestCase):
         self.assertFalse(got["known"]["fees"])
 
 
+class CollectedTaxReachesEveryLayer(unittest.TestCase):
+    """The author, on being told Stripe knows tax only via the session: *"Tax is something that the
+    customer will pay anyway. I'm fine with it, except that it should work once the tenant enables tax
+    collection."*
+
+    Nothing in this codebase enables Stripe Tax yet -- `automatic_tax` appears nowhere in `src/` -- so
+    every figure here is legitimately zero today. These tests pin that each layer is ready, so turning
+    collection on is the only remaining step rather than the first of several.
+    """
+
+    def test_a_renewals_tax_comes_free_from_the_expanded_invoice(self):
+        """The sweep already expands `data.invoice` to read the silo stamp, so a renewal needs no extra
+        call and no mirror. `invoice.tax` is the right field for API 2024-06-20."""
+        got = rec.components_from_charge(charge(invoice={"id": "in_9", "tax": 131}))
+        self.assertEqual(got["amounts"]["tax"], 131)
+        self.assertTrue(got["known"]["tax"])
+
+    def test_a_session_outranks_everything_because_it_is_stripes_own_figure(self):
+        got = rec.components_from_charge(
+            charge(invoice={"id": "in_9", "tax": 131}),
+            payment_intent={"metadata": {rec.TAX_KEY: "99"}},
+            session={"total_details": {"amount_tax": 200}})
+        self.assertEqual(got["amounts"]["tax"], 200)
+
+    def test_an_invoice_outranks_the_mirror_we_wrote_ourselves(self):
+        """Stripe's own number beats a value we copied there, for the same reason the balance
+        transaction beats our fee estimate."""
+        got = rec.components_from_charge(charge(invoice={"id": "in_9", "tax": 131}),
+                                         payment_intent={"metadata": {rec.TAX_KEY: "99"}})
+        self.assertEqual(got["amounts"]["tax"], 131)
+
+    def test_no_tax_anywhere_is_unknown_rather_than_zero(self):
+        """A correct zero and an unasked question must not look identical -- the distinction this whole
+        plan keeps, and the reason `tax` is excluded from reconciliation."""
+        got = rec.components_from_charge(charge())
+        self.assertEqual(got["amounts"]["tax"], 0)
+        self.assertFalse(got["known"]["tax"])
+
+    def test_tax_is_never_reconciled_even_when_known(self):
+        """It is not compared against the ledger at any authority level: a drift report must rest on
+        figures Stripe is the authority for, and tax arrives three different ways."""
+        got = rec.audit([charge(invoice={"id": "in_9", "tax": 131})], mode="live",
+                        this_silo="production",
+                        entry_for_id=lambda _id: {"amounts": {"gross": 12132, "stripe_fee": -362,
+                                                              "platform_fee": -770, "tax": 0}})
+        self.assertTrue(got["agrees"], "a tax disagreement is not evidence of a ledger bug")
+        self.assertNotIn("tax", got["findings"][0]["drift"] if got["findings"] else {})
+
+
+class TheStatementAddsUpWhenTaxIsCollected(unittest.TestCase):
+    """Reports showed no tax row while `gross` INCLUDED the tax the buyer paid and `profit` subtracted it
+    again -- so Net exceeded Profit by an amount with no line behind it, which is the one thing a
+    statement must never do."""
+
+    def summary(self):
+        from stripe_link.domain.ledger import summarize
+        sale = {"entry_type": "sale", "amounts": {
+            "gross": 11000, "stripe_fee": -362, "platform_fee": -220,
+            "tax": 1000, "cogs": -4000, "shipping_cost": -783}}
+        return summarize([dict(sale, cogs_known=True)])
+
+    def test_tax_is_reported_as_a_liability(self):
+        s = self.summary()
+        self.assertEqual(s["totals"]["tax"], 1000)
+        self.assertEqual(s["tax_liability"], 1000)
+
+    def test_profit_is_net_minus_tax_and_costs_exactly(self):
+        """The arithmetic the new row makes visible: nothing unexplained between Net and Profit."""
+        s = self.summary()
+        self.assertEqual(s["net"], 11000 - 362 - 220)
+        self.assertEqual(s["profit"], s["net"] - 1000 - 4000 - 783)
+
+    def test_tax_is_not_counted_as_the_tenants_income(self):
+        """`gross` carries it in and `profit` takes it out; a tenant holding someone else's money must
+        never see it as earnings."""
+        s = self.summary()
+        self.assertLess(s["profit"], s["net"], "tax and costs both reduce it")
+
+
+class TheReportsStatementShowsTax(unittest.TestCase):
+    """No JS test runner in this repo, so this guards the source the way the other dashboard tests do."""
+
+    def source(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "Reports.vue").read_text()
+
+    def test_there_is_a_tax_row(self):
+        self.assertIn("Sales tax collected", self.source())
+
+    def test_it_reads_the_ledgers_tax_total(self):
+        self.assertIn("(s.totals || {}).tax", self.source())
+
+    def test_it_is_hidden_until_there_is_some(self):
+        """A permanent $0 row teaches a tenant to stop reading the statement."""
+        text = self.source()
+        i = text.index("Sales tax collected")
+        self.assertIn("hide:", text[i:i + 400])
+
+    def test_it_is_named_as_a_liability_not_income(self):
+        text = self.source()
+        i = text.index("Sales tax collected")
+        self.assertIn("not your income", text[i:i + 500])
+
+
 class TheReconstructionIsScopedToThisSilo(unittest.TestCase):
     """Both deployments hold credentials for the same connected account, so each lists the other's
     charges. Summing without the ownership filter is how production reported the sandbox silo's money

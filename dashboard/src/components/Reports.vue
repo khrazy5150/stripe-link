@@ -259,6 +259,23 @@ const LINES = [
     note: "Return postage you paid for. Not part of shipping margin." },
   { label: "Net", pick: (s) => s.net, tone: "is-total",
     note: "Gross after Stripe and platform fees." },
+  // TAX COLLECTED, which the statement could not previously explain. `summarize` has returned
+  // `tax_liability` since tax was first captured, and nothing displayed it -- while `gross` INCLUDES the
+  // tax the buyer paid and `profit` subtracts it again. So Net exceeded Profit by an amount with no row
+  // behind it, which is the one thing a statement must never do.
+  //
+  // NEGATIVE, like the other rows that leave the tenant, and placed between Net and Profit so the
+  // arithmetic reads downward. It is a LIABILITY, not a cost of doing business: the tenant is holding
+  // someone else's money, and calling it either income or an expense would be wrong in a way an
+  // accountant would notice.
+  //
+  // Hidden until there is some, for the reason the return-labels row is: a permanent $0 row teaches a
+  // tenant to stop reading the statement. Nothing in this codebase enables Stripe Tax yet, so today it
+  // is always hidden -- the point is that it appears by itself the day a tenant turns tax on.
+  { label: "Sales tax collected", pick: (s) => -Math.abs(Number((s.totals || {}).tax || 0)),
+    tone: "is-cost",
+    hide: (s) => !Number((s.totals || {}).tax || 0),
+    note: "Held on behalf of the tax authority — not your income." },
   // PROFIT IS WITHHELD RATHER THAN GUESSED. `cogs` was a declared ledger component that nothing ever
   // supplied, so this row has been showing `net` under the word "Profit" since Reports shipped -- the
   // same shape as the Dashboard's "Net Revenue" summing gross. Now the server says whether every sale in

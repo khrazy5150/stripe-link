@@ -13,15 +13,18 @@ after a live sale went missing: *"the ledger in our software must match Stripe t
 | `gross` | `charge.amount_captured` | **Stripe's** |
 | `stripe_fee` | balance transaction `fee_details` | **Stripe's** |
 | `platform_fee` | balance transaction `fee_details` | **Stripe's** |
-| `tax` | the SESSION's `total_details`, not the charge | Stripe's, one call away |
+| `tax` | the invoice (renewals), else metadata we mirrored at checkout | Stripe's / ours |
 | `cogs` | metadata we stamped at checkout (P2) | ours |
 | `shipping_cost` | metadata we wrote at label purchase (P3) | ours |
 
-**The plan said Stripe knows four of six. From a charge listing it knows three.** `tax` is on the
-Checkout Session, and a charge does not carry its session — so reconstructing it costs a lookup per
-charge, which this module accepts as an argument rather than pretending it is free. Zero tax is also the
-true answer for every tenant today, Stripe Tax being off, so `known` says which it is instead of letting
-a correct zero and an unasked question look identical.
+**The plan said Stripe knows four of six. From a charge listing it knows three and a half.** A one-off
+charge does not carry its Checkout Session, which is where `total_details.amount_tax` lives — so that
+half is reached through a mirrored metadata key, the same device P3 uses for shipping cost. A
+**renewal's** tax needs no mirror: the sweep already expands `data.invoice` for the silo stamp, and the
+invoice carries its own `tax`.
+
+Zero tax is also the true answer for every tenant today, nothing in this codebase enabling Stripe Tax —
+so `known` says which it is instead of letting a correct zero and an unasked question look identical.
 
 **Only the first three are reconciled.** `cogs` and `shipping_cost` are values we wrote into Stripe
 ourselves; comparing them with the ledger they came from would be reading back our own writes and calling
@@ -42,6 +45,15 @@ mean anything — without a reader, writing six components into Stripe is writin
 consumer is the cross-silo view in Part 1, which shipped as a capability flag instead. It is kept
 because the alternative is a writer with no reader; it is named here because an uncalled function that
 nobody admits is uncalled is how the three defects in P4 survived for months.
+
+**`TAX_KEY` is read and nothing writes it yet**, which is the same admission from the other direction. A
+one-off sale's tax is on its Checkout Session, and a charge does not carry one — so the two ways to close
+that are to mirror it onto the PaymentIntent (which needs Stripe credentials threaded into
+`persist_checkout_session_completed`, the most critical path in the system, for a figure the ledger
+already holds) or to fetch the session on demand (which the `sessions` argument already supports, and
+which an operator asking about one tenant and one period can easily afford where a five-minute sweep
+cannot). **The second is the intended one**; the key is read now so that turning tax on does not also
+require changing this reader. A renewal needs neither — its invoice is already expanded.
 """
 from __future__ import annotations
 
@@ -59,6 +71,11 @@ from stripe_link.domain.orphan_charges import (invoice_id_of, is_ours, is_record
 # constant anyway, because the first instinct on a false alarm is to widen it, and it should be widened
 # HERE with a reason rather than in a caller.
 TOLERANCE_CENTS = 0
+
+# What the webhook mirrors a one-off sale's collected tax under. Defined HERE, beside the reader, because
+# there is no tax domain module to own it the way `cogs` and `shipping_cost_metadata` own theirs -- and
+# one constant with one writer and one reader is better than a third module holding a single string.
+TAX_KEY = "tax"
 
 
 def components_from_charge(charge: dict[str, Any], *, payment_intent: dict[str, Any] | None = None,
@@ -86,12 +103,7 @@ def components_from_charge(charge: dict[str, Any], *, payment_intent: dict[str, 
     costs = cogs_metadata.from_metadata({**charge_meta, **pi_meta})
     postage = shipping_cost_metadata.from_metadata(pi_meta)
 
-    tax_known = False
-    tax = 0
-    if isinstance(session, dict):
-        totals = session.get("total_details")
-        if isinstance(totals, dict) and totals.get("amount_tax") is not None:
-            tax, tax_known = abs(_whole(totals.get("amount_tax"))), True
+    tax, tax_known = _tax_of(charge, pi_meta, session)
 
     return {
         "charge_id": str(charge.get("id") or ""),
@@ -115,6 +127,37 @@ def components_from_charge(charge: dict[str, Any], *, payment_intent: dict[str, 
             "tax": tax_known,
         },
     }
+
+
+def _tax_of(charge: dict[str, Any], pi_meta: dict[str, Any],
+             session: dict[str, Any] | None) -> tuple[int, bool]:
+    """Collected tax and whether it is an ANSWER, from the most authoritative source available.
+
+    Three sources in descending authority, because tax reaches a charge three different ways:
+
+    1. **The session**, when a caller has fetched one. `total_details.amount_tax` is where a one-off
+       Checkout Session records it, and it is Stripe's own figure.
+    2. **The invoice**, for a renewal. Free — the sweep already expands `data.invoice` to read the silo
+       stamp — and also Stripe's own figure. `invoice.tax` is correct for API `2024-06-20`; later
+       versions rename it `total_taxes`, so this moves when the pinned version does.
+    3. **The metadata we mirrored**, for a one-off charge nobody fetched a session for. Ours, with
+       Stripe's durability and none of its authority — exactly the standing of `cogs` and
+       `shipping_cost`.
+
+    A tenant's collected tax is their LIABILITY, not their income, which is why `summarize` subtracts it
+    from profit rather than adding it. Getting it wrong in the flattering direction would tell a tenant
+    they earned money they owe to a tax authority.
+    """
+    if isinstance(session, dict):
+        totals = session.get("total_details")
+        if isinstance(totals, dict) and totals.get("amount_tax") is not None:
+            return abs(_whole(totals.get("amount_tax"))), True
+    invoice = charge.get("invoice")
+    if isinstance(invoice, dict) and invoice.get("tax") is not None:
+        return abs(_whole(invoice.get("tax"))), True
+    if pi_meta.get(TAX_KEY) is not None:
+        return abs(_whole(pi_meta.get(TAX_KEY))), True
+    return 0, False
 
 
 def summarize_charges(charges, *, mode: str = "", this_silo: str = "",
