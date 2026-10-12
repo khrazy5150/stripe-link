@@ -236,26 +236,73 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "featured_badge_text": "#ffffff",
         "border": "#cbd5e1",
     },
+    # WHITE CARDS ON A NEAR-BLACK VIOLET PAGE, with a violet-to-fuchsia CTA (author's reference,
+    # 2026-10-12). The two surfaces have OPPOSITE polarity, which is why `card_*` exists: the page is
+    # light-on-dark and every card is dark-on-light. Before those tokens this preset was not expressible
+    # -- ten card elements inherited the page's light ink and would have been white on white.
     "royal-velvet": {
-        "background": "#0f0720",
-        "card": "#1a1033",
+        "background": "#0a0512",
+        # The card is the page's opposite, not a tinted version of it. Everything that sits on one gets
+        # an explicit dark ink below; nothing here may fall through to `text`.
+        "card": "#ffffff",
         "text": "#f5f3ff",
-        "muted": "#c4b5fd",
-        "brand": "#a855f7",
-        "accent": "#c084fc",
-        "headline": "#c084fc",
-        "cta_from": "#a855f7",
-        "cta_to": "#9333ea",
+        "muted": "#b3a8cc",
+        "brand": "#8b5cf6",
+        "accent": "#a855f7",
+        # White, not the accent: the reference sets the headline in white and carries the purple in the
+        # highlighted words and the CTA, which is what stops the page reading as uniformly violet.
+        "headline": "#ffffff",
+        "cta_from": "#7c3aed",
+        "cta_to": "#c026d3",
         "cta_text": "#ffffff",
-        "chip_bg": "#3b2360",
-        "chip_text": "#d8b4fe",
-        "chip_border": "#6b3fa0",
-        "savings_bg": "#3b2360",
-        "savings_text": "#d8b4fe",
-        "savings_border": "#6b3fa0",
-        "featured_badge_bg": "#a855f7",
+        # The reference pill is a lighter violet, but white on it measures 4.23 -- under AA for the
+        # small all-caps text it carries. Matching the CTA's start colour keeps the look and clears it.
+        "chip_bg": "#7c3aed",
+        "chip_text": "#ffffff",
+        "chip_border": "#a78bfa",
+        "savings_bg": "rgba(139,92,246,.14)",
+        "savings_text": "#7c3aed",
+        "savings_border": "rgba(139,92,246,.35)",
+        "featured_badge_bg": "#7c3aed",
         "featured_badge_text": "#ffffff",
-        "border": "#4c1d95",
+        "border": "#2a1b45",
+        # --- everything that sits ON a card, which is dark-on-light ---
+        "card_text": "#14101f",
+        "card_muted": "#574e6b",
+        "card_heading": "#14101f",
+        "price_card_bg": "#ffffff",
+        "price_card_border": "#e7e2f0",
+        "price_card_selected_border": "#7c3aed",
+        "price_title": "#14101f",
+        "price_description": "#574e6b",
+        # Struck-through, so it is quiet by role rather than by being hard to read: 3.65 was under AA.
+        "price_regular": "#6f6880",
+        "price_amount": "#7c3aed",
+        "faq_bg": "#ffffff",
+        "faq_border": "#e7e2f0",
+        "faq_summary": "#14101f",
+        "faq_text": "#574e6b",
+        "refund_bg": "#ffffff",
+        "refund_border": "#e7e2f0",
+        "refund_summary": "#14101f",
+        "refund_title": "#14101f",
+        "refund_text": "#574e6b",
+        "refund_return": "#14101f",
+        # --- and everything that sits on the PAGE, which stays light-on-dark ---
+        "hero_bg": "#140b26",
+        "hero_border": "#2a1b45",
+        "content_heading": "#ffffff",
+        "content_text": "#b3a8cc",
+        "content_border": "#2a1b45",
+        "subheadline_text": "#b3a8cc",
+        "brand_label_text": "#c4b5fd",
+        "trust_badge_bg": "rgba(139,92,246,.16)",
+        "trust_badge_text": "#d8b4fe",
+        "trust_badge_border": "rgba(139,92,246,.4)",
+        "countdown_bg": "#140b26",
+        "countdown_text": "#ffffff",
+        "legal_text": "#8b8299",
+        "legal_link": "#c4b5fd",
     },
     "fire-sale": {
         "background": "#18181b",
@@ -696,10 +743,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-next-steps{text-align:center;display:grid;gap:1.6rem;margin-top:1.6rem}",
     "    .sl-next-steps-title{font-family:var(--sl-font-heading);font-size:2rem;color:var(--sl-headline)}",
     "    .sl-next-steps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.2rem}",
-    "    .sl-next-step{background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:var(--sl-radius);padding:1.6rem;display:grid;gap:0.5rem;text-align:center}",
+    "    .sl-next-step{background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:var(--sl-radius);padding:1.6rem;display:grid;gap:0.5rem;text-align:center;color:var(--sl-card-text,var(--sl-text))}",
     "    .sl-next-step-icon{font-size:2.4rem}",
     "    .sl-next-step strong{font-family:var(--sl-font-heading);font-size:1.5rem;color:var(--sl-headline)}",
-    "    .sl-next-step p{color:var(--sl-content-text);font-size:1.35rem;line-height:1.5}",
+    "    .sl-next-step p{color:var(--sl-card-muted,var(--sl-content-text));font-size:1.35rem;line-height:1.5}",
     "    .sl-ty-footer{text-align:center;display:grid;gap:1rem;margin-top:2.4rem;padding-top:2rem;border-top:1px solid var(--sl-content-border)}",
     "    .sl-ty-footer h2{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-headline)}",
     "    .sl-ty-footer p{color:var(--sl-content-text);font-size:1.45rem;line-height:1.6}",
@@ -737,7 +784,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # inverted on the eight dark presets, where --sl-text is near-white.
     "    .sl-tone-contrast{--sl-section-bg:var(--sl-text);--sl-section-ink:var(--sl-background);--sl-section-border:transparent}",
     "    .sl-tone-accent{--sl-section-bg:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
-    "    .sl-tone-soft{--sl-section-bg:var(--sl-card);--sl-section-ink:var(--sl-text);--sl-section-border:var(--sl-content-border)}",
+    "    .sl-tone-soft{--sl-section-bg:var(--sl-card);--sl-section-ink:var(--sl-card-text);--sl-section-border:var(--sl-content-border)}",
     # A button sitting on a FILLED panel becomes the page's own surface -- background + text, the one pair
     # that is readable on every preset in either polarity -- so it reads as cut out of the panel rather than
     # dissolving into it. `soft` is already the card colour, so its button stays the ordinary gradient CTA.
@@ -784,11 +831,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Quote-led card: an oversized accent quote mark, the quote as the largest thing in it, and the
     # avatar to one side. Every colour is a theme token, so it re-skins with the preset instead of
     # carrying a palette of its own.
-    "    .sl-testimonial{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:1.8rem;background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:1.6rem;padding:2rem 2rem 2rem 4.6rem;margin:0}",
+    "    .sl-testimonial{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:1.8rem;background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:1.6rem;padding:2rem 2rem 2rem 4.6rem;margin:0;color:var(--sl-card-text,var(--sl-text))}",
     "    .sl-testimonial::before{content:'\\201C';position:absolute;left:1.4rem;top:0.4rem;font-family:var(--sl-font-heading);font-size:5.2rem;line-height:1;color:var(--sl-accent);opacity:0.32;pointer-events:none}",
     "    .sl-testimonial-body{display:grid;gap:1.2rem;min-width:0}",
     "    .sl-testimonial img{width:7.2rem;height:7.2rem;border-radius:50%;object-fit:cover;box-shadow:0 0 0 0.3rem var(--sl-card),0 0 0 0.5rem var(--sl-accent)}",
-    "    .sl-testimonial blockquote{margin:0;font-size:1.8rem;line-height:1.55;color:var(--sl-content-text)}",
+    "    .sl-testimonial blockquote{margin:0;font-size:1.8rem;line-height:1.55;color:var(--sl-card-text,var(--sl-content-text))}",
     "    .sl-testimonial figcaption{display:flex;align-items:center;flex-wrap:wrap;gap:0.9rem;font-size:1.4rem;color:var(--sl-muted)}",
     "    .sl-testimonial figcaption strong{color:var(--sl-text);font-weight:700}",
     "    .sl-testimonial-sep{width:1px;height:1.4rem;background:var(--sl-content-border)}",
@@ -873,12 +920,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The badge number is a CSS counter, so it never becomes selectable or duplicated text — the <ol>
     # already carries the ordering for anything that reads the page rather than looks at it.
     "    .sl-numbered-items{list-style:none;counter-reset:sl-num;margin:0 auto;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem}",
-    "    .sl-numbered-item{counter-increment:sl-num;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1.6rem;padding:1.6rem 2rem;border:1px solid var(--sl-content-border);border-radius:1rem;background:var(--sl-card)}",
+    "    .sl-numbered-item{counter-increment:sl-num;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1.6rem;padding:1.6rem 2rem;border:1px solid var(--sl-content-border);border-radius:1rem;background:var(--sl-card);color:var(--sl-card-text,var(--sl-text))}",
     "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-accent);color:var(--sl-accent-text,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
-    "    .sl-numbered-text{margin:0;font-size:1.6rem;line-height:1.55;color:var(--sl-content-text)}",
+    "    .sl-numbered-text{margin:0;font-size:1.6rem;line-height:1.55;color:var(--sl-card-muted,var(--sl-content-text))}",
     # PAGE RIBBON — an Attention Block. Uses the shared section override, so a tenant can make it break
     # the page deliberately; that is the entire point of an interruption.
-    "    .sl-page-ribbon{display:grid;gap:2rem;align-items:center;margin:0 auto;padding:3.2rem;border-radius:1.4rem;background:var(--sl-section-bg,var(--sl-card));color:var(--sl-section-ink,var(--sl-text));max-width:74rem}",
+    "    .sl-page-ribbon{display:grid;gap:2rem;align-items:center;margin:0 auto;padding:3.2rem;border-radius:1.4rem;background:var(--sl-section-bg,var(--sl-card));color:var(--sl-section-ink,var(--sl-card-text,var(--sl-text)));max-width:74rem}",
     "    .sl-page-ribbon.is-image_left{grid-template-columns:minmax(0,22rem) minmax(0,1fr)}",
     "    .sl-page-ribbon.is-centered{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
     "    .sl-page-ribbon.is-compact{grid-template-columns:minmax(0,12rem) minmax(0,1fr);gap:1.6rem;padding:1.6rem 2rem}",
@@ -906,7 +953,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-embed-play:focus-visible{outline:2px solid #fff;outline-offset:4px;border-radius:0.6rem}",
     "    .sl-before-after{max-width:74rem;margin:0 auto}",
     "    .sl-ba-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:1.2rem;color:var(--sl-content-heading);text-align:center}",
-    "    .sl-ba-frame{position:relative;aspect-ratio:var(--sl-ba-ar,4/3);overflow:hidden;border-radius:1rem;background:var(--sl-card);touch-action:none;user-select:none}",
+    "    .sl-ba-frame{position:relative;aspect-ratio:var(--sl-ba-ar,4/3);overflow:hidden;border-radius:1rem;background:var(--sl-card);touch-action:none;user-select:none;color:var(--sl-card-text,var(--sl-text))}",
     "    .sl-ba-frame:focus-within{outline:2px solid var(--sl-accent);outline-offset:3px}",
     # Both layers are the SAME box; the top one is clipped rather than resized, so the two halves cannot
     # drift out of register at the seam whatever the images are.
@@ -937,7 +984,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The download dialog. Built by script, so its styles ship with the page whether or not it is used --
     # a few hundred bytes against a round trip to fetch them at the moment a visitor is deciding.
     "    .sl-dl-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:2rem;background:rgba(0,0,0,.55)}",
-    "    .sl-dl-card{width:100%;max-width:38rem;display:grid;gap:1.2rem;padding:2.4rem;border-radius:1.2rem;background:var(--sl-card,#fff);color:var(--sl-text)}",
+    "    .sl-dl-card{width:100%;max-width:38rem;display:grid;gap:1.2rem;padding:2.4rem;border-radius:1.2rem;background:var(--sl-card,#fff);color:var(--sl-card-text,var(--sl-text))}",
     "    .sl-dl-title{margin:0;font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25}",
     "    .sl-dl-field{display:grid;gap:0.4rem;font-size:1.4rem}",
     "    .sl-dl-field input{padding:1rem 1.2rem;border:1px solid var(--sl-content-border);border-radius:0.8rem;font-size:1.6rem;font-family:inherit}",
@@ -1168,13 +1215,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-listicle-option.no-img{grid-template-columns:minmax(0,1fr)}",
     "    .sl-listicle-add{width:100%;text-align:center;margin-top:0.4rem}",
     "    .sl-flash-banner{position:sticky;top:0;z-index:30;text-align:center;padding:0.8rem 1rem;font-family:var(--sl-font-accent);font-weight:800;color:#fff;background:linear-gradient(90deg,#dc2626,#f97316)}",
-    "    .sl-minicart{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;flex-direction:column;gap:0.6rem;padding:1rem 1.6rem 1.2rem;background:var(--sl-card);border-top:1px solid var(--sl-border);box-shadow:0 -2px 16px rgba(0,0,0,.12)}",
+    "    .sl-minicart{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;flex-direction:column;gap:0.6rem;padding:1rem 1.6rem 1.2rem;background:var(--sl-card);border-top:1px solid var(--sl-border);box-shadow:0 -2px 16px rgba(0,0,0,.12);color:var(--sl-card-text,var(--sl-text))}",
     # In-page notice modal (the server-rendered page is not a Vue app, so it can't mount ConfirmDialog.vue —
     # this mirrors that component's look with theme tokens). Used to surface blocked-action reasons, e.g. the
     # publish guard, instead of the browser's window.alert.
     "    .sl-notice-backdrop{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:1.6rem;background:rgba(0,0,0,.55)}",
     "    .sl-notice-backdrop.is-visible{display:flex}",
-    "    .sl-notice-card{width:min(40rem,100%);background:var(--sl-card);border:1px solid var(--sl-border);border-radius:var(--sl-radius);padding:2.4rem 2rem 2rem;text-align:center;display:grid;gap:1.4rem;justify-items:center;box-shadow:0 16px 48px rgba(0,0,0,.35)}",
+    "    .sl-notice-card{width:min(40rem,100%);background:var(--sl-card);border:1px solid var(--sl-border);border-radius:var(--sl-radius);padding:2.4rem 2rem 2rem;text-align:center;display:grid;gap:1.4rem;justify-items:center;box-shadow:0 16px 48px rgba(0,0,0,.35);color:var(--sl-card-text,var(--sl-text))}",
     "    .sl-notice-icon{width:4.4rem;height:4.4rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2.2rem;font-weight:800;background:color-mix(in srgb,var(--sl-accent) 16%,transparent);color:var(--sl-accent)}",
     "    .sl-notice-msg{color:var(--sl-text);font-size:1.5rem;line-height:1.5;margin:0}",
     "    .sl-notice-ok{width:auto;min-width:12rem;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:0.9rem;padding:1rem 2.4rem;font-family:var(--sl-font-accent);font-size:1.5rem;font-weight:800;cursor:pointer}",
@@ -1309,6 +1356,16 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     tokens.setdefault("content_heading", tokens["text"])
     tokens.setdefault("content_text", tokens["muted"])
     tokens.setdefault("content_border", tokens["border"])
+    # INK FOR TEXT ON A CARD, which the token set used to assume matched ink on the page. It does not,
+    # once a theme wants a WHITE card on a DARK page (`royal-velvet`, 2026-10-12): thirteen elements are
+    # painted with `--sl-card` and ten carried no ink of their own, so they inherited the page's light
+    # `--sl-text` and would have rendered invisible on it.
+    #
+    # Defaulting to the page values means NO existing preset moves. This only gives a theme the OPTION of
+    # saying its two surfaces differ.
+    tokens.setdefault("card_text", tokens["text"])
+    tokens.setdefault("card_muted", tokens["muted"])
+    tokens.setdefault("card_heading", tokens["content_heading"])
     tokens.setdefault("faq_bg", tokens["card"])
     tokens.setdefault("faq_border", tokens["border"])
     tokens.setdefault("faq_summary", tokens["text"])

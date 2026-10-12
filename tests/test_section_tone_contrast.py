@@ -29,8 +29,22 @@ MIN_LEGIBLE = 2.0
 
 
 def _token(preset: dict, name: str) -> str:
-    """Resolve `--sl-foo` to the preset's value. Preset keys are the token names without the prefix."""
-    return preset.get(name.removeprefix("--sl-").replace("-", "_"), "")
+    """Resolve `--sl-foo` to the value the RENDERER would emit.
+
+    Resolved through `theme_tokens` rather than off the raw preset dict, because most tokens are
+    DEFAULTS filled in there and never written into a preset -- `card_text` among them (2026-10-12).
+    Read from the raw dict a defaulted token looked like an empty string, so the pair went unmeasured,
+    which is the opposite of what this guard is for.
+    """
+    key = name.removeprefix("--sl-").replace("-", "_")
+    resolved = preset.get(key)
+    if resolved:
+        return resolved
+    from stripe_link.runtime.html import UNIVERSAL_BUNDLE_THEME_PRESETS, theme_tokens
+    for candidate, values in UNIVERSAL_BUNDLE_THEME_PRESETS.items():
+        if values is preset:
+            return theme_tokens({"theme": {"preset": candidate}}).get(key, "")
+    return ""
 
 
 def _resolve(value: str, preset: dict) -> str:
@@ -135,7 +149,11 @@ class ToneContrastTests(unittest.TestCase):
         # The structural half of the rule, so the reason survives even if the presets change.
         pairs = {
             "--sl-text": "--sl-background", "--sl-background": "--sl-text",
-            "--sl-card": "--sl-text", "--sl-cta-from": "--sl-cta-text",
+            # The card's designed partner is its OWN ink since 2026-10-12. It used to be `--sl-text`,
+            # which held only while every preset's card shared the page's polarity; `royal-velvet` puts
+            # a white card on a near-black page, and pairing it with the page ink is precisely the
+            # white-on-white panel this file exists to prevent.
+            "--sl-card": "--sl-card-text", "--sl-cta-from": "--sl-cta-text",
         }
         for tone in SECTION_TONES:
             rule = _rule(f".sl-tone-{tone}")
