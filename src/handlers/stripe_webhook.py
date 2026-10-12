@@ -133,6 +133,49 @@ def _parse_signature_header(signature_header: str) -> tuple[int, list[str]]:
     return timestamp, signatures
 
 
+def _signature_check(
+    *,
+    body: str,
+    signature_header: str,
+    secret: str,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """`{ok, reason, age_seconds, signature_matched}` — WHY a signature failed, not merely that it did.
+
+    The old version returned a bare bool and the caller logged
+    `"secret mismatch or stale timestamp"`: one guessed message covering two problems with completely
+    different fixes. Measured 2026-10-12, that guess left 16 dropped test-mode events a day in both silos
+    with no way to tell which half was wrong without reasoning from retry counts.
+
+    **The HMAC is computed even when the timestamp is stale**, which is the whole point:
+
+    * `stale_timestamp` + `signature_matched: True` — **our secret is correct.** This is a late or
+      retried delivery, and the 300s tolerance is what refused it. Nothing to fix in Secrets Manager;
+      the question is why delivery is slow, or whether a first failure has left a pool of doomed retries.
+    * `stale_timestamp` + `signature_matched: False` — the secret is wrong *and* it is a retry.
+    * `secret_mismatch` — a fresh delivery our secret cannot verify. This is the one a redeploy or a
+      Secrets Manager update fixes.
+
+    **A stale signature is still rejected**, matched or not. The tolerance is replay protection, not a
+    diagnostic, and knowing why we refused is not a reason to stop refusing.
+    """
+    timestamp, signatures = _parse_signature_header(signature_header)
+    if not timestamp or not signatures:
+        return {"ok": False, "reason": "malformed_signature_header",
+                "age_seconds": 0, "signature_matched": False}
+
+    signed_payload = f"{timestamp}.{body}".encode("utf-8")
+    expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
+    matched = any(hmac.compare_digest(expected, signature) for signature in signatures)
+    age = int(now_fn()) - timestamp
+
+    if abs(age) > SIGNATURE_TOLERANCE_SECONDS:
+        return {"ok": False, "reason": "stale_timestamp", "age_seconds": age,
+                "signature_matched": matched}
+    return {"ok": matched, "reason": "" if matched else "secret_mismatch",
+            "age_seconds": age, "signature_matched": matched}
+
+
 def _signature_is_valid(
     *,
     body: str,
@@ -140,15 +183,9 @@ def _signature_is_valid(
     secret: str,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> bool:
-    timestamp, signatures = _parse_signature_header(signature_header)
-    if not timestamp or not signatures:
-        return False
-    if abs(now_fn() - timestamp) > SIGNATURE_TOLERANCE_SECONDS:
-        return False
-
-    signed_payload = f"{timestamp}.{body}".encode("utf-8")
-    expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
-    return any(hmac.compare_digest(expected, signature) for signature in signatures)
+    """The bool form, kept for `platform_billing_webhook` which has no use for the reason."""
+    return bool(_signature_check(body=body, signature_header=signature_header,
+                                 secret=secret, now_fn=now_fn)["ok"])
 
 
 def _metadata_tenant_id(stripe_event: dict[str, Any]) -> str:
@@ -174,6 +211,24 @@ def _reloaded_webhook_secret(loader, kind: str, mode: str) -> str | None:
         return loader(kind, mode, refresh=True)
     except TypeError:
         return None
+
+
+def _signature_detail(check: dict[str, Any]) -> str:
+    """One sentence naming the cause AND the fix, because the point of separating them is to act.
+
+    `stale_timestamp` with a matching signature is the counter-intuitive one and gets said plainly: the
+    secret is right, so nobody should go looking in Secrets Manager for a problem that is not there.
+    """
+    reason, age = check.get("reason"), int(check.get("age_seconds") or 0)
+    if reason == "stale_timestamp" and check.get("signature_matched"):
+        return (f"SECRET IS CORRECT -- delivery was {age}s old, past the {SIGNATURE_TOLERANCE_SECONDS}s "
+                f"tolerance. A late or retried delivery, not a configuration problem.")
+    if reason == "stale_timestamp":
+        return (f"secret does not match AND the delivery was {age}s old "
+                f"(past the {SIGNATURE_TOLERANCE_SECONDS}s tolerance)")
+    if reason == "secret_mismatch":
+        return "secret does not match this endpoint's signing secret (delivery was fresh)"
+    return str(reason or "signature could not be verified")
 
 
 def _reject(reason: str, *, kind: str = "", mode: str = "", stripe_event: Any = None,
@@ -289,12 +344,17 @@ def handler(
         )
 
     signature_header = header_value(event, "Stripe-Signature")
-    if not _signature_is_valid(body=body, signature_header=signature_header, secret=secret, now_fn=now_fn):
+    check = _signature_check(body=body, signature_header=signature_header, secret=secret, now_fn=now_fn)
+    if not check["ok"]:
         # A ROTATED secret is indistinguishable from a forged one here, so re-read Secrets Manager once
         # before refusing. The cache has no TTL and the sweeps keep this container warm for hours, so
         # without this an endpoint recreated in Stripe keeps failing against the old secret long after the
         # new one is saved -- and every failure counts toward Stripe disabling the endpoint again.
-        refreshed = _reloaded_webhook_secret(webhook_secret_loader, kind, mode) if signature_header else None
+        # A STALE TIMESTAMP IS NOT A ROTATED SECRET. Re-reading Secrets Manager cannot help a delivery
+        # that is simply too old, and doing it on every retry turns a pool of doomed retries into a pool
+        # of doomed retries plus a GetSecretValue each. Only ask when the signature itself did not match.
+        refreshed = (_reloaded_webhook_secret(webhook_secret_loader, kind, mode)
+                     if signature_header and not check["signature_matched"] else None)
         if refreshed and refreshed != secret and _signature_is_valid(
                 body=body, signature_header=signature_header, secret=refreshed, now_fn=now_fn):
             print(json.dumps({"webhook_secret_refreshed": {"kind": kind, "mode": mode,
@@ -304,7 +364,8 @@ def handler(
             # THE ONE THAT COST NINE DAYS. A stored secret that does not match the endpoint's own rejects
             # every event of that mode, identically and forever, and said nothing at all.
             _reject("invalid_signature", kind=kind, mode=mode, stripe_event=stripe_event,
-                    detail="no Stripe-Signature header" if not signature_header else "secret mismatch or stale timestamp")
+                    detail=("no Stripe-Signature header" if not signature_header
+                            else _signature_detail(check)))
             return error_response("Stripe webhook signature verification failed.", 400, code="invalid_signature")
 
     account_id = str(stripe_event.get("account") or "").strip()
