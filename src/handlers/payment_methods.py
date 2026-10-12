@@ -110,7 +110,8 @@ def _tax_block(keys, stripe_caller, platform_key_loader, mode, acct, now):
     """
     stored = dict((keys.get("payment_methods") or {}).get("tax") or {})
     if not acct:
-        return dict(tax_status.describe(stored, connected=False), enabled=False), stored, False
+        return (dict(tax_status.describe(stored, connected=False), enabled=False,
+                     missing_fields=[], checked_at=0, settings_url=""), stored, False)
     settings = _fetch_tax_settings(stripe_caller, platform_key_loader, mode, acct)
     # A FAILED READ MUST NOT CLEAR A GOOD STATUS. Only refresh when Stripe actually answered; otherwise a
     # momentary outage would flip a calculating tenant to `unknown`, stop `automatic_tax` on the next
@@ -118,16 +119,25 @@ def _tax_block(keys, stripe_caller, platform_key_loader, mode, acct, now):
     changed = False
     if settings is not None:
         stored, changed = tax_status.apply_settings(stored, settings, now)
-    return _screen_block(stored), stored, changed
+    return _screen_block(stored, acct), stored, changed
 
 
-def _screen_block(stored):
-    """The describe() payload plus the three facts the screen needs beside it. One builder, so the GET and
-    the PUT can never return differently-shaped tax blocks to the same component."""
+def _screen_block(stored, acct=""):
+    """The describe() payload plus the facts the screen needs beside it. One builder, so the GET and the
+    PUT can never return differently-shaped tax blocks to the same component.
+
+    `settings_url` is **account-scoped**. The first version linked to the bare
+    `dashboard.stripe.com/settings/tax`, which resolves to whichever account the viewer's browser session
+    is on — for a platform owner testing with a connected account, that is the WRONG account. A panel
+    that says "not set up on your account" and then links somewhere else is how a tenant stops believing
+    the panel (found 2026-10-12 by the author clicking it).
+    """
     return dict(tax_status.describe(stored),
                 enabled=bool(stored.get("enabled")),
                 missing_fields=tax_status.missing_labels(stored),
-                checked_at=int(stored.get("checked_at") or 0))
+                checked_at=int(stored.get("checked_at") or 0),
+                settings_url=(f"https://dashboard.stripe.com/{acct}/settings/tax" if acct
+                              else "https://dashboard.stripe.com/settings/tax"))
 
 
 def _set_tax(tenant_id, mode, enabled, stripe_repo, stripe_caller, platform_key_loader):
@@ -159,12 +169,12 @@ def _set_tax(tenant_id, mode, enabled, stripe_repo, stripe_caller, platform_key_
             code="tax_not_active",
             # The refusal still carries the fresh status, so the screen corrects itself rather than
             # showing a control the server has just said it will not honour.
-            extra={"tax": _screen_block(stored)})
+            extra={"tax": _screen_block(stored, acct)})
     stored["enabled"] = bool(enabled)
     stored["updated_at"] = now
     keys.setdefault("payment_methods", {})["tax"] = stored
     _persist(keys, stripe_repo)
-    return json_response({"tax": _screen_block(stored)})
+    return json_response({"tax": _screen_block(stored, acct)})
 
 
 def _read(tenant_id, mode, stripe_repo, stripe_caller, platform_key_loader):

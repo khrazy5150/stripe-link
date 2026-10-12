@@ -274,6 +274,21 @@ class SalesTaxRidesTheSameRoute(unittest.TestCase):
         self.assertEqual(body["tax"]["state"], "active")
         self.assertTrue(body["tax"]["calculating"])
 
+    def test_the_stripe_tax_link_names_the_connected_account(self):
+        """The bare `dashboard.stripe.com/settings/tax` resolves to whatever account the viewer's session
+        is on. For a platform owner testing with a connected account that is the WRONG account -- the
+        panel says "not set up on your account" and then links somewhere else, which is how a tenant
+        stops believing the panel (found 2026-10-12 by clicking it)."""
+        resp = self._get(FakeStripeKeysRepo([CONNECTED]), make_caller())
+        url = json.loads(resp["body"])["tax"]["settings_url"]
+        self.assertEqual(url, "https://dashboard.stripe.com/acct_123/settings/tax")
+
+    def test_the_refusal_carries_the_same_scoped_link(self):
+        """A rejection re-renders the panel, so it must not silently fall back to the generic URL."""
+        resp = self._put({"tenant_id": "t1", "mode": "test", "tax_enabled": True},
+                         FakeStripeKeysRepo([CONNECTED]), make_caller())
+        self.assertIn("acct_123", json.loads(resp["body"])["tax"]["settings_url"])
+
     def test_an_unconnected_tenant_is_told_to_connect_rather_than_shown_a_switch(self):
         repo = FakeStripeKeysRepo([{"schema_version": "1", "document_type": "stripe_keys",
                                     "tenant_id": "t1", "mode": "test", "publishable_key": "pk_test_1"}])

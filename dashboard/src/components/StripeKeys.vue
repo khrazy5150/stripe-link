@@ -215,7 +215,10 @@
 
         <!-- The only action we can honestly ask for. The tenant does registrations in their own Stripe
              Dashboard; we never create one and never imply they have. -->
-        <a class="tax-link" href="https://dashboard.stripe.com/settings/tax" target="_blank" rel="noopener">
+        <!-- ACCOUNT-SCOPED, from the server. The bare /settings/tax URL resolves to whatever account the
+             viewer's session is on, which for a platform owner is not the connected account this panel
+             just reported on. -->
+        <a v-if="pm.tax.settings_url" class="tax-link" :href="pm.tax.settings_url" target="_blank" rel="noopener">
           {{ pm.tax.may_enable ? "Your Stripe Tax settings" : "Set up Stripe Tax" }} &#8599;
         </a>
       </div>
