@@ -161,7 +161,7 @@ import { formatMoney } from "../stores/products";
 const PERIODS = [
   // SHORT WINDOWS FIRST. 30 days was the shortest, which is coarse for a seller checking daily -- and
   // it is the window that hides a freshly-costed sale behind a month of older uncosted ones.
-  { key: "today", label: "Today", days: 1 },
+  { key: "today", label: "Today", days: 1, calendarDay: true },
   { key: "7d", label: "Last 7 days", days: 7 },
   { key: "30d", label: "Last 30 days", days: 30 },
   { key: "90d", label: "Last 90 days", days: 90 },
@@ -187,21 +187,45 @@ async function fetchWindow(from, to) {
   return apiRequest("/ledger", { params });
 }
 
+/**
+ * The epoch bounds for a period, and for the equivalent period before it.
+ *
+ * "Today" is a CALENDAR day — local midnight to now — and every other window is rolling. That
+ * distinction is the whole point of this function: `days: 1` meant the last 24 hours, so a chip
+ * labelled "Today" was reaching back into most of yesterday and reporting yesterday's subscription
+ * renewals as today's sales (reported 2026-10-12, where it made "2 of 4" need explaining).
+ *
+ * Local midnight, not UTC: a tenant's "today" is the one on their own wall, and the ledger stores
+ * epoch seconds so the browser is the only place that knows which that is.
+ */
+function windowFor(spec) {
+  const now = Math.floor(Date.now() / 1000);
+  if (spec.calendarDay) {
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const from = Math.floor(midnight.getTime() / 1000);
+    // Yesterday, midnight to midnight — a whole day against a part of one, which is the honest
+    // comparison for "so far today" and is what every sales dashboard means by it.
+    return { from, previousFrom: from - 86400, previousTo: from - 1 };
+  }
+  if (!spec.days) return { from: null, previousFrom: null, previousTo: null };
+  const from = now - spec.days * 86400;
+  return { from, previousFrom: now - spec.days * 2 * 86400, previousTo: from - 1 };
+}
+
 async function load() {
   busy.value = true;
   error.value = "";
   try {
-    const now = Math.floor(Date.now() / 1000);
-    const days = spec.value.days;
-    const from = days ? now - days * 86400 : null;
+    const { from, previousFrom, previousTo } = windowFor(spec.value);
     const body = await fetchWindow(from, null);
     summary.value = body.summary || null;
     entryCount.value = Number(body.count || 0);
     currency.value = (body.entries || [])[0]?.currency || "usd";
     // The SAME length of time immediately before, so a comparison is like for like. Skipped for
     // all-time, which has nothing before it.
-    previous.value = days
-      ? (await fetchWindow(now - days * 2 * 86400, from - 1)).summary || null
+    previous.value = previousFrom
+      ? (await fetchWindow(previousFrom, previousTo)).summary || null
       : null;
   } catch (err) {
     error.value = err.message || "Could not load the ledger.";

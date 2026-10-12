@@ -174,3 +174,47 @@ class ReportsSitsOnTheSamePageWrapperAsEveryOtherScreen(unittest.TestCase):
         panel = self.CSS[self.CSS.index(".reports-panel {"):][:400]
         self.assertIn("padding:", panel)
         self.assertIn("overflow-x: auto", panel, "a statement must not drop a column to fit")
+
+
+class TodayMeansTheCalendarDayNotTheLastTwentyFourHours(unittest.TestCase):
+    """A chip labelled "Today" was reaching back into most of yesterday.
+
+    `days: 1` meant `now - 86400`, so yesterday's subscription renewals were reported as today's sales
+    and the scoped profit read "On 2 of 4 sales" when two of those four were not today's at all
+    (reported 2026-10-12). Every other window is legitimately rolling — "Last 7 days" does mean the
+    last seven — but a calendar word has to mean the calendar thing.
+    """
+
+    import pathlib as _pathlib
+    VIEW = (_pathlib.Path(__file__).resolve().parents[1]
+            / "dashboard/src/components/Reports.vue").read_text(encoding="utf-8")
+
+    def _window_fn(self):
+        body = self.VIEW[self.VIEW.index("function windowFor(spec) {"):]
+        return body[:body.index("\n}") + 2]
+
+    def test_today_is_flagged_as_a_calendar_day(self):
+        self.assertIn('{ key: "today", label: "Today", days: 1, calendarDay: true }', self.VIEW)
+
+    def test_it_starts_at_local_midnight(self):
+        """LOCAL, not UTC: a tenant's today is the one on their own wall, and the ledger stores epoch
+        seconds so the browser is the only place that knows which that is."""
+        body = self._window_fn()
+        self.assertIn("setHours(0, 0, 0, 0)", body)
+        self.assertIn("spec.calendarDay", body)
+
+    def test_its_comparison_is_yesterday_whole(self):
+        """A whole day against a part of one — what every sales dashboard means by "vs yesterday"."""
+        body = self._window_fn()
+        self.assertIn("previousFrom: from - 86400", body)
+        self.assertIn("previousTo: from - 1", body)
+
+    def test_the_rolling_windows_are_untouched(self):
+        """"Last 7 days" genuinely means the last seven, and should not become a calendar week."""
+        body = self._window_fn()
+        self.assertIn("now - spec.days * 86400", body)
+        self.assertIn("now - spec.days * 2 * 86400", body)
+
+    def test_all_time_still_has_nothing_before_it(self):
+        body = self._window_fn()
+        self.assertIn("if (!spec.days) return { from: null, previousFrom: null, previousTo: null };", body)
