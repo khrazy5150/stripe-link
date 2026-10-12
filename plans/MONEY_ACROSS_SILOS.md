@@ -559,6 +559,19 @@ ledger they were copied from would be reading back our own writes and calling th
   neither is fixed by nudging a total until it matches, and a self-correcting ledger would have hidden
   both.
 
+### Verified live on dev, including that the check itself runs
+
+```
+'ledger_drift': {'examined': 2, 'matched': 2, 'unmatched': 0, 'failed': 0, 'fee_checked': 2}
+```
+
+`fee_checked` exists because "no findings" and "the fee half never ran" look identical in a tally. The
+fee comparison only happens when the caller expanded `balance_transaction`, so a listing that forgot the
+expand would report perfect agreement forever. Two of two charges had their fees genuinely compared.
+
+That counter is this plan's own lesson applied to its own code: **three of the four defects P4 fixed were
+code present and never reached**, each found only by a human reading a dashboard by eye a day later.
+
 ### A bug this found in its own first draft
 
 `describe` keyed its message off `net`. **A sale we never recorded that was later refunded nets to zero
