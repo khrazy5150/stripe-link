@@ -487,7 +487,24 @@ def _and_more(names: list[str], shown: int = 3) -> str:
     return f"{', '.join(names[:shown])} and {len(names) - shown} more"
 
 
-def label_readiness(config: dict[str, Any] | None) -> list[str]:
+
+def _has_key_for_mode(provider: dict[str, Any], stripe_mode: str) -> bool:
+    """A key this mode can actually use: its own slot, or a pre-split key whose prefix matches.
+
+    The legacy case cannot be decided here -- only a decrypt reveals the prefix, and this function has no
+    cipher -- so a config that still carries one is treated as ready and the real answer comes from
+    `provider_credentials` at the moment a rate or label is requested. Readiness is a prompt, not a gate;
+    being optimistic here costs a clearer error later, while being pessimistic would tell a tenant with a
+    working setup to re-enter a key they already have.
+    """
+    from stripe_link.domain import shipping_keys
+
+    if shipping_keys.key_slot(provider, stripe_mode).get("api_key_ref"):
+        return True
+    return bool(shipping_keys.legacy_ref(provider))
+
+
+def label_readiness(config: dict[str, Any] | None, stripe_mode: str = "test") -> list[str]:
     """What is still missing before this tenant can buy a label. Empty means ready.
 
     Separate from validation on purpose. "Is this document well-formed" and "is this setup complete enough
@@ -497,12 +514,17 @@ def label_readiness(config: dict[str, Any] | None) -> list[str]:
     Only actionable items, each naming the thing to go and do.
     """
     config = config or {}
+    from stripe_link.domain import shipping_keys
+
     missing = []
     provider = config.get("provider") or {}
     if not provider.get("name"):
         missing.append("Choose a shipping provider.")
-    elif provider.get("name") != "mock" and not provider.get("api_key_ref"):
-        missing.append("Add your provider's API key.")
+    elif provider.get("name") != "mock" and not _has_key_for_mode(provider, stripe_mode):
+        # NAMES THE MODE. Readiness is per mode now, and "Add your provider's API key" to a tenant whose
+        # live key is sitting right there would read as the software having lost it
+        # (domain/shipping_keys.py).
+        missing.append(f"Add your provider's API key for {shipping_keys.normalize_mode(stripe_mode)} mode.")
     elif provider.get("connection_status") != "connected":
         missing.append("Test the connection to confirm the key works.")
     ship_from = config.get("ship_from_address") or {}

@@ -216,7 +216,7 @@ def fulfilment_context(tenant_id, mode, products_repo=None, shipments_repo=None,
         "products_by_id": {str(p.get("product_id") or ""): p for p in products if p.get("product_id")},
         "index": product_index(products),
         "shipments": shipments,
-        "readiness": label_readiness(config) if config else [],
+        "readiness": label_readiness(config, stripe_mode=mode) if config else [],
         "configured": bool(config),
         # The boxes a group packs into come from here. Returned rather than re-read: the config is already
         # loaded above, and a second fetch per request to answer the same question is waste.

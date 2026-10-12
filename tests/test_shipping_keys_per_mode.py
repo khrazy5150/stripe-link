@@ -1,0 +1,224 @@
+"""One carrier credential per Stripe mode, so TEST never spends real postage.
+
+Reported by the author 2026-10-11, and the reasons are theirs:
+
+> "Test mode means sandbox for tenants even if we are in production. Since it's sandbox that uses
+>  Shippo's test API, the labels will show as TEST LABELS, which prevents accidental real money."
+>
+> "Most tenants will work on Live mode and only later switch to Test. It would be a real tragedy if
+>  they add a test Shippo API that overrides their live API."
+
+`ShippingConfig` held one `provider.api_key_ref`, keyed on tenant alone, and there was no mode anywhere
+in the shipping path: `shipping_config_repository()` takes no mode and `provider_for(name, api_key)` is
+never given one. The dashboard's TEST/LIVE toggle moved products and orders and left the carrier key
+exactly where it was. So the screen said TEST while the money path had no idea, and one slot meant the
+second key you saved destroyed the first.
+
+The `test_mode` checkbox did not help: saved, displayed, read by nothing. It could not have worked —
+Shippo uses one base URL and decides the environment from the key's own prefix.
+"""
+import unittest
+
+from stripe_link.domain.shipping_keys import (adopt_legacy, configured_modes, key_mismatch, key_slot,
+                                              mode_of_key, normalize_mode, with_key_slot)
+
+
+class SavingOneModeNeverTouchesTheOther(unittest.TestCase):
+    """The author's second reason, and the one with a real victim."""
+
+    def test_a_test_key_cannot_displace_a_live_one(self):
+        provider = {"name": "shippo", "keys": {"live": {"api_key_ref": "ref_live"}}}
+        after = with_key_slot(provider, "test", {"api_key_ref": "ref_test"})
+        self.assertEqual(after["keys"]["live"]["api_key_ref"], "ref_live")
+        self.assertEqual(after["keys"]["test"]["api_key_ref"], "ref_test")
+
+    def test_clearing_one_mode_leaves_the_other(self):
+        provider = {"name": "shippo",
+                    "keys": {"live": {"api_key_ref": "ref_live"}, "test": {"api_key_ref": "ref_test"}}}
+        after = with_key_slot(provider, "test", {})
+        self.assertNotIn("test", after["keys"])
+        self.assertEqual(after["keys"]["live"]["api_key_ref"], "ref_live")
+
+    def test_a_live_key_is_invisible_in_test_mode(self):
+        """The first reason: nothing in test mode may reach a credential that spends real money."""
+        provider = {"name": "shippo", "keys": {"live": {"api_key_ref": "ref_live"}}}
+        self.assertEqual(key_slot(provider, "test"), {})
+        self.assertEqual(key_slot(provider, "live")["api_key_ref"], "ref_live")
+
+    def test_the_dashboard_can_say_which_modes_are_set_up(self):
+        provider = {"keys": {"live": {"api_key_ref": "r"}, "test": {}}}
+        self.assertEqual(configured_modes(provider), ["live"])
+
+
+class AKeyForTheWrongModeIsRefused(unittest.TestCase):
+    """Shippo says which environment a key is for in the key itself, so a mismatch is catchable at the
+    moment somebody can still fix it — rather than when a real label is bought in a window marked TEST."""
+
+    def test_a_live_key_saved_under_test_is_refused(self):
+        message = key_mismatch("shippo", "shippo_live_abc", "test")
+        self.assertIn("live key", message)
+        self.assertIn("test mode", message)
+
+    def test_a_test_key_saved_under_live_is_refused(self):
+        self.assertTrue(key_mismatch("shippo", "shippo_test_abc", "live"))
+
+    def test_a_matching_key_is_accepted(self):
+        self.assertEqual(key_mismatch("shippo", "shippo_test_abc", "test"), "")
+        self.assertEqual(key_mismatch("shippo", "shippo_live_abc", "live"), "")
+
+    def test_easypost_is_recognised_too(self):
+        """Not wired yet, but the prefixes are a lookup rather than a special case, so the day it is
+        wired this does not need remembering."""
+        self.assertTrue(key_mismatch("easypost", "EZAKlive123", "test"))
+        self.assertEqual(key_mismatch("easypost", "EZTKtest123", "test"), "")
+
+    def test_a_provider_that_does_not_advertise_is_not_second_guessed(self):
+        self.assertEqual(key_mismatch("shipstation", "anything", "test"), "")
+        self.assertEqual(mode_of_key("shipstation", "anything"), "")
+
+
+class APreSplitConfigIsClassifiedByItsOwnKey(unittest.TestCase):
+    """An existing config has one key and no record of which environment it was for. The key usually
+    knows."""
+
+    LEGACY = {"name": "shippo", "api_key_ref": "ref", "connection_status": "connected"}
+
+    def test_a_live_key_is_adopted_only_by_live_mode(self):
+        self.assertIsNone(adopt_legacy(self.LEGACY, "test", "shippo_live_abc"))
+        adopted = adopt_legacy(self.LEGACY, "live", "shippo_live_abc")
+        self.assertEqual(adopted["api_key_ref"], "ref")
+        self.assertEqual(adopted["connection_status"], "connected",
+                         "the key has not changed, so what we knew about it still holds")
+
+    def test_a_test_key_is_adopted_only_by_test_mode(self):
+        self.assertIsNone(adopt_legacy(self.LEGACY, "live", "shippo_test_abc"))
+        self.assertTrue(adopt_legacy(self.LEGACY, "test", "shippo_test_abc"))
+
+    def test_an_unclassifiable_key_keeps_working_in_both(self):
+        """Refuse only what can be POSITIVELY identified as wrong. Two earlier versions got this wrong
+        in both directions: refusing everything unclassifiable stopped real shipping for anyone whose
+        provider does not advertise the environment, and defaulting it to live broke the same tenants in
+        test mode for a risk they may not have had."""
+        unknown = {"name": "shipstation", "api_key_ref": "ref"}
+        self.assertTrue(adopt_legacy(unknown, "test", "plain-key"))
+        self.assertTrue(adopt_legacy(unknown, "live", "plain-key"))
+
+
+class TheModeItselfFailsSafe(unittest.TestCase):
+    def test_anything_not_live_is_test(self):
+        for value in ("test", "", None, "TEST", "nonsense", "sandbox"):
+            self.assertEqual(normalize_mode(value), "test", repr(value))
+
+    def test_only_live_is_live(self):
+        self.assertEqual(normalize_mode("live"), "live")
+        self.assertEqual(normalize_mode(" LIVE "), "live")
+
+    def test_the_default_direction_is_the_one_that_cannot_spend_money(self):
+        """Same rule as `normalize_stripe_mode`. Guessing `live` on an unreadable value would be
+        guessing toward buying a real label."""
+        self.assertEqual(normalize_mode(object()), "test")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TheScreenNamesTheModeItIsSaving(unittest.TestCase):
+    """Static guards, in the shape of the other dashboard tests (no JS runner here).
+
+    A field labelled just "API Key", on a screen with a TEST/LIVE toggle that used to do nothing to it,
+    is how a tenant pastes a test key over their live one without ever being told that is what they are
+    doing.
+    """
+
+    import pathlib as _pathlib
+    VIEW = (_pathlib.Path(__file__).resolve().parents[1]
+            / "dashboard/src/components/Shipping.vue").read_text(encoding="utf-8")
+
+    def test_the_key_field_names_the_mode(self):
+        self.assertIn("API Key — {{ modeLabel }} mode", self.VIEW)
+
+    def test_it_says_the_other_mode_is_untouched(self):
+        """The reassurance that matters: a tenant must be able to see that saving here is safe."""
+        self.assertIn("is saved separately and is not affected by changes here", self.VIEW)
+
+    def test_it_says_when_the_other_mode_has_no_key(self):
+        self.assertIn("switch the dashboard to", self.VIEW.lower())
+
+    def test_configured_state_is_read_per_mode(self):
+        """`keyConfigured` used to read the flat `api_key_ref`, which after the split would have said
+        "Saved" in Test mode because a Live key existed."""
+        body = self.VIEW[self.VIEW.index("const keyConfigured"):][:420]
+        self.assertIn("getStripeMode()", body)
+        self.assertIn("has_key", body)
+
+    def test_the_dead_test_mode_checkbox_is_gone(self):
+        """Saved, displayed, read by nothing server-side -- and unable to work even in principle, since
+        Shippo decides the environment from the key's own prefix. A control that does nothing beside the
+        control that actually decides is worse than no control."""
+        self.assertNotIn('v-model="form.test_mode"', self.VIEW)
+        self.assertNotIn("use the provider's test environment", self.VIEW)
+
+
+class TheServerKeepsBothModesApart(unittest.TestCase):
+    """The end-to-end property, through the real handler."""
+
+    def _save(self, repository, cipher, key, mode):
+        import json
+
+        from handlers.shipping import handler
+        document = {
+            "schema_version": "2026-05-29", "document_type": "shipping_config", "tenant_id": "t1",
+            "provider": {"name": "shippo", "api_key_ref": key},
+            "ship_from_address": {"name": "A", "street1": "1 St", "city": "Cheyenne", "state": "WY",
+                                  "postal_code": "82009", "country": "US"},
+        }
+        return handler({"httpMethod": "PUT", "path": "/shipping", "body": json.dumps(document),
+                        "headers": {"X-Stripe-Mode": mode}},
+                       None, repository=repository, secret_cipher=cipher)
+
+    def test_a_test_save_leaves_the_live_key_standing(self):
+        class Repo:
+            doc = None
+
+            def get(self, tenant_id):
+                return self.doc
+
+            def put(self, document):
+                self.doc = document
+                return document
+
+        class Cipher:
+            def encrypt(self, value, **kwargs):
+                return "kms:v1:" + value
+
+        repo, cipher = Repo(), Cipher()
+        self.assertEqual(self._save(repo, cipher, "shippo_live_REAL", "live")["statusCode"], 201)
+        self.assertEqual(self._save(repo, cipher, "shippo_test_SANDBOX", "test")["statusCode"], 201)
+        keys = repo.doc["provider"]["keys"]
+        self.assertEqual(keys["live"]["api_key_ref"], "kms:v1:shippo_live_REAL",
+                         "THE tragedy this prevents")
+        self.assertEqual(keys["test"]["api_key_ref"], "kms:v1:shippo_test_SANDBOX")
+
+    def test_a_live_key_pasted_in_test_mode_is_refused_and_nothing_is_stored(self):
+        import json
+
+        class Repo:
+            doc = None
+
+            def get(self, tenant_id):
+                return self.doc
+
+            def put(self, document):
+                self.doc = document
+                return document
+
+        class Cipher:
+            def encrypt(self, value, **kwargs):
+                return "kms:v1:" + value
+
+        repo = Repo()
+        response = self._save(repo, Cipher(), "shippo_live_REAL", "test")
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"], "provider_key_mode_mismatch")
+        self.assertIsNone(repo.doc)

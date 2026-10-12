@@ -56,6 +56,65 @@
           "type": "string",
           "description": "Reference to the encrypted provider API key; never store raw API keys in this document."
         },
+        "keys": {
+          "type": "object",
+          "description": "ONE CARRIER KEY PER STRIPE MODE. The config used to hold a single `api_key_ref`, with no mode axis anywhere in the shipping path -- so a tenant in TEST mode bought real labels with their live key, and saving a test key destroyed the live one. The provider name, addresses, boxes and label options stay shared: those are the same facts in both modes. `api_key_ref` above is the pre-split field, still read when its own prefix says which mode it belongs to. See domain/shipping_keys.py.",
+          "properties": {
+            "test": {
+              "type": "object",
+              "properties": {
+                "api_key_ref": {
+                  "type": "string",
+                  "description": "KMS-wrapped carrier key for this mode. Never returned to the browser."
+                },
+                "connection_status": {
+                  "type": "string",
+                  "enum": [
+                    "not_configured",
+                    "untested",
+                    "connected",
+                    "failed"
+                  ]
+                },
+                "last_tested_at": {
+                  "type": "integer"
+                },
+                "has_key": {
+                  "type": "boolean",
+                  "description": "Read-only, added on redaction so the dashboard can say which modes are configured."
+                }
+              },
+              "additionalProperties": false
+            },
+            "live": {
+              "type": "object",
+              "properties": {
+                "api_key_ref": {
+                  "type": "string",
+                  "description": "KMS-wrapped carrier key for this mode. Never returned to the browser."
+                },
+                "connection_status": {
+                  "type": "string",
+                  "enum": [
+                    "not_configured",
+                    "untested",
+                    "connected",
+                    "failed"
+                  ]
+                },
+                "last_tested_at": {
+                  "type": "integer"
+                },
+                "has_key": {
+                  "type": "boolean",
+                  "description": "Read-only, added on redaction so the dashboard can say which modes are configured."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "base_url": {
           "type": "string"
         },
@@ -99,16 +158,41 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["service_token"],
+        "required": [
+          "service_token"
+        ],
         "properties": {
-          "service_token": { "type": "string", "minLength": 1 },
-          "carrier": { "type": "string" },
-          "label": { "type": "string", "description": "What the BUYER reads, e.g. 'Ground (5-7 days)'. Absent falls back to the carrier's own name." },
-          "transit_days_min": { "type": ["integer", "null"], "minimum": 0 },
-          "transit_days_max": { "type": ["integer", "null"], "minimum": 0 },
+          "service_token": {
+            "type": "string",
+            "minLength": 1
+          },
+          "carrier": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "description": "What the BUYER reads, e.g. 'Ground (5-7 days)'. Absent falls back to the carrier's own name."
+          },
+          "transit_days_min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "transit_days_max": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
           "source": {
             "type": "string",
-            "enum": ["rate", "manual"],
+            "enum": [
+              "rate",
+              "manual"
+            ],
             "description": "Where this service came from. `rate` means it was adopted from a live carrier quote, so its code, carrier and transit estimate are the CARRIER's and the screen locks them -- a hand-edited service code is one that can never be quoted. `manual` means someone typed it, which stays editable and is shown as unverified."
           }
         }
@@ -120,9 +204,15 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["destinations", "rule"],
+        "required": [
+          "destinations",
+          "rule"
+        ],
         "properties": {
-          "name": { "type": "string", "description": "The tenant's own label, e.g. 'United States'. Never shown to a buyer." },
+          "name": {
+            "type": "string",
+            "description": "The tenant's own label, e.g. 'United States'. Never shown to a buyer."
+          },
           "destinations": {
             "type": "array",
             "minItems": 1,
@@ -130,21 +220,54 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["country"],
+              "required": [
+                "country"
+              ],
               "properties": {
-                "country": { "type": "string", "minLength": 1, "maxLength": 2, "description": "ISO 3166-1 alpha-2, or \"*\" for the catch-all." },
-                "regions": { "type": "array", "items": { "type": "string" }, "description": "NOT USED IN V1. State/province codes within the country when subdivision targeting arrives." }
+                "country": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2,
+                  "description": "ISO 3166-1 alpha-2, or \"*\" for the catch-all."
+                },
+                "regions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "NOT USED IN V1. State/province codes within the country when subdivision targeting arrives."
+                }
               }
             }
           },
           "rule": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["type"],
+            "required": [
+              "type"
+            ],
             "properties": {
-              "type": { "type": "string", "enum": ["free", "flat", "flat_rate_box", "live"] },
-              "amount": { "type": "integer", "minimum": 0, "description": "Required when type is 'flat'. Cents the buyer pays." },
-              "services": { "type": "array", "items": { "type": "string" }, "description": "Narrows enabled_services for this zone, e.g. no overnight to Canada. Never widens it." }
+              "type": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "flat",
+                  "flat_rate_box",
+                  "live"
+                ]
+              },
+              "amount": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Required when type is 'flat'. Cents the buyer pays."
+              },
+              "services": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Narrows enabled_services for this zone, e.g. no overnight to Canada. Never widens it."
+              }
             }
           }
         }
@@ -299,11 +422,14 @@
           "default": "box"
         },
         "flat_rate": {
-        "type": "object",
-        "description": "What the tenant charges a buyer for this container, keyed by destination COUNTRY (ISO alpha-2). Country-keyed because flat rate is domestic by definition -- one number cannot serve two countries. The template describes the physical container; this describes what it costs the buyer in a place. Used by a zone whose rule type is 'flat_rate_box'; a shipping-configuration concern, never an Offer one.",
-        "additionalProperties": { "type": "integer", "minimum": 0 }
-      },
-      "template": {
+          "type": "object",
+          "description": "What the tenant charges a buyer for this container, keyed by destination COUNTRY (ISO alpha-2). Country-keyed because flat rate is domestic by definition -- one number cannot serve two countries. The template describes the physical container; this describes what it costs the buyer in a place. Used by a zone whose rule type is 'flat_rate_box'; a shipping-configuration concern, never an Offer one.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "template": {
           "description": "A carrier's own packaging identifier (USPS flat-rate envelopes and the like), passed straight through to the provider. Flat-rate packaging is frequently the cheapest option for a soft pack, and omitting it means those rates are never quoted at all. Absent means a custom parcel, which is what every box has been until now.",
           "type": [
             "string",

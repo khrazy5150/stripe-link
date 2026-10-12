@@ -25,10 +25,10 @@
           <input v-model="form.enabled" type="checkbox" />
           <span>Enable shipping (rates and labels)</span>
         </label>
-        <label class="checkbox-row">
-          <input v-model="form.test_mode" type="checkbox" />
-          <span>Test mode (use the provider's test environment)</span>
-        </label>
+        <!-- The "Test mode" checkbox lived here. It was saved, displayed, and read by nothing
+             server-side, and it could not have worked: Shippo uses one base URL and decides the
+             environment from the key's own prefix. The dashboard's TEST/LIVE toggle now selects which
+             carrier key is used, which is what this control appeared to promise. -->
         <label class="checkbox-row">
           <input v-model="form.auto_fulfill_after_label_purchase" type="checkbox" />
           <span>Auto-fulfill orders after a label is purchased</span>
@@ -70,9 +70,20 @@
         </div>
         <div class="offer-two-column">
           <label class="offer-field">
-            <span>API Key</span>
+            <!-- NAMES THE MODE. One key per mode now, so a field labelled just "API Key" would be
+                 ambiguous in exactly the way that used to lose people their live credential. -->
+            <span>API Key — {{ modeLabel }} mode</span>
             <input v-model="form.provider.api_key" type="password" autocomplete="new-password" :placeholder="apiKeyPlaceholder" />
-            <small>Your provider's API key. Stored encrypted and never shown again after saving.</small>
+            <small>
+              Your {{ modeLabel }} key, used only while the dashboard is in {{ modeLabel }} mode. Stored
+              encrypted and never shown again after saving.
+            </small>
+            <small v-if="otherModeConfigured" class="field-note">
+              Your {{ otherModeLabel }} key is saved separately and is not affected by changes here.
+            </small>
+            <small v-else-if="keyConfigured" class="field-note">
+              No {{ otherModeLabel }} key yet — switch the dashboard to {{ otherModeLabel }} to add one.
+            </small>
           </label>
           <label class="offer-field">
             <span>Connection Status</span>
@@ -672,7 +683,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { apiRequest, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { statusLabel } from "../utils/format";
 import AddressFields from "./AddressFields.vue";
 import { useProfileStore } from "../stores/profile";
@@ -689,7 +700,24 @@ const copyingBusiness = ref(false);
 const form = reactive(defaultForm());
 
 // A saved key comes back redacted (api_key_ref === "********"), so a truthy value means configured.
-const keyConfigured = computed(() => Boolean(rawDoc.value.provider?.api_key_ref));
+// PER MODE. The saved key comes back redacted, so a truthy value means configured -- but it is now
+// configured FOR A MODE, and a tenant looking at Test must not be told "Saved" because their Live key
+// exists. `has_key` is added on redaction precisely so this question has an answer that carries no
+// secret (handlers/shipping.redact_shipping_config).
+const keyConfigured = computed(() => {
+  const keys = rawDoc.value.provider?.keys || {};
+  const slot = keys[getStripeMode()] || {};
+  return Boolean(slot.has_key || slot.api_key_ref) || Boolean(rawDoc.value.provider?.api_key_ref);
+});
+const modeLabel = computed(() => (getStripeMode() === "live" ? "Live" : "Test"));
+const otherModeLabel = computed(() => (getStripeMode() === "live" ? "Test" : "Live"));
+// Which modes have a key, so the screen can say "Live is set up, Test is not" before a tenant finds out
+// at the rate screen.
+const otherModeConfigured = computed(() => {
+  const other = getStripeMode() === "live" ? "test" : "live";
+  const slot = (rawDoc.value.provider?.keys || {})[other] || {};
+  return Boolean(slot.has_key || slot.api_key_ref);
+});
 const apiKeyPlaceholder = computed(() => (keyConfigured.value ? "Saved — enter a new key to replace" : "Enter your provider API key"));
 const providerChangedNeedsKey = computed(() =>
   Boolean(

@@ -996,17 +996,25 @@ class AccountHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 201)
         # Response never exposes the key or the ciphertext.
-        self.assertEqual(json.loads(response["body"])["shipping_config"]["provider"]["api_key_ref"], "********")
+        self.assertEqual(
+            json.loads(response["body"])["shipping_config"]["provider"]["keys"]["test"]["api_key_ref"],
+            "********", "a stored reference must never reach the browser, in either shape")
         # Stored value is encrypted, not the plaintext.
         stored = repository.get("tenant_demo")
-        self.assertEqual(stored["provider"]["api_key_ref"], "kms:v1:enc(shippo_test_PLAINTEXT_KEY)")
+        # PER MODE now (domain/shipping_keys.py): the key lives in the slot for the mode it was saved
+        # under, so a test key can never overwrite a live one.
+        self.assertEqual(stored["provider"]["keys"]["test"]["api_key_ref"],
+                         "kms:v1:enc(shippo_test_PLAINTEXT_KEY)")
+        self.assertNotIn("api_key_ref", stored["provider"], "the flat field is gone, not shadowed")
         self.assertEqual(stored["provider"]["connection_status"], "untested")
         # GET is redacted too.
         fetched = shipping_handler({
             "httpMethod": "GET",
             "queryStringParameters": {"tenant_id": "tenant_demo"},
         }, None, repository=repository, secret_cipher=FakeCipher())
-        self.assertEqual(json.loads(fetched["body"])["shipping_config"]["provider"]["api_key_ref"], "********")
+        self.assertEqual(
+            json.loads(fetched["body"])["shipping_config"]["provider"]["keys"]["test"]["api_key_ref"],
+            "********")
 
     def test_shipping_config_preserves_key_when_provider_unchanged(self):
         repository = FakeSimpleRepository("tenant_id")
@@ -1019,14 +1027,65 @@ class AccountHandlerTests(unittest.TestCase):
         config["provider"]["name"] = "shippo"
         config["provider"]["api_key_ref"] = "shippo_PLAINTEXT"
         shipping_handler({"httpMethod": "PUT", "body": json.dumps(config)}, None, repository=repository, secret_cipher=FakeCipher())
-        stored_ref = repository.get("tenant_demo")["provider"]["api_key_ref"]
+        stored_ref = repository.get("tenant_demo")["provider"]["keys"]["test"]["api_key_ref"]
 
         resaved = load_fixture("shipping-config-demo.json")
         resaved["provider"]["name"] = "shippo"
         resaved["provider"]["api_key_ref"] = "********"
         shipping_handler({"httpMethod": "PUT", "body": json.dumps(resaved)}, None, repository=repository, secret_cipher=FakeCipher())
 
-        self.assertEqual(repository.get("tenant_demo")["provider"]["api_key_ref"], stored_ref)
+        self.assertEqual(
+            repository.get("tenant_demo")["provider"]["keys"]["test"]["api_key_ref"], stored_ref,
+            "re-saving without a new key keeps this mode's key")
+
+    def test_shipping_config_keeps_the_other_modes_key(self):
+        """The tragedy this split exists to prevent (author, 2026-10-11): a tenant who has shipped live
+        for months flips to test, pastes a test key, and loses the credential their real shipping
+        depends on. The first implementation of the split still did it, because the dashboard submits a
+        provider with no `keys` map and the save built the map from what was submitted."""
+        repository = FakeSimpleRepository("tenant_id")
+
+        class FakeCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:enc({plaintext})"
+
+        live = load_fixture("shipping-config-demo.json")
+        live["provider"] = {"name": "shippo", "api_key_ref": "shippo_live_REAL"}
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(live),
+                          "headers": {"X-Stripe-Mode": "live"}},
+                         None, repository=repository, secret_cipher=FakeCipher())
+        stored_live = repository.get("tenant_demo")["provider"]["keys"]["live"]["api_key_ref"]
+
+        test = load_fixture("shipping-config-demo.json")
+        test["provider"] = {"name": "shippo", "api_key_ref": "shippo_test_SANDBOX"}
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(test),
+                          "headers": {"X-Stripe-Mode": "test"}},
+                         None, repository=repository, secret_cipher=FakeCipher())
+
+        keys = repository.get("tenant_demo")["provider"]["keys"]
+        self.assertEqual(keys["live"]["api_key_ref"], stored_live, "THE live key must survive")
+        self.assertEqual(keys["test"]["api_key_ref"], "kms:v1:enc(shippo_test_SANDBOX)")
+
+    def test_shipping_config_refuses_a_key_for_the_wrong_mode(self):
+        """A live key pasted while the dashboard says TEST is refused, not stored. Shippo says which
+        environment a key is for in the key itself, so this is catchable at the moment it can be fixed
+        rather than when a real label is bought in a window marked TEST."""
+        repository = FakeSimpleRepository("tenant_id")
+
+        class FakeCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:enc({plaintext})"
+
+        config = load_fixture("shipping-config-demo.json")
+        config["provider"] = {"name": "shippo", "api_key_ref": "shippo_live_REAL"}
+        response = shipping_handler({"httpMethod": "PUT", "body": json.dumps(config),
+                                     "headers": {"X-Stripe-Mode": "test"}},
+                                    None, repository=repository, secret_cipher=FakeCipher())
+        self.assertEqual(response["statusCode"], 400)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "provider_key_mode_mismatch")
+        self.assertIn("live key", body["message"])
+        self.assertIsNone(repository.get("tenant_demo"), "nothing is stored on a refusal")
 
     def test_shipping_config_clears_key_on_provider_change(self):
         repository = FakeSimpleRepository("tenant_id")

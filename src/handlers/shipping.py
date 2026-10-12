@@ -54,6 +54,11 @@ REDACTED_SECRET = "********"
 KNOWN_SECRET_REF_PREFIXES = ("kms:v1:", "kms://", "secretsmanager://")
 # Encryption context values binding a provider key ciphertext to this document/field.
 SECRET_MODE = "shipping"
+
+
+class ProviderKeyModeError(ValueError):
+    """A carrier key whose own prefix contradicts the mode it is being saved under."""
+
 SECRET_FIELD = "provider.api_key_ref"
 
 
@@ -115,12 +120,12 @@ def handler(event, context, repository=None, secret_cipher=None, products_repo=N
         tenant_id = tenant_id_from_event(event)
         if not tenant_id:
             return error_response("tenant_id is required.", code="missing_tenant")
-        config = repository.get(tenant_id)
+        config = config_for_mode(repository, tenant_id, event, secret_cipher)
         if not config:
             return error_response("Shipping config not found.", status_code=404, code="not_found")
         return json_response({
             "shipping_config": redact_shipping_config(config),
-            "readiness": label_readiness(config),
+            "readiness": label_readiness(config, stripe_mode=resolve_stripe_mode(event)),
             # Separate from `readiness` on purpose: that one is about THIS document and blocks labels,
             # while this is about the catalogue and costs money without blocking anything.
             "product_readiness": catalogue_readiness(
@@ -168,18 +173,25 @@ def save_shipping_config(event, repository, secret_cipher, products_repo=None):
         document = parse_json_body(event)
         tenant_id = str(document.get("tenant_id") or "").strip()
         existing = repository.get(tenant_id) if tenant_id else None
-        document = prepare_provider_secret(document, existing, secret_cipher)
+        # THE MODE THE DASHBOARD IS IN. A save writes only that mode's carrier key, so flipping to test
+        # and pasting a test key can no longer destroy a live one (domain/shipping_keys.py).
+        document = prepare_provider_secret(document, existing, secret_cipher,
+                                           stripe_mode=resolve_stripe_mode(event))
         validate_shipping_config(document)
         saved = repository.put(document)
         # Readiness travels with every response so the screen never has to compute it from unsaved form
         # state -- which is how it came to say "Ready to buy labels" about boxes a failed save had dropped.
         return json_response({
             "shipping_config": redact_shipping_config(saved),
-            "readiness": label_readiness(saved),
+            "readiness": label_readiness(saved, stripe_mode=resolve_stripe_mode(event)),
             "product_readiness": catalogue_readiness(
                 tenant_id, products_repo, resolve_stripe_mode(event)),
             "dimensions_consequence": dimensions_consequence(saved),
         }, status_code=201)
+    except ProviderKeyModeError as exc:
+        # Its own code so the screen can point at the mode toggle rather than the key field: the key is
+        # probably fine, it is the window it was pasted into that is wrong.
+        return error_response(str(exc), code="provider_key_mode_mismatch")
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_shipping_config")
 
@@ -188,7 +200,7 @@ def _looks_like_secret_ref(value: str) -> bool:
     return is_encrypted_secret_ref(value) or value.startswith(KNOWN_SECRET_REF_PREFIXES)
 
 
-def prepare_provider_secret(document, existing, secret_cipher):
+def prepare_provider_secret(document, existing, secret_cipher, stripe_mode="test"):
     """Encrypt a newly-entered provider API key, or preserve/clear the stored one.
 
     The provider key is saved as a unit with its provider name: an unchanged key is
@@ -199,44 +211,218 @@ def prepare_provider_secret(document, existing, secret_cipher):
     existing_provider = dict((existing or {}).get("provider") or {})
     tenant_id = str(document.get("tenant_id") or "").strip()
 
+    from stripe_link.domain import shipping_keys
+
     submitted = str(provider.get("api_key_ref") or "").strip()
     new_name = provider.get("name")
     old_name = existing_provider.get("name")
-    old_ref = existing_provider.get("api_key_ref")
+    mode = shipping_keys.normalize_mode(stripe_mode)
+
+    # PER MODE. A save only ever touches the slot for the mode being saved, which is the whole fix: a
+    # tenant who has shipped live for months and tries test mode must not lose the credential their real
+    # shipping depends on (author, 2026-10-11). The other slot is carried across untouched.
+    existing_slot = shipping_keys.key_slot(existing_provider, mode)
+    # CARRY THE OTHER MODE'S KEY ACROSS, which is the entire purpose of this change and which the first
+    # version of it did not do. The dashboard submits the whole config and its `provider` has no `keys`
+    # map -- it never sees other modes' secrets, and should not -- so building the map from the SUBMITTED
+    # provider silently dropped whichever mode was not being saved. That is precisely the tragedy this
+    # was written to prevent: a tenant live for months pastes a test key and loses their live one.
+    provider["keys"] = dict(existing_provider.get("keys") or {})
+    slot = {}
 
     if submitted and submitted != REDACTED_SECRET and not _looks_like_secret_ref(submitted):
-        # A freshly-typed plaintext key: encrypt it and mark the connection untested.
-        provider["api_key_ref"] = secret_cipher.encrypt(
-            submitted, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD
-        )
-        provider["connection_status"] = "untested"
-        provider.pop("last_tested_at", None)
+        # REFUSED when the key's own prefix contradicts the mode. Shippo and EasyPost both say which
+        # environment a key is for, so a mismatch is catchable now rather than when a real label is
+        # bought in a window marked TEST.
+        mismatch = shipping_keys.key_mismatch(new_name, submitted, mode)
+        if mismatch:
+            raise ProviderKeyModeError(mismatch)
+        slot = {
+            "api_key_ref": secret_cipher.encrypt(
+                submitted, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD),
+            "connection_status": "untested",
+        }
     elif submitted and _looks_like_secret_ref(submitted):
-        # Already a stored reference (e.g. seeded fixture): keep it as-is.
-        provider["api_key_ref"] = submitted
-    elif old_ref and new_name == old_name:
-        # No new key and the same provider: preserve the stored key and its status.
-        provider["api_key_ref"] = old_ref
-        provider.setdefault("connection_status", existing_provider.get("connection_status") or "untested")
-        if existing_provider.get("last_tested_at") is not None:
-            provider.setdefault("last_tested_at", existing_provider["last_tested_at"])
+        # An already-stored reference (a seeded fixture, or a re-save). Its status comes from what is
+        # already known about that key -- the submitted document first, because seeding is the only way
+        # a config arrives pre-connected, then the existing slot. Resetting it to "untested" here would
+        # tell a seeded tenant to test a connection that was never theirs to test.
+        slot = {"api_key_ref": submitted,
+                "connection_status": (provider.get("connection_status")
+                                      or existing_slot.get("connection_status") or "untested")}
+    elif existing_slot.get("api_key_ref") and new_name == old_name:
+        # No new key and the same provider: keep this mode's key and what we knew about it.
+        slot = dict(existing_slot)
+    elif new_name == old_name and shipping_keys.legacy_ref(existing_provider):
+        # A pre-split config being re-saved. The legacy key is left where it is rather than copied into
+        # a slot: only a decrypt can say which mode it belongs to, and `provider_credentials` does that
+        # on read, where the plaintext is already in hand.
+        slot = {}
     else:
-        # No key, or the provider changed without a new key: drop it.
+        slot = {}
+
+    provider = shipping_keys.with_key_slot(provider, mode, slot)
+    provider.pop("api_key_ref", None)
+    if old_name and new_name != old_name:
+        # The provider CHANGED: no key from the old one may linger, in either mode. Guarded on
+        # `old_name` because a FIRST save has none -- without that, `None != "shippo"` is true and the
+        # slot written three lines earlier is wiped on the way out.
+        provider["keys"] = {}
         provider.pop("api_key_ref", None)
-        provider["connection_status"] = "not_configured"
+    # The status shown is this mode's status, so a tenant is never told "Connected" about a key the mode
+    # they are looking at does not have.
+    provider["connection_status"] = (slot.get("connection_status")
+                                     if slot else ("not_configured" if old_name and new_name != old_name
+                                                   else provider.get("connection_status") or "not_configured"))
+    if slot.get("last_tested_at") is not None:
+        provider["last_tested_at"] = slot["last_tested_at"]
+    else:
         provider.pop("last_tested_at", None)
 
     document["provider"] = provider
     return document
 
 
+
+def provider_credentials(config, tenant_id, mode, secret_cipher):
+    """`(provider_name, api_key, error)` for ONE Stripe mode. `error` is a message or `""`.
+
+    The single place the carrier key is resolved. There were six copies of
+    `provider_config.get("api_key_ref")` + decrypt, which is exactly why there was nowhere to put the
+    mode: adding it in one of six places would have been worse than not adding it at all
+    (plans/SHIPPING_PROVIDERS.md, and domain/shipping_keys.py for why the split exists).
+
+    Falls back to a pre-split config's single key ONLY when that key's own prefix says it belongs to the
+    mode being asked for. A live key therefore stays invisible in test mode, which is the entire point;
+    an unrecognisable prefix is adopted by neither, because the safe answer to "which mode is this?" is
+    to ask rather than assume.
+    """
+    from stripe_link.domain import shipping_keys
+
+    provider_config = dict((config or {}).get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    mode = shipping_keys.normalize_mode(mode)
+    if not name:
+        return "", "", "Connect a shipping provider first."
+    if name == "mock":
+        return name, "", ""
+
+    slot = shipping_keys.key_slot(provider_config, mode)
+    ref = str(slot.get("api_key_ref") or "")
+    if ref:
+        try:
+            return name, secret_cipher.decrypt(ref, tenant_id=tenant_id, mode=SECRET_MODE,
+                                               field=SECRET_FIELD), ""
+        except Exception as exc:  # noqa: BLE001 - an unreadable key is an answer, never a 500
+            return name, "", f"Could not read the saved {mode} key: {type(exc).__name__}"
+
+    legacy = shipping_keys.legacy_ref(provider_config)
+    if legacy:
+        try:
+            plaintext = secret_cipher.decrypt(legacy, tenant_id=tenant_id, mode=SECRET_MODE,
+                                              field=SECRET_FIELD)
+        except Exception as exc:  # noqa: BLE001
+            return name, "", f"Could not read the saved key: {type(exc).__name__}"
+        if shipping_keys.adopt_legacy(provider_config, mode, plaintext):
+            return name, plaintext, ""
+        found = shipping_keys.mode_of_key(name, plaintext)
+        if found:
+            return name, "", (f"Your saved key is a {found} key and this is {mode} mode. "
+                              f"Add a {mode} key on the Shipping screen.")
+        return name, "", f"Add a {mode} key on the Shipping screen."
+    return name, "", f"Add a {mode} key on the Shipping screen."
+
+
+
+def config_for_mode(repository, tenant_id, event, secret_cipher):
+    """The tenant's shipping config with the carrier key resolved FOR THIS REQUEST'S MODE.
+
+    **The one seam.** Twelve places decrypt `provider.api_key_ref`, each with its own error handling, so
+    adding the mode to each would have been twelve chances to miss one -- and the one missed would be a
+    live label bought in a window marked TEST. Resolving at the single point the config is LOADED makes
+    every downstream reader mode-correct without touching any of them.
+
+    The returned document carries a flat `api_key_ref` for exactly that reason: it is the shape all
+    twelve already read. It is never written back.
+
+    A pre-split config is decrypted here to classify it by prefix, which means a legacy tenant pays two
+    decrypts until their next save migrates the key into a slot. One extra KMS call on an un-migrated
+    config is a cheap price for not guessing which environment their only key belongs to.
+    """
+    from stripe_link.domain import shipping_keys
+
+    # The RAW read. A bulk rewrite of the twelve load sites caught this line too and made the function
+    # call itself; the suite said `RecursionError` on the first run, which is the cheapest possible way
+    # to find out.
+    config = repository.get(tenant_id)
+    if not config:
+        return config
+    provider = dict(config.get("provider") or {})
+    if not provider or provider.get("name") == "mock":
+        return config
+    mode = shipping_keys.normalize_mode(resolve_stripe_mode(event))
+
+    slot = shipping_keys.key_slot(provider, mode)
+    ref = str(slot.get("api_key_ref") or "")
+    if ref:
+        provider["api_key_ref"] = ref
+        provider.pop("key_error", None)
+        provider["connection_status"] = slot.get("connection_status") or "untested"
+        if slot.get("last_tested_at") is not None:
+            provider["last_tested_at"] = slot["last_tested_at"]
+        else:
+            provider.pop("last_tested_at", None)
+        return {**config, "provider": provider}
+
+    legacy = shipping_keys.legacy_ref(provider)
+    if legacy:
+        try:
+            plaintext = secret_cipher.decrypt(legacy, tenant_id=tenant_id, mode=SECRET_MODE,
+                                              field=SECRET_FIELD)
+        except Exception as exc:  # noqa: BLE001 - reported, never raised
+            # CARRIED, not swallowed. Moving the decrypt into this seam quietly turned "KMS is down"
+            # into "no key configured" at every endpoint downstream -- a different problem with a
+            # different fix, told to the tenant as if it were theirs.
+            provider["key_error"] = f"{type(exc).__name__}: {exc}"
+            plaintext = ""
+        if plaintext and shipping_keys.adopt_legacy(provider, mode, plaintext):
+            return {**config, "provider": provider}
+
+    # Nothing for THIS mode. The key is removed rather than left, because every downstream reader treats
+    # a present ref as usable -- which is precisely how a live key came to be used in test.
+    provider.pop("api_key_ref", None)
+    provider["connection_status"] = "not_configured"
+    provider.pop("last_tested_at", None)
+    return {**config, "provider": provider}
+
+
 def redact_shipping_config(config):
+    """The config as the browser may see it: every stored key reference replaced.
+
+    **Both shapes.** The per-mode slots were added without this and the refs went straight out in the
+    response -- the flat field was redacted and the thing that replaced it was not. A KMS reference is
+    not a usable key, but it has been treated as a secret since this module was written and the moment
+    to stop is not a refactor nobody flagged.
+
+    The dashboard also needs to know WHICH modes have a key, so it can say "live configured, test not"
+    rather than leaving a tenant to discover it at the rate screen. `has_key` carries that without
+    carrying the reference.
+    """
     if not config:
         return config
     redacted = dict(config)
     provider = dict(redacted.get("provider") or {})
     if provider.get("api_key_ref"):
         provider["api_key_ref"] = REDACTED_SECRET
+    keys = {}
+    for mode, slot in (provider.get("keys") or {}).items():
+        slot = dict(slot or {})
+        if slot.get("api_key_ref"):
+            slot["api_key_ref"] = REDACTED_SECRET
+            slot["has_key"] = True
+        keys[mode] = slot
+    if keys:
+        provider["keys"] = keys
     redacted["provider"] = provider
     return redacted
 
@@ -256,7 +442,7 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    config = repository.get(tenant_id)
+    config = config_for_mode(repository, tenant_id, event, secret_cipher)
     if not config:
         return error_response("Shipping config not found.", status_code=404, code="not_found")
 
@@ -283,7 +469,7 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
     return json_response({
         "shipping_config": redact_shipping_config(saved),
         "connection": {"status": status, "message": message, "carriers": carriers},
-        "readiness": label_readiness(saved),
+        "readiness": label_readiness(saved, stripe_mode=resolve_stripe_mode(event)),
     }, status_code=200 if status == "connected" else 502)
 
 
@@ -529,7 +715,7 @@ def preview_rates(event, repository, secret_cipher, *, products_repo=None, offer
     if not offer_id and not product_ids:
         return error_response("Choose an offer or at least one product to rate.", code="missing_subject")
 
-    config = repository.get(tenant_id) or {}
+    config = config_for_mode(repository, tenant_id, event, secret_cipher) or {}
     from_address = config.get("ship_from_address") or {}
     if not from_address.get("postal_code"):
         return error_response("Add your ship-from address before previewing rates.",
@@ -745,7 +931,7 @@ def suggest_bump_postage(event, repository, secret_cipher, *, products_repo=None
     if not product_id:
         return error_response("bump_postage_for.product_id is required.", code="missing_product")
 
-    config = repository.get(tenant_id) or {}
+    config = config_for_mode(repository, tenant_id, event, secret_cipher) or {}
     from_address = config.get("ship_from_address") or {}
     if not from_address.get("postal_code"):
         return error_response("Add your ship-from address before working out postage.",
@@ -1036,6 +1222,8 @@ def pack_preview(event, repository):
     if not items:
         return json_response({"parcels": [], "reason": "no_items"})
 
+    # The RAW config: packing reads box definitions, which are the same in both modes and never touch
+    # the carrier key. Resolving a key here would mean giving this endpoint a cipher it has no use for.
     config = repository.get(tenant_id) or {}
     parcels = pack(items, tenant_boxes(config))
     return json_response({
@@ -1065,7 +1253,7 @@ def list_parcel_templates(event, repository, secret_cipher):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    config = repository.get(tenant_id) or {}
+    config = config_for_mode(repository, tenant_id, event, secret_cipher) or {}
     provider = config.get("provider") or {}
     name = str(provider.get("name") or "").strip()
     key_ref = str(provider.get("api_key_ref") or "").strip()
@@ -1103,11 +1291,16 @@ def list_carriers(event, repository, secret_cipher):
 
     registry = carrier_options()
     payload = {"carriers": registry, "source": "registry", "connected": []}
-    config = repository.get(tenant_id) or {}
+    config = config_for_mode(repository, tenant_id, event, secret_cipher) or {}
     provider = config.get("provider") or {}
     name = str(provider.get("name") or "").strip()
     key_ref = str(provider.get("api_key_ref") or "").strip()
     if not name or not key_ref:
+        # SAY WHY when we know. The registry fallback is the right answer either way, but "we could not
+        # read your key" and "you have not added one" are different problems and a tenant can only act
+        # on the one they are told about.
+        if provider.get("key_error"):
+            payload["message"] = f"Could not read the saved key: {provider['key_error']}"
         return json_response(payload)
 
     try:
@@ -1179,10 +1372,10 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
     if not order_id:
         return error_response("An order id is required.", code="missing_order")
 
-    config = repository.get(tenant_id)
+    config = config_for_mode(repository, tenant_id, event, secret_cipher)
     if not config:
         return error_response("Shipping config not found.", status_code=404, code="not_found")
-    blockers = label_readiness(config)
+    blockers = label_readiness(config, stripe_mode=resolve_stripe_mode(event))
     if blockers:
         return error_response(" ".join(blockers), code="not_ready")
 
@@ -1328,10 +1521,10 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     if not order_id or not rate_id:
         return error_response("An order id and a rate id are required.", code="missing_rate")
 
-    config = repository.get(tenant_id)
+    config = config_for_mode(repository, tenant_id, event, secret_cipher)
     if not config:
         return error_response("Shipping config not found.", status_code=404, code="not_found")
-    blockers = label_readiness(config)
+    blockers = label_readiness(config, stripe_mode=resolve_stripe_mode(event))
     if blockers:
         return error_response(" ".join(blockers), code="not_ready")
 
@@ -1489,10 +1682,10 @@ def buy_return_label(event, repository, secret_cipher, *, orders_repo=None, ship
             "The return window for this refund has passed, so free return postage no longer applies.",
             code="return_window_passed")
 
-    config = repository.get(tenant_id)
+    config = config_for_mode(repository, tenant_id, event, secret_cipher)
     if not config:
         return error_response("Shipping config not found.", status_code=404, code="not_found")
-    blockers = label_readiness(config)
+    blockers = label_readiness(config, stripe_mode=resolve_stripe_mode(event))
     if blockers:
         return error_response(" ".join(blockers), code="not_ready")
 
@@ -1601,10 +1794,10 @@ def handover(event, repository, secret_cipher, kind, *, shipments_repo=None,
     if not carrier or not day:
         return error_response("A carrier and a ship date are required.", code="missing_batch")
 
-    config = repository.get(tenant_id)
+    config = config_for_mode(repository, tenant_id, event, secret_cipher)
     if not config:
         return error_response("Shipping config not found.", status_code=404, code="not_found")
-    blockers = label_readiness(config)
+    blockers = label_readiness(config, stripe_mode=resolve_stripe_mode(event))
     if blockers:
         return error_response(" ".join(blockers), code="not_ready")
 
