@@ -45,10 +45,11 @@
              server-side, and it could not have worked: Shippo uses one base URL and decides the
              environment from the key's own prefix. The dashboard's TEST/LIVE toggle now selects which
              carrier key is used, which is what this control appeared to promise. -->
-        <label class="checkbox-row">
-          <input v-model="form.auto_fulfill_after_label_purchase" type="checkbox" />
-          <span>Auto-fulfill orders after a label is purchased</span>
-        </label>
+        <!-- "Auto-fulfill orders after a label is purchased" lived here. Read by nothing, and
+             describing something that is not optional: fulfilment is DERIVED from the shipment
+             (fulfilment_overdue.SHIPPED_STATUSES includes "purchased"), so buying a label always counts
+             the order as shipped. Unticked -- its default -- it told a tenant the opposite of what the
+             software does. Audited out 2026-10-11 with `test_mode`. -->
       </div>
     </section>
 
@@ -758,7 +759,6 @@ function defaultForm() {
   return {
     enabled: false,
     test_mode: true,
-    auto_fulfill_after_label_purchase: false,
     provider: { name: "", base_url: "", api_key: "" },
     ship_from_address: emptyAddress(),
     return_address: emptyAddress(),
@@ -1248,7 +1248,6 @@ function applyConfig(config) {
   const base = defaultForm();
   form.enabled = Boolean(config.enabled);
   form.test_mode = config.test_mode ?? true;
-  form.auto_fulfill_after_label_purchase = Boolean(config.auto_fulfill_after_label_purchase);
   form.provider.name = config.provider?.name || "";
   form.provider.base_url = config.provider?.base_url || "";
   form.provider.api_key = ""; // never populate the actual key; it's redacted on read
@@ -1434,7 +1433,6 @@ function buildPayload() {
   doc.tenant_id = getTenantId();
   doc.enabled = form.enabled;
   doc.test_mode = form.test_mode;
-  doc.auto_fulfill_after_label_purchase = form.auto_fulfill_after_label_purchase;
 
   // Provider: send a newly-typed key as plaintext (backend encrypts), the redacted
   // sentinel to keep an unchanged key, or nothing when no key is set. connection_status/

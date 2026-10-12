@@ -240,3 +240,60 @@ class TickingItBackRestoresEverything(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheScreenHasNoControlsThatDoNothing(unittest.TestCase):
+    """An audit, after three dead controls turned up on this one screen in an afternoon.
+
+    Each was saved, displayed, and read by nothing — and each cost real time, because a control that
+    appears to govern money behaves, to the person using it, exactly like one that does. `test_mode` sent
+    the author looking for a provider test environment that does not exist;
+    `auto_fulfill_after_label_purchase` told them fulfilment was optional when it is derived.
+
+    This is the guard that turns "we found three" into "there are none".
+    """
+
+    import json as _json
+    import pathlib as _pathlib
+    import re as _re
+
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    SCHEMA = _json.loads((ROOT / "schemas/ShippingConfig.schema.json").read_text(encoding="utf-8"))
+    SOURCE = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "src").rglob("*.py"))
+
+    # Structural fields every document carries; they are read by the repository, not by shipping code.
+    STRUCTURAL = {"schema_version", "document_type", "tenant_id", "created_at", "updated_at"}
+
+    def test_every_live_field_is_read_by_something(self):
+        dead = []
+        for field, spec in self.SCHEMA["properties"].items():
+            if field in self.STRUCTURAL or spec.get("deprecated"):
+                continue
+            quoted = len(self._re.findall(rf'["\']{self._re.escape(field)}["\']', self.SOURCE))
+            declared = len(self._re.findall(
+                rf'(?:optional|require)_\w+\([^)]*["\']{self._re.escape(field)}["\']', self.SOURCE))
+            if quoted - declared <= 0:
+                dead.append(field)
+        self.assertEqual([], dead,
+                         f"declared, saved, rendered -- and read by nothing: {dead}")
+
+    def test_the_retired_ones_are_marked_and_not_merely_deleted(self):
+        """Still declared, so documents written before the audit keep validating; marked, so nobody
+        wires them up again."""
+        for field in ("test_mode", "auto_fulfill_after_label_purchase"):
+            spec = self.SCHEMA["properties"][field]
+            self.assertTrue(spec.get("deprecated"), field)
+            self.assertIn("RETIRED", spec["description"], field)
+
+    def test_retired_fields_are_dropped_on_save(self):
+        """Stored documents heal the next time a tenant touches the screen -- no migration to run."""
+        from handlers.shipping import drop_retired_fields
+        cleaned = drop_retired_fields({"tenant_id": "t1", "test_mode": True,
+                                       "auto_fulfill_after_label_purchase": False, "enabled": True})
+        self.assertEqual(cleaned, {"tenant_id": "t1", "enabled": True})
+
+    def test_the_dashboard_no_longer_sends_them(self):
+        view = (self.ROOT / "dashboard/src/components/Shipping.vue").read_text(encoding="utf-8")
+        self.assertNotIn('v-model="form.test_mode"', view)
+        self.assertNotIn('v-model="form.auto_fulfill_after_label_purchase"', view)
+        self.assertNotIn("doc.auto_fulfill_after_label_purchase", view)

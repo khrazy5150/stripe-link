@@ -34,11 +34,15 @@
     },
     "test_mode": {
       "type": "boolean",
-      "default": true
+      "default": true,
+      "deprecated": true,
+      "description": "RETIRED 2026-10-11 and dropped on save. Kept declared so documents written before then still validate; nothing reads it and the dashboard no longer sends it. It claimed to select the provider's test environment. Shippo has one base URL and decides from the key's own prefix, so there was never an environment to select -- see provider.keys."
     },
     "auto_fulfill_after_label_purchase": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "deprecated": true,
+      "description": "RETIRED 2026-10-11 and dropped on save. Kept declared so documents written before then still validate; nothing reads it and the dashboard no longer sends it. It claimed to make fulfilment optional. Fulfilment is DERIVED from the shipment and fulfilment_overdue.SHIPPED_STATUSES counts 'purchased' as shipped, so buying a label always counts the order as shipped. Unticked -- its default -- it told the tenant the opposite."
     },
     "provider": {
       "type": "object",

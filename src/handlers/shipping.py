@@ -178,6 +178,7 @@ def save_shipping_config(event, repository, secret_cipher, products_repo=None):
         document = prepare_provider_secret(document, existing, secret_cipher,
                                            stripe_mode=resolve_stripe_mode(event))
         document = record_shipping_opt_out(document, existing)
+        document = drop_retired_fields(document)
         validate_shipping_config(document)
         saved = repository.put(document)
         # Readiness travels with every response so the screen never has to compute it from unsaved form
@@ -196,6 +197,28 @@ def save_shipping_config(event, repository, secret_cipher, products_repo=None):
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_shipping_config")
 
+
+
+
+# Controls that were saved, displayed, and read by NOTHING. Audited out 2026-10-11, after three of them
+# turned up one screenshot at a time on the Shipping screen.
+#
+#   test_mode  -- claimed to select "the provider's test environment". Shippo has one base URL and
+#                 decides from the key's own prefix, so there was no environment to select. Replaced by
+#                 per-mode keys (domain/shipping_keys.py).
+#   auto_fulfill_after_label_purchase -- claimed to make fulfilment optional. It is not: fulfilment is
+#                 DERIVED from the shipment, and `fulfilment_overdue.SHIPPED_STATUSES` counts
+#                 "purchased" as shipped. Unticked, it told a tenant the opposite of what happens.
+#
+# Dropped on save rather than migrated, so stored documents heal the next time a tenant touches the
+# screen and nothing has to be run against the tables.
+RETIRED_FIELDS = ("test_mode", "auto_fulfill_after_label_purchase")
+
+
+def drop_retired_fields(document):
+    for field in RETIRED_FIELDS:
+        document.pop(field, None)
+    return document
 
 
 def record_shipping_opt_out(document, existing):
