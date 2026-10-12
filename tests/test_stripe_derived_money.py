@@ -191,6 +191,14 @@ class TheLedgerIsCheckedPerCharge(unittest.TestCase):
         self.assertEqual(got["findings"][0]["component"], "gross")
         self.assertGreater(got["findings"][0]["drift"]["gross"], 0, "Stripe ahead = money not recorded")
 
+    def test_a_fully_refunded_sale_that_we_did_record_is_not_drift(self):
+        """The subtle half: the reconstruction nets refunds out of `gross`, the sale entry does not --
+        it records what was taken, and the reversal is an entry of its own. Comparing the netted figure
+        against the un-netted one made the first draft report every refunded sale as a disagreement."""
+        got = rec.audit([charge(amount=8841, refunded=8841)], mode="live", this_silo="production",
+                        entry_for_id=lambda _id: self.entry(gross=8841))
+        self.assertTrue(got["agrees"], rec.describe(got))
+
     def test_a_charge_with_no_entry_is_not_reported_here(self):
         """That is the orphan pass's finding, in the same loop. Reporting it twice would double every
         alarm for one missing sale."""

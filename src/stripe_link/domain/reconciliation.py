@@ -33,6 +33,15 @@ Drift is **reported, never corrected.** Both times this went wrong the cause was
 mis-keyed write; neither is fixed by nudging a total until it matches, and a self-correcting ledger would
 have hidden both. The orphan pass next door answers "is there money here with no order?"; this answers
 "and do the ones we do hold add up?".
+
+## What has a caller and what does not, stated rather than left to be discovered
+
+`components_from_charge` and `audit` run on the five-minute sweep. **`summarize_charges` has no caller
+yet**, and that is deliberate rather than forgotten: it is the aggregate reader that makes P3's metadata
+mean anything — without a reader, writing six components into Stripe is writing to nowhere — and its
+consumer is the cross-silo view in Part 1, which shipped as a capability flag instead. It is kept
+because the alternative is a writer with no reader; it is named here because an uncalled function that
+nobody admits is uncalled is how the three defects in P4 survived for months.
 """
 from __future__ import annotations
 
@@ -225,9 +234,11 @@ def audit(charges, *, entry_for_id, mode: str = "", this_silo: str = "") -> dict
             out["unmatched"] += 1
             continue
         out["matched"] += 1
-        if fees_from_balance_transaction(charge.get("balance_transaction")):
+        # REBUILT ONCE and handed to the comparison, rather than once here and again inside it.
+        rebuilt = components_from_charge(charge)
+        if rebuilt["known"]["fees"]:
             out["fee_checked"] += 1
-        finding = _compare_one(charge, entry, entry_id)
+        finding = _compare_one(rebuilt, entry, entry_id)
         if finding:
             out["findings"].append(finding)
             out["worst_cents"] = max(out["worst_cents"], int(finding["worst_cents"]))
@@ -235,35 +246,38 @@ def audit(charges, *, entry_for_id, mode: str = "", this_silo: str = "") -> dict
     return out
 
 
-def _compare_one(charge: dict[str, Any], entry: dict[str, Any], entry_id: str) -> dict[str, Any] | None:
-    """Stripe's view of one charge against the ledger entry for it, or None when they agree.
+def _compare_one(rebuilt: dict[str, Any], entry: dict[str, Any], entry_id: str) -> dict[str, Any] | None:
+    """Stripe's view of one charge, already reconstructed, against the ledger entry for it.
 
-    `gross` is compared GROSS of refunds, because the sale entry records what was taken and a reversal is
-    a separate entry of its own. Netting one side and not the other is the mistake that made the first
-    draft of this module report a refunded sale as a disagreement.
+    Takes the REBUILT charge rather than the raw one, so there is exactly one place that turns a Stripe
+    charge into components and no chance of this function and `components_from_charge` disagreeing about
+    the same money.
     """
     amounts = entry.get("amounts") if isinstance(entry.get("amounts"), dict) else {}
-    fees = fees_from_balance_transaction(charge.get("balance_transaction"))
+    stripe_side = rebuilt["amounts"]
     drift: dict[str, int] = {
-        "gross": abs(_whole(charge.get("amount_captured"))) - abs(_whole(amounts.get("gross"))),
+        # GROSS OF REFUNDS on both sides. The sale entry records what was taken and a reversal is a
+        # separate entry of its own, so the reconstruction's refund-netted gross has to be undone to
+        # compare like with like. Netting one side and not the other is what made the first draft report
+        # every refunded sale as a disagreement.
+        "gross": (stripe_side["gross"] + rebuilt["refunded"]) - abs(_whole(amounts.get("gross"))),
     }
     # Only once Stripe has a number of its own. See `audit`: ours is an estimate until the sweep trues it
     # up, and an estimate is a correct intermediate state rather than a discrepancy.
-    if fees:
-        drift["stripe_fee"] = abs(_whole(fees.get("stripe_fee"))) - abs(_whole(amounts.get("stripe_fee")))
-        drift["platform_fee"] = (abs(_whole(fees.get("platform_fee")))
-                                 - abs(_whole(amounts.get("platform_fee"))))
+    if rebuilt["known"]["fees"]:
+        drift["stripe_fee"] = abs(stripe_side["stripe_fee"]) - abs(_whole(amounts.get("stripe_fee")))
+        drift["platform_fee"] = abs(stripe_side["platform_fee"]) - abs(_whole(amounts.get("platform_fee")))
     worst = max((abs(value) for value in drift.values()), default=0)
     if worst <= TOLERANCE_CENTS:
         return None
     component = max(drift, key=lambda key: abs(int(drift.get(key) or 0)))
     return {
-        "charge_id": str(charge.get("id") or ""),
+        "charge_id": str(rebuilt.get("charge_id") or ""),
         "entry_id": entry_id,
         "component": component,
         "drift": drift,
         "worst_cents": worst,
-        "fees_settled": bool(fees),
+        "fees_settled": bool(rebuilt["known"]["fees"]),
     }
 
 
