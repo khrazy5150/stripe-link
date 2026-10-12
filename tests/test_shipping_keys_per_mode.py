@@ -222,3 +222,90 @@ class TheServerKeepsBothModesApart(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(json.loads(response["body"])["error"], "provider_key_mode_mismatch")
         self.assertIsNone(repo.doc)
+
+
+class TestingAConnectionRecordsItAgainstTheRIGHTMode(unittest.TestCase):
+    """Found on live data minutes after shipping, by the author: after testing Live and then saving a
+    Test key, Live asked for a key that was sitting right there.
+
+    `test_shipping_connection` read its config from `config_for_mode`, which FLATTENS the resolved key
+    onto `provider.api_key_ref` so the twelve readers can stay as they are — a read-only shape. Writing
+    it back re-introduced the flat field the split exists to remove, and recorded the result at provider
+    level where the other mode reads it, so both slots stayed "untested".
+
+    The suite did not catch it because every test of this endpoint predates the split and asserts the
+    provider-level status, which is still written. This asserts the slot.
+    """
+
+    def _run(self, mode, existing):
+        from handlers import shipping
+
+        class Repo:
+            def __init__(self):
+                self.doc = existing
+
+            def get(self, tenant_id):
+                return self.doc
+
+            def put(self, document):
+                self.doc = document
+                return document
+
+        class Cipher:
+            def decrypt(self, ref, **kwargs):
+                return "shippo_live_REAL" if "live" in ref else "shippo_test_SANDBOX"
+
+            def encrypt(self, value, **kwargs):
+                return "kms:v1:" + value
+
+        repo = Repo()
+        # The tenant arrives as a QUERY parameter on this endpoint, not in the body.
+        event = {"httpMethod": "POST", "path": "/shipping/test",
+                 "queryStringParameters": {"tenant_id": "t1"},
+                 "headers": {"X-Stripe-Mode": mode}}
+        shipping.handler(event, None, repository=repo, secret_cipher=Cipher())
+        return repo.doc
+
+    BOTH = {
+        "schema_version": "2026-05-29", "document_type": "shipping_config", "tenant_id": "t1",
+        "provider": {"name": "shippo", "keys": {
+            "live": {"api_key_ref": "kms:v1:live_ref"},
+            "test": {"api_key_ref": "kms:v1:test_ref"}}},
+        "ship_from_address": {"name": "A", "street1": "1 St", "city": "Cheyenne", "state": "WY",
+                              "postal_code": "82009", "country": "US"},
+    }
+
+    def test_the_result_lands_in_the_tested_modes_slot(self):
+        saved = self._run("live", dict(self.BOTH))
+        keys = saved["provider"]["keys"]
+        self.assertIn(keys["live"]["connection_status"], {"connected", "failed"},
+                      "the mode that was tested records a result")
+        self.assertNotIn("connection_status", keys["test"],
+                         "the mode that was NOT tested is left alone")
+
+    def test_it_does_not_reintroduce_the_flat_key(self):
+        """The flattened shape is for reading. Written back, it puts a stale secret reference in the
+        field the split removed -- and the live config had one within minutes."""
+        saved = self._run("live", dict(self.BOTH))
+        self.assertNotIn("api_key_ref", saved["provider"],
+                         "config_for_mode's flattened output must never be persisted")
+
+    def test_both_keys_survive_a_connection_test(self):
+        saved = self._run("test", dict(self.BOTH))
+        keys = saved["provider"]["keys"]
+        self.assertEqual(keys["live"]["api_key_ref"], "kms:v1:live_ref")
+        self.assertEqual(keys["test"]["api_key_ref"], "kms:v1:test_ref")
+
+    def test_a_pre_split_key_is_migrated_when_it_is_proven(self):
+        """The cheapest moment to migrate: the plaintext is in hand and the key has just been shown to
+        work for this mode."""
+        legacy = {
+            "schema_version": "2026-05-29", "document_type": "shipping_config", "tenant_id": "t1",
+            "provider": {"name": "shippo", "api_key_ref": "kms:v1:live_ref",
+                         "connection_status": "connected"},
+            "ship_from_address": {"name": "A", "street1": "1 St", "city": "Cheyenne", "state": "WY",
+                                  "postal_code": "82009", "country": "US"},
+        }
+        saved = self._run("live", legacy)
+        self.assertEqual(saved["provider"]["keys"]["live"]["api_key_ref"], "kms:v1:live_ref")
+        self.assertNotIn("api_key_ref", saved["provider"], "the legacy field is retired once proven")

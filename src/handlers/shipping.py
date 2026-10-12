@@ -463,9 +463,33 @@ def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: in
     except Exception as exc:  # noqa: BLE001 - a failed test is an ANSWER, never a 500
         status, message, carriers = "failed", f"Could not test the connection: {type(exc).__name__}", []
 
-    provider_config["connection_status"] = status
-    provider_config["last_tested_at"] = now_fn()
-    saved = repository.put({**config, "provider": provider_config})
+    # WRITE INTO THE SLOT, AND WRITE TO THE RAW DOCUMENT.
+    #
+    # `config` here came from `config_for_mode`, which FLATTENS the resolved key onto
+    # `provider.api_key_ref` so the twelve readers can stay as they are. That shape is for reading only.
+    # Writing it back did two things, both found on live data within minutes of shipping: it
+    # re-introduced the flat field the split exists to remove, and it recorded the result at provider
+    # level where the OTHER mode reads it -- so testing live left both slots saying "untested" and the
+    # dashboard asked for a key that was sitting right there.
+    from stripe_link.domain import shipping_keys
+
+    mode = shipping_keys.normalize_mode(resolve_stripe_mode(event))
+    raw = repository.get(tenant_id) or {}
+    raw_provider = dict(raw.get("provider") or {})
+    slot = shipping_keys.key_slot(raw_provider, mode)
+    if not slot.get("api_key_ref") and shipping_keys.legacy_ref(raw_provider):
+        # A pre-split key, proven to work for THIS mode: migrate it into its slot now, which is the
+        # cheapest moment to do it and the last one where the plaintext is in hand.
+        slot = {"api_key_ref": shipping_keys.legacy_ref(raw_provider)}
+        if shipping_keys.mode_of_key(name, api_key) == mode:
+            raw_provider.pop("api_key_ref", None)
+    slot = {**slot, "connection_status": status, "last_tested_at": now_fn()}
+    raw_provider = shipping_keys.with_key_slot(raw_provider, mode, slot)
+    # Kept at provider level too: it is what the current mode's screen reads, and `label_readiness`
+    # still asks the provider rather than the slot.
+    raw_provider["connection_status"] = status
+    raw_provider["last_tested_at"] = now_fn()
+    saved = repository.put({**raw, "provider": raw_provider})
     return json_response({
         "shipping_config": redact_shipping_config(saved),
         "connection": {"status": status, "message": message, "carriers": carriers},
