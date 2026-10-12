@@ -8,6 +8,7 @@ import secrets
 import time
 import uuid
 
+from stripe_link.domain.tax_status import calculates as tax_calculates
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.booking import (
@@ -351,10 +352,18 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
         appointment, tenant_id, success_url=success_url, cancel_url=cancel_url,
         platform_fee=platform_fee, tenant_plan=tenant_plan, charged_unit_amount=charged_unit_amount,
     )
+    # A booked service is a sale and owes whatever tax a product does. Same gate as every other sale
+    # path, reading the `stripe_keys` doc already fetched for credentials, so the buyer waits on nothing
+    # extra (plans/TAX_STATUS_AND_THRESHOLDS.md).
+    if stripe_account and tax_calculates((stripe_keys.get("payment_methods") or {}).get("tax")):
+        payload["automatic_tax[enabled]"] = "true"
     try:
-        from handlers.checkout import create_stripe_checkout_session
+        # THE SHARED LADDER, not the bare create, so a tax failure costs the tax and not the booking.
+        # Booking offers no installments, so the only rung that can fire here is `automatic_tax`.
+        from handlers.checkout import create_checkout_session_with_fallback
 
-        session = create_stripe_checkout_session(payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
+        session = create_checkout_session_with_fallback(payload, api_key=api_key,
+                                                        stripe_account=stripe_account, opener=opener)
     except Exception as exc:  # noqa: BLE001
         return error_response(str(exc), status_code=502, code="checkout_error")
     checkout_url = session.get("url")

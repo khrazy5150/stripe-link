@@ -13,13 +13,14 @@ from handlers.checkout import (
     _tenant_shipping_config,
     build_checkout_payload,
     collect_shipping_for,
-    create_checkout_session_with_bnpl_fallback,
+    create_checkout_session_with_fallback,
     stripe_discount_materializer,
 )
 from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
+from stripe_link.domain.tax_status import calculates as tax_calculates
 from stripe_link.domain.cart import CartError, resolved_items_for_checkout
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
@@ -168,6 +169,10 @@ def handler(
             success_url=success_url, cancel_url=cancel_url, page_id=page_id,
             fee_context=fee_context, apply_application_fee=bool(stripe_account),
             bnpl_payment_method_types=bnpl_types,
+            # A cart owes the same tax a single-product checkout does. Same gate, same stripe_keys doc
+            # already in hand (plans/TAX_STATUS_AND_THRESHOLDS.md).
+            collect_tax=bool(stripe_account) and tax_calculates(
+                (stripe_keys.get("payment_methods") or {}).get("tax")),
             coupon_code=coupon_code,
             mode=mode,
             coupons_repo=coupons_repo,
@@ -186,7 +191,7 @@ def handler(
         )
         payload["metadata[cart_id]"] = cart_id  # tie the resulting order back to the cart (attribution)
 
-        stripe_response = create_checkout_session_with_bnpl_fallback(
+        stripe_response = create_checkout_session_with_fallback(
             payload, api_key=api_key, stripe_account=stripe_account, opener=opener, had_bnpl=bool(bnpl_types),
         )
         checkout_url = stripe_response.get("url")

@@ -1953,6 +1953,25 @@ def validate_stripe_keys_document(document: dict[str, Any]) -> None:
                 status = entry.get("capability_status")
                 if status is not None and status not in {"active", "pending", "inactive", "unrequested"}:
                     raise DocumentValidationError(f"payment_methods.bnpl.{method}.capability_status is invalid.")
+        # Sales tax: the tenant's switch plus Stripe's own status, cached so CHECKOUT never has to ask
+        # (plans/TAX_STATUS_AND_THRESHOLDS.md). `enabled` is intent and `status` is Stripe's answer; both
+        # are required to send `automatic_tax`, because acting on intent alone would refuse checkouts on
+        # an account whose tax settings have lapsed.
+        tax = payment_methods.get("tax")
+        if tax is not None:
+            if not isinstance(tax, dict):
+                raise DocumentValidationError("Stripe keys payment_methods.tax must be an object.")
+            if not isinstance(tax.get("enabled", False), bool):
+                raise DocumentValidationError("payment_methods.tax.enabled must be boolean.")
+            tax_status = tax.get("status")
+            if tax_status is not None and tax_status not in {"active", "pending", "unknown"}:
+                raise DocumentValidationError("payment_methods.tax.status is invalid.")
+            missing = tax.get("missing_fields")
+            if missing is not None and not isinstance(missing, list):
+                raise DocumentValidationError("payment_methods.tax.missing_fields must be a list.")
+            behaviour = tax.get("tax_behavior")
+            if behaviour not in (None, "", "inclusive", "exclusive", "inferred_by_currency"):
+                raise DocumentValidationError("payment_methods.tax.tax_behavior is invalid.")
 
 
 def validate_refund_policies(policies: Any, label: str) -> None:

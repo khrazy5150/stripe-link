@@ -22,9 +22,10 @@ class FakeStripeKeysRepo:
 
 
 def make_caller(*, capabilities=None, country="US", record=None, requirements=None,
-                link_url="https://connect.stripe.com/setup/acct/xyz", fail_paths=()):
+                link_url="https://connect.stripe.com/setup/acct/xyz", fail_paths=(), tax=None):
     """A fake stripe_request: GET /accounts/{id} returns the account; POST /accounts/{id}/capabilities/{cap}
-    requests it (→ pending, with any configured `requirements`); POST /account_links mints a hosted link."""
+    requests it (→ pending, with any configured `requirements`); POST /account_links mints a hosted link;
+    GET /tax/settings returns the account's sales-tax settings (plans/TAX_STATUS_AND_THRESHOLDS.md)."""
     caps = dict(capabilities or {})
     reqs = dict(requirements or {})               # {capability: {"currently_due": [...], "past_due": [...]}}
 
@@ -43,6 +44,13 @@ def make_caller(*, capabilities=None, country="US", record=None, requirements=No
             return {"url": link_url}
         if method == "GET" and path.startswith("/accounts/"):
             return {"id": path.split("/")[-1], "country": country, "capabilities": dict(caps)}
+        if method == "GET" and path == "/tax/settings":
+            # Default `pending`, which is every tenant's real state: nothing in this codebase enables
+            # Stripe Tax, so a fake that defaulted to `active` would be testing a fiction.
+            return tax if tax is not None else {
+                "object": "tax.settings", "status": "pending",
+                "defaults": {"tax_code": None, "tax_behavior": None},
+                "status_details": {"pending": {"missing_fields": ["head_office"]}}}
         raise AssertionError(f"unexpected call {method} {path}")
     return caller
 
@@ -185,6 +193,92 @@ class PaymentMethodsHandlerTests(unittest.TestCase):
         self.assertFalse(affirm["country_eligible"])
         klarna = next(m for m in json.loads(resp["body"])["methods"] if m["method"] == "klarna")
         self.assertTrue(klarna["country_eligible"])  # Klarna covers GB
+
+
+ACTIVE_TAX = {"object": "tax.settings", "status": "active",
+              "defaults": {"tax_code": None, "tax_behavior": "exclusive"},
+              "status_details": {"active": {}}}
+
+
+class SalesTaxRidesTheSameRoute(unittest.TestCase):
+    """Folded onto /payment-methods rather than given its own route: it belongs on this screen, and the
+    stack sits close enough to CloudFormation's 1MB transform ceiling that a route is a cost to justify
+    (plans/TRANSFORM_BUDGET.md). A body key costs nothing."""
+
+    def _get(self, repo, caller):
+        return handler({"httpMethod": "GET", "queryStringParameters": {"tenant_id": "t1", "mode": "test"}},
+                       None, stripe_repo=repo, stripe_caller=caller, platform_key_loader=_key_loader)
+
+    def _put(self, body, repo, caller):
+        return handler({"httpMethod": "PUT", "body": json.dumps(body)}, None,
+                       stripe_repo=repo, stripe_caller=caller, platform_key_loader=_key_loader)
+
+    def test_the_get_returns_a_tax_block_beside_the_methods(self):
+        resp = self._get(FakeStripeKeysRepo([CONNECTED]), make_caller(tax=ACTIVE_TAX))
+        body = json.loads(resp["body"])
+        self.assertEqual(body["tax"]["state"], "active")
+        self.assertTrue(body["tax"]["may_enable"])
+        self.assertFalse(body["tax"]["enabled"], "ready is not the same as on")
+        self.assertIn("methods", body, "the BNPL half still answers")
+
+    def test_the_get_caches_the_status_so_checkout_never_asks_stripe(self):
+        repo = FakeStripeKeysRepo([CONNECTED])
+        self._get(repo, make_caller(tax=ACTIVE_TAX))
+        stored = (repo.get("t1", mode="test") or {}).get("payment_methods", {}).get("tax") or {}
+        self.assertEqual(stored.get("status"), "active")
+        self.assertEqual(stored.get("tax_behavior"), "exclusive")
+
+    def test_turning_it_on_is_refused_while_stripe_says_pending(self):
+        """The screen hides the control, but a client is not a permission -- the server re-reads."""
+        resp = self._put({"tenant_id": "t1", "mode": "test", "tax_enabled": True},
+                         FakeStripeKeysRepo([CONNECTED]), make_caller())
+        self.assertEqual(resp["statusCode"], 400)
+        body = json.loads(resp["body"])
+        self.assertEqual(body["error"], "tax_not_active")
+        self.assertIn("head office address", body["message"])
+        self.assertEqual(body["tax"]["state"], "pending",
+                         "the refusal carries fresh status so the screen corrects itself")
+
+    def test_turning_it_on_is_honoured_when_stripe_says_active(self):
+        repo = FakeStripeKeysRepo([CONNECTED])
+        resp = self._put({"tenant_id": "t1", "mode": "test", "tax_enabled": True},
+                         repo, make_caller(tax=ACTIVE_TAX))
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertTrue(json.loads(resp["body"])["tax"]["calculating"])
+        stored = (repo.get("t1", mode="test") or {}).get("payment_methods", {}).get("tax") or {}
+        self.assertTrue(stored["enabled"])
+
+    def test_turning_it_off_is_always_allowed(self):
+        """A tenant must be able to stop us adding tax even while their account is mid-change, so this
+        path never asks Stripe for permission."""
+        repo = FakeStripeKeysRepo([dict(CONNECTED, payment_methods={
+            "tax": {"enabled": True, "status": "active", "tax_behavior": "exclusive"}})])
+        resp = self._put({"tenant_id": "t1", "mode": "test", "tax_enabled": False}, repo, make_caller())
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertFalse(json.loads(resp["body"])["tax"]["enabled"])
+
+    def test_a_tax_request_is_not_mistaken_for_an_unknown_payment_method(self):
+        """It carries no `method`, so without explicit routing it would fail method validation."""
+        resp = self._put({"tenant_id": "t1", "mode": "test", "tax_enabled": False},
+                         FakeStripeKeysRepo([CONNECTED]), make_caller())
+        self.assertNotEqual(json.loads(resp["body"]).get("error"), "invalid_method")
+
+    def test_an_unreadable_tax_settings_read_does_not_clear_a_good_status(self):
+        """A momentary outage must not flip a calculating tenant to `unknown`, stop automatic_tax on the
+        next sale, and silently drop tax from their checkout."""
+        repo = FakeStripeKeysRepo([dict(CONNECTED, payment_methods={
+            "tax": {"enabled": True, "status": "active", "tax_behavior": "exclusive",
+                    "missing_fields": []}})])
+        resp = self._get(repo, make_caller(fail_paths=("/tax/settings",)))
+        body = json.loads(resp["body"])
+        self.assertEqual(body["tax"]["state"], "active")
+        self.assertTrue(body["tax"]["calculating"])
+
+    def test_an_unconnected_tenant_is_told_to_connect_rather_than_shown_a_switch(self):
+        repo = FakeStripeKeysRepo([{"schema_version": "1", "document_type": "stripe_keys",
+                                    "tenant_id": "t1", "mode": "test", "publishable_key": "pk_test_1"}])
+        resp = self._put({"tenant_id": "t1", "mode": "test", "tax_enabled": True}, repo, make_caller())
+        self.assertEqual(json.loads(resp["body"])["error"], "stripe_not_connected")
 
 
 if __name__ == "__main__":

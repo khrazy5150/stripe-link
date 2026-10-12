@@ -183,6 +183,44 @@
       </div>
     </section>
 
+    <!-- SALES TAX. Beside the installment toggles because both answer "what happens to money at
+         checkout". Every sentence comes from the server (domain/tax_status.describe) -- wording about a
+         tenant's tax carries legal risk and must not be assembled from flags in a template.
+
+         The switch is only rendered when the server says `may_enable`, which means Stripe already
+         reports the account active AND a default tax behaviour is set. We never offer a control whose
+         effect depends on a tax claim Stripe has not already accepted. -->
+    <section v-if="isConnected && pm.tax" class="dashboard-card tax-card">
+      <header class="dashboard-card-header">
+        <div>
+          <h2>Sales tax</h2>
+          <p>Stripe works out what to charge and where. We only ask it to.</p>
+        </div>
+        <span :class="['tax-state', pm.tax.state]">{{ pm.tax.label }}</span>
+      </header>
+      <div class="connect-card-body">
+        <p class="tax-headline">{{ pm.tax.headline }}</p>
+        <p v-if="pm.tax.detail" class="tax-detail">{{ pm.tax.detail }}</p>
+
+        <label v-if="pm.tax.may_enable" class="tax-switch-row">
+          <input
+            type="checkbox"
+            :checked="pm.tax.enabled"
+            :disabled="pm.savingTax"
+            @change="pm.setTax($event.target.checked)"
+          />
+          <span class="bnpl-switch" aria-hidden="true"></span>
+          <span class="tax-switch-label">Add sales tax at checkout</span>
+        </label>
+
+        <!-- The only action we can honestly ask for. The tenant does registrations in their own Stripe
+             Dashboard; we never create one and never imply they have. -->
+        <a class="tax-link" href="https://dashboard.stripe.com/settings/tax" target="_blank" rel="noopener">
+          {{ pm.tax.may_enable ? "Your Stripe Tax settings" : "Set up Stripe Tax" }} &#8599;
+        </a>
+      </div>
+    </section>
+
     <div v-if="wizardOpen" class="modal-backdrop" @click.self="closeWizard">
       <section class="modal-card stripe-onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="stripe-onboarding-title">
         <header class="modal-card-header">
@@ -476,6 +514,16 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.tax-state { font-size: 1.1rem; font-weight: 600; padding: 0.2rem 0.7rem; border-radius: 0.4rem;
+  text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid var(--line); }
+.tax-state.active { color: var(--money-in, #0a7f5b); border-color: currentColor; }
+.tax-state.pending { color: var(--warn, #9a6b00); border-color: currentColor; }
+.tax-headline { margin: 0 0 0.4rem; font-weight: 600; font-size: 1.5rem; }
+.tax-detail { margin: 0; color: var(--muted); font-size: 1.3rem; }
+.tax-switch-row { display: flex; align-items: center; gap: 0.8rem; margin: 1.4rem 0 0; cursor: pointer; }
+.tax-switch-row input { position: absolute; opacity: 0; width: 0; height: 0; }
+.tax-switch-label { font-weight: 600; }
+.tax-link { display: inline-block; margin-top: 1.2rem; font-weight: 600; }
 .bnpl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
 .bnpl-row { border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
 .bnpl-row-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

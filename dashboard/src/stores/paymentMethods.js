@@ -7,6 +7,12 @@ import { apiRequest } from "../api/client";
 export const usePaymentMethodsStore = defineStore("paymentMethods", {
   state: () => ({
     methods: [],           // [{ method, label, enabled, capability_status, country_eligible, countries }]
+    // Sales tax (plans/TAX_STATUS_AND_THRESHOLDS.md). The server sends the whole rendered block --
+    // { state, label, headline, detail, may_enable, calculating, enabled, missing_fields } -- because the
+    // wording about a tenant's tax carries legal risk and belongs somewhere this repo can test it, not
+    // composed from flags in a template.
+    tax: null,
+    savingTax: false,
     connected: false,
     accountCountry: "",
     mode: "test",
@@ -22,6 +28,7 @@ export const usePaymentMethodsStore = defineStore("paymentMethods", {
       try {
         const body = await apiRequest("/payment-methods", { params: { mode: this.mode } });
         this.methods = Array.isArray(body.methods) ? body.methods : [];
+        this.tax = body.tax || null;
         this.connected = !!body.connected;
         this.accountCountry = body.account_country || "";
       } catch (error) {
@@ -56,8 +63,31 @@ export const usePaymentMethodsStore = defineStore("paymentMethods", {
         this.savingMethod = "";
       }
     },
+    async setTax(enabled) {
+      this.savingTax = true;
+      this.error = "";
+      try {
+        const body = await apiRequest("/payment-methods", {
+          method: "PUT",
+          body: { mode: this.mode, tax_enabled: !!enabled },
+        });
+        this.tax = body.tax || this.tax;
+      } catch (error) {
+        // A REFUSAL STILL CARRIES THE FRESH STATUS. The server re-reads Stripe before honouring the
+        // switch, so a rejection usually means the account changed since this screen loaded -- adopting
+        // the status it returns is what stops the control sitting there offering something the server
+        // has just declined.
+        // `extra` from error_response merges into the body top level, which the client keeps as
+        // `error.payload` -- not an `extra` property.
+        if (error.payload && error.payload.tax) this.tax = error.payload.tax;
+        this.error = error.message || "Failed to update sales tax.";
+      } finally {
+        this.savingTax = false;
+      }
+    },
     reset() {
       this.methods = [];
+      this.tax = null;
       this.connected = false;
       this.accountCountry = "";
       this.error = "";

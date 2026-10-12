@@ -22,6 +22,7 @@ from stripe_link.common import error_response, json_response, query_params, reso
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
+from stripe_link.domain.tax_status import calculates as tax_calculates
 from stripe_link.domain.fees import (application_fee_percent, build_fee_context, cached_billing_config,
                                      calculate_price, normalize_tier_id)
 from stripe_link.domain.shipping_charges import checkout_shipping, stripe_option_payload
@@ -408,6 +409,13 @@ def handler(
         bnpl_types = checkout_payment_method_types(
             (stripe_keys.get("payment_methods") or {}).get("bnpl"), resolved.get("currency"),
         ) if stripe_account else []
+        # SALES TAX. Read from the same `stripe_keys` doc already fetched for credentials, so the buyer's
+        # path gains no round trip -- the plan's rule that a tax status lookup must never sit inside
+        # checkout (plans/TAX_STATUS_AND_THRESHOLDS.md). BOTH the tenant's switch and Stripe's own
+        # `active` status are required: `automatic_tax` errors outright on a pending account, so acting on
+        # a stale intent would turn lapsed tax settings into refused checkouts.
+        collect_tax = bool(stripe_account) and tax_calculates(
+            (stripe_keys.get("payment_methods") or {}).get("tax"))
         checkout_payload = build_checkout_payload(
             tenant_id=tenant_id,
             offer=offer,
@@ -419,6 +427,7 @@ def handler(
             fee_context=fee_context,
             apply_application_fee=bool(stripe_account),
             bnpl_payment_method_types=bnpl_types,
+            collect_tax=collect_tax,
             coupon_code=str(params.get("coupon") or ""),
             mode=mode,
             coupons_repo=coupons_repo,
@@ -438,7 +447,7 @@ def handler(
             shipping_service=str(params.get("shipping_service") or "").strip()[:64],
             secret_cipher=secret_cipher,
         )
-        stripe_response = create_checkout_session_with_bnpl_fallback(
+        stripe_response = create_checkout_session_with_fallback(
             checkout_payload,
             api_key=api_key,
             stripe_account=stripe_account,
@@ -1143,6 +1152,7 @@ def build_checkout_payload(
     fee_context=None,
     apply_application_fee=False,
     bnpl_payment_method_types=None,
+    collect_tax=False,
     coupon_code="",
     mode="test",
     coupons_repo=None,
@@ -1604,6 +1614,11 @@ def build_checkout_payload(
     # recurring line (BNPL doesn't do recurring — guard on both the mode AND any recurring price_data line).
     # Otherwise leave payment methods to the account's Stripe defaults, as before.
     has_recurring = any("[recurring]" in key for key in payload)
+    # Stripe decides the rate and the jurisdiction; we only ask. With no registration for the buyer's
+    # location the calculation returns ZERO tax rather than an error, so an active-but-unregistered tenant
+    # gets a $0 tax line and a working checkout (verified against Stripe's docs 2026-10-12).
+    if collect_tax:
+        payload["automatic_tax[enabled]"] = "true"
     if bnpl_payment_method_types and payload.get("mode") == "payment" and not has_recurring:
         # An explicit payment_method_types list SUPPRESSES Link (Stripe shows Link only when 'link' is listed);
         # without a list Link rides in via the account defaults. Since we only set an explicit list to add BNPL,
@@ -1617,13 +1632,21 @@ def build_checkout_payload(
     return payload
 
 
-def create_checkout_session_with_bnpl_fallback(payload, *, api_key, stripe_account="", opener=None, had_bnpl=False):
-    """Create the Checkout Session with a retry ladder for the explicit payment_method_types list (card + Link +
-    the tenant's BNPL). On failure we degrade in the order that keeps the most, so an edge account never crashes
-    checkout and rarely loses more than necessary (plans/BNPL_PAYMENT_METHODS.md):
+def create_checkout_session_with_fallback(payload, *, api_key, stripe_account="", opener=None, had_bnpl=False):
+    """Create the Checkout Session with a retry ladder, degrading in the order that keeps the most.
+
+    **Renamed from `..._with_bnpl_fallback` on 2026-10-12**, when sales tax became a rung. The ladder was
+    never only about BNPL, and the old name would have had `booking.py` — which offers no installments at
+    all — calling something that claimed to be a BNPL fallback.
+
+    The rungs (plans/BNPL_PAYMENT_METHODS.md, plans/TAX_STATUS_AND_THRESHOLDS.md):
       1) drop 'link' — the account may not have Link enabled; keeps BNPL + platform control;
       2) drop the whole explicit list → the account's default methods (a BNPL method went ineligible at charge
-         time, e.g. the merchant turned it off in their own dashboard, or a per-transaction Stripe rule)."""
+         time, e.g. the merchant turned it off in their own dashboard, or a per-transaction Stripe rule);
+      3) drop `automatic_tax` → an untaxed sale rather than no sale, because a tenant's tax settings can
+         lapse between the status we cached and this charge. An uncollected tax is recoverable and the
+         tenant can be told; a refused checkout is revenue that never arrives.
+    """
     try:
         return create_stripe_checkout_session(payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
     except Exception as original:
@@ -1636,6 +1659,14 @@ def create_checkout_session_with_bnpl_fallback(payload, *, api_key, stripe_accou
             ladder.append(without_link)
         if had_bnpl:
             ladder.append({key: value for key, value in payload.items() if not key.startswith("payment_method_types[")})
+        # TAX LAST, and tax is dropped on its own rung as well as with everything else. `automatic_tax`
+        # fails on an account whose tax settings have lapsed between our cached status and this sale, and
+        # the plan's rule is explicit: fail open. An uncollected tax is recoverable and the tenant can be
+        # told; a refused checkout is revenue that never arrives.
+        if payload.get("automatic_tax[enabled]"):
+            ladder.append({key: value for key, value in payload.items() if key != "automatic_tax[enabled]"})
+            ladder.append({key: value for key, value in payload.items()
+                           if key != "automatic_tax[enabled]" and not key.startswith("payment_method_types[")})
         if not ladder:
             raise
         last_exc = original

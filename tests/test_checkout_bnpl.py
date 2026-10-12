@@ -1,6 +1,6 @@
 import unittest
 
-from handlers.checkout import build_checkout_payload, create_checkout_session_with_bnpl_fallback
+from handlers.checkout import build_checkout_payload, create_checkout_session_with_fallback
 
 
 def _offer(mode="payment"):
@@ -107,7 +107,7 @@ class BnplCheckoutFallbackTests(unittest.TestCase):
             return _Ok()
 
         payload = {"mode": "payment", "payment_method_types[0]": "card", "payment_method_types[1]": "klarna", "success_url": "s"}
-        result = create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
+        result = create_checkout_session_with_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
         self.assertEqual(result["url"], "https://checkout.stripe.com/ok")
         self.assertEqual(len(calls), 2)                          # failed once, retried once
         self.assertNotIn("payment_method_types", calls[1])       # retry dropped BNPL
@@ -117,7 +117,7 @@ class BnplCheckoutFallbackTests(unittest.TestCase):
             raise RuntimeError("unrelated failure")
         payload = {"mode": "payment", "success_url": "s"}
         with self.assertRaises(RuntimeError):                    # had_bnpl False → surface, don't swallow/retry
-            create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=False)
+            create_checkout_session_with_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=False)
 
     def test_ladder_drops_link_first_and_keeps_bnpl(self):
         # An account without Link: the full list fails, but dropping just 'link' (keeping card + BNPL) succeeds,
@@ -133,7 +133,7 @@ class BnplCheckoutFallbackTests(unittest.TestCase):
 
         payload = {"mode": "payment", "payment_method_types[0]": "card", "payment_method_types[1]": "link",
                    "payment_method_types[2]": "klarna", "success_url": "s"}
-        result = create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
+        result = create_checkout_session_with_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
         self.assertEqual(result["url"], "https://checkout.stripe.com/ok")
         self.assertEqual(len(calls), 2)
         self.assertNotIn("link", calls[1])                      # link dropped
@@ -152,7 +152,7 @@ class BnplCheckoutFallbackTests(unittest.TestCase):
 
         payload = {"mode": "payment", "payment_method_types[0]": "card", "payment_method_types[1]": "link",
                    "payment_method_types[2]": "klarna", "success_url": "s"}
-        result = create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
+        result = create_checkout_session_with_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
         self.assertEqual(result["url"], "https://checkout.stripe.com/ok")
         self.assertEqual(len(calls), 3)                         # full → without-link → no-types
         self.assertNotIn("payment_method_types", calls[2])

@@ -466,6 +466,11 @@ def handler(
         )
         if renewal.get("status") == "sent":
             persistence = {**(persistence or {}), "tip_renewal": renewal}
+    elif event_type == "tax.settings.updated" and tenant_document:
+        persistence = reconcile_tax_settings_updated(
+            stripe_event, mode=mode, tenant_document=tenant_document,
+            stripe_keys_repo=(repository or stripe_keys_repository()), now_fn=now_fn,
+        )
     elif event_type == "account.updated" and tenant_document:
         persistence = reconcile_account_updated(
             stripe_event, mode=mode, tenant_document=tenant_document,
@@ -531,6 +536,48 @@ def _owner_user_profile(user_profiles_repo, tenant_id: str) -> dict[str, Any] | 
         return user_profiles_repo.get(tenant_id, tenant_id)
     except RepositoryError:
         return None
+
+
+def reconcile_tax_settings_updated(stripe_event, *, mode, tenant_document, stripe_keys_repo, now_fn):
+    """Stripe `tax.settings.updated` → refresh the cached sales-tax status on the stripe_keys doc.
+
+    `plans/TAX_STATUS_AND_THRESHOLDS.md`. The status has to be cached because CHECKOUT reads it and must
+    never call Stripe in the buyer's path — and a cache nobody refreshes is a cache that is wrong. Stripe
+    fires this event when an account changes its tax settings **or when new required settings are
+    introduced**, which is the case polling would miss entirely: a tenant who was calculating tax
+    yesterday can need a new field today without touching anything.
+
+    Pushed rather than polled, and it shares `tax_status.apply_settings` with the Payments-screen read so
+    the two can never refresh differently — the same reason `apply_capability_statuses` is shared.
+
+    The tenant's `enabled` intent is preserved; only Stripe's half changes. If the account falls out of
+    `active`, `tax_status.calculates` stops sending `automatic_tax` on the very next sale while the
+    tenant's choice stays recorded, so nothing is silently turned off on their behalf.
+
+    Requires **"Listen to events on Connected accounts"** on the webhook endpoint, which this integration
+    already needs for `account.updated`.
+    """
+    from stripe_link.domain import tax_status
+
+    settings = (stripe_event or {}).get("data", {}).get("object") or {}
+    now = int(now_fn())
+    payment_methods = dict(tenant_document.get("payment_methods") or {})
+    tax, changed = tax_status.apply_settings(payment_methods.get("tax"), settings, now)
+    if not changed:
+        # Stripe re-sends and also fires on unrelated edits. A write per event would churn the doc and
+        # race the Payments screen's own refresh for no gain.
+        return {"tenant_id": str(tenant_document.get("tenant_id") or ""), "tax_refreshed": False}
+    payment_methods["tax"] = tax
+    stripe_keys_repo.put({**tenant_document, "payment_methods": payment_methods,
+                          "mode": mode, "updated_at": now})
+    return {
+        "tenant_id": str(tenant_document.get("tenant_id") or ""),
+        "tax_refreshed": True,
+        "tax_status": tax.get("status"),
+        # Whether we will actually ask Stripe to calculate after this change, which is the only part a
+        # reader of the logs cares about.
+        "tax_calculating": tax_status.calculates(tax),
+    }
 
 
 def reconcile_account_updated(
