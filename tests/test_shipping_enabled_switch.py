@@ -152,5 +152,35 @@ class TheScreenExplainsIt(unittest.TestCase):
         self.assertIn("we will not turn it back on by itself", self._words(self.VIEW))
 
 
+class TheCheckboxMovesWithoutAReload(unittest.TestCase):
+    """The server ticked it; the screen did not show it until a refresh (reported 2026-10-11).
+
+    `/shipping/test` WRITES: it records the result and, on success, enables shipping for a tenant who
+    has not opted out. Its response carries the saved config — but only `rawDoc` was updated, and the
+    checkbox is bound to `form`. So the box stayed visibly unticked while the server said otherwise,
+    which looks exactly like the feature not working.
+    """
+
+    import pathlib as _pathlib
+    VIEW = (_pathlib.Path(__file__).resolve().parents[1]
+            / "dashboard/src/components/Shipping.vue").read_text(encoding="utf-8")
+
+    def test_the_test_response_is_adopted_into_the_form(self):
+        self.assertIn("adoptSavedConfig(body.shipping_config)", self.VIEW)
+        self.assertIn("form.enabled = config.enabled", self.VIEW)
+
+    def test_a_failed_test_adopts_it_too(self):
+        """A failure is an answer, and the server's view of `enabled` is still authoritative."""
+        self.assertIn("adoptSavedConfig(err.body.shipping_config)", self.VIEW)
+
+    def test_it_does_not_swallow_unsaved_edits(self):
+        """A test is not a save. Adopting the whole document would discard whatever the tenant has
+        typed into the dozen other fields on this screen for pressing a button meant to check a key."""
+        body = self.VIEW[self.VIEW.index("function adoptSavedConfig"):]
+        body = body[:body.index("\n}") + 2]
+        assignments = [line for line in body.splitlines() if "form." in line and "=" in line]
+        self.assertEqual(len(assignments), 1, f"only `enabled` may be adopted: {assignments}")
+
+
 if __name__ == "__main__":
     unittest.main()

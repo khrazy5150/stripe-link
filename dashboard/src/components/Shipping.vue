@@ -1561,16 +1561,34 @@ async function testConnection() {
     const body = await apiRequest("/shipping/test", { method: "POST" });
     connectionResult.value = body.connection || null;
     applyReadiness(body);
-    if (body.shipping_config) rawDoc.value = body.shipping_config;
+    if (body.shipping_config) adoptSavedConfig(body.shipping_config);
   } catch (err) {
     // A failed test is an ANSWER, not an error: the backend returns 502 with the provider's own words,
     // and those words are how a tenant learns what is actually wrong with their key.
     connectionResult.value = { status: "failed", message: err.body?.connection?.message || err.message };
     applyReadiness(err.body);
-    if (err.body?.shipping_config) rawDoc.value = err.body.shipping_config;
+    if (err.body?.shipping_config) adoptSavedConfig(err.body.shipping_config);
   } finally {
     testing.value = false;
   }
+}
+
+
+/**
+ * Take the fields a connection test can CHANGE back into the form.
+ *
+ * The test writes to the server -- it records the result and, on success, ticks "Enable shipping" for a
+ * tenant who has not deliberately turned it off. The response carries the saved config, but only
+ * `rawDoc` was being updated, and the checkbox is bound to `form`. So the box stayed visibly unticked
+ * until a reload, which looks exactly like the feature not working (reported 2026-10-11).
+ *
+ * Deliberately narrow: this copies `enabled` and nothing else. A test is not a save, and the tenant may
+ * have unsaved edits in every other field on this screen -- adopting the whole document would discard
+ * them for pressing a button that was meant to check a key.
+ */
+function adoptSavedConfig(config) {
+  rawDoc.value = config;
+  if (typeof config.enabled === "boolean") form.enabled = config.enabled;
 }
 
 async function save() {
