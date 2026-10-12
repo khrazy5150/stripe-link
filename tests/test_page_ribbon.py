@@ -122,7 +122,8 @@ class SectionOverrideTests(unittest.TestCase):
         # Text sits ON the button, so a pale button must flip to dark text by itself.
         pale = render_page_ribbon({**RIBBON, "theme": {"bg": "#0f0f0f", "accent": "#f1f1f1"}})
         self.assertIn(f"--sl-section-accent-ink:{DARK_INK}", pale)
-        self.assertIn("color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))", CSS)
+        self.assertIn("color:var(--sl-section-accent-ink,var(--sl-accent-text,#fff))", CSS,
+                      "the fallback inks from the ACCENT, not from the CTA gradient: when no\n                       section override is set this sits on --sl-accent, and borrowing cta_text\n                       there made 12 of 16 presets fail WCAG AA (2026-10-12)")
 
 
 class PromotePageActionTests(unittest.TestCase):

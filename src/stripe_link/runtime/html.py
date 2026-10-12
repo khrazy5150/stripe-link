@@ -42,7 +42,9 @@ from stripe_link.domain.fonts import (
     REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
 )
 from stripe_link.domain.video_embeds import parse_video_embed
-from stripe_link.domain.section_theme import SECTION_TONES, section_theme_vars, tone_class
+from stripe_link.domain.section_theme import (LIGHT_INK as SECTION_LIGHT_INK, SECTION_TONES,
+                                              readable_ink as section_readable_ink, section_theme_vars,
+                                              tone_class)
 from stripe_link.domain.tips import MAX_AMOUNT as TIP_MAX_AMOUNT
 from stripe_link.domain.tips import MIN_AMOUNT as TIP_MIN_AMOUNT
 from stripe_link.domain.tips import allows_custom as tip_allows_custom
@@ -805,7 +807,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-author-photo{width:14rem;height:14rem;border-radius:50%;overflow:hidden;box-shadow:0 0 0 0.5rem var(--sl-section-border,var(--sl-accent))}",
     "    .sl-author-photo:not(.sl-cropped) img{width:100%;height:100%;object-fit:cover;display:block}",
     # A pill, so the name reads as an attribution rather than a second heading.
-    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-section-border-ink,var(--sl-cta-text,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
+    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-section-border-ink,var(--sl-accent-text,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
     "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-author-body{margin:0;max-width:62rem;font-size:1.6rem;line-height:1.7;color:var(--sl-section-ink,var(--sl-muted))}",
     # BRAGGING POINTS. Same section-override contract as the author bio above.
@@ -844,7 +846,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # FANCY — a coloured card. `accent` paints the CARD here rather than a bar, so the text on it is the
     # derived accent-ink: the reference design's white-on-pink comes out of the contrast maths, not a
     # hardcoded colour, and holds for a pale card just as well.
-    "    .sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2.4rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))}",
+    "    .sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2.4rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-accent-text,#fff))}",
     # The photo is sized by HEIGHT with a fixed box, exactly as the reference does. Sizing it by width
     # alone let a PORTRAIT source render ~500px tall, which forced the card to wrap even on a desktop and
     # buried the words under a column of photograph.
@@ -929,7 +931,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-body{margin:0;font-size:1.6rem;line-height:1.55;opacity:0.85}",
     # The CTA takes the section accent when the ribbon breaks the pattern, so its ink is the DERIVED
     # accent-ink and a tenant cannot colour the button into invisibility.
-    "    .sl-ribbon-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff));font-size:1.5rem;font-weight:700;text-decoration:none}",
+    "    .sl-ribbon-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-accent-text,#fff));font-size:1.5rem;font-weight:700;text-decoration:none}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-cta{justify-self:center}",
     "    .sl-page-ribbon.is-compact .sl-ribbon-headline{font-size:clamp(1.7rem,3vw,2.1rem)}",
     # The download dialog. Built by script, so its styles ship with the page whether or not it is used --
@@ -943,7 +945,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-dl-actions{display:flex;gap:1rem;justify-content:flex-end}",
     "    .sl-dl-actions button{padding:1rem 1.8rem;border-radius:999px;font-size:1.5rem;font-weight:700;cursor:pointer;font-family:inherit}",
     "    .sl-dl-cancel{background:none;border:1px solid var(--sl-content-border);color:inherit}",
-    "    .sl-dl-submit{border:0;background:var(--sl-accent);color:var(--sl-cta-text,#fff)}",
+    "    .sl-dl-submit{border:0;background:var(--sl-accent);color:var(--sl-accent-text,#fff)}",
     "    .sl-dl-card{position:relative}",
     "    .sl-dl-dismiss{position:absolute;top:0.8rem;right:1rem;border:0;background:none;color:inherit;font-size:2.2rem;line-height:1;cursor:pointer;opacity:0.55}",
     "    .sl-ribbon-cta:disabled,.sl-dl-submit:disabled{opacity:0.6;cursor:default}",
@@ -1252,65 +1254,6 @@ def template_name(page: dict[str, Any]) -> str:
     return str((page.get("theme") or {}).get("template") or "universal_bundle")
 
 
-# Inks for text that sits ON a theme colour. Not pure black/white: #0b0b0b reads as ink rather than a
-# hole, and both are neutral enough not to fight any accent hue.
-_DARK_INK = "#0b0b0b"
-_LIGHT_INK = "#ffffff"
-
-
-def _relative_luminance(colour: str) -> float | None:
-    """WCAG relative luminance for `#rgb`, `#rrggbb` or `rgb(r,g,b)`. None when it is not a flat colour.
-
-    None matters: a gradient or a CSS variable is not something to guess a contrast against, and the
-    caller keeps the previous behaviour rather than inventing an answer.
-    """
-    raw = str(colour or "").strip().lower()
-    if raw.startswith("#"):
-        digits = raw[1:]
-        if len(digits) == 3:
-            digits = "".join(ch * 2 for ch in digits)
-        if len(digits) != 6 or any(ch not in "0123456789abcdef" for ch in digits):
-            return None
-        channels = [int(digits[i:i + 2], 16) for i in (0, 2, 4)]
-    elif raw.startswith("rgb"):
-        numbers = re.findall(r"\d+", raw)
-        if len(numbers) < 3:
-            return None
-        channels = [min(255, int(n)) for n in numbers[:3]]
-    else:
-        return None
-
-    def channel(value: int) -> float:
-        srgb = value / 255
-        return srgb / 12.92 if srgb <= 0.03928 else ((srgb + 0.055) / 1.055) ** 2.4
-
-    red, green, blue = (channel(c) for c in channels)
-    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
-
-
-def readable_ink(background: str) -> str:
-    """The ink — dark or light — that reads best ON `background`.
-
-    **The numbered badge asked the wrong question.** It coloured its numeral with `cta_text`, which
-    answers *"what reads on the CTA gradient?"*, while sitting on `accent`. Those are different colours,
-    and on 2026-10-12 an audit of all sixteen presets found **twelve** failing WCAG AA on that badge --
-    `tiktok-dark` worst at **1.41:1**, white on `#00f2ea`, effectively invisible.
-
-    Deriving it from the accent's own luminance fixes every preset at once and, more importantly, means
-    a new preset cannot reintroduce the fault by picking a light accent. A preset that wants something
-    else can still set `accent_text` explicitly; this is only the default.
-
-    An unparseable background (a gradient, a `var()`) returns the light ink, which is what the badge used
-    before -- an unknown is not a licence to guess.
-    """
-    luminance = _relative_luminance(background)
-    if luminance is None:
-        return _LIGHT_INK
-    on_dark = (luminance + 0.05) / (_relative_luminance(_DARK_INK) + 0.05)
-    on_light = (_relative_luminance(_LIGHT_INK) + 0.05) / (luminance + 0.05)
-    return _DARK_INK if on_dark >= on_light else _LIGHT_INK
-
-
 def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     theme = page.get("theme") or {}
     preset_name = str(theme.get("preset") or "techno-green")
@@ -1341,9 +1284,16 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     tokens.setdefault("price_card_bg", tokens["card"])
     tokens.setdefault("price_card_border", tokens["border"])
     tokens.setdefault("price_card_selected_border", tokens["brand"])
-    # Text that sits ON the accent, which is not the same question as text on the CTA gradient. See
-    # `readable_ink`: twelve of sixteen presets failed WCAG AA while this borrowed `cta_text`.
-    tokens.setdefault("accent_text", readable_ink(tokens["accent"]))
+    # Text that sits ON the accent -- not the same question as text on the CTA gradient, which is what
+    # `cta_text` answers. Twelve of sixteen presets failed WCAG AA on the numbered badge while it
+    # borrowed `cta_text`; `tiktok-dark` was 1.41:1, white on #00f2ea.
+    #
+    # Reuses `section_theme.readable_ink`, which already solved exactly this for section overrides and
+    # carries the measurement behind its two inks. Writing a second one here (as the first version of
+    # this fix did) is how a codebase ends up with two "which ink is readable" answers that drift.
+    # It returns None for a colour it cannot parse; LIGHT_INK is what these rules used before, so an
+    # unknown changes nothing rather than guessing.
+    tokens.setdefault("accent_text", section_readable_ink(tokens["accent"]) or SECTION_LIGHT_INK)
     tokens.setdefault("price_radio", tokens["accent"])
     tokens.setdefault("price_title", tokens["text"])
     tokens.setdefault("price_description", tokens["muted"])
