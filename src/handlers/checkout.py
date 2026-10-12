@@ -44,6 +44,7 @@ from stripe_link.stripe_coupons import create_disposable_coupon
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.error_pages import render_error_page
 from stripe_link.domain import cogs
+from stripe_link.domain.shipping_keys import resolve_for_mode
 from stripe_link.repositories.documents import (
     coupon_grants_repository,
     coupons_repository,
@@ -423,7 +424,9 @@ def handler(
             coupons_repo=coupons_repo,
             grants_repo=grants_repo,
             discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
-            shipping_config=_tenant_shipping_config(tenant_id) if collect_shipping_for(
+            shipping_config=resolve_for_mode(
+                _tenant_shipping_config(tenant_id), tenant_id, mode,
+                KmsSecretCipher()) if collect_shipping_for(
                 offer, products_by_id) else None,
             # Where the BUYER said they want it sent, if a shipping element on the page asked. Declaring a
             # country lifts the unanimity restriction: we can price that one zone correctly instead of needing
@@ -702,7 +705,15 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
         # than an empty dropdown.
         return json_response({"ships": False, "countries": [], "options": [], "needs": "", "mode": ""})
 
-    config = _tenant_shipping_config(tenant_id)
+    # THE CARRIER KEY, FOR THIS MODE. The per-mode split moved it into `provider.keys[mode]` and missed
+    # this loader, so the buyer's rate island reported `no_provider` while the tenant's own Shipping
+    # screen said "Connected" -- the landing page sat on "Checking rates..." forever (found 2026-10-11).
+    #
+    # Resolved HERE rather than inside `_tenant_shipping_config`, because that function is a seam the
+    # suite patches in 47 places and widening its signature broke all of them. The mode and the cipher
+    # are already in hand at the call site; they were not in there.
+    config = resolve_for_mode(_tenant_shipping_config(tenant_id), tenant_id, mode,
+                              secret_cipher or KmsSecretCipher())
     countries = zone_countries(config)
 
     # THE REAL CART when there is one. A listicle page keeps a server-side cart, and quoting the selected

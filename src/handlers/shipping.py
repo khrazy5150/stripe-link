@@ -397,49 +397,13 @@ def config_for_mode(repository, tenant_id, event, secret_cipher):
     """
     from stripe_link.domain import shipping_keys
 
-    # The RAW read. A bulk rewrite of the twelve load sites caught this line too and made the function
-    # call itself; the suite said `RecursionError` on the first run, which is the cheapest possible way
-    # to find out.
+    # The RAW read, then the DOMAIN resolver -- which is shared with handlers/checkout.py and
+    # handlers/orders.py, because this module was never the only place a carrier key is opened.
     config = repository.get(tenant_id)
     if not config:
         return config
-    provider = dict(config.get("provider") or {})
-    if not provider or provider.get("name") == "mock":
-        return config
-    mode = shipping_keys.normalize_mode(resolve_stripe_mode(event))
-
-    slot = shipping_keys.key_slot(provider, mode)
-    ref = str(slot.get("api_key_ref") or "")
-    if ref:
-        provider["api_key_ref"] = ref
-        provider.pop("key_error", None)
-        provider["connection_status"] = slot.get("connection_status") or "untested"
-        if slot.get("last_tested_at") is not None:
-            provider["last_tested_at"] = slot["last_tested_at"]
-        else:
-            provider.pop("last_tested_at", None)
-        return {**config, "provider": provider}
-
-    legacy = shipping_keys.legacy_ref(provider)
-    if legacy:
-        try:
-            plaintext = secret_cipher.decrypt(legacy, tenant_id=tenant_id, mode=SECRET_MODE,
-                                              field=SECRET_FIELD)
-        except Exception as exc:  # noqa: BLE001 - reported, never raised
-            # CARRIED, not swallowed. Moving the decrypt into this seam quietly turned "KMS is down"
-            # into "no key configured" at every endpoint downstream -- a different problem with a
-            # different fix, told to the tenant as if it were theirs.
-            provider["key_error"] = f"{type(exc).__name__}: {exc}"
-            plaintext = ""
-        if plaintext and shipping_keys.adopt_legacy(provider, mode, plaintext):
-            return {**config, "provider": provider}
-
-    # Nothing for THIS mode. The key is removed rather than left, because every downstream reader treats
-    # a present ref as usable -- which is precisely how a live key came to be used in test.
-    provider.pop("api_key_ref", None)
-    provider["connection_status"] = "not_configured"
-    provider.pop("last_tested_at", None)
-    return {**config, "provider": provider}
+    return shipping_keys.resolve_for_mode(
+        config, tenant_id, resolve_stripe_mode(event), secret_cipher)
 
 
 def redact_shipping_config(config):

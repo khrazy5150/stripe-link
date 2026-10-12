@@ -309,3 +309,58 @@ class TestingAConnectionRecordsItAgainstTheRIGHTMode(unittest.TestCase):
         saved = self._run("live", legacy)
         self.assertEqual(saved["provider"]["keys"]["live"]["api_key_ref"], "kms:v1:live_ref")
         self.assertNotIn("api_key_ref", saved["provider"], "the legacy field is retired once proven")
+
+
+class EveryPathThatOPENSAKeyResolvesTheMode(unittest.TestCase):
+    """The per-mode split rewired twelve load sites inside `handlers/shipping.py` and missed five
+    outside it.
+
+    One of those five is the BUYER's rate quote in `handlers/checkout.py`. So the split shipped with
+    landing pages stuck on "Checking rates..." for any tenant whose key had moved into a slot — while
+    their own Shipping screen said "Connected" at the same moment. Found on a live page, not by the
+    suite, because every test of the quote path supplies its own config fixture and never exercises the
+    real loader (reported 2026-10-11).
+
+    The commit message for the split claimed "one seam". It was one seam in one module.
+    """
+
+    import pathlib as _pathlib
+    import re as _re
+
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+
+    def _module(self, name):
+        return (self.ROOT / "src" / name).read_text(encoding="utf-8")
+
+    def test_the_buyer_quote_resolves_the_key(self):
+        source = self._module("handlers/checkout.py")
+        self.assertIn("resolve_for_mode(_tenant_shipping_config(tenant_id), tenant_id, mode", source)
+
+    def test_the_orders_address_check_resolves_the_key(self):
+        """It calls `provider_for`, so it opens a credential and needs the mode's one."""
+        source = self._module("handlers/orders.py")
+        self.assertIn("resolve_for_mode(config, tenant_id, resolve_stripe_mode(event)", source)
+
+    def test_every_module_that_reads_api_key_ref_also_resolves(self):
+        """The structural guard, so the SIXTH site cannot be missed the way the fifth was: a module that
+        opens a carrier key must also resolve which mode's key it is opening."""
+        offenders = []
+        for path in (self.ROOT / "src").rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            if "shipping_keys" in path.name or "api_key_ref" not in source:
+                continue
+            # Only modules that OPEN the key -- naming the field is not the same as decrypting it.
+            if "provider_for(" not in source and "live_rates_for(" not in source:
+                continue
+            if "resolve_for_mode" not in source:
+                offenders.append(str(path.relative_to(self.ROOT)))
+        self.assertEqual([], offenders,
+                         f"these open a carrier key without resolving its mode: {offenders}")
+
+    def test_modules_that_only_read_boxes_are_left_alone(self):
+        """`upsell` and `ai_generate` load a shipping config for parcel and address defaults, which are
+        the same in both modes. Forcing a cipher on them would be ceremony for a key they never open."""
+        for name in ("handlers/upsell.py", "handlers/ai_generate.py"):
+            source = self._module(name)
+            self.assertIn("shipping_config_repository()", source, name)
+            self.assertNotIn("api_key_ref", source, f"{name} should not be opening a carrier key")

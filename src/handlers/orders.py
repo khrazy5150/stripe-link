@@ -28,6 +28,7 @@ from stripe_link.domain.carriers import carrier_options, service_has_tracking, t
 from stripe_link.domain.shipment_notice import revision_for
 from stripe_link.domain.shipping_promise import revised_sentence
 from stripe_link.domain.fulfilment import delivery_status, order_fulfilment_state, product_index
+from stripe_link.domain.shipping_keys import resolve_for_mode
 from stripe_link.domain.handover import handover_groups, orders_csv
 from stripe_link.domain.order_reference import matches_reference, short_refs
 from stripe_link.domain.shipment_notice import notify_buyer
@@ -485,6 +486,10 @@ def validate_addresses(event, repository, mode, *, shipping_config_repo=None, se
         return error_response("tenant_id is required.", code="missing_tenant")
 
     config = (shipping_config_repo or shipping_config_repository()).get(tenant_id) or {}
+    # The carrier key lives in a per-mode slot now (domain/shipping_keys.py). This path opens a
+    # credential, so it has to resolve one -- reading the flat field alone stopped finding it.
+    config = resolve_for_mode(config, tenant_id, resolve_stripe_mode(event),
+                              secret_cipher if secret_cipher is not None else KmsSecretCipher())
     provider_config = dict(config.get("provider") or {})
     name = str(provider_config.get("name") or "")
     if not name:

@@ -140,3 +140,58 @@ def adopt_legacy(provider: dict[str, Any] | None, mode: str, plaintext: str) -> 
 def configured_modes(provider: dict[str, Any] | None) -> list[str]:
     """Which modes have a key, for a dashboard that should say so before a tenant discovers it."""
     return [mode for mode in MODES if key_slot(provider, mode).get("api_key_ref")]
+
+
+# The KMS encryption context for a carrier key. Not mode-scoped, deliberately: it is part of the
+# ciphertext's identity, so changing it per mode would make every key already stored undecryptable.
+SECRET_MODE = "shipping"
+SECRET_FIELD = "provider.api_key_ref"
+
+
+def resolve_for_mode(config, tenant_id: str, mode: str, secret_cipher) -> dict[str, Any]:
+    """A shipping config whose flat `provider.api_key_ref` is THIS MODE'S key, or absent.
+
+    **In the domain because handlers/shipping.py was not the only caller.** The per-mode split rewired
+    the twelve load sites inside that module and missed five outside it, one of which is the BUYER's
+    rate quote in handlers/checkout.py. The split therefore shipped with buyer-facing rates reporting
+    `no_provider` on any tenant whose key had moved into a slot -- the tenant's own Shipping screen said
+    "Connected" at the same time (found 2026-10-11, on a landing page stuck at "Checking rates...").
+
+    The flat field is the shape every downstream reader already expects. It is READ-ONLY: persisting it
+    re-introduces the pre-split field, which has its own entry in that list of mistakes.
+    """
+    config = config or {}
+    provider = dict(config.get("provider") or {})
+    if not provider or provider.get("name") == "mock":
+        return config
+    mode = normalize_mode(mode)
+
+    slot = key_slot(provider, mode)
+    ref = str(slot.get("api_key_ref") or "")
+    if ref:
+        provider["api_key_ref"] = ref
+        provider["connection_status"] = slot.get("connection_status") or "untested"
+        if slot.get("last_tested_at") is not None:
+            provider["last_tested_at"] = slot["last_tested_at"]
+        else:
+            provider.pop("last_tested_at", None)
+        provider.pop("key_error", None)
+        return {**config, "provider": provider}
+
+    legacy = legacy_ref(provider)
+    if legacy and secret_cipher is not None:
+        try:
+            plaintext = secret_cipher.decrypt(legacy, tenant_id=tenant_id, mode=SECRET_MODE,
+                                              field=SECRET_FIELD)
+        except Exception as exc:  # noqa: BLE001 - reported, never raised
+            provider["key_error"] = f"{type(exc).__name__}: {exc}"
+            plaintext = ""
+        if plaintext and adopt_legacy(provider, mode, plaintext):
+            return {**config, "provider": provider}
+
+    # Nothing for THIS mode. Removed rather than left, because every downstream reader treats a present
+    # ref as usable -- which is how a live key came to be used in test.
+    provider.pop("api_key_ref", None)
+    provider["connection_status"] = "not_configured"
+    provider.pop("last_tested_at", None)
+    return {**config, "provider": provider}
