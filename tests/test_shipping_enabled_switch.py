@@ -182,5 +182,61 @@ class TheCheckboxMovesWithoutAReload(unittest.TestCase):
         self.assertEqual(len(assignments), 1, f"only `enabled` may be adopted: {assignments}")
 
 
+class TheScreenSaysWHYItIsOff(unittest.TestCase):
+    """Off because nobody turned it on, and off because somebody turned it OFF, are different states
+    with different fixes — and the hint said "this ticks itself when a carrier key passes its connection
+    test" in both.
+
+    That sentence is FALSE for a tenant who opted out, and it sent the author re-entering a Shippo key
+    and re-testing it because the software told them that would work (reported 2026-10-11). The system
+    was behaving exactly as specified; the screen was lying about it.
+    """
+
+    import pathlib as _pathlib
+    VIEW = (_pathlib.Path(__file__).resolve().parents[1]
+            / "dashboard/src/components/Shipping.vue").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _words(text):
+        return " ".join(text.split())
+
+    def test_an_opted_out_tenant_is_told_they_did_it(self):
+        self.assertIn("Shipping is off because you turned it off", self._words(self.VIEW))
+
+    def test_and_told_that_testing_a_key_will_not_fix_it(self):
+        """The precise correction: the other branch's promise does not apply to them."""
+        self.assertIn("testing a carrier key will not do it", self._words(self.VIEW))
+
+    def test_the_auto_tick_promise_is_only_made_where_it_is_true(self):
+        """It must sit in the branch for a tenant who has NOT opted out."""
+        # Just THAT branch: from its opening template to the first closing one. Slicing to `</p>`
+        # overshot into the `v-else` and swept up the very sentence being checked for.
+        block = self.VIEW[self.VIEW.index('v-else-if="shippingOptedOut"'):]
+        block = block[:block.index("</template>")]
+        self.assertNotIn("ticks itself", block,
+                         "the auto-tick promise must not appear in the opted-out branch")
+
+    def test_the_flag_reaches_the_browser(self):
+        """A hint keyed on a field the server never returns is a hint that never fires."""
+        from handlers.shipping import redact_shipping_config
+        redacted = redact_shipping_config({"enabled": False, "enabled_opt_out": True,
+                                           "provider": {"name": "shippo"}})
+        self.assertTrue(redacted["enabled_opt_out"])
+
+
+class TickingItBackRestoresEverything(unittest.TestCase):
+    """The switch must not be a trapdoor: one click returns a tenant to normal service, including the
+    auto-tick they had turned off."""
+
+    def test_ticking_clears_the_opt_out_and_re_arms_the_auto_tick(self):
+        from handlers.shipping import record_shipping_opt_out
+        from stripe_link.domain.shipping import shipping_opted_out
+
+        opted_out = {"enabled": False, "enabled_opt_out": True}
+        after = record_shipping_opt_out({"enabled": True}, opted_out)
+        self.assertNotIn("enabled_opt_out", after)
+        self.assertFalse(shipping_opted_out(after), "a later connection test may tick it again")
+
+
 if __name__ == "__main__":
     unittest.main()

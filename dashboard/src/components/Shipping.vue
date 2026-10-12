@@ -32,6 +32,10 @@
             Buyers see shipping rates and you can buy labels. Untick to stop offering shipping — we will
             not turn it back on by itself.
           </template>
+          <template v-else-if="shippingOptedOut">
+            Shipping is off because you turned it off. Tick the box to turn it back on — testing a
+            carrier key will not do it, by design.
+          </template>
           <template v-else>
             Shipping is off: buyers see no rates and labels cannot be bought. This ticks itself when a
             carrier key passes its connection test.
@@ -721,6 +725,11 @@ const keyConfigured = computed(() => {
   const slot = keys[getStripeMode()] || {};
   return Boolean(slot.has_key || slot.api_key_ref) || Boolean(rawDoc.value.provider?.api_key_ref);
 });
+// OFF BECAUSE NOBODY TURNED IT ON, or off because somebody turned it OFF. The hint said "this ticks
+// itself when a carrier key passes its connection test" in both cases -- which is false for a tenant who
+// opted out, and sent the author re-entering a key because the software told them that would work
+// (reported 2026-10-11). The two states need different sentences.
+const shippingOptedOut = computed(() => Boolean(rawDoc.value.enabled_opt_out));
 const modeLabel = computed(() => (getStripeMode() === "live" ? "Live" : "Test"));
 const otherModeLabel = computed(() => (getStripeMode() === "live" ? "Test" : "Live"));
 // Which modes have a key, so the screen can say "Live is set up, Test is not" before a tenant finds out
