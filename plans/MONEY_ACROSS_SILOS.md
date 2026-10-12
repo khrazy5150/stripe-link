@@ -406,7 +406,9 @@ Why metadata rather than a lookup at report time: it is an **immutable snapshot*
 cost next month must not retroactively rewrite last month's margin, and a product later deleted must not
 take its own history with it.
 
-**P3 — shipping cost. LEDGER HALF BUILT 2026-10-11. Metadata half DEFERRED, with a measurement.**
+**P3 — shipping cost. BOTH HALVES BUILT 2026-10-11.** The ledger half first, then the metadata half
+once the deferral's own exit condition was met — see *"Why the metadata half was deferred"* below and
+*"What the deferral was actually waiting for"* after it.
 
 **The plan did not know this was already mostly built.** `ledger.shipping_cost_entry` exists and
 `handlers/shipping.py:1397` has appended it on every outbound label purchase since labels shipped. So the
@@ -435,7 +437,7 @@ teaches a tenant to stop reading the statement. Its own `entry_id` prefix too: u
 a return and an outbound label for the same order would collide, and the second write would replace the
 first rather than add to it.
 
-### Why the metadata half is deferred, measured rather than argued
+### Why the metadata half was deferred, measured rather than argued
 
 Writing shipping cost into Stripe metadata serves exactly one consumer: **P4**, which this plan already
 flags as possibly never worth building. The cost is not nominal:
@@ -449,16 +451,120 @@ flags as possibly never worth building. The cost is not nominal:
   **a fifth of everything left**, and the budget plan's own words are *"roughly one more route fits. Not
   two."*
 
-**So P3's stated goal is met and its mechanism is not built.** The goal was *"profit becomes a real
+**So P3's stated goal was met and its mechanism was not built.** The goal was *"profit becomes a real
 number"*, and it now is: outbound labels (already), return labels (today), COGS (P2). Spending a fifth of
 the remaining ceiling to make a deferred report possible is the wrong trade while that report is
 hypothetical. Pick it up with P4, or after the env-var work in `plans/TRANSFORM_BUDGET.md` reclaims the
 ~267KB that makes the question uninteresting.
 
-**P4 — the Stripe-derived view, if still wanted.** NOTE: this now also carries P3's deferred metadata
-half, without which a silo can reconstruct five of the six components from Stripe, not all six. Whether that becomes a screen, an operator tool, or just a
-reconciliation check is a decision better made once the data is actually complete — and it may turn out
-that P2/P3 were the whole value, and the view was never the point.
+### What the deferral was actually waiting for — and it arrived
+
+The env-var work landed the same day (`plans/TRANSFORM_BUDGET.md`), taking headroom from **6,047 bytes to
+~129,000**. That was the condition this plan named, so the metadata half was built. **Measured cost: 871
+bytes**, against the 1,151 estimated — *0.9% of headroom* rather than a fifth of it.
+
+```
+transformed   871,107 bytes     headroom   128,893     87.1% used
+```
+
+**The byte cost was never the only objection, and the other one deserves answering rather than
+forgetting.** Writing our own numbers into Stripe and reading them back is a *backup, not a
+verification*: Stripe has no independent view of what a carrier charged us, so the agreement proves
+nothing about the number. But that was never this part's claim — the claim, in Part 3's own words, is *"a
+side-car value we wrote, with Stripe's durability and none of Stripe's authority"*, so that **any silo
+can reconstruct a tenant's money from Stripe alone**. That is a portability property, not an accuracy
+one, and it is the property Part 1 needs.
+
+### What shipped for the metadata half
+
+- **`domain/shipping_cost_metadata.py`** — pure. `stamp(shipment_id, amount, returning=)` and
+  `from_metadata`.
+- **One key per LABEL, not a running total.** `sc_<ref>` outbound, `sr_<ref>` return, where `<ref>` is
+  the last 8 characters of the shipment id. A running total would have to be read before being written,
+  and a retried purchase would then add the same postage twice; Stripe **merges** metadata on update, so
+  a key named after the shipment is idempotent by overwrite and costs no GET on a path already waiting
+  on a carrier. The ref is the id's **tail** because carrier ids share a prefix — taking the front would
+  make every parcel of one order write the same key.
+- **The outbound/return split is preserved in the keys**, for the reason the ledger splits them: a return
+  has no postage revenue beside it, so folding the two would make a tenant's outbound pricing look like
+  it loses money whenever a buyer sends something back.
+- **`handlers/shipping.py` gained its first and only Stripe call**, wired into both label paths, plus
+  `StripeKeysTable` read and `secretsmanager:GetSecretValue` on the role. KMS was already granted. Both
+  grant guards were checked to *fail* with the grant removed, before trusting that they passed.
+- **A subscription order is a skip, not a failure** — it stores no `payment_intent_id` at all (the same
+  fact behind P4 defect 1), so there is nothing to mirror onto.
+- **Positive magnitudes in metadata, negative in the ledger**, matching what `cogs` actually does. Part 3
+  above says `# negative, per the convention`; **the code P2 shipped stores the positive magnitude** and
+  `ledger.sale_entry` negates on the way in. The code is right and that comment was wrong.
+
+**P4 — the Stripe-derived view. BUILT 2026-10-11 as a reconciliation check.**
+
+The plan left the shape open — *"whether that becomes a screen, an operator tool, or just a
+reconciliation check is a decision better made once the data is actually complete"* — and with P3
+complete the data answered it. **A check, not a screen.** A screen would be a second, slower copy of
+Reports reading a source with less authority; a check answers what the author actually asked for on
+2026-10-07, after a live sale went missing: *"the ledger in our software must match Stripe to the
+penny."*
+
+### Stripe knows THREE of six from a charge, not four
+
+Part 2 says four. From a **charge listing** it is three, and the difference matters because the listing
+is what any sweep can afford:
+
+| component | source | authority |
+|---|---|---|
+| `gross` | `charge.amount_captured` | **Stripe's** |
+| `stripe_fee` | balance transaction `fee_details` | **Stripe's** |
+| `platform_fee` | balance transaction `fee_details` | **Stripe's** |
+| `tax` | the **session's** `total_details` — a charge does not carry its session | Stripe's, one call away |
+| `cogs` | metadata we stamped at checkout (P2) | ours |
+| `shipping_cost` | metadata we wrote at label purchase (P3) | ours |
+
+`tax` is accepted as an argument rather than pretended free. Zero is also the true answer for every
+tenant today, Stripe Tax being off — so `known` says which it is, instead of letting a correct zero and
+an unasked question look identical.
+
+### Only the three are reconciled
+
+`cogs` and `shipping_cost` are **reconstructed and never asserted against**. Comparing them with the
+ledger they were copied from would be reading back our own writes and calling the agreement a check.
+
+### What shipped
+
+- **`domain/reconciliation.py`** — pure. `components_from_charge` (all six, in the ledger's sign
+  convention, plus a `known` map), `summarize_charges` (the Stripe-derived view, same shape as
+  `ledger.summarize`), `audit` (per-charge ledger comparison), `describe`.
+- **`fees_from_balance_transaction` extracted** into `domain/fee_reconciliation.py`;
+  `stripe_webhook.fees_from_payment_intent` now delegates. One implementation of *which `fee_details`
+  entry is Stripe's own* — the rule being that `txn.fee` is the **total**, so reading it as the Stripe
+  fee charges the tenant for the platform's own cut.
+- **It rides the orphan pass's existing listing.** No new Lambda, no new route, no second API call —
+  `data.balance_transaction` is simply a second `expand[]` on the call already being made. (That forced
+  the params from a dict to a list of pairs: **a dict cannot carry two `expand[]` keys**, and the second
+  would have been silently dropped.)
+- **Bounded by deterministic entry ids.** `sale_entry_ids` builds the candidates — `le_sale_<pi>`, and
+  `le_sale_order_<invoice>` for a renewal, invoice first — so the check is a point read per charge. The
+  first draft compared window totals, which meant reading a tenant's **entire financial history every
+  five minutes**, costing more the longer they had been successful.
+- **A charge with no entry is NOT reported here.** That is the orphan pass's finding, in the same loop;
+  reporting it twice would double every alarm for one missing sale. `unmatched` counts them so the two
+  tallies read together.
+- **Fees are not compared until Stripe has settled them.** Ours is an estimate by design and the sweep's
+  own job is to true it up — comparing an unsettled charge would report the sweep's pending work as a
+  discrepancy, every five minutes, for fifteen minutes, on every sale.
+- **Scoped by the same ownership rule as the orphan pass.** Both deployments hold credentials for the
+  same connected account, so an unscoped total would be a confident sum of two silos' takings — P4
+  defect 2, arriving a second time through a new door.
+- **Reports, never corrects.** Both money bugs so far were a missing event and a mis-keyed write;
+  neither is fixed by nudging a total until it matches, and a self-correcting ledger would have hidden
+  both.
+
+### A bug this found in its own first draft
+
+`describe` keyed its message off `net`. **A sale we never recorded that was later refunded nets to zero
+on both sides** — so the summary read *"ahead by 0 cents"* while gross was out by the whole sale. The
+figure that decides the verdict is now the figure that gets named. Written down because the same
+instinct — summarise with the headline number — produced it, and will again.
 
 ## Related
 

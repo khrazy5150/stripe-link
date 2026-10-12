@@ -285,9 +285,19 @@ class TheSweepActuallyAsksStripeForTheInvoice(unittest.TestCase):
                 notifications_repo=self.notifications_repo, this_silo=silo)
 
     def test_it_expands_the_invoice_so_the_stamp_is_reachable(self):
-        """Without this the charge carries no silo at all and the filter has nothing to read."""
+        """Without this the charge carries no silo at all and the filter has nothing to read.
+
+        Asserted over a LIST of pairs rather than a dict, because the listing now asks for two expands
+        and a dict cannot carry two `expand[]` keys -- which is exactly how the second one would have
+        been silently dropped."""
         self._run("sandbox")
-        self.assertEqual(self.sent_params[0].get("expand[]"), "data.invoice")
+        self.assertIn(("expand[]", "data.invoice"), list(self.sent_params[0]))
+
+    def test_it_also_expands_the_balance_transaction_for_the_ledger_audit(self):
+        """Without it `charge.balance_transaction` arrives as a bare id, the audit reads every charge as
+        unsettled, and the fee half of the check silently never runs (plans/MONEY_ACROSS_SILOS.md P4)."""
+        self._run("sandbox")
+        self.assertIn(("expand[]", "data.balance_transaction"), list(self.sent_params[0]))
 
     def test_sandbox_finds_the_order_through_the_real_repository(self):
         out = self._run("sandbox")

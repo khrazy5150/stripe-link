@@ -50,10 +50,15 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
     tally = {}
     for mode in modes:
         orders_for_mode = orders_repo or orders_repository(mode=mode)
+        # RESOLVED ONCE per mode, because the orphan/audit pass below needs the same one. It used to be
+        # built inline in the call above, which is why adding a second reader of the ledger would
+        # otherwise have constructed a second repository for the same table.
+        ledger_for_mode = ledger_repo or (ledger_repository(mode=mode)
+                                          if os.environ.get("LEDGER_TABLE") else None)
         tally[mode] = _reconcile_mode(
             mode, now,
             orders_repo=orders_for_mode,
-            ledger_repo=ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None),
+            ledger_repo=ledger_for_mode,
             stripe_repo=stripe_repo, secret_cipher=secret_cipher,
             fetch_fees=fetch_fees, true_up=true_up)
         # A SECOND PASS OVER THE SAME SCAN. Reading the orders table is the expensive half and it is
@@ -70,13 +75,14 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
         tally[mode]["orphan_charges"] = _report_orphan_charges(
             mode, now, orders_repo=orders_for_mode, stripe_repo=stripe_repo,
             secret_cipher=secret_cipher, list_charges=list_charges,
-            notifications_repo=notifications_repo, this_silo=this_silo)
+            notifications_repo=notifications_repo, this_silo=this_silo,
+            ledger_repo=ledger_for_mode, drift=tally[mode].setdefault("ledger_drift", {}))
     logger.info("order sweep: %s", tally)
     return tally
 
 
 def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher, list_charges=None,
-                           notifications_repo=None, this_silo=None):
+                           notifications_repo=None, this_silo=None, ledger_repo=None, drift=None):
     """Ask Stripe what it charged, and report anything THIS SILO should hold an order for and does not.
 
     Per TENANT, because charges live on the connected account and the credentials are per tenant. The
@@ -125,11 +131,24 @@ def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher
             # `expand[]=data.invoice` costs nothing -- same one call -- and is the only way to reach a
             # subscription charge's silo stamp, which lives on the invoice because `payment_intent_data`
             # is payment-mode only and never reaches a renewal's charge.
+            # `data.balance_transaction` is the SECOND expand, added for the ledger audit. Without it
+            # `charge.balance_transaction` arrives as a bare id, `fees_from_balance_transaction` reads it
+            # as unsettled, and the fee half of the audit would silently never run -- present in the code
+            # and absent in effect, which is the shape of the three defects P4 fixed. Stripe permits four
+            # expands and this call now uses two, at no extra round trip.
             listed = lister(api_key=api_key, stripe_account=account,
-                            params={"created[gte]": created_gte, "created[lte]": created_lte, "limit": 100,
-                                    "expand[]": "data.invoice"})
+                            params=[("created[gte]", created_gte), ("created[lte]", created_lte),
+                                    ("limit", 100), ("expand[]", "data.invoice"),
+                                    ("expand[]", "data.balance_transaction")])
             charges = list((listed or {}).get("data") or [])
             out["charges"] += len(charges)
+            # A SECOND QUESTION ABOUT THE SAME LISTING. Asking Stripe for a tenant's charges is the
+            # expensive half and it is already done; "and do the ones we hold agree with the ledger?" is
+            # free on top (plans/MONEY_ACROSS_SILOS.md P4). Separate function, separate module, as with
+            # the overdue pass that shares the orders scan -- sharing a walk does not make two decisions
+            # one concern.
+            _audit_ledger(tenant_id, charges, mode=mode, silo=silo,
+                          ledger_repo=ledger_repo, into=drift)
             found = orphans(charges,
                             order_for_payment_intent=orders_repo.find_by_payment_intent,
                             order_for_id=lambda order_id, _t=tenant_id: orders_repo.get(_t, order_id),
@@ -148,6 +167,44 @@ def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher
             logger.warning("orphan sweep failed for %s (%s): %s: %s",
                            tenant_id, mode, type(exc).__name__, exc)
     return out
+
+
+def _audit_ledger(tenant_id, charges, *, mode, silo, ledger_repo, into):
+    """Does our ledger hold the same money Stripe does, for the charges we DO hold?
+
+    The complement of the orphan pass. That one asks "is there money here with no order?" and catches a
+    sale that never landed; this asks "and are the ones that landed right?" and catches a wrong amount, a
+    fee that never settled, and a write keyed to the wrong place. One missing sale is reported by exactly
+    one of them, because `audit` deliberately does not report an unmatched charge.
+
+    **Reports, never corrects.** Both times this went wrong the cause was a missing event and a mis-keyed
+    write; neither is fixed by adjusting a total until it matches, and a self-correcting ledger would
+    have hidden both.
+
+    Never raises, and accumulates into the caller's tally so a silent pass is visible as zeros rather
+    than as an absent key.
+    """
+    if ledger_repo is None or into is None:
+        return
+    from stripe_link.domain.reconciliation import audit, describe
+
+    try:
+        result = audit(charges, mode=mode, this_silo=silo,
+                       entry_for_id=lambda entry_id: ledger_repo.get(tenant_id, entry_id))
+    except Exception as exc:  # noqa: BLE001 - a reporting pass must not stop fees being reconciled
+        into["failed"] = int(into.get("failed") or 0) + 1
+        logger.warning("ledger audit failed for %s (%s): %s: %s",
+                       tenant_id, mode, type(exc).__name__, exc)
+        return
+    for key in ("examined", "matched", "unmatched", "failed", "fee_checked"):
+        into[key] = int(into.get(key) or 0) + int(result.get(key) or 0)
+    if result.get("findings"):
+        into["disagreeing"] = int(into.get("disagreeing") or 0) + len(result["findings"])
+        into["worst_cents"] = max(int(into.get("worst_cents") or 0), int(result.get("worst_cents") or 0))
+        # LOUD, like the orphan alarm beside it, and for the same reason: the previous two money bugs
+        # were both found by a human reading the Stripe dashboard by eye, a day late.
+        logger.error("LEDGER DISAGREES WITH STRIPE tenant=%s mode=%s silo=%s %s",
+                     tenant_id, mode, silo, describe(result))
 
 
 def _notify_orphans(notifications_repo, tenant_id, mode, found, now, silo="") -> int:

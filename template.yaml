@@ -3910,6 +3910,7 @@ Resources:
           PRODUCTS_TABLE: !Ref ProductsTable
           SHIPMENTS_TABLE: !Ref ShipmentsTable
           SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
+          STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-shipping-api-${Environment}"
@@ -3965,6 +3966,22 @@ Resources:
               Resource: "*"
         - DynamoDBCrudPolicy:
             TableName: !Ref ShippingConfigTable
+        # A BOUGHT LABEL'S COST IS MIRRORED ONTO THE ORDER'S PaymentIntent, so Stripe carries all six
+        # ledger components and any silo can reconstruct a tenant's money without reading this
+        # deployment's tables (plans/MONEY_ACROSS_SILOS.md P3). This is the only Stripe call this
+        # function makes, and it is why it needs credentials at all. Read-only on the keys.
+        - DynamoDBReadPolicy:
+            TableName: !Ref StripeKeysTable
+        - !If
+          - HasStripePlatformSecret
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripePlatformSecretArn
+          - !Ref AWS::NoValue
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow

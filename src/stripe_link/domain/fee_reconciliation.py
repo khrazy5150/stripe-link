@@ -100,3 +100,39 @@ def drift(before: dict[str, Any] | None, after: dict[str, Any] | None) -> int:
     """How far the estimate was out, in cents. Signed: positive means we had UNDER-stated Stripe's fee,
     which is the direction that flatters the tenant's books and the one worth reporting."""
     return _whole(fees_of({"fees": after}).get("stripe_fee")) - _whole(fees_of({"fees": before}).get("stripe_fee"))
+
+
+# Stripe's own fee and the platform's cut, as `fee_details` names them. Kept as constants because three
+# readers now agree on these strings and a typo in one of them would silently report a fee of zero.
+STRIPE_FEE_TYPE = "stripe_fee"
+APPLICATION_FEE_TYPE = "application_fee"
+
+
+def fees_from_balance_transaction(txn: Any) -> dict[str, int]:
+    """`{stripe_fee, platform_fee, net}` off a settled balance transaction, or `{}` when it has not settled.
+
+    **Extracted so the charge-listing reader and the PaymentIntent reader cannot disagree.** The rule that
+    matters is the one this used to state only inside `fees_from_payment_intent`: `txn.fee` is the TOTAL,
+    Stripe's processing fee plus the platform's application fee, so reading `fee` as "the Stripe fee"
+    double-counts the platform's cut against the tenant. Only `fee_details` can tell them apart
+    (plans/MONEY_ACROSS_SILOS.md P4).
+
+    An unsettled transaction returns `{}` rather than zeros — the same distinction the rest of this
+    codebase keeps between *absent* and *nothing*, and the reason a usable estimate is never overwritten
+    with a blank.
+    """
+    if not isinstance(txn, dict):
+        return {}
+    details = txn.get("fee_details") or []
+    out: dict[str, int] = {}
+    stripe_fee = sum(abs(_whole(d.get("amount"))) for d in details
+                     if isinstance(d, dict) and str(d.get("type") or "") == STRIPE_FEE_TYPE)
+    platform_fee = sum(abs(_whole(d.get("amount"))) for d in details
+                       if isinstance(d, dict) and str(d.get("type") or "") == APPLICATION_FEE_TYPE)
+    if stripe_fee:
+        out["stripe_fee"] = stripe_fee
+    if platform_fee:
+        out["platform_fee"] = platform_fee
+    if txn.get("net") is not None:
+        out["net"] = _whole(txn.get("net"))
+    return out

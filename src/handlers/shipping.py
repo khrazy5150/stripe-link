@@ -632,6 +632,80 @@ def _append_shipping_cost(order, shipment, *, now, ledger_repo, build, label):
         return False
 
 
+def record_shipping_cost_metadata(order, shipment, tenant_id, *, mode, returning=False,
+                                  secret_cipher=None, stripe_repo=None, stripe_post=None):
+    """Mirror this label's cost onto the order's PaymentIntent, so Stripe carries all six components.
+
+    `plans/MONEY_ACROSS_SILOS.md` P3, the deferred half. P2 stamped COGS at checkout; shipping cost
+    cannot be stamped there because it is not known until the carrier is paid, which is after the charge.
+    So it arrives here, as a metadata update on a path that is already waiting on a carrier anyway.
+
+    **This is the one thing in this module that talks to Stripe,** which the plan treated as the reason to
+    defer it -- `handlers/shipping.py` had no Stripe dependency at all, and the measured IAM cost was a
+    fifth of the transform headroom that existed at the time. The env-var work since
+    (`plans/TRANSFORM_BUDGET.md`) took headroom from 6,047 bytes to ~130,000, which is the condition that
+    plan named for picking this up.
+
+    **Never raises, and never retried.** The label is bought and the parcel is going; a bookkeeping
+    mirror must not turn a successful purchase into an error a tenant thinks they should repeat. The
+    LEDGER is canonical -- `record_shipping_cost_entry` has already run -- so a failure here costs
+    cross-silo reconstruction, not the tenant's books.
+
+    Returns True when a key was written, so "the mirror is silently never happening" is visible in a log
+    line rather than inferable from its absence.
+    """
+    from stripe_link.domain import shipping_cost_metadata
+
+    order = order if isinstance(order, dict) else {}
+    try:
+        # A SUBSCRIPTION ORDER HAS NO PaymentIntent FIELD AT ALL -- `order_record_from_invoice` keys on the
+        # invoice, which is exactly what made the orphan sweep read every renewal as lost money
+        # (P4 defect 1). There is nothing to mirror onto, and that is a skip rather than a failure.
+        payment_intent = str(order.get("payment_intent_id") or "").strip()
+        if not payment_intent:
+            return False
+        keys = shipping_cost_metadata.stamp(
+            str((shipment or {}).get("shipment_id") or ""),
+            int(((shipment or {}).get("cost") or {}).get("amount") or 0),
+            returning=returning,
+        )
+        if not keys:
+            return False
+
+        repo = stripe_repo
+        if repo is None:
+            if not os.environ.get("STRIPE_KEYS_TABLE"):
+                return False
+            from stripe_link.repositories.documents import stripe_keys_repository
+
+            repo = stripe_keys_repository()
+        from stripe_link.stripe_platform_secrets import checkout_credentials
+
+        api_key, stripe_account = checkout_credentials(
+            tenant_id, mode, repo.get(tenant_id, mode=mode) or {},
+            secret_cipher or KmsSecretCipher())
+        if not api_key:
+            return False
+
+        post = stripe_post
+        if post is None:
+            from stripe_link.stripe_client import stripe_request
+
+            post = stripe_request
+        # FLAT keys rather than a nested dict: Stripe's form encoding wants `metadata[sc_5e6f7a8b]`, and
+        # writing it out is one less layer to be wrong about. The update MERGES, which is what makes one
+        # key per label idempotent -- a repeated purchase of the same shipment rewrites its own key
+        # instead of adding to a running total.
+        post("POST", f"/payment_intents/{payment_intent}",
+             api_key=api_key, stripe_account=stripe_account,
+             data={f"metadata[{name}]": value for name, value in keys.items()})
+        return True
+    except Exception as exc:  # noqa: BLE001 - see docstring: the ledger already holds the real record
+        print(f"[shipping] {'return ' if returning else ''}cost not mirrored to Stripe for order "
+              f"{order.get('order_id')}: {type(exc).__name__}: {exc}")
+        return False
+
+
 def record_shipping_variance(order, shipment, tenant_id, *, mode, now, actuals_repo=None):
     """Compare the label's real cost with the quote the buyer agreed to, and keep both.
 
@@ -1674,6 +1748,10 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # never learn whether their postage pricing made or lost money. Best-effort, like everything after the
     # label is bought: the postage is paid and the parcel is going.
     record_shipping_cost_entry(order, saved, now=now)
+    # AND THE SAME NUMBER INTO STRIPE, so a silo that cannot read this table can still reconstruct the
+    # sixth component (plans/MONEY_ACROSS_SILOS.md P3). The ledger above stays canonical; this is the
+    # portable copy.
+    record_shipping_cost_metadata(order, saved, tenant_id, mode=mode, secret_cipher=secret_cipher)
 
     # The buyer is told the same way the manual path tells them -- one builder, one mailer. Best-effort
     # HERE, unlike the manual path: the label is already bought and paid for, so a bounced address must
@@ -1814,6 +1892,10 @@ def buy_return_label(event, repository, secret_cipher, *, orders_repo=None, ship
     # block, the same carrier charge -- appended nothing, so return postage was money out the books never
     # saw. Best-effort, like every write after a label is bought.
     record_return_shipping_cost_entry(order, saved, now=now)
+    # Mirrored to Stripe under its OWN key prefix, so a reconstruction can keep returns out of shipping
+    # margin exactly as `summarize` does -- a return has no postage revenue beside it.
+    record_shipping_cost_metadata(order, saved, tenant_id, mode=mode, returning=True,
+                                  secret_cipher=secret_cipher)
 
     # The request remembers its label, so the screen can show the buyer's tracking without a second lookup.
     refund_request["return_shipment_id"] = shipment_id

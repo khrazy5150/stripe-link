@@ -1965,21 +1965,18 @@ def fees_from_payment_intent(payment_intent: Any) -> dict[str, int]:
         return {}
     charge = payment_intent.get("latest_charge")
     txn = charge.get("balance_transaction") if isinstance(charge, dict) else None
-    if not isinstance(txn, dict):
-        # A charge whose balance transaction has not settled yet. Not an error, and not a reason to
-        # overwrite a usable estimate with nothing.
-        return {}
-    # Only Stripe's OWN processing fee. `fee` on the transaction also contains the application fee, and
-    # counting that as a Stripe fee would double-count the platform's cut against the tenant.
-    stripe_fee = sum(abs(int(d.get("amount") or 0))
-                     for d in txn.get("fee_details") or []
-                     if str(d.get("type") or "") == "stripe_fee")
-    out: dict[str, int] = {}
-    if stripe_fee:
-        out["stripe_fee"] = stripe_fee
-    if txn.get("net") is not None:
-        out["net"] = int(txn.get("net") or 0)
-    return out
+    # DELEGATED since 2026-10-11: the charge-listing reader in `domain/reconciliation.py` needs the same
+    # split, and two copies of "which fee_details entry is Stripe's own" would eventually disagree. An
+    # unsettled balance transaction still returns {} -- not an error, and not a reason to overwrite a
+    # usable estimate with nothing.
+    #
+    # `platform_fee` is dropped on purpose: this caller's contract is {stripe_fee, net}, and
+    # `true_up_fees` leaves the platform fee alone because checkout chose that number and Stripe merely
+    # applied it.
+    from stripe_link.domain.fee_reconciliation import fees_from_balance_transaction
+
+    fees = fees_from_balance_transaction(txn)
+    return {key: value for key, value in fees.items() if key in ("stripe_fee", "net")}
 
 
 def fetch_actual_fees(payment_intent_id: str, *, api_key: str, stripe_account: str = "",
