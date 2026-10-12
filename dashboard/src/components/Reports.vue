@@ -269,7 +269,7 @@ const LINES = [
   // entry already written can never gain a cost. The partial answer is shown WITH its scope instead,
   // which is the same shape as the shipping-coverage caveat two rows down.
   { label: "Profit", pick: (s) => (s.profit_known ? s.profit : s.costed_profit), tone: "is-total",
-    known: (s) => Boolean(s.profit_known) || s.costed_profit !== null,
+    known: (s) => Boolean(s.profit_known) || s.costed_profit != null,
     note: (s) => (s.profit_known
       ? "Net after postage and cost of goods."
       : `On ${s.costed_sales} of ${s.sale_count} sales — the rest have no cost recorded yet.`),
@@ -309,7 +309,7 @@ const headline = computed(() => {
   if (!now) return [];
   const was = previous.value;
   const delta = (pick) => (was ? Number(pick(now) || 0) - Number(pick(was) || 0) : 0);
-  const scoped = !now.profit_known && now.costed_profit !== null;
+  const scoped = !now.profit_known && now.costed_profit != null;
   return [
     { label: "Gross", value: (now.totals || {}).gross, known: true,
       delta: delta((s) => (s.totals || {}).gross) },
@@ -317,7 +317,7 @@ const headline = computed(() => {
       hint: "After Stripe and platform fees" },
     { label: "Profit", lead: true,
       value: now.profit_known ? now.profit : now.costed_profit,
-      known: now.profit_known || now.costed_profit !== null,
+      known: now.profit_known || now.costed_profit != null,
       delta: delta((s) => (s.profit_known ? s.profit : s.costed_profit) || 0),
       // The scope replaces the change, deliberately: comparing a partial figure with a period whose
       // coverage was different is a number nobody can act on.
