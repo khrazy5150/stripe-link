@@ -1,3 +1,15 @@
+
+
+def _products_ship_physical(products_by_id) -> bool:
+    """Does anything the renderer loaded actually require shipping?
+
+    The same derivation `render_page` performs for the composer. Duplicated rather than imported
+    because publishing holds the products and the renderer holds the composer, and a shared helper
+    between them would be a third place to keep the question in sync.
+    """
+    return any((product.get("fulfillment") or {}).get("requires_shipping")
+               for product in (products_by_id or {}).values())
+
 import copy
 import json
 import base64
@@ -1482,7 +1494,8 @@ def publish_page_document(
     # Flow said "ALWAYS -> Thank-you page" and its Live Preview showed the screen. The builder was promising
     # something publish never produced, and only a live sale revealed it. The artifact is small, noindex, and
     # unreachable unless the router sends someone to it, so there is nothing to gain by withholding it.
-    ty_page, ty_offer = synthesize_thank_you_page(page, offer)
+    ty_page, ty_offer = synthesize_thank_you_page(
+        page, offer, ships_physical=_products_ship_physical(products_by_id))
     ty_html = render_page(
         ty_page, ty_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
         robots=NOINDEX_ROBOTS, site=site, page_type="thank_you",
@@ -1576,7 +1589,8 @@ def render_funnel_step_html(
     if step == "thank_you":
         # `preview=True`: the Live Preview has no order behind a session_id, so the shipping element shows
         # a marked example date instead of trying to fetch one.
-        ty_page, ty_offer = synthesize_thank_you_page(page, offer, preview=True)
+        ty_page, ty_offer = synthesize_thank_you_page(
+            page, offer, preview=True, ships_physical=_products_ship_physical(products_by_id))
         return render_page(ty_page, ty_offer, {}, page_type="thank_you", **common)
     plan = post_purchase_plan(offer, products_by_id)
     if step == "upsell_carousel" or (step.startswith("upsell:") and plan["strategy"] == "carousel"):

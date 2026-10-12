@@ -393,7 +393,8 @@ def _business_days_from_now(count: int) -> str:
 
 
 def synthesize_thank_you_page(
-    source_page: dict[str, Any], source_offer: dict[str, Any], *, preview: bool = False
+    source_page: dict[str, Any], source_offer: dict[str, Any], *, preview: bool = False,
+    ships_physical: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (page, offer): the funnel's terminal thank-you screen on the Universal Bundle template, inheriting
     the source page's theme. It sells nothing (no price/CTA), so its offer carries no items — render_page only
@@ -434,7 +435,13 @@ def synthesize_thank_you_page(
     # who buys it will ever get one. Emitting the element anyway put a package card in front of a buyer
     # of a digital product and showed the tenant one in the builder preview, where there is no order to
     # remove it (reported 2026-10-08, then seen live on a real purchase 2026-10-09).
-    ships = offer_ships_physical(source_offer)
+    # THE OFFER'S FLAG **OR** WHAT THE RENDERER CAN SEE, exactly as `compose_page` does it.
+    # `offer.ships_physical` is denormalised by the builder, so it is absent on any offer saved before
+    # that field existed -- and on at least one saved after. Trusting it alone dropped the arrival
+    # estimate from the thank-you page of a physical product whose own `fulfillment.requires_shipping`
+    # was true (reported 2026-10-12). The composer ORs the two for this reason; this did not, and the
+    # docstring on `offer_ships_physical` says so in as many words.
+    ships = bool(ships_physical or offer_ships_physical(source_offer))
     if config.get("enable_shipping_eta", True) and ships:
         sections.append({"id": "shipping-eta", "type": "shipping_eta",
                          "icon": config.get("shipping_eta_icon") or "📦",

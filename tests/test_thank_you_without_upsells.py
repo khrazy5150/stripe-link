@@ -52,6 +52,61 @@ class PublishWritesItForEveryPage(unittest.TestCase):
         marker = "_write_funnel_artifact(str(ty_page[\"page_id\"]), ty_html, \"thank_you\")"
         self.assertIn(marker, src)
         before = src[:src.index(marker)]
-        tail = before[before.rindex("synthesize_thank_you_page(page, offer)"):]
+        # Anchored on the CALL, not on its exact arguments: the previous anchor was the literal
+        # `synthesize_thank_you_page(page, offer)` and broke the moment the call gained a
+        # `ships_physical=` argument, which has nothing to do with what this test guards.
+        tail = before[before.rindex("synthesize_thank_you_page("):]
         self.assertNotIn("if upsell_entries", tail,
                          "the thank-you terminus must not be conditional on upsells existing")
+
+
+class TheArrivalEstimateFollowsTheProductsNotJustTheOffer(unittest.TestCase):
+    """A physical product's thank-you page lost its shipping ETA (reported 2026-10-12).
+
+    `offer.ships_physical` is DENORMALISED by the builder, so it is absent on any offer saved before
+    that field existed — and on at least one saved after. The thank-you synthesis trusted it alone,
+    while the product it sells had `fulfillment.requires_shipping: true` and a real parcel on the way.
+
+    `compose_page` has always ORed the offer's flag with what the renderer can actually see, and
+    `offer_ships_physical`'s own docstring says why: *"The renderer passes the truth it can see (the
+    products it loaded) on top, so an offer saved before this field existed still composes correctly."*
+    This path did not, which is the whole defect.
+    """
+
+    OFFER = {"offer_id": "o1", "name": "Creatine Gummies"}
+    PAGE = {"page_id": "p1", "tenant_id": "t1", "sections": [], "theme": {}}
+
+    def _sections(self, **kwargs):
+        from stripe_link.runtime.upsell_pages import synthesize_thank_you_page
+        page, _offer = synthesize_thank_you_page(self.PAGE, self.OFFER, **kwargs)
+        return [s.get("type") for s in page.get("sections") or []]
+
+    def test_an_offer_with_no_flag_still_gets_an_eta_when_the_product_ships(self):
+        self.assertIn("shipping_eta", self._sections(ships_physical=True))
+
+    def test_the_offers_own_flag_still_works_on_its_own(self):
+        from stripe_link.runtime.upsell_pages import synthesize_thank_you_page
+        page, _ = synthesize_thank_you_page(self.PAGE, {**self.OFFER, "ships_physical": True})
+        self.assertIn("shipping_eta", [s.get("type") for s in page["sections"]])
+
+    def test_a_digital_offer_still_gets_no_package_card(self):
+        """The fix must not undo 2026-10-08: a digital buyer was shown a package card, and the builder
+        preview showed the tenant one with no order present to remove it."""
+        self.assertNotIn("shipping_eta", self._sections())
+        self.assertNotIn("shipping_eta", self._sections(ships_physical=False))
+
+    def test_publishing_derives_it_from_the_products_it_loaded(self):
+        from stripe_link.runtime.publishing import _products_ship_physical
+        self.assertTrue(_products_ship_physical(
+            {"p1": {"fulfillment": {"requires_shipping": True}}}))
+        self.assertFalse(_products_ship_physical(
+            {"p1": {"fulfillment": {"requires_shipping": False}}}))
+        self.assertFalse(_products_ship_physical({}))
+        self.assertFalse(_products_ship_physical(None))
+
+    def test_both_publish_paths_pass_it(self):
+        """The published artifact AND the builder preview, or the tenant sees one thing and the buyer
+        another — which is the drift the page composer exists to stop."""
+        import pathlib
+        src = pathlib.Path("src/stripe_link/runtime/publishing.py").read_text(encoding="utf-8")
+        self.assertEqual(src.count("ships_physical=_products_ship_physical(products_by_id)"), 2)
