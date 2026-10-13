@@ -773,6 +773,19 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # paragraphs stack flush and read as the run-on block they were split up to fix. Two classes outrank
     # the one-class `margin:0` rules, so it wins wherever it applies.
     "    .sl-para + .sl-para{margin-top:0.9em}",
+    "    .sl-photos{display:grid;gap:1.6rem}",
+    "    .sl-photo-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;color:var(--sl-content-heading);text-align:center}",
+    "    .sl-photo{margin:0;display:grid;gap:0.8rem}",
+    # Radius + overflow on the CONTAINER, never on the <img>. A cropped image is a scaled, offset picture
+    # inside this box; rounding the image itself rounds the part that is already overflowing and clipped,
+    # which showed as a straight-cornered photo with a curved ghost (fixed once already, 2026-10-12).
+    "    .sl-photo-media{border-radius:var(--sl-radius);overflow:hidden}",
+    # Natural proportions when there is no crop: a screenshot is only proof while its text is readable, so
+    # nothing letterboxes it. `:not(.sl-cropped)` because the crop surface owns its own sizing.
+    "    .sl-photo-media:not(.sl-cropped) img{width:100%;height:auto;display:block}",
+    "    .sl-photo figcaption{font-size:1.4rem;line-height:1.5;color:var(--sl-content-text);text-align:center}",
+    # 2-up only where there is room for it; a pair of half-width images on a phone is two unreadable images.
+    "    @media (min-width: 42rem){.sl-photos.is-side-by-side{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}.sl-photos.is-side-by-side .sl-photo-heading{grid-column:1/-1}}",
     "    .sl-content-media{border-radius:0.8rem;overflow:hidden}",
     "    .sl-content-media:not(.sl-cropped) img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover}",
     # Centered variant (SALES_FUNNELS.md P3.5): a single centered column — used for the upsell product blurb and
@@ -2663,6 +2676,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url), "version": 1},
     "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
+    "photo": {"render": lambda c: render_photo(c.section), "version": 1},
     "video": {"render": lambda c: render_video(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
@@ -6382,6 +6396,67 @@ NUMBERED_LIST_MAX = 12
 
 BEFORE_AFTER_SIZES = "(min-width: 60rem) 60rem, 100vw"
 BEFORE_AFTER_DEFAULT_RATIO = 4 / 3
+
+
+PHOTO_SIZES = "(min-width: 52rem) 52rem, 100vw"
+PHOTO_PAIR_SIZES = "(min-width: 52rem) 26rem, 50vw"
+
+
+def render_photo(section: dict[str, Any]) -> str:
+    """Plain images on the page: screenshots used as proof, a portrait, a diagram.
+
+    Every other element that carries an image attaches it to something else -- a content block's prose, an
+    author's name, a before/after comparison. There was no way to put an image on a page as the content,
+    which is what a stack of screenshotted reviews is: the picture IS the argument.
+
+    A LIST with one shared heading rather than one image per element, because the screenshots that prompted
+    this arrive as a set under a single claim, and three separate rows would let them drift apart in the
+    order. The element is repeatable, so a page can still hold several unrelated photo blocks.
+
+    Stacked at full width by default: a review screenshot is only proof while its text is readable, and a
+    grid shrinks it until it is not. `side_by_side` opts into a 2-up grid for photos that do not carry text.
+    """
+    images = [image for image in (section.get("images") or []) if str((image or {}).get("url") or "").strip()]
+    if not images:
+        return ""
+
+    heading = str(section.get("heading") or "").strip()
+    pair = bool(section.get("side_by_side"))
+    sizes = PHOTO_PAIR_SIZES if pair else PHOTO_SIZES
+
+    rows: list[str] = []
+    if heading:
+        rows.append(f'      <h2 class="sl-photo-heading">{render_headline_markup(heading)}</h2>')
+
+    for image in images:
+        url = str(image.get("url") or "").strip()
+        caption = str(image.get("caption") or "").strip()
+        # The tenant's own alt first; a caption describes the picture to everyone, so it is the honest
+        # fallback rather than inventing one. Never the heading: it describes the SET, and repeating it on
+        # each image announces the same words three times.
+        alt = str(image.get("alt") or "").strip() or caption
+        figure = cropped_media(
+            responsive_img(url, alt, sizes=sizes),
+            image.get("crop"), "photo", "sl-photo-media",
+        )
+        # A real <figure>/<figcaption> when there is a caption: the caption belongs TO this image, and that
+        # pairing is what a screen reader needs. Without one a bare figure would add a landmark saying
+        # nothing (plans/SEMANTIC_HTML.md).
+        if caption:
+            rows.append(f'      <figure class="sl-photo">{figure}<figcaption>{escape(caption)}</figcaption></figure>')
+        else:
+            rows.append(f'      <div class="sl-photo">{figure}</div>')
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    grid = " is-side-by-side" if pair else ""
+    section_id = escape(str(section.get("id", "photo")))
+    return "\n".join([
+        f'    <section class="sl-photos{grid}{themed}" data-section-id="{section_id}" data-section-type="photo"{style_attr}>',
+        *rows,
+        "    </section>",
+    ])
 
 
 def render_before_after(section: dict[str, Any]) -> str:

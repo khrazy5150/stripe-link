@@ -28,6 +28,7 @@
     "page_ribbon",
     "client_marquee",
     "video",
+    "photo",
     "before_after",
     "faq",
     "trust_badges",
@@ -496,6 +497,20 @@
       "tokens": [
         "content_heading",
         "content_text"
+      ]
+    },
+    "photo": {
+      "placement": "free",
+      "label": "Photo",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "content_heading",
+        "content_text",
+        "content_border"
       ]
     },
     "social_links": {

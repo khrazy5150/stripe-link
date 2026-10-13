@@ -235,7 +235,8 @@ class CssIsolationTests(unittest.TestCase):
         A surface listed but not wired is a lie the cropper cannot detect: the tenant is offered a shape
         picker, frames a photo, and the page ignores it.
         """
-        from stripe_link.runtime.html import render_author_bio, render_before_after, render_content_blocks
+        from stripe_link.runtime.html import (render_author_bio, render_before_after, render_content_blocks,
+                                              render_photo)
 
         root = pathlib.Path(__file__).resolve().parents[1]
         declared = set(json.loads((root / "src/stripe_link/image_ratios.json").read_text())["placement"])
@@ -253,6 +254,9 @@ class CssIsolationTests(unittest.TestCase):
                 "id": "ba", "type": "before_after",
                 "before_url": "https://i/b/large.webp", "after_url": "https://i/a/large.webp",
                 "before_crop": dict(crop), "after_crop": dict(crop)}),
+            "photo": render_photo({
+                "id": "ph", "type": "photo",
+                "images": [{"url": "https://i/x/large.webp", "crop": dict(crop)}]}),
         }
         self.assertEqual(declared, set(rendered),
                          "a declared surface with no coverage here is one nobody has proven crops")
@@ -294,6 +298,7 @@ class MechanismTests(unittest.TestCase):
             # Both sides take the ELEMENT's shape, so the editor binds element.ratio rather than the table
             # directly -- the shape is asked once, which is what keeps the two halves aligned.
             "before_after": None,
+            "photo": "dashboard/src/components/LandingPages.vue",
         }
         declared = set(table["placement"]) | set(table["asset"])
         self.assertEqual(declared, set(OWNER), "every declared surface needs a named owner here")

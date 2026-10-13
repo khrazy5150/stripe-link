@@ -1809,6 +1809,17 @@ def validate_page_document(document: dict[str, Any]) -> None:
             for logo in logos:
                 require_string(logo, "image_url", "Client marquee logo image_url")
                 optional_string(logo, "name", "Client marquee logo name")
+        elif section_type == "photo":
+            optional_string(section, "heading", "Photo heading")
+            optional_bool(section, "side_by_side", "Photo side_by_side")
+            images = optional_limited_object_list(section, "images", 12, "Photo images")
+            for image in images:
+                # `url` is the only requirement -- an entry with no picture is not a photo. `alt` and
+                # `caption` are optional because the renderer falls back from one to the other, and
+                # demanding alt text here would block a save rather than improve a page.
+                require_string(image, "url", "Photo image url")
+                optional_string(image, "alt", "Photo image alt")
+                optional_string(image, "caption", "Photo image caption")
         elif section_type == "product_carousel":
             optional_string(section, "heading", "Product carousel heading")
             optional_string_list(section, "offer_ids", "Product carousel offer_ids")

@@ -825,6 +825,28 @@
                       <label class="builder-toggle"><input v-model="element.divider" type="checkbox" /><span>Add a dividing line</span></label>
                     </template>
 
+                    <template v-else-if="element.type === 'photo'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <div v-for="(image, i) in element.images" :key="i" class="element-subrow">
+                        <ImageUploadField
+                          v-model="image.url"
+                          :crop="image.crop"
+                          :ratios="imageRatios.placement.photo"
+                          :uploader="uploadPageImage"
+                          label="Upload photo"
+                          alt="Photo preview"
+                          allow-url
+                          url-placeholder="or paste an image URL"
+                          @update:crop="(rect) => (image.crop = rect)"
+                        />
+                        <input v-model.trim="image.caption" type="text" placeholder="Caption (optional)" />
+                        <input v-model.trim="image.alt" type="text" :placeholder="image.caption ? 'Alt text (defaults to the caption)' : 'Alt text — describes the image to screen readers'" />
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'images', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'images', { url: '', crop: null, caption: '', alt: '' })">+ Add photo</button>
+                      <label class="builder-toggle"><input v-model="element.side_by_side" type="checkbox" /><span>Show two across</span></label>
+                    </template>
+
                     <template v-else-if="element.type === 'testimonials'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
@@ -5716,6 +5738,9 @@ function newElement(type) {
   const base = { id: localId("el"), type };
   // Sensible default headings so the tenant isn't guessing — they can always reword them.
   if (type === "content_block") return { ...base, title: "", text: "", image_url: "", centered: false, divider: false };
+  // Starts with ONE empty row: an element whose editor is blank reads as broken, and "+ Add photo" is
+  // not an obvious first move when there is nothing on screen to add to.
+  if (type === "photo") return { ...base, heading: "", images: [{ url: "", crop: null, caption: "", alt: "" }], side_by_side: false };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
@@ -6348,6 +6373,7 @@ function rowSummary(row) {
   // A title-less block is legitimate (it is how a plain paragraph gets on the page), so fall back to the
   // opening words rather than the bare word "text" -- the point of the row is to tell blocks apart.
   if (row.type === "content_block") return e.title?.trim() || excerpt(e.text) || "empty";
+  if (row.type === "photo") return countLabel((e.images || []).filter((i) => (i.url || "").trim()).length, "photo");
   // The author IS the section — whose credibility it borrows is the one thing worth reading off a
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
@@ -6458,6 +6484,16 @@ function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
     return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), ...(element.divider ? { divider: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
+  }
+  if (element.type === "photo") {
+    const images = (element.images || [])
+      .filter((image) => (image.url || "").trim())
+      .map((image) => ({ url: image.url.trim(), crop: image.crop || undefined,
+                         caption: (image.caption || "").trim() || undefined,
+                         alt: (image.alt || "").trim() || undefined }));
+    if (!images.length) return null;   // nothing to show; same rule as an empty testimonials list
+    return { id: element.id, type: "photo", heading: element.heading || undefined,
+             ...(element.side_by_side ? { side_by_side: true } : {}), images };
   }
   if (element.type === "testimonials") {
     const items = (element.items || []).filter((item) => (item.quote || "").trim());
@@ -6646,6 +6682,11 @@ function elementsFromPage(sections) {
       for (const block of section.blocks || []) {
         elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
       }
+    } else if (section.type === "photo") {
+      elements.push({ id: localId("el"), type: "photo", heading: section.heading || "",
+        side_by_side: Boolean(section.side_by_side),
+        images: (section.images || []).map((image) => ({ url: image.url || "", crop: image.crop || null,
+                                                         caption: image.caption || "", alt: image.alt || "" })) });
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
