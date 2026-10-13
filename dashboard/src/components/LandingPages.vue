@@ -6273,7 +6273,7 @@ function ribbonCta(cta) {
 function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
-    return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined }] };
+    return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
   }
   if (element.type === "testimonials") {
     const items = (element.items || []).filter((item) => (item.quote || "").trim());
@@ -6374,6 +6374,8 @@ function elementSection(element) {
       presentation: element.presentation || "image_left",
       // centered has no image slot, so the URL is not carried into a document that will ignore it
       image_url: element.presentation === "centered" ? undefined : (element.image_url || undefined),
+      // Follows the image: a crop without the image it was framed against means nothing.
+      image_crop: element.presentation === "centered" ? undefined : (element.image_crop || undefined),
       eyebrow: element.eyebrow || undefined,
       headline: element.headline || undefined,
       body: element.body || undefined,
@@ -6424,6 +6426,9 @@ function elementSection(element) {
     if (!element.photo_url && !element.name && !element.headline && !element.body) return null;
     const theme = element.theme && element.theme.bg ? element.theme : undefined;
     return { id: element.id, type: "author_bio", photo_url: element.photo_url || undefined,
+      // The crop is part of the image, not decoration: dropping it here left the cropper working
+      // in the Live Preview and forgotten on save (2026-10-12).
+      image_crop: element.image_crop || undefined,
       name: element.name || undefined, headline: formatHeadline(element.headline || "") || undefined,
       body: element.body || undefined, theme };
   }
@@ -6455,7 +6460,7 @@ function elementsFromPage(sections) {
   for (const section of sections || []) {
     if (section.type === "content_block") {
       for (const block of section.blocks || []) {
-        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", centered: Boolean(section.centered) });
+        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered) });
       }
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
@@ -6463,7 +6468,8 @@ function elementsFromPage(sections) {
     } else if (section.type === "page_ribbon") {
       elements.push({ id: localId("el"), type: "page_ribbon",
         purpose: section.purpose || "custom", presentation: section.presentation || "image_left",
-        image_url: section.image_url || "", eyebrow: section.eyebrow || "",
+        image_url: section.image_url || "", image_crop: section.image_crop || null,
+        eyebrow: section.eyebrow || "",
         headline: section.headline || "", body: section.body || "",
         cta: { label: section.cta?.label || "", action: section.cta?.action || "redirect",
                page_id: section.cta?.page_id || "", target: section.cta?.target || "",
@@ -6496,6 +6502,7 @@ function elementsFromPage(sections) {
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "author_bio") {
       elements.push({ id: localId("el"), type: "author_bio", photo_url: section.photo_url || "",
+        image_crop: section.image_crop || null,
         name: section.name || "", headline: section.headline || "", body: section.body || "",
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "price_highlight") {
