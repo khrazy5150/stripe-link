@@ -600,7 +600,7 @@
                   <span>Hide brand name</span>
                 </label>
                 <small class="field-note">
-                  Removes the <strong>● {{ brandLabelFallback || "brand" }}</strong> mark above the hero. Turn it off
+                  Removes the <strong>● brand name</strong> mark above the hero. Turn it off
                   if this page is about a person rather than a business — the name below can stand in for it.
                 </small>
 
@@ -2983,7 +2983,22 @@ const isListicleOffer = computed(() => deriveOfferType(builderOffer.value) === "
 // would freeze this page at whatever the avatar was the day it was built.
 // What the brand label would say if the tenant typed nothing -- shown as the placeholder so the fallback
 // is visible rather than mysterious.
-const brandLabelFallback = computed(() => offerBrandDefault(builderOffer.value) || "Your business name");
+// What the brand mark will actually say if this page names nothing. The RENDERER resolves it
+// (`resolve_business_name`: the Site's organisation name, then the tenant's business name, then the
+// owner's display name), and the builder cannot: `offerBrandDefault` is the OFFER brand chain used for
+// SEO titles and knows nothing about the Site. Using it here promised "Poliaxis Nutrition" on a page
+// whose mark reads "Quill" (author, 2026-10-13) -- a placeholder that lies about what publishing will do.
+//
+// So read the mark the preview frame already rendered, the same single-source rule the colour swatches
+// follow. `offerBrandDefault` stays only as the pre-load fallback, where a near-miss beats an empty box.
+const renderedBrandLabel = computed(() => {
+  void previewTokenEpoch.value;   // getComputedStyle/DOM reads are not reactive; re-read on frame load
+  const doc = previewFrame.value?.contentDocument;
+  const mark = doc?.querySelector('[data-section-type="brand_label"]');
+  return (mark?.textContent || "").trim();
+});
+const brandLabelFallback = computed(() =>
+  renderedBrandLabel.value || offerBrandDefault(builderOffer.value) || "Your business name");
 const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl || "");
 const effectiveAvatarUrl = computed(() => builder.avatar_url || storeAvatarUrl.value);
 const avatarIsFromProfile = computed(() => !builder.avatar_url && Boolean(storeAvatarUrl.value));
