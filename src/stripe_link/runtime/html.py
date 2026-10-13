@@ -773,6 +773,31 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # paragraphs stack flush and read as the run-on block they were split up to fix. Two classes outrank
     # the one-class `margin:0` rules, so it wins wherever it applies.
     "    .sl-para + .sl-para{margin-top:0.9em}",
+    "    .sl-info{display:grid;gap:1.6rem}",
+    "    .sl-info-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;color:var(--sl-content-heading);text-align:center}",
+    "    .sl-info-cards{list-style:none;display:grid;gap:1.6rem;counter-reset:sl-info}",
+    # position:relative so the badge can overhang this card rather than the page.
+    "    .sl-info-card{position:relative;background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:var(--sl-radius);padding:2.4rem}",
+    # The marked card is outlined in the page accent and nothing else changes -- it is the one to look at,
+    # not a different kind of card.
+    "    .sl-info-card.is-featured{border-color:var(--sl-accent);box-shadow:0 0 0 1px var(--sl-accent)}",
+    "    .sl-info-label{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--sl-card-muted,var(--sl-muted))}",
+    # The counter lives in CSS so reordering cards renumbers them and the glyph carries no content.
+    "    .sl-info-cards{counter-reset:sl-info}",
+    "    .sl-info-card{counter-increment:sl-info}",
+    "    .sl-info-count::before{content:counter(sl-info);font-family:var(--sl-font-heading);font-size:2.4rem;font-style:italic;letter-spacing:0;color:var(--sl-accent)}",
+    "    .sl-info-title{font-family:var(--sl-font-heading);font-size:1.9rem;line-height:1.25;color:var(--sl-card-heading,var(--sl-content-heading))}",
+    "    .sl-info-body{font-size:1.5rem;line-height:1.6;color:var(--sl-card-text,var(--sl-content-text))}",
+    # The sticker: the ^^highlight^^ colours the tenant already controls, the theme's accent face, and a
+    # couple of degrees of rotation so it reads as something stuck on rather than another label.
+    "    .sl-info-badge{position:absolute;top:-1.2rem;right:1.6rem;transform:rotate(-2deg);background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);font-family:var(--sl-font-accent);font-size:1.3rem;line-height:1.3;padding:0.5rem 1rem;border-radius:0.6rem;max-width:min(26rem,70%)}",
+    # NUMBERED: title in a narrow column, body beside it. Only where there is room -- on a phone the two
+    # columns become two strips four characters wide, which is what the author's own screenshot shows.
+    "    .sl-info.is-numbered .sl-info-card{display:grid;gap:0.4rem 1.6rem}",
+    "    @media (min-width: 40rem){.sl-info.is-numbered .sl-info-card{grid-template-columns:3rem 14rem minmax(0,1fr);align-items:start}.sl-info.is-numbered .sl-info-label{grid-row:1;grid-column:1}.sl-info.is-numbered .sl-info-title{grid-row:1;grid-column:2}.sl-info.is-numbered .sl-info-body{grid-row:1;grid-column:3}}",
+    # LABELLED: eyebrow, title, body stacked at full width.
+    "    .sl-info.is-labelled .sl-info-card{display:grid;gap:0.8rem}",
+    "    .sl-info.is-labelled .sl-info-title{font-size:2.4rem}",
     "    .sl-photos{display:grid;gap:1.6rem}",
     "    .sl-photo-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;color:var(--sl-content-heading);text-align:center}",
     "    .sl-photo{margin:0;display:grid;gap:0.8rem}",
@@ -2677,6 +2702,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url), "version": 1},
     "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
     "photo": {"render": lambda c: render_photo(c.section), "version": 1},
+    "info_cards": {"render": lambda c: render_info_cards(c.section), "version": 1},
     "video": {"render": lambda c: render_video(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
@@ -6607,6 +6633,90 @@ def render_numbered_list(section: dict[str, Any]) -> str:
     section_id = escape(str(section.get("id", "numbered-list")))
     return "\n".join([
         f'    <section class="sl-numbered-list" data-section-id="{section_id}" data-section-type="numbered_list">',
+        *rows,
+        "    </section>",
+    ])
+
+
+INFO_CARDS_MAX = 10
+INFO_CARD_PRESENTATIONS = ("numbered", "labelled")
+
+
+def render_info_cards(section: dict[str, Any]) -> str:
+    """Titled points, each with its own explanation. A numbered_list carries LINES; this carries cards.
+
+    Kept apart from numbered_list rather than growing it, because that element's items are plain strings
+    and its whole argument is that it is a list -- a real <ol> whose order is the content. Turning its
+    items into objects would migrate every existing page to say something it does not mean.
+
+    Two presentations, which is what the author asked for:
+
+    * `numbered`  -- an auto-numbered card with the title in a narrow column and the body beside it. The
+                     number is a CSS counter, never authored, so reordering cards cannot strand it.
+    * `labelled`  -- an authored eyebrow ("TOOL 01") above a larger title, body underneath, full width.
+
+    Per card: an optional `badge` -- the sticker overhanging the corner -- and `featured`, which outlines
+    one card to mark it as the one to look at. Both appear in the author's references and neither changes
+    the card's meaning, only its weight.
+    """
+    items = [
+        item for item in (section.get("items") or [])
+        if isinstance(item, dict) and (str(item.get("title") or "").strip() or str(item.get("body") or "").strip())
+    ][:INFO_CARDS_MAX]
+    if not items:
+        return ""
+
+    presentation = str(section.get("presentation") or "numbered")
+    if presentation not in INFO_CARD_PRESENTATIONS:
+        presentation = "numbered"
+    numbered = presentation == "numbered"
+
+    heading = str(section.get("heading") or "").strip()
+    rows: list[str] = []
+    if heading:
+        rows.append(f'      <h2 class="sl-info-heading">{render_headline_markup(heading)}</h2>')
+
+    # An <ol> when the cards are numbered: the sequence is then in the markup, which is what lets assistive
+    # technology announce "2 of 4" rather than reading a decorative glyph. A labelled set is not ordered,
+    # so it is a plain list and claims nothing about sequence.
+    list_tag = "ol" if numbered else "ul"
+    rows.append(f'      <{list_tag} class="sl-info-cards">')
+    for item in items:
+        label = str(item.get("label") or "").strip()
+        title = str(item.get("title") or "").strip()
+        body = str(item.get("body") or "").strip()
+        badge = str(item.get("badge") or "").strip()
+        featured = " is-featured" if item.get("featured") else ""
+
+        card: list[str] = []
+        if badge:
+            # aria-hidden: it repeats a price or aside that the body already states, and a screen reader
+            # meeting it before the title hears the aside first.
+            card.append(f'          <span class="sl-info-badge" aria-hidden="true">{escape(badge)}</span>')
+        # In `numbered` the eyebrow slot holds the counter unless the tenant typed one over it.
+        if label:
+            card.append(f'          <p class="sl-info-label">{escape(label)}</p>')
+        elif numbered:
+            card.append('          <p class="sl-info-label sl-info-count" aria-hidden="true"></p>')
+        if title:
+            card.append(f'          <h3 class="sl-info-title">{render_headline_markup(title)}</h3>')
+        if body:
+            # Real paragraphs: these bodies carry a second thought ("Who buys it: ...") under the first,
+            # which is exactly what a blank line means.
+            card.append(render_body_markup(body, "sl-info-body", "          "))
+
+        rows.append(f'        <li class="sl-info-card{featured}">')
+        rows.extend(card)
+        rows.append("        </li>")
+    rows.append(f"      </{list_tag}>")
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "info-cards")))
+    return "\n".join([
+        f'    <section class="sl-info is-{presentation}{themed}" data-section-id="{section_id}"'
+        f' data-section-type="info_cards"{style_attr}>',
         *rows,
         "    </section>",
     ])

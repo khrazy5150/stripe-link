@@ -25,6 +25,7 @@
     "content_block",
     "quote",
     "numbered_list",
+    "info_cards",
     "page_ribbon",
     "client_marquee",
     "video",
@@ -219,6 +220,23 @@
         "content_heading",
         "content_text",
         "content_border"
+      ]
+    },
+    "info_cards": {
+      "placement": "free",
+      "label": "Info cards",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "content_heading",
+        "content_text",
+        "content_border",
+        "accent",
+        "highlight_bg",
+        "highlight_bg_text"
       ]
     },
     "page_ribbon": {

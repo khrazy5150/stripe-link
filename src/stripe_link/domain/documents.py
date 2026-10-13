@@ -1809,6 +1809,19 @@ def validate_page_document(document: dict[str, Any]) -> None:
             for logo in logos:
                 require_string(logo, "image_url", "Client marquee logo image_url")
                 optional_string(logo, "name", "Client marquee logo name")
+        elif section_type == "info_cards":
+            optional_string(section, "heading", "Info cards heading")
+            if section.get("presentation") is not None:
+                require_enum(section, "presentation", {"numbered", "labelled"}, "Info cards presentation")
+            items = optional_limited_object_list(section, "items", 10, "Info cards items")
+            for item in items:
+                # A card is its title; body/label/badge decorate it. Requiring the body too would refuse
+                # the one-line card the numbered style is built for.
+                require_string(item, "title", "Info card title")
+                optional_string(item, "body", "Info card body")
+                optional_string(item, "label", "Info card label")
+                optional_string(item, "badge", "Info card badge")
+                optional_bool(item, "featured", "Info card featured")
         elif section_type == "photo":
             optional_string(section, "heading", "Photo heading")
             optional_bool(section, "side_by_side", "Photo side_by_side")

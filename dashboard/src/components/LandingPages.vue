@@ -825,6 +825,27 @@
                       <label class="builder-toggle"><input v-model="element.divider" type="checkbox" /><span>Add a dividing line</span></label>
                     </template>
 
+                    <template v-else-if="element.type === 'info_cards'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <label class="offer-field">
+                        <span>Style</span>
+                        <select v-model="element.presentation">
+                          <option value="numbered">Numbered — title beside the text</option>
+                          <option value="labelled">Labelled — eyebrow above a big title</option>
+                        </select>
+                      </label>
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <input v-model.trim="item.label" type="text"
+                               :placeholder="element.presentation === 'labelled' ? 'Eyebrow, e.g. TOOL 01' : 'Replaces the number (optional)'" />
+                        <input v-model.trim="item.title" type="text" placeholder="Title" />
+                        <textarea v-model.trim="item.body" rows="3" placeholder="What this point says. Leave a blank line to start a new paragraph."></textarea>
+                        <input v-model.trim="item.badge" type="text" placeholder="Corner sticker (optional), e.g. sells from: $990" />
+                        <label class="builder-toggle"><input v-model="item.featured" type="checkbox" /><span>Highlight this card</span></label>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { label: '', title: '', body: '', badge: '', featured: false })">+ Add card</button>
+                    </template>
+
                     <template v-else-if="element.type === 'photo'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <div v-for="(image, i) in element.images" :key="i" class="element-subrow">
@@ -5741,6 +5762,8 @@ function newElement(type) {
   // Starts with ONE empty row: an element whose editor is blank reads as broken, and "+ Add photo" is
   // not an obvious first move when there is nothing on screen to add to.
   if (type === "photo") return { ...base, heading: "", images: [{ url: "", crop: null, caption: "", alt: "" }], side_by_side: false };
+  if (type === "info_cards") return { ...base, heading: "", presentation: "numbered",
+    items: [{ label: "", title: "", body: "", badge: "", featured: false }] };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
@@ -6374,6 +6397,7 @@ function rowSummary(row) {
   // opening words rather than the bare word "text" -- the point of the row is to tell blocks apart.
   if (row.type === "content_block") return e.title?.trim() || excerpt(e.text) || "empty";
   if (row.type === "photo") return countLabel((e.images || []).filter((i) => (i.url || "").trim()).length, "photo");
+  if (row.type === "info_cards") return countLabel((e.items || []).filter((i) => (i.title || "").trim()).length, "card");
   // The author IS the section — whose credibility it borrows is the one thing worth reading off a
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
@@ -6484,6 +6508,17 @@ function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
     return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), ...(element.divider ? { divider: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
+  }
+  if (element.type === "info_cards") {
+    const items = (element.items || [])
+      .filter((item) => (item.title || "").trim() || (item.body || "").trim())
+      .map((item) => ({ title: (item.title || "").trim(), body: (item.body || "").trim() || undefined,
+                        label: (item.label || "").trim() || undefined,
+                        badge: (item.badge || "").trim() || undefined,
+                        ...(item.featured ? { featured: true } : {}) }));
+    if (!items.length) return null;
+    return { id: element.id, type: "info_cards", heading: element.heading || undefined,
+             presentation: element.presentation || "numbered", items };
   }
   if (element.type === "photo") {
     const images = (element.images || [])
@@ -6682,6 +6717,12 @@ function elementsFromPage(sections) {
       for (const block of section.blocks || []) {
         elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
       }
+    } else if (section.type === "info_cards") {
+      elements.push({ id: localId("el"), type: "info_cards", heading: section.heading || "",
+        presentation: section.presentation || "numbered",
+        items: (section.items || []).map((item) => ({ label: item.label || "", title: item.title || "",
+                                                      body: item.body || "", badge: item.badge || "",
+                                                      featured: Boolean(item.featured) })) });
     } else if (section.type === "photo") {
       elements.push({ id: localId("el"), type: "photo", heading: section.heading || "",
         side_by_side: Boolean(section.side_by_side),
