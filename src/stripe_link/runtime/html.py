@@ -5578,10 +5578,13 @@ def render_content_blocks(section: dict[str, Any]) -> str:
     rendered = []
     for block in blocks:
         image_url = block.get("image_url")
-        rendered.append("\n".join([
+        title = str(block.get("title") or "").strip()
+        rendered.append("\n".join(row for row in [
             "      <article class=\"sl-content-block\">",
             "        <div>",
-            f"          <h2>{render_headline_markup(block.get('title') or '')}</h2>",
+            # No title means NO <h2>, not an empty one: a heading with nothing in it is a hole in the
+            # page's outline (plans/SEMANTIC_HTML.md) and reads as a blank line to a screen reader.
+            f"          <h2>{render_headline_markup(title)}</h2>" if title else "",
             render_body_markup(block.get("text"), "", "          "),
             "        </div>",
             "        " + cropped_media(
@@ -5589,7 +5592,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
                 block.get("image_crop"), "content_block", "sl-content-media",
             ) if image_url else "",
             "      </article>",
-        ]))
+        ] if row))   # an absent title or image contributes "", which would otherwise leave a blank line
     if not rendered:
         return ""
     centered = " sl-content-blocks--centered" if section.get("centered") else ""

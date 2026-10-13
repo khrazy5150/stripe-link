@@ -1779,7 +1779,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "centered", "Content block centered")
             blocks = optional_limited_object_list(section, "blocks", 10, "Content blocks")
             for block in blocks:
-                require_string(block, "title", "Content block title")
+                # The title is OPTIONAL: a content block is the only way to put a plain paragraph on a
+                # page, and demanding a heading for one forced tenants to invent a title or go without the
+                # paragraph. The renderer omits the <h2> entirely when it is absent, rather than emitting
+                # an empty heading. `text` stays required -- it is what makes the block a content block.
+                optional_string(block, "title", "Content block title")
                 require_string(block, "text", "Content block text")
                 optional_string(block, "image_url", "Content block image_url")
         elif section_type == "testimonials":

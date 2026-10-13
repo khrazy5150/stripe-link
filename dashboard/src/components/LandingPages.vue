@@ -807,7 +807,7 @@
                 <template v-for="element in [sectionEditor.row.element]" :key="element.id">
 
                     <template v-if="element.type === 'content_block'">
-                      <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
+                      <input :value="element.title" type="text" placeholder="Title (optional)" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
                       <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
                       <ImageUploadField
                         v-model="element.image_url"
@@ -6329,7 +6329,9 @@ function rowSummary(row) {
   if (row.type === "faq") return countLabel((e.items || []).filter((i) => (i.question || "").trim()).length, "question");
   if (row.type === "client_marquee") return countLabel((e.logos || []).filter((l) => l.image_url).length, "logo");
   if (row.type === "rating") return `${e.value || 5} stars`;
-  if (row.type === "content_block") return e.title?.trim() || (e.text?.trim() ? "text" : "empty");
+  // A title-less block is legitimate (it is how a plain paragraph gets on the page), so fall back to the
+  // opening words rather than the bare word "text" -- the point of the row is to tell blocks apart.
+  if (row.type === "content_block") return e.title?.trim() || excerpt(e.text) || "empty";
   // The author IS the section — whose credibility it borrows is the one thing worth reading off a
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
@@ -6348,6 +6350,14 @@ function rowSummary(row) {
 function countLabel(n, noun) {
   if (!n) return "empty";
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+// The opening words of a body field, for a collapsed row that has no title to show. Newlines collapse to
+// spaces here on purpose: this is a one-line summary, not the copy itself.
+function excerpt(text, limit = 48) {
+  const flat = String(text || "").replace(/\s+/g, " ").trim();
+  if (flat.length <= limit) return flat;
+  return `${flat.slice(0, limit).trimEnd()}…`;
 }
 
 // Sections with no editor still earn a row: a tenant needs to see WHERE they land, even with nothing to set.
