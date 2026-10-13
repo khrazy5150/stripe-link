@@ -125,6 +125,12 @@ fi
 # --no-fail-on-empty-changeset: with `set -e`, an unchanged stack made `sam deploy` exit non-zero and the
 # script stopped BEFORE uploading the billing config below — so a config-only change could never be
 # deployed. That is how a stale fee table stayed live after the pricing pivot (2026-09-14).
+#
+# DEPLOY_EXTRA_ARGS exists so a PROD deploy can be audited before it applies: run with
+# DEPLOY_EXTRA_ARGS=--no-execute-changeset to create the changeset, read what it actually changes, then
+# `aws cloudformation execute-change-set`. The parameter logic above (which PRESERVES live feature flags
+# read off the running stack) must not be bypassed by hand-rolling a separate `sam deploy` to get there.
+read -r -a DEPLOY_EXTRA <<< "${DEPLOY_EXTRA_ARGS:-}"
 sam deploy \
   --stack-name "${STACK_NAME}" \
   --region "${REGION}" \
@@ -132,7 +138,8 @@ sam deploy \
   --no-fail-on-empty-changeset \
   --resolve-s3 \
   --parameter-overrides "${PARAMETER_OVERRIDES[@]}" \
-  --tags "Project=stripe-link" "Environment=${ENVIRONMENT}" "ManagedBy=sam"
+  --tags "Project=stripe-link" "Environment=${ENVIRONMENT}" "ManagedBy=sam" \
+  ${DEPLOY_EXTRA[@]+"${DEPLOY_EXTRA[@]}"}
 
 CONFIG_BUCKET="$(aws cloudformation describe-stacks \
   --region "${REGION}" \
