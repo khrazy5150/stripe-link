@@ -4,10 +4,22 @@
   "title": "AppConfig",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "document_type", "config_key", "environment", "environments"],
+  "required": [
+    "schema_version",
+    "document_type",
+    "config_key",
+    "environment",
+    "environments"
+  ],
   "properties": {
-    "schema_version": { "type": "string", "const": "2026-05-29" },
-    "document_type": { "type": "string", "const": "app_config" },
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "app_config"
+    },
     "config_key": {
       "type": "string",
       "const": "app_config",
@@ -21,20 +33,32 @@
     "environments": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dev", "prod"],
+      "required": [
+        "dev",
+        "prod"
+      ],
       "properties": {
-        "dev": { "$ref": "#/$defs/environmentConfig" },
-        "prod": { "$ref": "#/$defs/environmentConfig" }
+        "dev": {
+          "$ref": "#/$defs/environmentConfig"
+        },
+        "prod": {
+          "$ref": "#/$defs/environmentConfig"
+        }
       }
     },
     "dashboard": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "display_order": { "type": "integer", "minimum": 0 },
+        "display_order": {
+          "type": "integer",
+          "minimum": 0
+        },
         "editable_sections": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -42,16 +66,29 @@
       "type": "object",
       "additionalProperties": true
     },
-    "created_at": { "type": "integer", "minimum": 0 },
-    "updated_at": { "type": "integer", "minimum": 0 }
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
   },
   "$defs": {
     "environmentConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["api_base_url", "dashboard_url", "checkout_base_url", "label"],
+      "required": [
+        "api_base_url",
+        "dashboard_url",
+        "checkout_base_url",
+        "label"
+      ],
       "properties": {
-        "label": { "type": "string" },
+        "label": {
+          "type": "string"
+        },
         "api_base_url": {
           "type": "string",
           "pattern": "^https?://[^\\s\"'<>]+$"
@@ -78,7 +115,17 @@
         },
         "feature_flags": {
           "type": "object",
-          "additionalProperties": { "type": "boolean" }
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "pages_preview_base_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "test_pages_host": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9.-]+$"
         }
       }
     }

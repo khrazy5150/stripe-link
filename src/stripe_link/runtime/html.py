@@ -252,6 +252,13 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         # is what the author asked for on the numbered badges and the ribbon CTA -- and it matches the
         # CTA gradient's first stop, so the purples on the page are one family rather than two.
         "accent": "#7c3aed",
+        # The headline's highlighted words carry the page's purple as a GRADIENT, which is what the
+        # reference does and what keeps the rest of the headline plain white. `highlight_text` is the
+        # solid fallback a browser without `background-clip:text` falls back to -- readable on the dark
+        # page at 5.09, so the page degrades to "no gradient" rather than to "no words".
+        "highlight_text": "#a855f7",
+        "highlight_gradient": "linear-gradient(90deg,#7c3aed,#c026d3)",
+        "highlight_ink": "transparent",
         # White, not the accent: the reference sets the headline in white and carries the purple in the
         # highlighted words and the CTA, which is what stops the page reading as uniformly violet.
         "headline": "#ffffff",
@@ -534,6 +541,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-seo-title{text-align:center}",
     "    .sl-seo-title p{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
     "    .sl-mark-text{color:var(--sl-highlight-text)}",
+    # A GRADIENT-FILLED highlight, for a theme that wants one (royal-velvet). `background-clip:text`
+    # paints the gradient through the glyphs, which needs the ink to be transparent -- and a browser
+    # without the property would then render NOTHING. So it lives behind @supports and the solid
+    # `--sl-highlight-text` above stays the fallback: no gradient, but readable text.
+    #
+    # Inert for every other preset: `--sl-highlight-gradient` defaults to `none` and
+    # `--sl-highlight-ink` to the same solid colour, so the block changes nothing it touches.
+    "    @supports ((-webkit-background-clip:text) or (background-clip:text)){",
+    "      .sl-mark-text{background-image:var(--sl-highlight-gradient,none);-webkit-background-clip:text;background-clip:text;color:var(--sl-highlight-ink,var(--sl-highlight-text))}",
+    "    }",
     "    .sl-mark-bg{background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);padding:0.1em 0.3em;border-radius:0.4rem}",
     "    .sl-headline{text-align:center;padding:0.8rem 0 0.4rem}",
     "    .sl-headline h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
@@ -1323,6 +1340,10 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     tokens.setdefault("brand_label_text", tokens["muted"])
     tokens.setdefault("brand_dot", tokens["brand"])
     tokens.setdefault("highlight_text", "#f97316")
+    # The gradient a highlight is painted with, and the ink that lets it show through. Defaults keep
+    # every preset on the solid colour above.
+    tokens.setdefault("highlight_gradient", "none")
+    tokens.setdefault("highlight_ink", tokens["highlight_text"])
     tokens.setdefault("highlight_bg", "#facc15")
     tokens.setdefault("highlight_bg_text", "#1a1a1a")
     tokens.setdefault("subheadline_text", tokens["muted"])

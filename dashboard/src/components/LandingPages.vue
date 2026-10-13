@@ -7092,16 +7092,42 @@ function previewPageUrl(page) {
   return pageUrl(page);
 }
 
+// A preview link must be ABSOLUTE or not offered at all. `pageUrl` falls back to a path built from
+// `pages_preview_base_url`, and that key was read here for as long as draft previews have existed while
+// NOTHING ever wrote it into app_config (fixed 2026-10-12). It resolved to "", the path came out
+// relative, and the browser opened it on the dashboard's own host where the SPA router rendered... the
+// dashboard. A draft preview looked like a link that goes nowhere, and publishing looked like the only
+// way to see a page.
+//
+// Config can still be missing -- during bootstrap, or on an environment whose config was not uploaded --
+// so saying so beats silently reopening the dashboard.
+function isOpenableUrl(value) {
+  return /^https?:\/\//i.test(String(value || ""));
+}
+
 async function copyPageUrl(page) {
   openMenuId.value = "";
   const value = pageUrl(page);
+  // Copying a relative path puts a link on the clipboard that works nowhere, which is worse than
+  // refusing: it gets pasted into an email before anyone discovers it.
+  if (!isOpenableUrl(value)) {
+    message.value = "This page has no shareable address yet.";
+    return;
+  }
   if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value).catch(() => {});
   message.value = "Landing page URL copied.";
 }
 
 function previewPage(page) {
   openMenuId.value = "";
-  window.open(previewPageUrl(page), "_blank", "noopener,noreferrer");
+  const url = previewPageUrl(page);
+  if (!isOpenableUrl(url)) {
+    message.value = page.status === "published"
+      ? "This page's address is not configured yet. Reload the dashboard and try again."
+      : "Draft previews are not configured for this environment yet, so this page can only be opened once published.";
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function viewPage(page) {

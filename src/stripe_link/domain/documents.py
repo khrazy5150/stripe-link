@@ -27,6 +27,8 @@ CSS_COLOR_PATTERN = re.compile(
 )
 FONT_FAMILY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$")
 HTTP_URL_PATTERN = re.compile(r"^https?://[^\s\"'<>]+$")
+# A bare host (no scheme, no path): the dashboard builds `https://{host}/preview/{code}` from it.
+HOSTNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$")
 # The legal section types ARE the element catalog keys, so derive them from composition_rules.json rather
 # than keeping a second copy here. The two had been identical by hand-maintenance alone, and the drift bites
 # late and confusingly: adding an element made it composable and renderable but not *storable*, which
@@ -2104,10 +2106,21 @@ def validate_app_config(document: dict[str, Any]) -> None:
             raise DocumentValidationError(f"App config environments.{environment} must be an object.")
         for field in ["label", "api_base_url", "dashboard_url", "checkout_base_url"]:
             require_string(config, field, f"App config environments.{environment}.{field}")
-        for field in ["api_base_url", "dashboard_url", "checkout_base_url", "pages_base_url", "favicon_url", "public_asset_base_url"]:
+        # `pages_preview_base_url` joined this list on 2026-10-12. The dashboard had read it since the
+        # draft-preview feature was written and NOTHING ever set it, so it resolved to "" and the preview
+        # link became a RELATIVE path that the SPA router rendered as the dashboard -- which is exactly
+        # what a draft preview looked like: a link that goes nowhere.
+        for field in ["api_base_url", "dashboard_url", "checkout_base_url", "pages_base_url", "favicon_url",
+                      "public_asset_base_url", "pages_preview_base_url"]:
             value = config.get(field)
             if value is not None and (not isinstance(value, str) or not HTTP_URL_PATTERN.match(value)):
                 raise DocumentValidationError(f"App config environments.{environment}.{field} must be an HTTP URL.")
+        # A HOST, not a URL -- the dashboard builds `https://{host}/preview/{code}` from it.
+        test_pages_host = config.get("test_pages_host")
+        if test_pages_host is not None and (not isinstance(test_pages_host, str)
+                                            or not HOSTNAME_PATTERN.match(test_pages_host)):
+            raise DocumentValidationError(
+                f"App config environments.{environment}.test_pages_host must be a hostname.")
         feature_flags = config.get("feature_flags")
         if feature_flags is not None:
             if not isinstance(feature_flags, dict):

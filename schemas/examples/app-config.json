@@ -15,7 +15,9 @@
       "feature_flags": {
         "custom_api_domain": true,
         "s3_page_publish": true
-      }
+      },
+      "pages_preview_base_url": "https://dev-live.juniorbay.com",
+      "test_pages_host": "dev-test.juniorbay.com"
     },
     "prod": {
       "label": "Live",
@@ -28,12 +30,16 @@
       "feature_flags": {
         "custom_api_domain": true,
         "s3_page_publish": true
-      }
+      },
+      "pages_preview_base_url": "https://prod-live.juniorbay.com",
+      "test_pages_host": "prod-test.juniorbay.com"
     }
   },
   "dashboard": {
     "display_order": 10,
-    "editable_sections": ["environments"]
+    "editable_sections": [
+      "environments"
+    ]
   },
   "metadata": {
     "owner": "platform"
