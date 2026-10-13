@@ -673,10 +673,16 @@ class ResponsiveImageTests(unittest.TestCase):
             "Water Gun",
             sizes="9rem",
         )
-        # A processor rendition advertises every rendition (widths mirror the processor's SIZES
-        # table) so a small slot can pick thumb/small instead of downloading the 1080px file.
+        # A processor rendition advertises every ASPECT-PRESERVING rendition (widths mirror the
+        # processor's SIZES table) so a small slot can pick small instead of downloading the 1080px file.
+        #
+        # `thumb` is deliberately absent since 2026-10-12: the processor builds it `fit: "cover"` at
+        # 200x200, so it is a square CROP rather than a 200px copy. A srcset's candidates must be
+        # interchangeable, and a surface applying a CSS crop stretched the square into the slot's
+        # dimensions -- a visibly bent photo.
         base = "https://images.juniorbay.com/products/ABC123"
-        for size, width in (("thumb", 200), ("small", 800), ("medium", 1080), ("large", 1920), ("full", 2560)):
+        self.assertNotIn(f"{base}/thumb.webp", markup)
+        for size, width in (("small", 800), ("medium", 1080), ("large", 1920), ("full", 2560)):
             self.assertIn(f"{base}/{size}.webp {width}w", markup)
         self.assertIn('sizes="9rem"', markup)
         self.assertIn('loading="lazy"', markup)

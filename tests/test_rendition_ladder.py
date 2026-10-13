@@ -26,21 +26,43 @@ PROCESSOR = REPO / "src" / "imageProcessorApp.js"
 
 @unittest.skipUnless(PROCESSOR.exists(), f"sibling repo not present at {PROCESSOR}")
 class RenditionLadderTests(unittest.TestCase):
-    def processor_ladder(self) -> dict[str, int]:
+    def processor_sizes(self) -> dict[str, tuple[int, str]]:
+        """`{name: (width, fit)}` from the processor's own SIZES. The `fit` matters as much as the width:
+        it says whether a rung is a smaller COPY of the image or a different CROP of it."""
         source = PROCESSOR.read_text(encoding="utf-8")
         block = re.search(r"const SIZES\s*=\s*\[(.*?)\n\];", source, re.S)
         self.assertIsNotNone(block, "SIZES not found — has the processor been restructured?")
-        return {
-            name: int(width)
-            for name, width in re.findall(r'name:\s*"(\w+)",\s*width:\s*(\d+)', block.group(1))
-        }
+        found = re.findall(r'name:\s*"(\w+)",\s*width:\s*(\d+),\s*height:\s*\d+,\s*fit:\s*"(\w+)"',
+                           block.group(1))
+        self.assertTrue(found, "SIZES entries no longer carry a fit — the rule below cannot be checked")
+        return {name: (int(width), fit) for name, width, fit in found}
+
+    def processor_ladder(self) -> dict[str, int]:
+        """Only the rungs that PRESERVE ASPECT. A srcset's candidates must be interchangeable renderings
+        of one image, and `fit: "cover"` crops instead of scaling."""
+        return {name: width for name, (width, fit) in self.processor_sizes().items() if fit == "inside"}
 
     def test_every_width_we_advertise_matches_what_the_processor_produces(self):
         self.assertEqual(
             IMAGE_RENDITION_WIDTHS, self.processor_ladder(),
-            "the srcset widths and the processor's ladder have drifted — the browser would be told a file "
-            "is a width it is not",
+            "the srcset widths and the processor's aspect-preserving ladder have drifted — the browser "
+            "would be told a file is a width it is not",
         )
+
+    def test_a_cover_rung_is_never_advertised(self):
+        """`thumb` is `fit: "cover"` at 200x200 -- a square CROP, not a 200px copy. Measured on a real
+        asset: thumb 200x200 against small 493x800.
+
+        While `object-fit:cover` framed every image, the browser picking the square thumb was invisible.
+        The moment a surface applied a CSS CROP -- explicit width and height computed from the source's
+        aspect -- the square was stretched to those dimensions and the photo came out visibly bent
+        (2026-10-12). A square thumbnail is fine to ask for by name; it is not a resolution step.
+        """
+        cover = {name for name, (_w, fit) in self.processor_sizes().items() if fit != "inside"}
+        self.assertIn("thumb", cover, "thumb stopped being a cover crop — this rule may no longer apply")
+        for name in cover:
+            with self.subTest(rendition=name):
+                self.assertNotIn(name, IMAGE_RENDITION_WIDTHS)
 
     def test_the_ladder_has_no_second_home(self):
         # The whole point of the 2026-09-08 cleanup. If an env override comes back, this test is reading a
@@ -70,7 +92,7 @@ class SmallSourceRenditionTests(unittest.TestCase):
     """
 
     def test_a_small_source_names_only_renditions_that_can_exist(self):
-        self.assertEqual(available_renditions(225), ["thumb", "small"])
+        self.assertEqual(available_renditions(225), ["small"])
 
     def test_a_large_source_is_unchanged(self):
         self.assertEqual(available_renditions(3000), list(IMAGE_RENDITION_WIDTHS))
@@ -78,7 +100,7 @@ class SmallSourceRenditionTests(unittest.TestCase):
     def test_upscales_are_excluded_even_when_the_file_exists(self):
         # The 800x420 case from the same page: medium/large/full DO exist, and are upscales of an 800px
         # source. Serving them costs bytes for no detail.
-        self.assertEqual(available_renditions(800), ["thumb", "small"])
+        self.assertEqual(available_renditions(800), ["small"])
 
     def test_unknown_dimensions_change_nothing(self):
         # Legacy images predate the image_dims sidecar and mostly come from large sources. Breaking those

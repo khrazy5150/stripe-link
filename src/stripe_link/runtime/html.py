@@ -5175,7 +5175,18 @@ def landing_page_price_sort_key(price: dict[str, Any], option: dict[str, Any], i
 # numbers are the `w` descriptors in the srcset, so a mismatch tells the browser a file is a size it is not
 # and it picks the wrong one. 800 exists so a phone (412 CSS px at DPR 1.75 ~ 721px) stops being served the
 # 1080 file; 1080 stays so a DPR-1 desktop does not jump to 1920.
-IMAGE_RENDITION_WIDTHS = {"thumb": 200, "small": 800, "medium": 1080, "large": 1920, "full": 2560}
+# `thumb` is NOT here, and that is the point: it is a different CROP, not a different size. The processor
+# builds it `fit: "cover"` at 200x200 while every other rung is `fit: "inside"` and keeps the source's
+# aspect -- measured on a real asset: thumb 200x200 (1.000) against small 493x800 (0.616).
+#
+# A srcset's candidates must be interchangeable renderings of ONE image; the browser may pick any of them.
+# While `object-fit:cover` was doing the framing, picking the square thumb was invisible. The moment a
+# surface applied a CSS CROP -- which sets explicit width and height computed from the source's aspect --
+# the square got stretched to those dimensions and the author's photo came out visibly bent (2026-10-12).
+#
+# A square thumbnail is still a perfectly good thing to ASK for by name; it is just not a resolution step.
+IMAGE_RENDITION_WIDTHS = {"small": 800, "medium": 1080, "large": 1920, "full": 2560}
+THUMB_RENDITION = "thumb"
 # `original` is listed alongside the sized renditions on purpose. When an upload stores the ORIGINAL url
 # rather than a rendition, this regex used to miss, responsive_img fell through to its plain-tag branch, and
 # the page shipped the full-size source with no srcset -- a 2000px 250KB PNG where a 12KB small.webp existed
