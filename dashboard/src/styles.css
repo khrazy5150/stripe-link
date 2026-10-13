@@ -4600,6 +4600,18 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+/* Saved colour themes. The storage existed from the migration with no UI; these style the half that
+   was missing (plans/ADVANCED_COLOR_SETTINGS.md). */
+.saved-themes { display: grid; gap: 0.8rem; }
+.saved-theme-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.saved-theme-row { display: flex; align-items: center; gap: 0.8rem; }
+.saved-theme-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-theme-swatches { display: inline-flex; flex: none; border-radius: 0.4rem; overflow: hidden;
+  border: 1px solid var(--line); }
+.saved-theme-swatches i { width: 1.4rem; height: 1.4rem; display: block; }
+.saved-theme-save { display: flex; gap: 0.8rem; align-items: center; }
+.saved-theme-save input { flex: 1; min-width: 0; }
+
 .color-group {
   display: grid;
   gap: 0.4rem;

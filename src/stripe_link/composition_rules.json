@@ -581,6 +581,21 @@
       "group": "Text",
       "kind": "color"
     },
+    "highlight_text": {
+      "label": "**emphasis** text",
+      "group": "Headline highlights",
+      "kind": "color"
+    },
+    "highlight_bg": {
+      "label": "^^highlight^^ background",
+      "group": "Headline highlights",
+      "kind": "color"
+    },
+    "highlight_bg_text": {
+      "label": "^^highlight^^ text",
+      "group": "Headline highlights",
+      "kind": "color"
+    },
     "brand": {
       "label": "Brand primary",
       "group": "Brand",
@@ -604,6 +619,21 @@
     "cta_text": {
       "label": "CTA text",
       "group": "CTA button",
+      "kind": "color"
+    },
+    "countdown_bg": {
+      "label": "Countdown gradient start",
+      "group": "Countdown bar",
+      "kind": "color"
+    },
+    "countdown_end_bg": {
+      "label": "Countdown gradient end",
+      "group": "Countdown bar",
+      "kind": "color"
+    },
+    "countdown_text": {
+      "label": "Countdown text",
+      "group": "Countdown bar",
       "kind": "color"
     },
     "trust_badge_bg": {

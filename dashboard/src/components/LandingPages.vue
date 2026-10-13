@@ -313,6 +313,34 @@
                       />
                     </label>
                   </div>
+
+                  <!-- SAVED THEMES. The storage, the schema and the 10-theme cap were migrated long ago
+                       (user_preferences.landing_pages.custom_color_themes) and nothing ever read or wrote
+                       them -- a data model with no UI. This is that UI. -->
+                  <div class="color-group saved-themes">
+                    <div class="color-group-title">Your saved themes</div>
+                    <p v-if="!savedThemes.length" class="field-note">
+                      Save the colours above as a theme and reuse them on another page.
+                    </p>
+                    <ul v-else class="saved-theme-list">
+                      <li v-for="theme in savedThemes" :key="theme.theme_id" class="saved-theme-row">
+                        <span class="saved-theme-swatches" aria-hidden="true">
+                          <i v-for="swatch in themeSwatches(theme)" :key="swatch" :style="{ background: swatch }"></i>
+                        </span>
+                        <span class="saved-theme-name">{{ theme.name }}</span>
+                        <button class="secondary-action compact" type="button" @click="applySavedTheme(theme)">Apply</button>
+                        <button class="secondary-action compact" type="button" :disabled="themeBusy" @click="deleteSavedTheme(theme)">Delete</button>
+                      </li>
+                    </ul>
+                    <div class="saved-theme-save">
+                      <input v-model.trim="newThemeName" type="text" maxlength="40" placeholder="Name this theme" />
+                      <button class="secondary-action compact" type="button" :disabled="themeBusy || !newThemeName" @click="saveCurrentTheme">
+                        {{ themeBusy ? "Saving…" : "Save as theme" }}
+                      </button>
+                    </div>
+                    <small v-if="themeError" class="field-error">{{ themeError }}</small>
+                    <small v-else-if="themeMessage" class="field-note">{{ themeMessage }}</small>
+                  </div>
                 </div>
             </SettingsAccordion>
             <SettingsAccordion label="SEO" hint="Title and search snippet" :icon="SETTINGS_ICONS['SEO']" :open="openSetting === 'SEO'" @toggle="toggleSetting('SEO')">
@@ -3104,6 +3132,111 @@ function setFontFamily(role, value) {
 }
 // "Reset to preset" means the whole appearance, not half of it: leaving fonts behind while colours reset
 // would make the button lie about what it did.
+/* SAVED COLOUR THEMES (user_preferences.landing_pages.custom_color_themes).
+ *
+ * The document shape, its validation and the TEN-theme cap were migrated from the legacy app and have
+ * been sitting unused: nothing in the dashboard ever read or wrote them (found 2026-10-13). This is the
+ * missing half.
+ *
+ * Colours only, like the legacy "Save your current color settings as a reusable theme". Fonts are a
+ * separate control and saving them silently would change type on a page the tenant only wanted recoloured.
+ */
+const savedThemes = ref([]);
+const newThemeName = ref("");
+const themeBusy = ref(false);
+const themeError = ref("");
+const themeMessage = ref("");
+const MAX_SAVED_THEMES = 10;          // mirrors the server's own cap; the message beats a 400
+const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+// The server validates saved-theme tokens as HEX specifically -- stricter than a page, which accepts any
+// CSS colour. Filtering here means a page using `rgba(...)` somewhere still saves its hex tokens instead
+// of the whole PUT being refused for one value.
+function hexTokensOnly(tokens) {
+  return Object.fromEntries(Object.entries(tokens || {}).filter(([, v]) => HEX.test(String(v || ""))));
+}
+
+function themeSwatches(theme) {
+  const t = theme?.tokens || {};
+  return [t.background, t.cta_from || t.brand, t.accent, t.headline].filter(Boolean).slice(0, 4);
+}
+
+async function loadPreferencesDoc() {
+  const body = await apiRequest("/preferences");
+  return body.preferences || {};
+}
+
+async function loadSavedThemes() {
+  try {
+    const doc = await loadPreferencesDoc();
+    savedThemes.value = doc.landing_pages?.custom_color_themes || [];
+  } catch {
+    savedThemes.value = [];   // best-effort: the colour editor must still work
+  }
+}
+
+// Read-modify-write the WHOLE preferences document. Preferences.vue does the same in reverse, preserving
+// the sections it does not manage, so neither screen erases the other's half.
+async function writeSavedThemes(next) {
+  const doc = await loadPreferencesDoc();
+  const updated = {
+    ...doc,
+    schema_version: doc.schema_version || "2026-05-29",
+    document_type: "user_preferences",
+    tenant_id: getTenantId(),
+    landing_pages: { ...(doc.landing_pages || {}), custom_color_themes: next },
+    updated_at: Math.floor(Date.now() / 1000),
+  };
+  const body = await apiRequest("/preferences", { method: "PUT", body: updated });
+  savedThemes.value = (body.preferences || updated).landing_pages?.custom_color_themes || next;
+}
+
+async function saveCurrentTheme() {
+  themeError.value = "";
+  themeMessage.value = "";
+  const tokens = hexTokensOnly(builder.theme_tokens);
+  if (!Object.keys(tokens).length) {
+    themeError.value = "Change at least one colour before saving a theme.";
+    return;
+  }
+  if (savedThemes.value.length >= MAX_SAVED_THEMES) {
+    themeError.value = `You can keep ${MAX_SAVED_THEMES} themes. Delete one to make room.`;
+    return;
+  }
+  themeBusy.value = true;
+  try {
+    const theme = { theme_id: localId("theme"), name: newThemeName.value.slice(0, 40), tokens };
+    await writeSavedThemes([...savedThemes.value, theme]);
+    newThemeName.value = "";
+    themeMessage.value = "Theme saved.";
+  } catch (err) {
+    themeError.value = err?.message || "Could not save the theme.";
+  } finally {
+    themeBusy.value = false;
+  }
+}
+
+async function deleteSavedTheme(theme) {
+  themeError.value = "";
+  themeMessage.value = "";
+  themeBusy.value = true;
+  try {
+    await writeSavedThemes(savedThemes.value.filter((t) => t.theme_id !== theme.theme_id));
+  } catch (err) {
+    themeError.value = err?.message || "Could not delete the theme.";
+  } finally {
+    themeBusy.value = false;
+  }
+}
+
+// REPLACES the overrides rather than merging. A merge would leave colours from the previous theme behind,
+// so "apply" would mean something different depending on what was already set.
+function applySavedTheme(theme) {
+  builder.theme_tokens = { ...(theme.tokens || {}) };
+  themeMessage.value = `Applied "${theme.name}".`;
+  themeError.value = "";
+}
+
 function resetAppearanceOverrides() {
   builder.theme_tokens = {};
   builder.theme_fonts = {};
@@ -5846,6 +5979,9 @@ const openSetting = ref("");
 
 function toggleSetting(key) {
   openSetting.value = openSetting.value === key ? "" : key;
+  // Fetched when the panel is OPENED, not on page load: most editing sessions never touch colours, and
+  // the themes live on the user's preferences document rather than on this page.
+  if (openSetting.value === "Appearance" && !savedThemes.value.length) loadSavedThemes();
 }
 
 const sectionEditor = ref(null);
