@@ -601,7 +601,7 @@
 
 <script setup>
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
-import { apiRequest, getStripeMode, toAssetCdnUrl } from "../api/client";
+import { apiRequest, getStripeMode } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, unitCostToInput, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
@@ -611,7 +611,8 @@ import PhoneInput from "./PhoneInput.vue";
 import TipAmountsField from "./shared/TipAmountsField.vue";
 import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
 import WizardSteps from "./shared/WizardSteps.vue";
-import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
+import { recordImageDims } from "../utils/imageDims";
+import { uploadImage } from "../api/uploads";
 import { cropBox, cropImage } from "../api/uploads";
 import ImageCropper from "./shared/ImageCropper.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
@@ -1438,74 +1439,12 @@ async function handleImageFiles(files) {
   uploadStatusKind.value = "success";
 }
 
+// The SHARED uploader (api/uploads.js), not a second copy. Products carried its own presign-upload-poll
+// with its own candidate list and its own poll timings, and the only thing that kept it working was a
+// larger opening delay: the shared one probed at 400ms, accepted the `original` before any rendition
+// existed, and a page then asked for a rendition that was never made (2026-10-12). One flow, one fix.
 async function uploadProductImage(file) {
-  const presigned = await apiRequest("/upload/multiple", {
-    method: "POST",
-    body: {
-      fileName: file.name,
-      contentType: file.type,
-      basePrefix: "products",
-      targetBucket: "images.juniorbay.net",
-    },
-  });
-  const formData = new FormData();
-  Object.entries(presigned.upload?.fields || {}).forEach(([key, value]) => formData.append(key, value));
-  formData.append("file", file);
-  const uploadResponse = await fetch(presigned.upload.url, { method: "POST", body: formData });
-  if (!uploadResponse.ok) throw new Error("Failed to upload file");
-  return pollProductImageUrl(presigned.id);
-}
-
-async function pollProductImageUrl(imageId) {
-  const deadline = Date.now() + 180000;
-  let delay = 1200;
-  while (Date.now() < deadline) {
-    await sleep(delay);
-    delay = Math.min(8000, Math.ceil(delay * 1.35));
-    const body = await apiRequest(`/upload/status/${encodeURIComponent(imageId)}`).catch(() => ({}));
-    if (body.status === "failed") throw new Error("Image processing failed");
-    for (const url of productImageUrlCandidates(body.urls || {})) {
-      const probe = await imageUrlLoads(url);
-      if (probe.ok) return { url, dims: dimsFromStatus(body, probe), imageId };
-    }
-  }
-  throw new Error("Timed out waiting for processed image");
-}
-
-function productImageUrlCandidates(urls) {
-  return [...new Set([
-    urls.small?.webp,
-    urls.small?.jpg,
-    urls.medium?.webp,
-    urls.medium?.jpg,
-    urls.large?.webp,
-    urls.large?.jpg,
-    urls.original,
-  ].filter(Boolean).map(cdnImageUrl))];
-}
-
-function cdnImageUrl(url) {
-  return toAssetCdnUrl(url);  // upload bucket host -> configured asset CDN (public_asset_base_url)
-}
-
-function imageUrlLoads(url, timeoutMs = 4000) {
-  if (!url) return Promise.resolve({ ok: false });
-  return new Promise((resolve) => {
-    const image = new Image();
-    let done = false;
-    const finish = (ok) => {
-      if (done) return;
-      done = true;
-      const dims = ok ? { width: image.naturalWidth, height: image.naturalHeight } : {};
-      image.onload = null;
-      image.onerror = null;
-      resolve({ ok, ...dims });
-    };
-    image.onload = () => finish(true);
-    image.onerror = () => finish(false);
-    image.src = `${url}${url.includes("?") ? "&" : "?"}_probe=${Date.now()}`;
-    setTimeout(() => finish(false), timeoutMs);
-  });
+  return uploadImage(file, { basePrefix: "products" });
 }
 
 function addUploadedImage(url, dims, imageId) {
@@ -1586,10 +1525,6 @@ function shortImageName(url) {
   } catch {
     return url;
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function confirmStatusChange(product) {

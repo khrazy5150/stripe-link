@@ -35,7 +35,16 @@ async function pollImageUrl(imageId) {
     delay = Math.min(3000, Math.ceil(delay * 1.3));
     const body = await apiRequest(`/upload/status/${encodeURIComponent(imageId)}`).catch(() => ({}));
     if (body.status === "failed") throw new Error("Image processing failed.");
-    for (const url of imageUrlCandidates(body.urls || {})) {
+    // `original` is accepted ONLY once processing has finished. The processor copies the original FIRST
+    // and makes the variants afterwards, so the original is servable within milliseconds -- it won this
+    // race on the very first poll, the upload reported success, and processing then produced no
+    // renditions at all. The page stored `.../original.jpg`, the renderer asked for `.../medium.webp`,
+    // and a live author photo rendered as alt text (2026-10-12).
+    //
+    // A rendition needs no such gate: it cannot load before it has been made. And `complete` with only
+    // an original is a real answer -- a PNG/TIFF kept as-is, or a non-image -- so this still resolves.
+    const settled = body.status === "complete";
+    for (const url of imageUrlCandidates(body.urls || {}, { allowOriginal: settled })) {
       const probe = await imageUrlLoads(url);
       if (probe.ok) return { url, dims: dimsFromStatus(body, probe), imageId };
     }
@@ -43,7 +52,7 @@ async function pollImageUrl(imageId) {
   throw new Error("Timed out waiting for processed image.");
 }
 
-function imageUrlCandidates(urls) {
+function imageUrlCandidates(urls, { allowOriginal = true } = {}) {
   return [...new Set([
     urls.small?.webp,
     urls.small?.jpg,
@@ -51,7 +60,7 @@ function imageUrlCandidates(urls) {
     urls.medium?.jpg,
     urls.large?.webp,
     urls.large?.jpg,
-    urls.original,
+    allowOriginal ? urls.original : null,
   ].filter(Boolean).map(cdnImageUrl))];
 }
 
