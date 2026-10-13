@@ -15,6 +15,7 @@
     <ImageUploadField
       :model-value="modelValue"
       :ratios="1"
+      shape="circle"
       :uploader="uploader"
       :label="modelValue ? 'Replace photo' : 'Upload a photo'"
       alt="Store avatar preview"

@@ -1135,6 +1135,7 @@
                         :uploader="uploadPageImage"
                         label="Upload photo"
                         alt="Author photo preview"
+                        shape="circle"
                         @update:crop="(rect) => (element.image_crop = rect)"
                       />
                       <label class="offer-field"><span>Name</span><input v-model.trim="element.name" type="text" placeholder="e.g. Jordan Belfort" /></label>

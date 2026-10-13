@@ -35,6 +35,9 @@ const props = defineProps({
    * cropping the same product photo once per placement.
    */
   bake: { type: Boolean, default: false },
+  // How the consuming surface presents the image: "rect" or "circle". Passed straight to the cropper,
+  // which draws the guide. It changes nothing about what is stored -- a circle IS a square plus CSS.
+  shape: { type: String, default: "rect" },
   // The baked output box. Generous, so no surface has to upscale what it is given.
   bakeWidth: { type: Number, default: 1600 },
   urlPlaceholder: { type: String, default: "or paste an image URL" },
@@ -200,6 +203,7 @@ function previewStyle() {
       :src="cropSource"
       :ratios="ratios"
       :crop="crop"
+      :shape="shape"
       :busy="uploading"
       @apply="applyCrop"
       @cancel="cropping = false"

@@ -27,6 +27,15 @@ const props = defineProps({
   ratios: { type: [Number, Array, String], default: null },
   // Reopen with the crop already applied, so a crop is an editable decision rather than a one-shot.
   crop: { type: Object, default: null },
+  /**
+   * How the SURFACE will present this image: "rect" (the default) or "circle".
+   *
+   * Purely a guide -- the stored rect is identical either way, because the circle is CSS
+   * (`border-radius:50%`) applied to a square. But a square frame over an image destined for a circular
+   * mask hides which corners vanish, and the author's photo came out with its head clipped (2026-10-12).
+   * Showing the circle makes the crop mean what it will look like.
+   */
+  shape: { type: String, default: "rect" },
   title: { type: String, default: "Crop, zoom, or move" },
   /*
    * The PARENT's crop is in flight. Applying a crop is a round trip to the image service, and the dialog
@@ -73,6 +82,11 @@ const activeRatio = computed(() => {
   return pick;
 });
 const frameHeight = computed(() => Math.round(frameWidth.value / (activeRatio.value || 1)));
+
+// A circle is only honest on a SQUARE frame: drawn over any other ratio it would promise a circle the
+// surface cannot produce. `author_bio` is locked to 1, so this holds -- and if a surface ever offers the
+// tenant a choice, the guide steps back to a rectangle rather than lying about the result.
+const isCircle = computed(() => props.shape === "circle" && Math.abs(activeRatio.value - 1) < 0.001);
 
 function ratioLabel(option) {
   if (option === FREEFORM) return "Original";
@@ -221,6 +235,7 @@ function apply() {
 
       <div
         class="cropper-frame"
+        :class="{ 'is-circle': isCircle }"
         :style="{ width: `${frameWidth}px`, height: `${frameHeight}px` }"
         tabindex="0"
         role="application"
@@ -281,6 +296,17 @@ function apply() {
   position: relative; overflow: hidden; margin: 0 auto;
   max-width: 100%; background: #0f172a; border-radius: 8px;
   cursor: grab; touch-action: none; user-select: none;
+}
+/* The circular guide. The frame stays SQUARE and the stored rect is unchanged -- this only shows the
+   tenant what the surface's `border-radius:50%` will keep. Clipping the frame itself (rather than
+   overlaying a ring) means the corners are visibly gone, so there is nothing to misread. */
+.cropper-frame.is-circle { border-radius: 50%; }
+/* The ring sits ON the clip so the edge reads as deliberate rather than as a rendering artefact, and it
+   is `inset` so it cannot change the frame's size and therefore the crop maths. */
+.cropper-frame.is-circle::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
 }
 .cropper-frame:active { cursor: grabbing; }
 .cropper-frame:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
