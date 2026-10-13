@@ -765,6 +765,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
     "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
+    # Space between paragraphs of body copy. Every body class sets `margin:0`, so without this the
+    # paragraphs stack flush and read as the run-on block they were split up to fix. Two classes outrank
+    # the one-class `margin:0` rules, so it wins wherever it applies.
+    "    .sl-para + .sl-para{margin-top:0.9em}",
     "    .sl-content-media{border-radius:0.8rem;overflow:hidden}",
     "    .sl-content-media:not(.sl-cropped) img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover}",
     # Centered variant (SALES_FUNNELS.md P3.5): a single centered column — used for the upsell product blurb and
@@ -1578,9 +1582,14 @@ def capitalize_headline_core(word: str) -> str:
     return word[:1].upper() + word[1:] if word else word
 
 
-def render_headline_markup(text: Any) -> str:
-    raw = format_headline(str(text or ""))
-    tokens = re.split(r"(\*\*.*?\*\*|\^\^.*?\^\^)", raw)
+def render_inline_marks(text: str) -> str:
+    """`**emphasis**` and `^^highlight^^`, escaping everything else.
+
+    Shared by headings and body copy so the two cannot drift apart -- a tenant who learns the markers in a
+    headline should not find them printing literally in a bio. `.` does not match a newline, so a marker is
+    never matched across a line break.
+    """
+    tokens = re.split(r"(\*\*.*?\*\*|\^\^.*?\^\^)", text)
     rendered: list[str] = []
     for token in tokens:
         if not token:
@@ -1593,6 +1602,42 @@ def render_headline_markup(text: Any) -> str:
             continue
         rendered.append(escape(token))
     return "".join(rendered)
+
+
+def render_headline_markup(text: Any) -> str:
+    return render_inline_marks(format_headline(str(text or "")))
+
+
+def render_body_markup(text: Any, css_class: str = "", indent: str = "") -> str:
+    """Body copy as real paragraphs.
+
+    A blank line starts a new `<p>`; a single newline is a `<br>`. Both were already being typed into the
+    textareas and thrown away here -- every body field rendered as `<p>{escape(text)}</p>`, one element, and
+    HTML collapses the newlines inside it to spaces. A tenant's four-paragraph author bio came out as one
+    unreadable run-on block.
+
+    A blank line is the mechanism rather than a marker like `##` because the tenants' stored text ALREADY
+    carries it (measured 2026-10-13: the one dev page with breaks had 3 blank lines and 0 stray newlines),
+    so no one has to re-type copy that is already correct. It is also what every writer presses by reflex.
+
+    The single newline is a `<br>` rather than a space: in a plain textarea, what you typed is what you
+    should get, and collapsing it is how the run-on above happened in the first place.
+
+    No title-casing -- that belongs to headings, and sentence case is what prose wants.
+    """
+    raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not raw.strip():
+        return ""
+    # Every paragraph is marked so ONE rule can space them. The body classes all set `margin:0`, so without
+    # it the paragraphs would stack flush against each other and read as a run-on again.
+    classes = f"{css_class} sl-para" if css_class else "sl-para"
+    out: list[str] = []
+    for paragraph in re.split(r"\n[ \t]*\n+", raw):
+        if not paragraph.strip():
+            continue
+        lines = [render_inline_marks(line) for line in paragraph.strip("\n").split("\n")]
+        out.append(f"{indent}<p class=\"{escape(classes)}\">{'<br>'.join(lines)}</p>")
+    return "\n".join(out)
 
 
 def require_offer_products(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> None:
@@ -3387,12 +3432,12 @@ def render_hero(
         # stops a page freezing at whatever copy it happened to be seeded with.
         headline, subheadline = hero_copy(section, offer or {}, products_by_id or {})
         headline_html, headline_attr = (render_headline_markup(headline), "") if headline else ("", "")
-        sub_html, sub_attr = (escape(subheadline), "") if subheadline else ("", "")
+        sub_html, sub_attr = (subheadline, "") if subheadline else ("", "")
 
     return "\n".join([
         f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\">",
         f"      <h1{headline_attr}>{headline_html}</h1>" if headline_html else "",
-        f"      <p{sub_attr}>{sub_html}</p>" if sub_html else "",
+        (f"      <p{sub_attr}>{escape(sub_html)}</p>" if sub_attr else render_body_markup(sub_html, "", "      ")) if sub_html else "",
         "    </section>",
     ])
 
@@ -5537,7 +5582,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
             "      <article class=\"sl-content-block\">",
             "        <div>",
             f"          <h2>{render_headline_markup(block.get('title') or '')}</h2>",
-            f"          <p>{escape(str(block.get('text') or ''))}</p>",
+            render_body_markup(block.get("text"), "", "          "),
             "        </div>",
             "        " + cropped_media(
                 responsive_img(image_url, str(block.get("title") or "Content image"), sizes=CONTENT_BLOCK_SIZES),
@@ -5860,7 +5905,7 @@ def render_testimonials(section: dict[str, Any]) -> str:
         cards.append("\n".join(line for line in [
             "      <figure class=\"sl-testimonial\">",
             "        <div class=\"sl-testimonial-body\">",
-            f"          <blockquote>{escape(quote)}</blockquote>",
+            f"          <blockquote>\n{render_body_markup(quote, '', '            ')}\n          </blockquote>",
             (f"          <figcaption>{byline}</figcaption>" if byline else ""),
             "        </div>",
             # Avatar LAST in source so it sits on the right on desktop; CSS reorders it above the quote
@@ -6170,7 +6215,7 @@ def render_author_bio(section: dict[str, Any]) -> str:
         # h2 so the block joins the page heading outline (plans/SEMANTIC_HTML.md) rather than floating.
         rows.append(f'      <h2 class="sl-author-headline">{render_headline_markup(headline)}</h2>')
     if body:
-        rows.append(f'      <p class="sl-author-body">{escape(body)}</p>')
+        rows.append(render_body_markup(body, "sl-author-body", "      "))
 
     style = section_theme_vars(section)
     style_attr = f' style="{escape(style)}"' if style else ""
@@ -6283,7 +6328,7 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
     if headline:
         copy.append(f'        <h2 class="sl-ribbon-headline">{render_headline_markup(headline)}</h2>')
     if body:
-        copy.append(f'        <p class="sl-ribbon-body">{escape(body)}</p>')
+        copy.append(render_body_markup(body, "sl-ribbon-body", "        "))
     if action in ("download", "email_file") and label and (cta.get("asset") or {}).get("bucket_key"):
         page = page or {}
         collect = [field for field in ("email", "phone") if cta.get(f"collect_{field}")]
@@ -6523,7 +6568,7 @@ def render_quote(section: dict[str, Any]) -> str:
     while attribution and attribution[0] in ATTRIBUTION_DASHES:
         attribution = attribution[1:].strip()
 
-    quote_html = f'<blockquote class="sl-quote-text">{escape(text)}</blockquote>'
+    quote_html = f'<blockquote class="sl-quote-text">{render_body_markup(text)}</blockquote>'
     caption_html = (
         f'<figcaption class="sl-quote-attribution">\u2014 {escape(attribution)}</figcaption>'
         if attribution else ""
@@ -6986,7 +7031,7 @@ def render_seller_profile(section: dict[str, Any]) -> str:
         parts.append(f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>')
     description = str(org.get("description") or "").strip()
     if description:
-        parts.append(f'      <p class="sl-seller-desc">{escape(description)}</p>')
+        parts.append(render_body_markup(description, "sl-seller-desc", "      "))
     contact = []
     tel = str(org.get("telephone") or "").strip()
     if tel:

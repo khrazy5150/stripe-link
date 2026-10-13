@@ -25,7 +25,10 @@ FULL = {
 def order_of(html):
     """The CHILD class names in order, so structure can be asserted rather than eyeballed. Excludes the
     wrapper's own `sl-author-bio`, which is not part of the sequence."""
-    return [name for name in re.findall(r'class="(sl-author-[a-z]+)"', html) if name != "sl-author-bio"]
+    # Matches the class TOKEN, not the whole attribute: body copy also carries `sl-para`, and a helper
+    # that only recognised a lone class would report the body as missing rather than misplaced.
+    return [name for name in re.findall(r'class="([^"]*)"', html)
+            for name in name.split() if name.startswith("sl-author-") and name != "sl-author-bio"]
 
 
 class StructureTests(unittest.TestCase):
