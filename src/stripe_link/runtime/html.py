@@ -952,6 +952,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-media{border-radius:1rem;overflow:hidden}",
     "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block}",
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
+    # The CONTAINER clips -- `overflow:hidden` plus whatever radius the surface itself sets. The cropped
+    # image must NOT inherit that radius: a crop makes the image TALLER than its box (here 227px inside a
+    # 140px circle), so `border-radius:50%` on the image describes an ellipse of the IMAGE's box, not the
+    # container's. The two do not line up, and the mismatch eats the picture from the sides -- 3.8px of
+    # black at the top of the circle, 91.6px near the bottom, which is exactly the crescents reported on
+    # a live author photo (2026-10-12). The container's own clip was always doing the real work.
     "    .sl-cropped{position:relative;overflow:hidden;aspect-ratio:var(--sl-crop-ar,1)}",
     "    .sl-embed{position:relative;width:100%;aspect-ratio:var(--sl-embed-ar,16/9);overflow:hidden;border-radius:1rem;background:#000}",
     "    .sl-video-block{max-width:74rem;margin:0 auto}",
@@ -990,7 +996,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ba-tag{position:absolute;bottom:1.2rem;padding:0.4rem 1rem;border-radius:999px;font-size:1.2rem;font-weight:600;background:rgba(0,0,0,0.6);color:#fff;pointer-events:none}",
     "    .sl-ba-tag.is-before{left:1.2rem}",
     "    .sl-ba-tag.is-after{right:1.2rem}",
-    "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none;border-radius:inherit}",
+    "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none}",
     "    .sl-ribbon-copy{display:grid;gap:0.8rem;min-width:0}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-copy{justify-items:center}",
     "    .sl-ribbon-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
