@@ -822,6 +822,7 @@
                       />
                       <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
                       <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
+                      <label class="builder-toggle"><input v-model="element.divider" type="checkbox" /><span>Add a dividing line</span></label>
                     </template>
 
                     <template v-else-if="element.type === 'testimonials'">
@@ -5699,7 +5700,7 @@ async function handleElementVideoPicked(element, event) {
 function newElement(type) {
   const base = { id: localId("el"), type };
   // Sensible default headings so the tenant isn't guessing — they can always reword them.
-  if (type === "content_block") return { ...base, title: "", text: "", image_url: "", centered: false };
+  if (type === "content_block") return { ...base, title: "", text: "", image_url: "", centered: false, divider: false };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
@@ -6441,7 +6442,7 @@ function ribbonCta(cta) {
 function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
-    return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
+    return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), ...(element.divider ? { divider: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
   }
   if (element.type === "testimonials") {
     const items = (element.items || []).filter((item) => (item.quote || "").trim());
@@ -6628,7 +6629,7 @@ function elementsFromPage(sections) {
   for (const section of sections || []) {
     if (section.type === "content_block") {
       for (const block of section.blocks || []) {
-        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered) });
+        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
       }
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",

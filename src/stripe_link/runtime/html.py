@@ -762,7 +762,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-refund-policy-applies{font-size:1.3rem;line-height:1.55;font-weight:700;color:var(--sl-refund-applies)}",
     "    .sl-refund-policy-copy{padding-left:2rem}",
     "    .sl-refund-policy-return{padding-left:2rem;color:var(--sl-refund-return)!important;font-weight:800}",
-    "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
+    "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center}",
+    # The rule above used to carry `border-top` + `padding-top`, so every content block drew a line above
+    # itself whether or not the page wanted one. A plain paragraph is the common case now that a title is
+    # optional, and a rule over every paragraph reads as a document, not a landing page. Opt-in instead.
+    "    .sl-content-blocks--divided .sl-content-block{border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
     "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
     # Space between paragraphs of body copy. Every body class sets `margin:0`, so without this the
@@ -5596,8 +5600,9 @@ def render_content_blocks(section: dict[str, Any]) -> str:
     if not rendered:
         return ""
     centered = " sl-content-blocks--centered" if section.get("centered") else ""
+    divided = " sl-content-blocks--divided" if section.get("divider") else ""
     return "\n".join([
-        f"    <section class=\"sl-content-blocks{centered}\" data-section-id=\"{escape(str(section.get('id', 'content-blocks')))}\" data-section-type=\"content_block\">",
+        f"    <section class=\"sl-content-blocks{centered}{divided}\" data-section-id=\"{escape(str(section.get('id', 'content-blocks')))}\" data-section-type=\"content_block\">",
         *rendered,
         "    </section>",
     ])

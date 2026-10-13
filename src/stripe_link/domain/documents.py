@@ -1777,6 +1777,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 require_string(item, "answer", "FAQ answer")
         elif section_type == "content_block":
             optional_bool(section, "centered", "Content block centered")
+            optional_bool(section, "divider", "Content block divider")
             blocks = optional_limited_object_list(section, "blocks", 10, "Content blocks")
             for block in blocks:
                 # The title is OPTIONAL: a content block is the only way to put a plain paragraph on a
