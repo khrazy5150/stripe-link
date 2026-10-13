@@ -26,6 +26,17 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/webhook/stripe-preview"): "same, preview API version",
     ("POST", "/webhook/platform-billing"): "same, platform's own billing account",
 
+    # --- The dashboard's BOOTSTRAP read, which happens before there is a session ---
+    # `loadAppConfigApiBase` in dashboard/src/api/client.js fetches this with a bare `fetch()` and no
+    # Authorization header, because it is how the dashboard learns where the API is in the first place.
+    # Attaching the authorizer without this entry (2026-10-11) made it 401: the dashboard took its
+    # `catch` path, CLEARED the cached config, and every config-derived URL resolved to "" -- surfacing
+    # a day later as draft-preview links opening the dashboard instead of the page.
+    #
+    # It carries no tenant data -- hostnames, a favicon, feature flags, the platform fee. The PUT that
+    # writes it stays private.
+    ("GET", "/app-config/{config_key}"): "the dashboard's bootstrap read; it has no token yet",
+
     # --- Getting a session in the first place ---
     ("POST", "/auth/login"): "there is no token before login",
     ("POST", "/auth/refresh"): "the refresh token is the credential; an expired access token cannot renew itself",
@@ -112,6 +123,7 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
 # real set from the table and asserts this matches, so it cannot quietly drift.
 ASYMMETRIC = {
     "/leads": "POST is a stranger submitting a form; GET returns those strangers' email addresses",
+    "/app-config/{config_key}": "GET is the dashboard's bootstrap read, before it has a token; PUT writes platform config",
 }
 
 

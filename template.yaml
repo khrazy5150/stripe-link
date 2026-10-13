@@ -538,6 +538,17 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /app-config/{config_key}
             Method: GET
+            # PUBLIC, and it has to be: this is the BOOTSTRAP read. `loadAppConfigApiBase` fetches it with
+            # no Authorization header to learn where the API even is, long before anyone has a token.
+            # The Cognito authorizer (plans/API_AUTHENTICATION.md) was added without this exemption on
+            # 2026-10-11 and the request started 401ing, so the dashboard took its `catch` path, cleared
+            # the cached config, and every config-derived URL resolved to "" -- which surfaced as draft
+            # preview links going to the dashboard instead of the page (found 2026-10-12).
+            #
+            # It carries no tenant data: hostnames, a favicon, feature flags and the platform fee.
+            # The PUT below stays authorized -- WRITING platform config is not public.
+            Auth:
+              Authorizer: NONE
         AppConfigPut:
           Type: Api
           Properties:
