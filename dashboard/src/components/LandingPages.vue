@@ -2366,7 +2366,7 @@
           :srcdoc="previewHtml"
           title="Live preview"
           sandbox="allow-scripts allow-same-origin"
-          @load="restorePreviewScroll"
+          @load="onPreviewFrameLoad"
         ></iframe>
         <p v-if="!previewHtml && !previewError" class="landing-live-preview-status">
           {{ builder.offer_id ? "Rendering preview..." : "Select an offer to see the preview." }}
@@ -2482,7 +2482,7 @@ import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
+import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -3101,9 +3101,27 @@ const ownerDisplayName = computed(() => profileStore.displayName || "");
 
 // --- Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md) ---
 const previewEl = ref(null);
-// Effective colour for a token: the override if set, else the preset's value read off the live preview.
+// Bumped when the preview frame finishes loading, so the swatches below re-read the new document's
+// tokens. getComputedStyle is not reactive; without this the panel would show the PREVIOUS preset.
+const previewTokenEpoch = ref(0);
+// Effective colour for a token: the override if set, else the preset's own value.
+//
+// The preset's value is read off the PREVIEW FRAME's `:root`, which the server rendered -- the same
+// single-source rule the prices follow via ?expand=1. The hidden probe below is a second, hand-kept
+// transcription of the presets in dashboard CSS, and it had already drifted: it has no var at all for
+// `background`, `countdown_bg` or `countdown_end_bg` (so those pickers showed "preset" and nothing
+// else), it reported royal-velvet's emphasis colour as the global orange, and its royal-velvet block
+// still carried the dark card this preset had before it was restyled. The frame knows all 64 tokens
+// because runtime/html.py emits every one of them.
 function effectiveColor(token) {
   if (builder.theme_tokens[token]) return builder.theme_tokens[token];
+  void previewTokenEpoch.value;
+  const frameRoot = previewFrame.value?.contentDocument?.documentElement;
+  if (frameRoot) {
+    const rendered = getComputedStyle(frameRoot).getPropertyValue(renderedVar(token)).trim();
+    if (rendered) return rendered;
+  }
+  // No frame yet (no offer selected, or the first render): fall back to the probe.
   if (!previewEl.value) return "";
   return getComputedStyle(previewEl.value).getPropertyValue(previewVar(token)).trim();
 }
@@ -3362,6 +3380,10 @@ function capturePreviewScroll() {
   }
 }
 
+function onPreviewFrameLoad() {
+  previewTokenEpoch.value += 1;   // the Appearance swatches read this document's tokens
+  restorePreviewScroll();
+}
 function restorePreviewScroll() {
   if (!previewScrollY) return;
   try {

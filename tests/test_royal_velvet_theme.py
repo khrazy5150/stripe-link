@@ -96,9 +96,59 @@ class TheReferenceDesignIsActuallyPresent(unittest.TestCase):
         self.assertNotEqual(t["cta_from"], t["cta_to"], "a gradient needs two stops")
 
     def test_the_headline_is_white_not_the_accent(self):
-        """The reference carries its purple in the highlighted words and the CTA, which is what stops
-        the page reading as uniformly violet."""
+        """White is the SOLID value -- the gradient below is painted over it, and is what a browser
+        without `background-clip:text` falls back from. See TheH1CarriesTheGradient."""
         self.assertEqual(tokens()["headline"], "#ffffff")
+
+
+class TheH1CarriesTheGradient(unittest.TestCase):
+    """Corrected 2026-10-13. The first cut put the violet-to-fuchsia gradient on the EMPHASISED words
+    and left the headline plain white -- which painted over the "**emphasis** text" colour control
+    shipped the same day, so the panel offered a colour and the page ignored it. The author's rule:
+    the H1 is the gradient, `**emphasis**` is white.
+    """
+
+    def test_the_gradient_is_on_the_headline(self):
+        t = tokens()
+        self.assertEqual(t["headline_gradient"], "linear-gradient(90deg,#7c3aed,#c026d3)")
+        self.assertEqual(t["headline_ink"], "transparent")
+
+    def test_emphasis_is_plain_white_with_no_gradient_of_its_own(self):
+        t = tokens()
+        self.assertEqual(t["highlight_text"], "#ffffff")
+        self.assertEqual(t["highlight_gradient"], "none",
+                         "a gradient here would hide the colour the control sets")
+        self.assertEqual(t["highlight_ink"], "#ffffff")
+
+    def test_white_emphasis_is_readable_on_the_page(self):
+        t = tokens()
+        self.assertGreaterEqual(contrast_ratio(t["highlight_text"], t["background"]), AA)
+
+    def test_the_solid_fallback_is_readable_too(self):
+        """No `background-clip:text` means a white H1 on the near-black page, not an invisible one."""
+        t = tokens()
+        self.assertGreaterEqual(contrast_ratio(t["headline"], t["background"]), AA)
+
+    def test_no_other_preset_gained_a_headline_gradient(self):
+        for name in UNIVERSAL_BUNDLE_THEME_PRESETS:
+            if name == "royal-velvet":
+                continue
+            with self.subTest(preset=name):
+                self.assertEqual(tokens(name)["headline_gradient"], "none")
+
+    def test_the_renderer_paints_it_through_the_glyphs(self):
+        css = "".join(render_template_styles({"theme": {"preset": "royal-velvet"}}))
+        self.assertIn("--sl-headline-gradient", css)
+        self.assertIn("background-clip:text", css)
+
+    def test_the_gradient_rule_comes_after_both_headline_rules(self):
+        """Equal specificity, so order decides. Placed above `.sl-hero h1`, that rule's opaque
+        `color:var(--sl-headline)` would win and the hero headline would never show the gradient."""
+        css = "".join(render_template_styles({"theme": {"preset": "royal-velvet"}}))
+        gradient = css.index(".sl-headline h1,.sl-hero h1{background-image:var(--sl-headline-gradient")
+        for solid in (".sl-headline h1{font-family", ".sl-hero h1{font-family"):
+            with self.subTest(rule=solid):
+                self.assertLess(css.index(solid), gradient)
 
 
 class CardContainersStateTheirOwnInk(unittest.TestCase):

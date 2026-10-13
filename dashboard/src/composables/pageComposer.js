@@ -171,6 +171,12 @@ export function previewVar(token) {
   return `--preview-${String(token).replace(/_/g, "-")}`;
 }
 
+// The same token as the RENDERED page names it. Mirrors css_var_name() in runtime/html.py, which is
+// what the preview frame's :root actually carries.
+export function renderedVar(token) {
+  return `--sl-${String(token).replace(/_/g, "-")}`;
+}
+
 
 // Placement governs ORDER + draggability (visibility is the separate `enabled` axis). Read from the same
 // composition_rules.json the Python composer uses, so builder and renderer cannot disagree.

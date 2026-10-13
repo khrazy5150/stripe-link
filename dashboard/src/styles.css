@@ -5488,24 +5488,27 @@ button:disabled {
   --preview-border: #fed7aa;
 }
 
+/* Synced to UNIVERSAL_BUNDLE_THEME_PRESETS["royal-velvet"] after the 2026-10-13 restyle: white cards on
+   a near-black page, and a headline whose purple arrives as a gradient the probe cannot express. */
 .landing-live-preview.royal-velvet {
-  --preview-bg: #0f0720;
-  --preview-card: #1a1033;
+  --preview-bg: #0a0512;
+  --preview-card: #ffffff;
   --preview-text: #f5f3ff;
-  --preview-muted: #c4b5fd;
-  --preview-brand: #a855f7;
-  --preview-accent: #c084fc;
-  --preview-headline: #c084fc;
-  --preview-cta-from: #a855f7;
-  --preview-cta-to: #9333ea;
-  --preview-chip-bg: #3b2360;
-  --preview-chip-text: #d8b4fe;
-  --preview-chip-border: #6b3fa0;
-  --preview-savings-bg: #3b2360;
-  --preview-savings-text: #d8b4fe;
-  --preview-savings-border: #6b3fa0;
-  --preview-featured-badge-bg: #a855f7;
-  --preview-border: #4c1d95;
+  --preview-muted: #b3a8cc;
+  --preview-brand: #8b5cf6;
+  --preview-accent: #7c3aed;
+  --preview-headline: #ffffff;
+  --preview-highlight-text: #ffffff;
+  --preview-cta-from: #7c3aed;
+  --preview-cta-to: #c026d3;
+  --preview-chip-bg: #7c3aed;
+  --preview-chip-text: #ffffff;
+  --preview-chip-border: #a78bfa;
+  --preview-savings-bg: rgba(139, 92, 246, 0.14);
+  --preview-savings-text: #7c3aed;
+  --preview-savings-border: rgba(139, 92, 246, 0.35);
+  --preview-featured-badge-bg: #7c3aed;
+  --preview-border: #2a1b45;
 }
 
 .landing-live-preview.fire-sale {

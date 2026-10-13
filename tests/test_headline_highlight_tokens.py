@@ -57,6 +57,67 @@ class TheHighlightColoursAreReachable(unittest.TestCase):
                 self.assertEqual(CATALOG[token]["group"], "Countdown bar")
 
 
+class AColourOverrideBeatsAPresetGradient(unittest.TestCase):
+    """The failure this exists to stop, found by the author on 2026-10-13: royal-velvet painted a
+    gradient through the emphasised words, so the brand-new "**emphasis** text" picker set a colour the
+    page could not show. A gradient clipped to the glyphs HIDES the ink beneath it -- so whenever the
+    tenant names a colour explicitly, the preset's gradient stands down and the colour wins.
+
+    Only an explicit override does this. Left alone, the preset keeps its gradient.
+    """
+
+    def tokens(self, preset, **overrides):
+        from stripe_link.runtime.html import theme_tokens
+        return theme_tokens({"theme": {"preset": preset, "tokens": overrides}})
+
+    def test_setting_the_headline_colour_drops_the_preset_gradient(self):
+        t = self.tokens("royal-velvet", headline="#22d3ee")
+        self.assertEqual(t["headline"], "#22d3ee")
+        self.assertEqual(t["headline_gradient"], "none")
+        self.assertEqual(t["headline_ink"], "#22d3ee",
+                         "the preset's transparent ink would have made the colour invisible")
+
+    def test_setting_the_emphasis_colour_drops_its_gradient_too(self):
+        """Same rule on the other pair, so a future preset cannot reintroduce the bug."""
+        t = self.tokens("royal-velvet", highlight_text="#22d3ee", highlight_gradient="linear-gradient(90deg,#000,#fff)")
+        self.assertEqual(t["highlight_gradient"], "linear-gradient(90deg,#000,#fff)",
+                         "a tenant who sets BOTH meant the gradient")
+        t = self.tokens("royal-velvet", highlight_text="#22d3ee")
+        self.assertEqual(t["highlight_gradient"], "none")
+        self.assertEqual(t["highlight_ink"], "#22d3ee")
+
+    def test_the_preset_keeps_its_gradient_when_nothing_is_overridden(self):
+        t = self.tokens("royal-velvet")
+        self.assertTrue(t["headline_gradient"].startswith("linear-gradient"))
+
+    def test_an_unrelated_override_leaves_the_gradient_alone(self):
+        t = self.tokens("royal-velvet", background="#000000")
+        self.assertTrue(t["headline_gradient"].startswith("linear-gradient"))
+
+
+class ThePanelReadsTheRenderedPage(unittest.TestCase):
+    """The swatches used to be seeded from a hand-kept copy of the presets in dashboard CSS. It had no
+    var at all for `background`, `countdown_bg` or `countdown_end_bg`, reported royal-velvet's emphasis
+    as the global orange, and still described the dark card that preset had before it was restyled --
+    so the panel said one thing and the page showed another. It now reads the preview frame's `:root`,
+    which the server rendered: the same single-source rule the prices follow via ?expand=1.
+    """
+
+    def test_it_reads_the_frame_root(self):
+        self.assertIn("previewFrame.value?.contentDocument?.documentElement", BUILDER)
+        self.assertIn("renderedVar(token)", BUILDER)
+
+    def test_the_rendered_var_matches_the_renderers_own_naming(self):
+        composer = (ROOT / "dashboard" / "src" / "composables" / "pageComposer.js").read_text()
+        self.assertIn("export function renderedVar", composer)
+        self.assertIn("`--sl-${String(token).replace(/_/g, \"-\")}`", composer)
+
+    def test_a_reload_refreshes_the_swatches(self):
+        """getComputedStyle is not reactive, so without this the panel shows the PREVIOUS preset."""
+        self.assertIn("previewTokenEpoch", BUILDER)
+        self.assertIn('@load="onPreviewFrameLoad"', BUILDER)
+
+
 class EveryCatalogTokenIsReal(unittest.TestCase):
     """A catalog entry the renderer never emits is a control with no effect -- worse than a missing one,
     because the tenant watches it do nothing."""

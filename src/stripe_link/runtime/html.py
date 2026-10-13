@@ -252,16 +252,18 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         # is what the author asked for on the numbered badges and the ribbon CTA -- and it matches the
         # CTA gradient's first stop, so the purples on the page are one family rather than two.
         "accent": "#7c3aed",
-        # The headline's highlighted words carry the page's purple as a GRADIENT, which is what the
-        # reference does and what keeps the rest of the headline plain white. `highlight_text` is the
-        # solid fallback a browser without `background-clip:text` falls back to -- readable on the dark
-        # page at 5.09, so the page degrades to "no gradient" rather than to "no words".
-        "highlight_text": "#a855f7",
-        "highlight_gradient": "linear-gradient(90deg,#7c3aed,#c026d3)",
-        "highlight_ink": "transparent",
-        # White, not the accent: the reference sets the headline in white and carries the purple in the
-        # highlighted words and the CTA, which is what stops the page reading as uniformly violet.
+        # The HEADLINE carries the page's purple as a gradient and `**emphasis**` is white -- the
+        # inverse of this preset's first cut, which painted the gradient on the emphasised words and so
+        # left the "**emphasis** text" colour control with nothing to do.
+        #
+        # `headline` stays white as the solid fallback: a browser without `background-clip:text` gets a
+        # white headline, so the page degrades to "no gradient" rather than to "no words".
         "headline": "#ffffff",
+        "headline_gradient": "linear-gradient(90deg,#7c3aed,#c026d3)",
+        "headline_ink": "transparent",
+        # White emphasis reads AGAINST the gradient it sits inside, and at 19.9 on the page itself. It
+        # is a plain colour with no gradient of its own, which is what makes the control govern it.
+        "highlight_text": "#ffffff",
         "cta_from": "#7c3aed",
         "cta_to": "#c026d3",
         "cta_text": "#ffffff",
@@ -560,6 +562,21 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero{text-align:center}",
     "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0;max-width:52rem;margin:0 auto}",
     "    .sl-hero p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
+    # A GRADIENT-FILLED headline, behind @supports for the same reason as the highlight above: the ink
+    # has to go transparent for the gradient to show through the glyphs, and a browser without
+    # `background-clip:text` would then render an invisible H1. `--sl-headline` stays the fallback.
+    #
+    # `**emphasis**` inside the H1 keeps its own opaque colour, so it paints OVER the clipped gradient
+    # rather than being swallowed by it -- white words inside a purple-gradient headline.
+    #
+    # Inert for every preset but royal-velvet: the gradient defaults to `none`.
+    #
+    # It sits AFTER both headline rules on purpose. The selectors have equal specificity, so placed
+    # above `.sl-hero h1` the plain `color:var(--sl-headline)` there would win and the hero would
+    # render opaque -- gradient clipped behind text nobody can see through.
+    "    @supports ((-webkit-background-clip:text) or (background-clip:text)){",
+    "      .sl-headline h1,.sl-hero h1{background-image:var(--sl-headline-gradient,none);-webkit-background-clip:text;background-clip:text;color:var(--sl-headline-ink,var(--sl-headline))}",
+    "    }",
     "    .sl-hero-media{position:relative;padding-top:0.8rem}",
     # The brand overlay is absolutely positioned; without this its containing block is .sl-hero-media, which
     # GROWS when an inline or centred avatar sits below the image -- so a bottom-left brand slid down to sit
@@ -1339,7 +1356,16 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     if legacy_color.get("accent"):
         tokens["accent"] = legacy_color["accent"]
         tokens["brand"] = legacy_color["accent"]
-    tokens.update(theme.get("tokens") or {})
+    overrides = theme.get("tokens") or {}
+    tokens.update(overrides)
+    # A gradient painted through the glyphs HIDES the colour underneath it, so a preset gradient would
+    # make the matching colour control inert -- the tenant picks a headline colour and the page ignores
+    # it. An explicit override therefore drops the preset's gradient and the colour wins. Only an
+    # override does this: left alone, the preset keeps its gradient.
+    for colour_token, gradient_token in (("headline", "headline_gradient"), ("highlight_text", "highlight_gradient")):
+        if overrides.get(colour_token) and not overrides.get(gradient_token):
+            tokens[gradient_token] = "none"
+            tokens.pop(f"{colour_token.removesuffix('_text')}_ink", None)
     tokens.setdefault("countdown_bg", tokens["cta_from"] if preset_name != "techno-green" else "#dc2626")
     tokens.setdefault("countdown_end_bg", tokens["cta_to"] if preset_name != "techno-green" else "#f97316")
     tokens.setdefault("countdown_text", "#ffffff")
@@ -1350,6 +1376,9 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     # every preset on the solid colour above.
     tokens.setdefault("highlight_gradient", "none")
     tokens.setdefault("highlight_ink", tokens["highlight_text"])
+    # The same pair for the headline, so a preset can paint the H1 with a gradient (royal-velvet).
+    tokens.setdefault("headline_gradient", "none")
+    tokens.setdefault("headline_ink", tokens["headline"])
     tokens.setdefault("highlight_bg", "#facc15")
     tokens.setdefault("highlight_bg_text", "#1a1a1a")
     tokens.setdefault("subheadline_text", tokens["muted"])
