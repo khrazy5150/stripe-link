@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest } from "../api/client";
+import { apiRequest, getTenantId } from "../api/client";
 
 // Scheduled events — a webinar and the occurrences it runs at (plans/WEBINAR.md P1). An event is the thing;
 // an occurrence is one running of it. Registrations are LEADS pointing at an occurrence, so they live in the
@@ -30,7 +30,12 @@ export const useEventsStore = defineStore("events", {
       }
     },
     async save(document) {
-      const body = await apiRequest("/events", { method: "POST", body: document });
+      // Stamped HERE rather than in the editor, so every caller gets it and only one place can forget.
+      // `validate_event` requires it, and without it the save failed with "tenant_id must be a non-empty
+      // string" -- a message about a field no tenant ever sees (reported 2026-10-14).
+      const body = await apiRequest("/events", {
+        method: "POST", body: { ...document, tenant_id: document.tenant_id || getTenantId() },
+      });
       const saved = body.event || document;
       const index = this.events.findIndex((e) => e.event_id === saved.event_id);
       if (index >= 0) this.events.splice(index, 1, saved);

@@ -93,12 +93,29 @@ class WhatItProtects(unittest.TestCase):
 class TheStore(unittest.TestCase):
     def test_it_talks_to_the_events_route(self):
         self.assertIn('apiRequest("/events")', STORE)
-        self.assertIn('apiRequest("/events", { method: "POST"', STORE)
-        self.assertIn("method: \"DELETE\"", STORE)
+        # The route and the verb, not the line breaks: this previously pinned a one-line call and failed
+        # the moment the body grew a second argument.
+        self.assertIn('apiRequest("/events", {', STORE)
+        self.assertIn('method: "POST"', STORE)
+        self.assertIn('method: "DELETE"', STORE)
 
     def test_the_delete_path_is_encoded(self):
         """An id is ours, but building a URL by concatenation is how the next one is not."""
         self.assertIn("encodeURIComponent(eventId)", STORE)
+
+    def test_it_stamps_the_tenant(self):
+        """Reported 2026-10-14: saving failed with "tenant_id must be a non-empty string" -- a message
+        about a field no tenant ever sees or sets. `require_document_fields` demands it on every document,
+        and the store is the single write path, so it belongs here rather than in the editor."""
+        self.assertIn("getTenantId", STORE)
+        self.assertIn("tenant_id: document.tenant_id || getTenantId()", STORE)
+
+    def test_the_editor_supplies_the_other_required_fields(self):
+        """schema_version, document_type and event_id are the rest of what the validator demands; a
+        missing one fails the same unhelpful way."""
+        for field in ('schema_version: "1.0.0"', 'document_type: "event"', 'event_id: localId("ev")'):
+            with self.subTest(field=field):
+                self.assertIn(field, SCREEN)
 
     def test_it_replaces_rather_than_appends_on_resave(self):
         """Saving twice must not show the event twice."""
