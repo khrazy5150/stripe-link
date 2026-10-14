@@ -77,6 +77,22 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
   },
 
   actions: {
+    // What is still missing before this tenant can take a payment, as one clause — or "" when nothing is.
+    // Reads `modeConfigured`, the same expression App.vue's nudge reads, so the screen and the nudge
+    // cannot disagree the way they did (author, 2026-10-14: "why am I getting this message when the
+    // software says the keys are loaded?").
+    //
+    // A CLAUSE rather than a whole sentence, because each caller has its own prefix: "Publishable keys
+    // loaded, but …" on load and "Keys saved, but …" after a save. Returning the finished sentence made
+    // one of them read "Keys saved, but publishable keys loaded, but …".
+    setupGap() {
+      const missing = ["live", "test"].filter((mode) => !this.modeConfigured(mode));
+      if (!missing.length) return "";
+      const names = missing.map((mode) => (mode === "live" ? "Live" : "Test")).join(" and ");
+      const subject = missing.length > 1 ? `${names} modes cannot` : `${names} mode cannot`;
+      return `${subject} take payments yet — save a secret key or connect a Stripe account.`;
+    },
+
     resetForCurrentTenant() {
       this.tenantId = getTenantId();
       this.verifyMode = getStripeMode();
@@ -108,8 +124,16 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         });
         this.applyLoadedKeys(body.stripe_keys);
         this.output = body;
-        this.message = "Stripe keys loaded.";
-        this.messageTone = "success";
+        // "Stripe keys loaded" reported that the FETCH succeeded, and sitting under two filled publishable
+        // fields it read as "you are configured" -- while the dashboard's own nudge said the opposite
+        // (author, 2026-10-14: "why am I getting this message when the software says the keys are
+        // loaded?"). A publishable key cannot take a payment; the screen now says what is actually
+        // missing, using the SAME rule the nudge uses so the two cannot disagree again.
+        // "error" is this screen's danger style. A half-configured Stripe is not a warning: until a
+        // secret key is saved or an account connected, that mode cannot take a payment at all.
+        const gap = this.setupGap();
+        this.message = gap ? `Publishable keys loaded, but ${gap}` : "Stripe is set up.";
+        this.messageTone = gap ? "error" : "success";
         await this.loadConnectCard();
       } catch (error) {
         this.output = { error: error.message };
@@ -218,8 +242,14 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         });
         this.applyLoadedKeys(body.stripe_keys);
         this.output = body;
-        this.message = "Stripe keys saved. Secrets are encrypted before persistence.";
-        this.messageTone = "success";
+        // Saving is not the same as being set up: a tenant who saves only publishable keys would
+        // otherwise see a green "saved" while that mode still cannot take a payment. The confirmation
+        // stays -- their change DID land -- and the gap is appended in the danger tone.
+        const gap = this.setupGap();
+        this.message = gap
+          ? `Keys saved, but ${gap}`
+          : "Stripe keys saved. Secrets are encrypted before persistence.";
+        this.messageTone = gap ? "error" : "success";
         await this.loadConnectCard();
       } catch (error) {
         this.error = error.message;
