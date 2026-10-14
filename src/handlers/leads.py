@@ -7,6 +7,7 @@
 
 See plans/LEAD_CAPTURE.md.
 """
+import logging
 import secrets
 import time
 from typing import Callable
@@ -22,6 +23,7 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_lead_submission
+from stripe_link.domain.events import CANCELLED, FULL, PASSED, accepts_registration, record_registration
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.domain.leads import (
@@ -36,11 +38,24 @@ from stripe_link.domain.leads import (
 )
 from stripe_link.repositories.documents import (
     RepositoryError,
+    events_repository,
     leads_repository,
     notifications_repository,
     offers_repository,
     products_repository,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+# What a visitor is told, per refusal state. The domain returns a STATE; the sentence belongs here.
+_REGISTRATION_REFUSALS = {
+    PASSED: "That session has already started.",
+    FULL: "That session is full.",
+    CANCELLED: "That session was cancelled.",
+    "unknown": "That session is no longer available.",
+}
 
 
 def handler(
@@ -51,6 +66,7 @@ def handler(
     offers_repo=None,
     products_repo=None,
     notifications_repo=None,
+    events_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     tenant_repo=None,
 ):
@@ -67,6 +83,7 @@ def handler(
             offers_repo=offers_repo or offers_repository(mode=mode),
             products_repo=products_repo or products_repository(mode=mode),
             notifications_repo=notifications_repo,
+            events_repo=events_repo,
             now=now_fn(),
             mode=mode,
         )
@@ -99,7 +116,7 @@ def _request_context(event) -> dict:
     }
 
 
-def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_repo, now, mode="test"):
+def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_repo, events_repo=None, now, mode="test"):
     try:
         payload = parse_json_body(event)
     except ValueError as exc:
@@ -133,6 +150,28 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
     except LeadValidationError as exc:
         return error_response(str(exc), code="invalid_lead")
 
+    # A webinar registration names the session it is for. The SERVER decides whether that session can
+    # still be registered for -- the page asks the same function at publish, but a page is a cached
+    # artifact and the visitor's copy may be hours old, so the client is never the authority here.
+    event_id = str(payload.get("event_id") or "").strip()
+    occurrence_id = str(payload.get("occurrence_id") or "").strip()
+    scheduled_event = None
+    if event_id or occurrence_id:
+        if not (event_id and occurrence_id):
+            return error_response("event_id and occurrence_id are required together.", code="invalid_registration")
+        # Resolved HERE, not at the top: an ordinary lead capture never touches the events table, and
+        # building the repository for every submission would make the common path depend on a table it
+        # has no business knowing about.
+        events_repo = events_repo or events_repository()
+        scheduled_event = events_repo.get(tenant_id, event_id)
+        if not scheduled_event:
+            return error_response("Event not found.", status_code=404, code="not_found")
+        accepted, reason = accepts_registration(scheduled_event, occurrence_id, now=int(now))
+        if not accepted:
+            # The REASON travels, so the page can say "that session has already run" rather than "no".
+            return error_response(_REGISTRATION_REFUSALS.get(reason, "This session is not accepting registrations."),
+                                  status_code=409, code=f"registration_{reason}")
+
     idempotency_key = str(payload.get("idempotency_key") or "").strip()
     lead_id = lead_id_for(tenant_id, offer_id, idempotency_key, now=now, token=secrets.token_hex(8))
 
@@ -155,12 +194,23 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
         provenance=provenance,
         idempotency_key=idempotency_key,
         now=now,
+        event_id=event_id,
+        occurrence_id=occurrence_id,
     )
     try:
         validate_lead_submission(lead)
         leads_repo.put(lead)
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_lead")
+
+    if scheduled_event is not None:
+        # Best-effort, and AFTER the lead is safely stored: a failed count must not lose a registration.
+        # Read-compare-write, so a burst can overbook by one (plans/WEBINAR.md §4) -- the registration is
+        # the record that matters, and the count exists to close the door roughly, not exactly.
+        try:
+            events_repo.put(record_registration(scheduled_event, occurrence_id))
+        except RepositoryError:
+            logger.warning("registration stored but seat count not updated for event %s", event_id)
 
     _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode)
     return json_response({"lead_id": lead_id, "status": "captured"}, status_code=201)

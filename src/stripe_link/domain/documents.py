@@ -2410,6 +2410,12 @@ def validate_lead_submission(document: dict[str, Any]) -> None:
     consent = document.get("consent")
     if consent is not None and not isinstance(consent, dict):
         raise DocumentValidationError("Lead submission consent must be an object.")
+    # A webinar registration carries both or neither: an occurrence without its event cannot be resolved,
+    # and an event without an occurrence does not say which session.
+    optional_string(document, "event_id", "Lead submission event_id")
+    optional_string(document, "occurrence_id", "Lead submission occurrence_id")
+    if bool(document.get("event_id")) != bool(document.get("occurrence_id")):
+        raise DocumentValidationError("Lead submission event_id and occurrence_id must be given together.")
 
 
 def validate_cart(document: dict[str, Any]) -> None:

@@ -131,6 +131,8 @@ def build_lead_submission(
     provenance: dict[str, Any],
     idempotency_key: str,
     now: int,
+    event_id: str = "",
+    occurrence_id: str = "",
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -139,6 +141,11 @@ def build_lead_submission(
         "lead_id": lead_id,
         "offer_id": str(offer_id or ""),
         "page_id": str(page_id or ""),
+        # A webinar registration is a LEAD (plans/WEBINAR.md §4): one list of people, one export, one
+        # consent story, one place PII lives. These say WHICH session, which every reminder and join link
+        # has to answer. Empty on an ordinary lead capture.
+        "event_id": str(event_id or ""),
+        "occurrence_id": str(occurrence_id or ""),
         "fields": fields,
         "email_normalized": normalize_email(fields.get("email")),
         "phone_normalized": normalize_phone(fields.get("phone")),

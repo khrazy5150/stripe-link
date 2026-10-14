@@ -764,6 +764,7 @@ Resources:
           # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
+          EVENTS_TABLE: !Ref EventsTable
           LEADS_TABLE: !Ref LeadsTable
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
@@ -779,6 +780,10 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref LeadsTable
+        # CRUD, not Read: a webinar registration increments the occurrence's seat count, so this handler
+        # writes the event document back (plans/WEBINAR.md §4).
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref NotificationsTable
         - DynamoDBReadPolicy:
