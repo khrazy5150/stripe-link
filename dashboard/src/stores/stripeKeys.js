@@ -43,6 +43,11 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
       live: emptyMode("live"),
     },
     loading: false,
+    // Whether the keys have actually been READ. `modes` starts at emptyMode(), which is indistinguishable
+    // from "nothing configured" -- so without this a failed fetch looks exactly like an unconfigured
+    // tenant, and the setup nudge is sticky (author, 2026-10-14: the toast insisted Stripe needed setting
+    // up while the Payments screen, having loaded, said it was set up).
+    loaded: false,
     saving: false,
     verifying: false,
     connectLoading: false,
@@ -117,6 +122,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
     async load() {
       this.loading = true;
       this.error = "";
+      this.loaded = false;
       setTenantId(this.tenantId);
       try {
         const body = await apiRequest("/stripe/keys", {
@@ -131,6 +137,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         // missing, using the SAME rule the nudge uses so the two cannot disagree again.
         // "error" is this screen's danger style. A half-configured Stripe is not a warning: until a
         // secret key is saved or an account connected, that mode cannot take a payment at all.
+        this.loaded = true;
         const gap = this.setupGap();
         this.message = gap ? `Publishable keys loaded, but ${gap}` : "Stripe is set up.";
         this.messageTone = gap ? "error" : "success";

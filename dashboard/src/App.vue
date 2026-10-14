@@ -464,6 +464,11 @@ watch(
 
 // One-time "set up Stripe" nudge when the active environment has neither saved keys nor a connected account.
 function maybeNudgeStripeSetup() {
+  // Only once the keys have actually been READ. `modes` starts at its empty shape, which is
+  // indistinguishable from "nothing configured" -- so a fetch that failed (cold start, a token refresh,
+  // a dropped request) used to raise a STICKY "finish setting up Stripe" at a tenant who was already set
+  // up, contradicting the Payments screen the moment it loaded (reported 2026-10-14).
+  if (!stripeKeys.loaded) return;
   const mode = stripeKeys.modes?.[activeEnvironment.value];
   if (!mode) return;
   const configured = mode.saved_secret_key || mode.connect_status === "connected" || !!mode.connect_account_id;

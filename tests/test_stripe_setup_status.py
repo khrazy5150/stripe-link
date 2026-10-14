@@ -33,6 +33,34 @@ class OneRuleNotThree(unittest.TestCase):
         self.assertNotIn("publishable", configured)
 
 
+class ANudgeNeedsToKNOWBeforeItWarns(unittest.TestCase):
+    """`modes` starts at its empty shape, which is indistinguishable from "nothing configured". A fetch
+    that failed therefore looked exactly like an unconfigured tenant — and the nudge is STICKY, so one
+    dropped request left a permanent "finish setting up Stripe" beside a Payments screen that loaded fine
+    and said the opposite (reported 2026-10-14)."""
+
+    def test_the_store_records_whether_it_actually_read_them(self):
+        self.assertIn("loaded: false,", STORE)
+        self.assertIn("this.loaded = true;", STORE)
+
+    def test_it_is_cleared_before_each_attempt(self):
+        """Otherwise a later failure keeps answering with the previous success."""
+        load = STORE[STORE.index("async load() {"):STORE.index("async loadConnectCard")]
+        self.assertIn("this.loaded = false;", load)
+        self.assertLess(load.index("this.loaded = false;"), load.index("this.loaded = true;"))
+
+    def test_only_a_successful_read_sets_it(self):
+        """The catch branch must not claim knowledge it does not have."""
+        load = STORE[STORE.index("async load() {"):STORE.index("async loadConnectCard")]
+        catch = load[load.index("} catch (error) {"):]
+        self.assertNotIn("this.loaded = true", catch)
+
+    def test_the_nudge_waits_for_it(self):
+        nudge = APP[APP.index("function maybeNudgeStripeSetup()"):][:900]
+        self.assertIn("if (!stripeKeys.loaded) return;", nudge)
+        self.assertLess(nudge.index("stripeKeys.loaded"), nudge.index("stripeKeys.modes"))
+
+
 class TheMessageSaysWhatIsMissing(unittest.TestCase):
     def test_load_no_longer_claims_success_for_a_mere_fetch(self):
         self.assertNotIn('this.message = "Stripe keys loaded."', STORE)
