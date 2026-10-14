@@ -534,7 +534,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Own keyframe name: `sl-marquee` is also defined by the client-logo strip further down, and the later
     # definition wins — which gave the countdown the logo animation (0 -> -50%), so it restarted from the
     # middle instead of wrapping off one edge and back in the other.
-    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-countdown-marquee var(--sl-countdown-marquee-duration,14s) linear infinite}",
+    # The content span had NO base rule: it was an inline box, so the icon and label started at the left
+    # edge of a box the wide digit grid had stretched, and the label sat off-centre above centred tiles.
+    # `text-align` cannot fix an inline element -- it needs to be a flex row that WRAPS, so the grid drops
+    # to a second line and each line is centred on its own.
+    "    .sl-countdown-content{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.8rem}",
+    # The marquee scrolls one continuous strip; wrapping it would stack the halves and shear the animation.
+    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;flex-wrap:nowrap;align-items:center;gap:0.8rem;animation:sl-countdown-marquee var(--sl-countdown-marquee-duration,14s) linear infinite}",
     # Scrolling past the deadline reads as a live offer that has already gone.
     "    .sl-countdown[data-expired='true'] .sl-countdown-content{animation:none}",
     "    .sl-countdown time{font-family:var(--sl-font-mono);background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",

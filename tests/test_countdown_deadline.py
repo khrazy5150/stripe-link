@@ -115,6 +115,27 @@ class TheDigitGrid(unittest.TestCase):
         self.assertIn("font-variant-numeric:tabular-nums", HTML)
 
 
+class TheBannerIsCentred(unittest.TestCase):
+    """The content span had no base rule at all, so it was an INLINE box: the icon and label began at the
+    left edge of a box the wide digit grid had stretched, putting the label off-centre above centred tiles.
+    """
+
+    def test_the_content_is_a_centred_wrapping_row(self):
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+        rule = next(r for r in UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if isinstance(r, str) and r.strip().startswith(".sl-countdown-content{"))
+        for prop in ("display:flex", "flex-wrap:wrap", "justify-content:center", "align-items:center"):
+            with self.subTest(prop=prop):
+                self.assertIn(prop, rule)
+
+    def test_the_marquee_still_refuses_to_wrap(self):
+        """It scrolls one continuous strip; wrapping stacks the halves and shears the animation."""
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+        rule = next(r for r in UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if isinstance(r, str) and "data-marquee='true'] .sl-countdown-content{" in r)
+        self.assertIn("flex-wrap:nowrap", rule)
+
+
 class ExpiryStillWithdrawsThePricing(unittest.TestCase):
     """A banner counting to the sale's end that keeps selling at the sale price afterwards is the bug."""
 
