@@ -80,6 +80,14 @@ export const menuSchema = {
       enabled: true,
       environments: ["test", "live"],
     },
+    events: {
+      key: "events",
+      label: "Events",
+      icon: "calendar",
+      view: "events",
+      enabled: true,
+      environments: ["test", "live"],
+    },
     services: {
       key: "services",
       label: "Services",

@@ -169,6 +169,10 @@
           v-else-if="activeView === 'collections'"
           :key="`collections-${activeEnvironment}-${auth.session?.client_id || ''}`"
         />
+        <Events
+          v-else-if="activeView === 'events'"
+          :key="`events-${auth.session?.client_id || ''}`"
+        />
         <ABTesting
           v-else-if="activeView === 'abTesting'"
           :key="`ab-testing-${activeEnvironment}-${auth.session?.client_id || ''}`"
@@ -205,6 +209,7 @@ import Billing from "./components/Billing.vue";
 import Configuration from "./components/Configuration.vue";
 import ConnectIntroModal from "./components/shared/ConnectIntroModal.vue";
 import Collections from "./components/Collections.vue";
+import Events from "./components/Events.vue";
 import Coupons from "./components/Coupons.vue";
 import Customers from "./components/Customers.vue";
 import Dashboard from "./components/Dashboard.vue";
