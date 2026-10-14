@@ -1696,6 +1696,13 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "marquee", "Countdown timer marquee")
             if section.get("duration_minutes") is not None:
                 require_positive_int(section, "duration_minutes", "Countdown timer duration_minutes")
+            if section.get("mode") is not None:
+                require_enum(section, "mode", {"duration", "deadline"}, "Countdown timer mode")
+            if section.get("display") is not None:
+                require_enum(section, "display", {"line", "digits"}, "Countdown timer display")
+            # Absent = derive from the page's own sale.ends_at (countdown_deadline), which is why this is
+            # optional rather than required whenever mode is "deadline".
+            optional_non_negative_int(section, "ends_at", "Countdown timer ends_at")
             optional_string(section, "label", "Countdown timer label")
             optional_string(section, "start_text", "Countdown timer start_text")
             optional_string(section, "end_text", "Countdown timer end_text")

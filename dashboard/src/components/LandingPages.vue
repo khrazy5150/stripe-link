@@ -444,8 +444,34 @@
                 </label>
                 <div v-if="builder.countdown.enabled" class="builder-countdown-options">
                   <label class="offer-field">
+                    <span>What it counts</span>
+                    <select v-model="builder.countdown.mode">
+                      <option value="duration">Down from a number of minutes — each visitor gets their own</option>
+                      <option value="deadline">To a date and time — the same for everyone</option>
+                    </select>
+                  </label>
+                  <label v-if="builder.countdown.mode !== 'deadline'" class="offer-field">
                     <span>Duration Minutes</span>
                     <input v-model.number="builder.countdown.duration_minutes" type="number" min="1" />
+                  </label>
+                  <template v-else>
+                    <label class="offer-field">
+                      <span>Ends at {{ builder.sale.ends_at ? "(leave blank to use the sale's expiry)" : "" }}</span>
+                      <input v-model="countdownEndsAtLocal" type="datetime-local" />
+                    </label>
+                    <p v-if="!builder.countdown.ends_at && builder.sale.ends_at" class="field-note">
+                      Counting to the sale's expiry, {{ formatEpoch(builder.sale.ends_at) }}. Change it under Sale &amp; Flash Sale and this follows.
+                    </p>
+                    <p v-else-if="!builder.countdown.ends_at" class="field-error">
+                      Pick a date, or set an expiry under Sale &amp; Flash Sale — with neither, the banner cannot render.
+                    </p>
+                  </template>
+                  <label class="offer-field">
+                    <span>Show as</span>
+                    <select v-model="builder.countdown.display">
+                      <option value="line">One line</option>
+                      <option value="digits">Days / hours / minutes / seconds boxes</option>
+                    </select>
                   </label>
                   <label class="builder-toggle">
                     <input v-model="builder.countdown.persistent" type="checkbox" />
@@ -2960,6 +2986,15 @@ function localInputToEpoch(value) {
   const ms = new Date(value).getTime();
   return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
 }
+const countdownEndsAtLocal = computed({
+  get: () => epochToLocalInput(builder.countdown.ends_at),
+  set: (v) => { builder.countdown.ends_at = localInputToEpoch(v) || 0; },
+});
+// Shown back to the tenant so "the sale's expiry" is a date they can check, not a promise they must trust.
+function formatEpoch(epoch) {
+  if (!epoch) return "";
+  return new Date(Number(epoch) * 1000).toLocaleString();
+}
 const saleEndsAtLocal = computed({ get: () => epochToLocalInput(builder.sale.ends_at), set: (v) => { builder.sale.ends_at = localInputToEpoch(v); } });
 const flashStartsOnLocal = computed({ get: () => epochToLocalInput(builder.flash_sale.starts_on), set: (v) => { builder.flash_sale.starts_on = localInputToEpoch(v); } });
 const flashEndsAtLocal = computed({ get: () => epochToLocalInput(builder.flash_sale.ends_at), set: (v) => { builder.flash_sale.ends_at = localInputToEpoch(v); } });
@@ -3819,6 +3854,9 @@ function defaultBuilderForm() {
     cta_form_description: "",
     countdown: {
       enabled: false,
+      mode: "duration",
+      display: "line",
+      ends_at: 0,
       duration_minutes: 15,
       start_text: "Offer expires in",
       end_text: "Offer expired",
@@ -4970,6 +5008,9 @@ function populateBuilderFromPage(page) {
   Object.assign(builder.countdown, defaultBuilderForm().countdown, {
     enabled: Boolean(countdown.id),
     duration_minutes: countdown.duration_minutes || 15,
+    mode: countdown.mode === "deadline" ? "deadline" : "duration",
+    display: countdown.display === "digits" ? "digits" : "line",
+    ends_at: Number(countdown.ends_at) || 0,
     start_text: countdown.start_text || countdown.label || "Offer expires in",
     end_text: countdown.end_text || "Offer expired",
     start_enabled: countdown.start_enabled !== false,
@@ -5207,6 +5248,11 @@ function builderSectionCandidates(intent) {
       type: "countdown_timer",
       enabled: true,
       duration_minutes: Math.max(1, Number(builder.countdown.duration_minutes || 15)),
+      mode: builder.countdown.mode === "deadline" ? "deadline" : "duration",
+      display: builder.countdown.display === "digits" ? "digits" : "line",
+      // Omitted when unset so the renderer derives from sale.ends_at; 0 would be a date in 1970.
+      ...(builder.countdown.mode === "deadline" && builder.countdown.ends_at
+        ? { ends_at: Number(builder.countdown.ends_at) } : {}),
       start_text: builder.countdown.start_text || "Offer expires in",
       end_text: builder.countdown.end_text || "Offer expired",
       start_enabled: builder.countdown.start_enabled !== false,

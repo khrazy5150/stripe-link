@@ -521,6 +521,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-countdown{width:100%;display:flex;align-items:center;justify-content:center;gap:0.8rem;background:var(--sl-countdown-bg,var(--sl-card));color:var(--sl-countdown-text);border-radius:0;padding:1.2rem 1.6rem;font-weight:800}",
     # display:flex above beats the hidden attribute's UA display:none, which made Banner Start inert.
     "    .sl-countdown[hidden]{display:none}",
+    "    .sl-countdown-digits{display:flex;gap:0.8rem;align-items:stretch}",
+    # Each unit is a tile: the number large, its name small and quiet beneath. tabular-nums so the digits
+    # do not jitter the tile's width as they tick.
+    "    .sl-countdown-unit{display:grid;gap:0.2rem;justify-items:center;min-width:6.4rem;padding:0.8rem 1rem;border-radius:0.8rem;background:rgba(0,0,0,.22)}",
+    "    .sl-countdown-unit b{font-family:var(--sl-font-heading);font-size:2.4rem;line-height:1;font-variant-numeric:tabular-nums}",
+    "    .sl-countdown-unit small{font-size:1.1rem;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75;font-weight:700}",
+    "    @media (max-width: 480px){.sl-countdown-digits{gap:0.5rem}.sl-countdown-unit{min-width:0;flex:1;padding:0.6rem 0.4rem}.sl-countdown-unit b{font-size:1.9rem}.sl-countdown-unit small{font-size:0.95rem;letter-spacing:0.04em}}",
     "    .sl-countdown[data-sticky='true']{position:sticky;top:0;z-index:20}",
     "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 85%,transparent)}",
     "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
@@ -2829,8 +2836,44 @@ def countdown_timer_colors(page: dict[str, Any], section: dict[str, Any]) -> tup
     return str(tokens["countdown_bg"]), str(tokens["countdown_end_bg"])
 
 
+COUNTDOWN_MODES = ("duration", "deadline")
+COUNTDOWN_DISPLAYS = ("line", "digits")
+COUNTDOWN_UNITS = (("days", "Days"), ("hours", "Hours"), ("minutes", "Minutes"), ("seconds", "Seconds"))
+
+
+def countdown_deadline(section: dict[str, Any], page: dict[str, Any]) -> int:
+    """The moment a deadline countdown counts to, as epoch seconds. 0 means there is nothing to count to.
+
+    An ABSENT `ends_at` derives from the page's own `sale.ends_at` -- the same "absent means derive at
+    render" rule the brand label and hero copy follow. That field already exists and the sale machinery
+    already honours it, so deriving is what stops the banner and the sale disagreeing about when the sale
+    ends: a page cannot show "2 days left" over pricing that expired on Monday.
+    """
+    raw = section.get("ends_at")
+    if raw:
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return max(0, int((page.get("sale") or {}).get("ends_at") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
+        return ""
+    mode = str(section.get("mode") or "duration")
+    if mode not in COUNTDOWN_MODES:
+        mode = "duration"
+    display = str(section.get("display") or "line")
+    if display not in COUNTDOWN_DISPLAYS:
+        display = "line"
+    ends_at = countdown_deadline(section, page) if mode == "deadline" else 0
+    # A deadline with no date is not a countdown. Rendering the banner anyway would leave "Offer expires
+    # in" above an empty space, which reads as a broken page rather than an unconfigured one.
+    if mode == "deadline" and not ends_at:
         return ""
     duration = int(section.get("duration_minutes") or 0)
     label = escape(str(section.get("start_text") or section.get("label") or "Offer expires in"))
@@ -2850,12 +2893,24 @@ def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str
     start_icon = escape(str(section.get("start_icon") or ""))
     end_icon = escape(str(section.get("end_icon") or ""))
     return "\n".join([
-        f"    <section class=\"sl-countdown\" data-section-id=\"{escape(str(section.get('id', 'countdown')))}\" data-section-type=\"countdown_timer\" data-duration-minutes=\"{duration}\" data-persistent=\"{str(bool(section.get('persistent'))).lower()}\" data-sticky=\"{str(bool(section.get('sticky'))).lower()}\" data-transparent=\"{str(transparent).lower()}\" data-marquee=\"{str(bool(section.get('marquee'))).lower()}\" data-start-text=\"{label}\" data-end-text=\"{end_text}\" data-start-icon=\"{start_icon}\" data-end-icon=\"{end_icon}\" data-start-enabled=\"{str(start_enabled).lower()}\" data-end-enabled=\"{str(end_enabled).lower()}\" data-start-color=\"{start_color}\" data-end-color=\"{end_color}\" style=\"{style}\"{'' if start_enabled else ' hidden'}>",
+        f"    <section class=\"sl-countdown\" data-section-id=\"{escape(str(section.get('id', 'countdown')))}\" data-section-type=\"countdown_timer\" data-mode=\"{mode}\" data-ends-at=\"{ends_at}\" data-display=\"{display}\" data-duration-minutes=\"{duration}\" data-persistent=\"{str(bool(section.get('persistent'))).lower()}\" data-sticky=\"{str(bool(section.get('sticky'))).lower()}\" data-transparent=\"{str(transparent).lower()}\" data-marquee=\"{str(bool(section.get('marquee'))).lower()}\" data-start-text=\"{label}\" data-end-text=\"{end_text}\" data-start-icon=\"{start_icon}\" data-end-icon=\"{end_icon}\" data-start-enabled=\"{str(start_enabled).lower()}\" data-end-enabled=\"{str(end_enabled).lower()}\" data-start-color=\"{start_color}\" data-end-color=\"{end_color}\" style=\"{style}\"{'' if start_enabled else ' hidden'}>",
         # aria-live=off: the timer mutates every second; announcing every tick would flood a screen reader.
         "      <span class=\"sl-countdown-content\" aria-live=\"off\">",
         (f"        <span data-countdown-icon aria-hidden=\"true\">{start_icon}</span>" if start_icon else ""),
         f"        <span data-countdown-label>{label}</span>",
-        f"        <time data-countdown-display>{duration}:00</time>" if duration else "",
+        (
+            # The grid is built server-side and filled by the island, so the shape is in the HTML rather
+            # than assembled by script -- a page with no JS shows the boxes and their names, not nothing.
+            "        <span class=\"sl-countdown-digits\" data-countdown-digits>"
+            + "".join(
+                f"<span class=\"sl-countdown-unit\"><b data-countdown-{key}>00</b>"
+                f"<small>{word}</small></span>"
+                for key, word in COUNTDOWN_UNITS
+            )
+            + "</span>"
+            if display == "digits" else
+            f"        <time data-countdown-display>{duration}:00</time>" if duration or mode == "deadline" else ""
+        ),
         "      </span>",
         "    </section>",
     ])
@@ -9183,14 +9238,21 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      document.querySelectorAll('[data-section-type=\"countdown_timer\"]').forEach((section) => {",
         "        const duration = Number(section.dataset.durationMinutes || 0) * 60;",
         "        const display = section.querySelector('[data-countdown-display]');",
+        "        const digits = section.querySelector('[data-countdown-digits]');",
         "        const label = section.querySelector('[data-countdown-label]');",
-        "        if (!duration || !display) return;",
-        "        const persistent = section.dataset.persistent === 'true';",
+        # A DEADLINE is an absolute moment: everyone sees the same number, so there is nothing to persist
+        # and nothing to restart. A DURATION is this visitor's own clock, which is what localStorage below
+        # is for -- mixing the two would let a stored duration override the date the tenant set.
+        "        const deadlineMode = section.dataset.mode === 'deadline';",
+        "        const endsAt = Number(section.dataset.endsAt || 0);",
+        "        if (!display && !digits) return;",
+        "        if (deadlineMode ? !endsAt : !duration) return;",
+        "        const persistent = !deadlineMode && section.dataset.persistent === 'true';",
         # Funnel-step timers scope to the session so a NEW purchase gets a fresh clock (a prior run may have
         # stored 'expired'); landing-page persist timers stay page-scoped, persisting across visits as intended.
         "        const cdScope = (isFunnelStep && funnelSessionId) ? ':' + funnelSessionId : '';",
         "        const storageKey = `stripe-link:${pageId}${cdScope}:countdown:${section.dataset.sectionId || 'timer'}`;",
-        "        let deadline = Date.now() + duration * 1000;",
+        "        let deadline = deadlineMode ? endsAt * 1000 : Date.now() + duration * 1000;",
         "        let interval = null;",
         # The stored value carries the duration it was created for. Changing the timer from 15 to 5
         # minutes previously kept counting down the OLD deadline, and the only way out was to switch
@@ -9216,11 +9278,26 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            writeStored(deadline);",
         "          }",
         "        }",
+        "        const pad = (n) => String(n).padStart(2, '0');",
         "        const render = () => {",
         "          const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000));",
-        "          const minutes = Math.floor(remaining / 60);",
-        "          const seconds = String(remaining % 60).padStart(2, '0');",
-        "          display.textContent = `${minutes}:${seconds}`;",
+        "          if (digits) {",
+        "            const set = (k, v) => { const el = digits.querySelector(`[data-countdown-${k}]`); if (el) el.textContent = v; };",
+        "            set('days', String(Math.floor(remaining / 86400)));",
+        "            set('hours', pad(Math.floor((remaining % 86400) / 3600)));",
+        "            set('minutes', pad(Math.floor((remaining % 3600) / 60)));",
+        "            set('seconds', pad(remaining % 60));",
+        "          } else if (deadlineMode) {",
+        # Days only once there ARE days: "0d 00:04:12" on the last afternoon of a sale reads as broken.
+        "            const d = Math.floor(remaining / 86400);",
+        "            const h = Math.floor((remaining % 86400) / 3600);",
+        "            const body = `${pad(h)}:${pad(Math.floor((remaining % 3600) / 60))}:${pad(remaining % 60)}`;",
+        "            display.textContent = d ? `${d}d ${body}` : body;",
+        "          } else {",
+        "            const minutes = Math.floor(remaining / 60);",
+        "            const seconds = String(remaining % 60).padStart(2, '0');",
+        "            display.textContent = `${minutes}:${seconds}`;",
+        "          }",
         "          if (remaining <= 0) {",
         # The end banner can be switched off independently: hide rather than swap to the expired state.
         "            if (section.dataset.endEnabled === 'false') { section.hidden = true; expireDiscounts(); return false; }",
@@ -9254,6 +9331,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # Re-arm the timer for the downsell: fresh deadline, reset label + start color, so it counts down anew and
         # its next expiry advances the funnel (the downsell is already showing).
         "        funnelCountdownRestarts.push(() => {",
+        # A DEADLINE cannot be re-armed: it is a moment, not a stopwatch, and a downsell does not move
+        # Black Friday. Without this the restart would set `deadline = now + 0`, expiring it instantly and
+        # firing the funnel's decline path again on a page that had simply reached its date.
+        "          if (deadlineMode) return;",
         "          if (interval) window.clearInterval(interval);",
         "          deadline = Date.now() + duration * 1000;",
         "          if (label) label.textContent = section.dataset.startText || label.textContent;",
