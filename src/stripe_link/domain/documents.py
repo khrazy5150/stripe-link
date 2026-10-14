@@ -1918,6 +1918,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
             # The inline lead form's own heading and sub-line, overriding the product's per-action default.
             # Capped because they sit inside a card above the field, not in the hero.
             optional_string(section, "form_title", "Checkout CTA form_title", max_length=80)
+            # What the page says while a session is RUNNING, when the form is replaced by a join button.
+            optional_string(section, "live_title", "Checkout CTA live_title", max_length=80)
+            optional_string(section, "live_label", "Checkout CTA live_label", max_length=60)
             optional_string(section, "form_description", "Checkout CTA form_description", max_length=200)
         elif section_type == "legal_footer":
             optional_string(section, "copyright", "Legal footer copyright")

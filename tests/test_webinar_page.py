@@ -4,6 +4,7 @@ The page asks the SAME `accepts_registration`/`open_occurrences` the endpoint us
 session the server will refuse. That is a consistency property, not a security one — the server still
 checks, because a published page is a cached artifact and a visitor's copy may be hours old.
 """
+import pathlib
 import re
 import time
 import unittest
@@ -177,6 +178,27 @@ class TheLiveState(unittest.TestCase):
                                         title="")
         self.assertIn("Doors are open", markup)
         self.assertIn("Enter the room", markup)
+
+    def test_the_preview_evaluates_the_session_too(self):
+        """The bug this exists to prevent, reported 2026-10-14: the PUBLISH path loaded events and the
+        PREVIEW path did not, so the builder showed a registration form while the live page showed the
+        join button. Two surfaces rendering the same page from different inputs."""
+        render = (pathlib.Path(html.__file__).resolve().parents[2].parent
+                  / "handlers" / "page_render.py")
+        if not render.exists():
+            render = pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers" / "page_render.py"
+        text = render.read_text(encoding="utf-8")
+        self.assertIn("events_by_id=", text)
+        self.assertIn("_load_events_for_products", text)
+
+    def test_the_live_wording_is_the_tenants_to_set(self):
+        """While the session runs the form is replaced, so the form's own heading and button are off
+        screen; without these the live page speaks in defaults nobody can reach."""
+        builder = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+                   / "LandingPages.vue").read_text(encoding="utf-8")
+        self.assertIn("builder.cta_live_title", builder)
+        self.assertIn("builder.cta_live_label", builder)
+        self.assertIn("live_title: builder.cta_live_title", builder)
 
     def test_the_live_check_comes_before_the_registration_check(self):
         """A form shown while the host is already talking is the page failing at the only moment that

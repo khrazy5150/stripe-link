@@ -822,6 +822,23 @@
                     <span>Form description</span>
                     <input v-model.trim="builder.cta_form_description" type="text" :placeholder="leadFormPlaceholder.description" maxlength="200" />
                   </label>
+                  <!-- WHILE THE SESSION RUNS the form is replaced by a join button, so the wording above
+                       is not on screen and these two are. Without them the live page spoke in defaults a
+                       tenant could not reach (reported 2026-10-14). -->
+                  <template v-if="builderOffer?.lead_capture_action === 'register_event'">
+                    <label class="offer-field">
+                      <span>While the session is live <small>heading</small></span>
+                      <input v-model.trim="builder.cta_live_title" type="text" placeholder="We're live now" maxlength="80" />
+                    </label>
+                    <label class="offer-field">
+                      <span>While the session is live <small>button</small></span>
+                      <input v-model.trim="builder.cta_live_label" type="text" placeholder="Join the session" maxlength="60" />
+                    </label>
+                    <p class="field-note">
+                      The registration form is replaced by this button once the session starts — nobody
+                      needs to sign up for something already running.
+                    </p>
+                  </template>
                 </template>
                 <div class="lead-action-summary">
                   <strong>{{ ctaTypeLabel(builderCta.type, builderLeadAction) }}</strong>
@@ -3954,6 +3971,8 @@ function defaultBuilderForm() {
     cta_show_destination: true,
     cta_tone: "contrast",
     cta_form_description: "",
+    cta_live_title: "",
+    cta_live_label: "",
     countdown: {
       enabled: false,
       mode: "duration",
@@ -5081,6 +5100,8 @@ function populateBuilderFromPage(page) {
       : offerCtaType(offer) === "call",
     cta_tone: cta.tone || "contrast",
     cta_form_description: cta.form_description || "",
+    cta_live_title: cta.live_title || "",
+    cta_live_label: cta.live_label || "",
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
     pixel_id: page.analytics?.pixel_id || "",
@@ -5470,6 +5491,8 @@ function builderSectionCandidates(intent) {
       show_destination: builder.cta_show_destination,
       tone: builder.cta_tone !== "contrast" ? builder.cta_tone : undefined,
       form_title: builder.cta_form_title || undefined,
+      live_title: builder.cta_live_title || undefined,
+      live_label: builder.cta_live_label || undefined,
       form_description: builder.cta_form_description || undefined,
     });
   }

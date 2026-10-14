@@ -11,6 +11,7 @@ from stripe_link.domain.documents import (
 )
 from stripe_link.domain.pricing import PricingError
 from stripe_link.repositories.documents import (
+    events_repository,
     reviews_repository,
     sites_repository,
     tenant_profiles_repository,
@@ -25,6 +26,7 @@ from stripe_link.runtime.html import (
     structured_data_warnings,
 )
 from stripe_link.runtime.publishing import (
+    _load_events_for_products,
     attach_owner_display_name,
     find_site_for_page,
     load_page_reviews,
@@ -36,7 +38,7 @@ from stripe_link.runtime.publishing import (
 )
 
 
-def handler(event, context, *, sites_repo=None, reviews_repo=None):
+def handler(event, context, *, sites_repo=None, reviews_repo=None, events_repo=None):
     try:
         body = parse_json_body(event)
         page = body.get("page")
@@ -192,6 +194,13 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
             site=site, page_type=site_page_type(site, str(page.get("page_id") or "")), reviews=reviews,
             home_url=preview_home_url,
             price_context=price_context, preferences=preferences,
+            # The PREVIEW must evaluate the same session state the published page does. Without this it
+            # renders the plain lead form -- no occurrence picker, no live state -- so a tenant watching the
+            # preview sees a different page from the one their visitors get (reported 2026-10-14). The
+            # publish path has loaded these since the element shipped; this surface was missed.
+            events_by_id=_load_events_for_products(
+                str(page.get("tenant_id") or ""), products_by_id,
+                events_repository() if os.environ.get("EVENTS_TABLE") else None),
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.

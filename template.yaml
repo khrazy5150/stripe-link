@@ -1837,6 +1837,7 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           APP_CONFIG_TABLE: !Ref AppConfigTable
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
+          EVENTS_TABLE: !Ref EventsTable
           REVIEWS_TABLE: !Ref ReviewsTable
           SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
@@ -1855,6 +1856,9 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ReviewsTable
+        # Read-only: the PREVIEW renders the session state, exactly as publishing does.
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsTable
         # The live preview is the published renderer, so it needs the store's font preference too --
         # otherwise an imported font previews as the system stack while presets preview correctly.
         - DynamoDBReadPolicy:
