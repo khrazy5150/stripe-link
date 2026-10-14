@@ -197,6 +197,26 @@ customers and therefore shouldn't get top priority").
 - **Replay for registrants only** appears in one reference. That is a gated asset, which the download
   machinery may already cover.
 
+## 11a. P2 as built (2026-10-14)
+
+Differs from §6 in two places worth recording:
+
+* **The reminder sweep is driven by EVENTS, not leads.** §10a's missing index made the obvious design —
+  scan registrations — mean reading every tenant's entire lead history every fifteen minutes. Inverting it
+  reads the small table instead, and only a tenant with a session inside a ~25h horizon has their leads
+  listed at all. The index in §10a is now a nice-to-have rather than a prerequisite.
+* **What is due is DERIVED from `starts_at`, never planned and stored.** A stored schedule needs rewriting
+  whenever a tenant moves a session and goes stale when a sweep is missed. Deriving means a sweep that
+  fails sends LATE rather than not at all, and moving a session moves its reminders with no rewrite.
+
+When several notices come due at once — a session created an hour before it runs, or a missed window —
+only the **most imminent** is sent and the rest are recorded as `superseded`. "Starts tomorrow" about a
+session starting in thirty minutes is not a duplicate, it is wrong.
+
+A separate handler from `handlers/reminders.py`: that one is appointment SMS and returns early when no
+10DLC origination number is configured, so folding email into it would have made these silently depend on
+an SMS registration they have nothing to do with.
+
 ## 12. Phases
 
 1. **P1 — Event + registration.** EventsTable, `lead_event` offer type and composition, occurrence picker,

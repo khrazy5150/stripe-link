@@ -993,6 +993,49 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /collections/{collection_id}
             Method: DELETE
+  EventRemindersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Environment:
+        Variables:
+          # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
+          # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
+          # A missing name here is a RUNTIME failure, not a deploy failure.
+          EVENTS_TABLE: !Ref EventsTable
+          LEADS_TABLE: !Ref LeadsTable
+          TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          USER_PROFILES_TABLE: !Ref UserProfilesTable
+      FunctionName: !Sub "${ProjectPrefix}-event-reminders-${Environment}"
+      CodeUri: src/
+      Handler: handlers.event_reminders.handler
+      Timeout: 120
+      Description: Emails registrants before their session. Driven by EVENTS, not by scanning leads.
+      Policies:
+        # CRUD on events: the sweep stamps each notice back onto the occurrence so it cannot repeat.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LeadsTable
+        # Sending as the tenant reads their tier (signature) and the owner's sender identity.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
+      Events:
+        EventReminderSweep:
+          Type: Schedule
+          Properties:
+            # Fifteen minutes, like the other sweeps. What is due is DERIVED from starts_at, so a missed
+            # run sends late rather than not at all -- the cadence is a latency choice, not correctness.
+            Schedule: rate(15 minutes)
+            Description: Send due session reminders.
   EventsFunction:
     Type: AWS::Serverless::Function
     Properties:

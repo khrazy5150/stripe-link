@@ -192,3 +192,66 @@ def record_registration(event: dict[str, Any], occurrence_id: Any) -> dict[str, 
         rows.append(row)
     updated["occurrences"] = rows
     return updated
+
+
+# When registrants are reminded, as minutes before the session. The day-before catches people who need to
+# move something; the hour-before catches everyone else, and is the one that actually fills a room.
+REMINDER_LEAD_MINUTES = (1440, 60)
+EMAIL_CHANNEL = "email"
+
+
+def _reminder_records(occurrence: Any) -> list[dict[str, Any]]:
+    return [row for row in ((occurrence or {}).get("reminders") or []) if isinstance(row, dict)]
+
+
+def reminder_sent(occurrence: Any, lead_minutes: int) -> bool:
+    """Whether this notice is SETTLED -- delivered, or deliberately skipped because a more imminent one
+    went instead. Both mean "do not send it", which is the only question the sweep asks."""
+    return any(
+        int(row.get("lead_minutes") or 0) == int(lead_minutes)
+        and row.get("status") in ("sent", "superseded")
+        for row in _reminder_records(occurrence)
+    )
+
+
+def due_reminder_leads(event: Any, occurrence: Any, *, now: int) -> list[int]:
+    """Which lead times are due for this sitting right now, soonest-sent first.
+
+    Derived from `starts_at` rather than planned ahead and stored. A stored schedule has to be rewritten
+    whenever the tenant moves the session, and a missed sweep leaves it stale; deriving means the answer is
+    always current and a sweep that does not run simply sends late rather than not at all.
+
+    Nothing is due once the session has started -- a reminder arriving mid-session is noise, and the page
+    is already showing the join link by then.
+    """
+    start = starts_at(occurrence)
+    moment = int(now)
+    if not start or moment >= start:
+        return []
+    if session_state(event, occurrence, now=moment) != UPCOMING:
+        return []
+    due = [
+        lead for lead in REMINDER_LEAD_MINUTES
+        if moment >= start - lead * 60 and not reminder_sent(occurrence, lead)
+    ]
+    # MOST IMMINENT FIRST. When several are due at once -- a session created an hour before it runs, or a
+    # sweep that missed a window -- only the first is worth sending: "starts tomorrow" about a session
+    # starting in thirty minutes is not a duplicate, it is wrong. The caller sends `[0]` and supersedes
+    # the rest so they cannot fire later.
+    return sorted(due)
+
+
+def record_reminder(occurrence: dict[str, Any], lead_minutes: int, *,
+                    now: int, status: str = "sent", recipients: int = 0) -> dict[str, Any]:
+    """The occurrence with this reminder's outcome stamped on it. Returns a NEW dict, like every other
+    writer here, so the caller controls when it is persisted."""
+    rows = [row for row in _reminder_records(occurrence)
+            if int(row.get("lead_minutes") or 0) != int(lead_minutes)]
+    rows.append({
+        "lead_minutes": int(lead_minutes),
+        "channel": EMAIL_CHANNEL,
+        "status": status,
+        "sent_at": int(now),
+        "recipients": int(recipients),
+    })
+    return {**occurrence, "reminders": rows}

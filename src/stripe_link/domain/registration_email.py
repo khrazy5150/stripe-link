@@ -78,3 +78,48 @@ def registration_confirmation(
         "</div>",
     ])
     return {"subject": subject, "html": html, "text": text}
+
+
+def registration_reminder(
+    event: dict[str, Any],
+    occurrence: dict[str, Any],
+    lead_minutes: int,
+    *,
+    name: str = "",
+) -> dict[str, str]:
+    """The nudge before a session. `{subject, html, text}`; empty subject means nothing worth sending.
+
+    Shorter than the confirmation on purpose. The registrant already knows what this is -- they signed up
+    -- so the whole job is the link and how soon. Re-explaining the session here is how a reminder becomes
+    another marketing email to ignore.
+    """
+    title = str(event.get("title") or "").strip() or "your session"
+    when = _when(event, occurrence)
+    if not when:
+        return {"subject": "", "html": "", "text": ""}
+
+    soon = "tomorrow" if int(lead_minutes) >= 720 else "in about an hour"
+    join_url = str(event.get("join_url") or "").strip()
+    greeting = f"Hi {name.strip()}," if str(name or "").strip() else "Hi,"
+    subject = f"{title} starts {soon}"
+
+    lines = [greeting, "", f"{title} starts {soon}.", "", f"When: {when}"]
+    lines += ["", f"Join here: {join_url}"] if join_url else \
+             ["", "We'll send the link shortly."]
+    text = "\n".join(lines)
+
+    join_html = (
+        f'<p style="margin:24px 0"><a href="{escape(join_url)}" '
+        f'style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:8px;'
+        f'text-decoration:none;display:inline-block">Join the session</a></p>'
+        if join_url else "<p>We'll send the link shortly.</p>"
+    )
+    html = "".join([
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:16px;line-height:1.5">',
+        f"<p>{escape(greeting)}</p>",
+        f"<p><strong>{escape(title)}</strong> starts {escape(soon)}.</p>",
+        f'<p style="font-size:18px"><strong>{escape(when)}</strong></p>',
+        join_html,
+        "</div>",
+    ])
+    return {"subject": subject, "html": html, "text": text}
