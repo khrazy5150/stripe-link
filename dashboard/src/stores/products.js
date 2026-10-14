@@ -635,6 +635,9 @@ const LEAD_FORM_COPY = {
   call_number: { title: "Talk to us", description: "Give us a call and we'll take it from there." },
   external_url: { title: "Keep going", description: "Follow the link to continue." },
   social_redirect: { title: "Find us there", description: "Follow the link to continue." },
+  // Addressed to someone deciding whether to turn up, not to someone buying anything: a webinar is a free
+  // event, and the ask is an hour of their attention.
+  register_event: { title: "Save your seat", description: "Register and we'll send you the link." },
 };
 
 function leadCaptureShape(action = {}) {
@@ -648,7 +651,17 @@ function leadCaptureShape(action = {}) {
     title: copy.title,
     description: copy.description,
   };
-  if (base.action === "capture_email") {
+  if (base.action === "register_event") {
+    // A registration IS a capture, plus the session it is for. This function builds the payload from an
+    // allow-list per action, so an action matching no branch silently loses BOTH -- which is how
+    // "lead_capture.event_id must be a non-empty string" survived the selector being filled in
+    // (reported 2026-10-14), with the missing `fields` waiting right behind it.
+    base.fields = [
+      { name: "name", type: "text", required: true },
+      { name: "email", type: "email", required: true },
+    ];
+    base.event_id = action.event_id || "";
+  } else if (base.action === "capture_email") {
     base.fields = [{ name: "email", type: "email", required: true }];
   } else if (base.action === "capture_phone") {
     base.fields = [{ name: "phone", type: "tel", required: true }];

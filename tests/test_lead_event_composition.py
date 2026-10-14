@@ -103,6 +103,37 @@ class TheProductPickerOffersIt(unittest.TestCase):
         self.assertIn('const eventId = sameAction ?', applied)
 
 
+class TheStoreBuildsTheWholeShape(unittest.TestCase):
+    """`leadCaptureShape` rebuilds the payload from an allow-list PER ACTION, so an action matching no
+    branch silently loses everything that branch would have added. `register_event` matched none: it lost
+    the event AND the fields, and borrowed another action's form copy (reported 2026-10-14, after the
+    selector was visibly filled in)."""
+
+    STORE = (ROOT / "dashboard" / "src" / "stores" / "products.js").read_text(encoding="utf-8")
+
+    def test_the_event_is_carried_through(self):
+        self.assertIn("base.event_id = action.event_id", self.STORE)
+
+    def test_a_registration_declares_its_fields(self):
+        """`validate_product_lead_capture` requires non-empty fields for a capture action, and a
+        registration is one -- this was the bug waiting behind the first."""
+        branch = self.STORE[self.STORE.index('if (base.action === "register_event")'):][:700]
+        self.assertIn('name: "email"', branch)
+        self.assertIn("base.fields", branch)
+
+    def test_it_has_its_own_form_copy(self):
+        """Falling back to another action's wording would ask a webinar registrant where to send a guide."""
+        self.assertIn("register_event: { title:", self.STORE)
+
+    def test_every_lead_action_has_form_copy(self):
+        """Derived, so the next action added cannot silently borrow capture_email's words."""
+        import re
+        from stripe_link.domain.documents import LEAD_CAPTURE_ACTIONS
+        block = re.search(r"const LEAD_FORM_COPY = \{(.*?)\n\};", self.STORE, re.S).group(1)
+        declared = set(re.findall(r"^  (\w+):", block, re.M))
+        self.assertEqual(set(LEAD_CAPTURE_ACTIONS) - declared, set())
+
+
 class TheProductMustNameTheEvent(unittest.TestCase):
     def _product(self, **lead_capture):
         base = {"schema_version": "1.0.0", "document_type": "product", "tenant_id": "t",
