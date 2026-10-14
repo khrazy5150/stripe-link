@@ -2655,6 +2655,7 @@ Resources:
           APP_CONFIG_TABLE: !Ref AppConfigTable
           COLLECTIONS_TABLE: !Ref CollectionsTable
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
+          EVENTS_TABLE: !Ref EventsTable
           EXPERIMENTS_TABLE: !Ref ExperimentsTable
           OFFERS_TABLE: !Ref OffersTable
           PAGES_TABLE: !Ref PagesTable
@@ -2691,6 +2692,9 @@ Resources:
             TableName: !Ref RoutesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ReviewsTable
+        # Read-only: publishing RENDERS the session, it never registers anyone.
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsTable
         # A page's collection-embed grids resolve their cards from the referenced Collection at publish
         # (plans/SITE_COLLECTIONS.md P1) — read-only.
         - DynamoDBReadPolicy:

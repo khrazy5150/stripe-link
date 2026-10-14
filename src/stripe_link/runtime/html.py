@@ -41,6 +41,11 @@ from stripe_link.domain.image_crop import crop_style_vars
 from stripe_link.domain.fonts import (
     REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
 )
+from stripe_link.domain.events import (
+    open_occurrences as event_open_occurrences,
+    seats_left as event_seats_left,
+    starts_at as event_starts_at,
+)
 from stripe_link.domain.store_timezone import load_zone
 from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import (LIGHT_INK as SECTION_LIGHT_INK, SECTION_TONES,
@@ -934,6 +939,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
     "    .sl-downsell-note{text-align:center;color:var(--sl-muted);font-size:1.4rem;font-weight:600;margin-bottom:0.4rem}",
+    "    .sl-occurrence-picker{display:grid;gap:0.6rem;border:0;padding:0;margin:0}",
+    "    .sl-occurrence-picker legend{font-size:1.3rem;font-weight:700;padding:0 0 0.4rem;color:var(--sl-price-title)}",
+    "    .sl-occurrence{display:flex;align-items:center;gap:0.8rem;padding:1rem 1.2rem;border:1px solid var(--sl-price-card-border);border-radius:0.8rem;cursor:pointer;color:var(--sl-price-title)}",
+    "    .sl-occurrence:has(input:checked){border-color:var(--sl-price-card-selected-border);box-shadow:0 0 0 1px var(--sl-price-card-selected-border)}",
+    "    .sl-occurrence-seats{margin-left:auto;font-size:1.2rem;font-weight:700;color:var(--sl-price-amount)}",
+    "    .sl-event-closed-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-description{font-size:1.4rem;color:var(--sl-price-description)}",
@@ -2183,6 +2194,7 @@ def render_page(
     home_url: str | None = None,
     bnpl_messaging: dict[str, Any] | None = None,
     preferences: dict[str, Any] | None = None,
+    events_by_id: dict[str, dict[str, Any]] | None = None,
     kind: str = "",
 ) -> str:
     services_by_id = services_by_id or {}
@@ -2202,6 +2214,11 @@ def render_page(
     # one tenant's preferences can never leak into another's page on a warm container.
     _RENDER_PREFERENCES.clear()
     _RENDER_PREFERENCES.update(preferences or {})
+    # Scheduled events, by id. Render-scoped like the dims index above and cleared in the same finally: the
+    # lead CTA that needs one sits six frames down, and threading a signature through every frame to reach
+    # it is exactly what these indexes exist to avoid.
+    _RENDER_EVENTS.clear()
+    _RENDER_EVENTS.update(events_by_id or {})
     _RENDER_ALTS_INDEX.clear()
     _RENDER_ALTS_INDEX.update(collect_image_alts(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
@@ -2305,6 +2322,8 @@ def render_page(
         _RENDER_DIMS_INDEX.clear()
         _RENDER_ALTS_INDEX.clear()
         _RENDER_PREFERENCES.clear()
+        # One tenant's sessions must never leak into another's page on a warm container.
+        _RENDER_EVENTS.clear()
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["api_base_url"] = ""
         _RENDER_STATE["tenant_id"] = ""
@@ -5531,6 +5550,7 @@ def rendition_base(url: str) -> str | None:
 # path is synchronous and non-reentrant per Lambda invocation, so a module-level index is safe; it
 # is set and cleared in render_page()'s try/finally.
 _RENDER_DIMS_INDEX: dict[str, tuple[int, int]] = {}
+_RENDER_EVENTS: dict[str, dict[str, Any]] = {}
 
 
 def collect_image_dims(*documents: dict[str, Any] | None) -> dict[str, tuple[int, int]]:
@@ -7634,6 +7654,9 @@ def render_email_cta(
     and two independent GDPR opt-ins (tenant list + Junior Bay list). Submits to POST /leads via JS."""
     lead_capture = first_offer_lead_capture(offer, products_by_id)
     declared = lead_capture.get("fields") or [{"name": "email", "type": "email", "required": True}]
+    # A REGISTRATION is this form plus the session it is for (plans/WEBINAR.md §5-6). The event is resolved
+    # here rather than passed, from the render-scoped index.
+    scheduled_event = _RENDER_EVENTS.get(str(lead_capture.get("event_id") or "")) if lead_capture.get("event_id") else None
     label = escape(cta["label"] or "Get Started")
     # The PAGE first, then the product's. A phone capture is a different business on every page that uses it
     # -- a roofer's "Where can we reach you?" is not an insurance broker's -- so the seeded default has to be
@@ -7710,11 +7733,22 @@ def render_email_cta(
     # Briefly shipped pre-ticked on 2026-09-15 and reverted the same day once the rule was checked. Left here
     # so the next person reaches for the citation instead of the checkbox (author's decision: "we must comply
     # to legal statutes").
+    if scheduled_event is not None:
+        # Asked at PUBLISH with the same function the endpoint uses, so a page cannot offer a session the
+        # server will refuse. A page is a cached artifact, so the server still checks -- this decides what
+        # the visitor is shown, not whether the registration is allowed.
+        open_rows = event_open_occurrences(scheduled_event, now=int(time.time()))
+        if not open_rows:
+            return render_event_closed(scheduled_event, section, title=title, description=description)
+        inputs = [render_occurrence_picker(open_rows)] + inputs
+
     return "\n".join([
         "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
         f"      <form class=\"sl-lead-form\" data-lead-form data-endpoint=\"{endpoint}\" "
         f"data-tenant-id=\"{tenant_id}\" data-offer-id=\"{offer_id}\" data-page-id=\"{page_id}\" "
-        f"data-stripe-mode=\"{'live' if str(offer.get('stripe_mode') or '').strip().lower() == 'live' else 'test'}\">",
+        f"data-stripe-mode=\"{'live' if str(offer.get('stripe_mode') or '').strip().lower() == 'live' else 'test'}\""
+        + (f" data-event-id=\"{escape(str(lead_capture.get('event_id') or ''))}\"" if scheduled_event is not None else "")
+        + ">",
         (f"        <p class=\"sl-lead-title\">{title}</p>" if title else ""),
         (f"        <p class=\"sl-lead-description\">{description}</p>" if description else ""),
         *inputs,
@@ -7725,6 +7759,57 @@ def render_email_cta(
         "        <p class=\"sl-lead-status\" data-lead-status role=\"status\" aria-live=\"polite\"></p>",
         "      </form>",
         "    </section>",
+    ])
+
+
+def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
+    """Which session. A radio group when there is a choice, a hidden field when there is not.
+
+    Radios rather than a <select>: there are two or three of these and each needs a date AND its zone, which
+    a one-line option truncates on a phone. With a single occurrence there is nothing to choose, so asking
+    would be a question with one answer -- the value still travels, because the server needs to know which.
+    """
+    if len(open_rows) == 1:
+        row = open_rows[0]
+        return (f'        <input type="hidden" name="occurrence_id" '
+                f'value="{escape(str(row.get("occurrence_id") or ""))}" />')
+    rows = ['        <fieldset class="sl-occurrence-picker">',
+            '          <legend>Choose a session</legend>']
+    for index, row in enumerate(open_rows):
+        occurrence_id = escape(str(row.get("occurrence_id") or ""))
+        when = escape(format_event_date(event_starts_at(row), str(row.get("timezone") or ""), with_time=True))
+        checked = ' checked' if index == 0 else ''
+        left = event_seats_left(row)
+        # Only when it is nearly gone: "497 seats left" is not scarcity, it is arithmetic.
+        remaining = f'<span class="sl-occurrence-seats">{left} left</span>' if left is not None and left <= 20 else ''
+        rows.append(
+            f'          <label class="sl-occurrence"><input type="radio" name="occurrence_id" '
+            f'value="{occurrence_id}"{checked} /> <span>{when}</span>{remaining}</label>'
+        )
+    rows.append('        </fieldset>')
+    return "\n".join(rows)
+
+
+def render_event_closed(scheduled_event: dict[str, Any], section: dict[str, Any] | None,
+                        *, title: str, description: str) -> str:
+    """What the page says once no session is open.
+
+    The form is REPLACED, not disabled: a disabled form invites people to try, and a registration page that
+    silently keeps collecting addresses for a session that already ran is the worst failure available here.
+    """
+    section = section or {}
+    heading = escape(str(section.get("closed_title") or "Registration has closed"))
+    note = escape(str(section.get("closed_text")
+                      or "This session has already taken place. Check back for the next one."))
+    return "\n".join([
+        '    <section class="sl-checkout-cta sl-email-cta sl-event-closed" data-section-type="checkout_cta"'
+        ' data-cta-type="email" data-event-closed="true">',
+        '      <div class="sl-lead-form">',
+        (f'        <p class="sl-lead-title">{title}</p>' if title else ""),
+        f'        <p class="sl-event-closed-heading">{heading}</p>',
+        f'        <p class="sl-lead-description">{note}</p>',
+        '      </div>',
+        '    </section>',
     ])
 
 
@@ -8600,6 +8685,15 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            page_id: leadForm.dataset.pageId, fields, consent, idempotency_key: idempotencyKey,",
         "            company_website: hp ? hp.value : '',",
         "          };",
+        # A webinar registration names its session. The picker is a radio group or a hidden input, so one
+        # read covers both; the event id rides the form so the server can resolve the occurrence without
+        # trusting anything else the page says about it.
+        "          const occurrence = leadForm.querySelector('[name=\"occurrence_id\"]:checked')",
+        "            || leadForm.querySelector('input[type=\"hidden\"][name=\"occurrence_id\"]');",
+        "          if (occurrence && occurrence.value && leadForm.dataset.eventId) {",
+        "            payload.event_id = leadForm.dataset.eventId;",
+        "            payload.occurrence_id = occurrence.value;",
+        "          }",
         "          if (statusEl) { statusEl.classList.remove('is-error'); statusEl.textContent = 'Sending...'; }",
         "          if (submitBtn) { submitBtn.dataset.busy = 'true'; submitBtn.classList.add('is-connecting'); }",
         "          fetch(leadForm.dataset.endpoint, {",

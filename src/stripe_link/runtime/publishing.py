@@ -915,6 +915,34 @@ def _load_offer_bundle(
     return offer
 
 
+def _load_events_for_products(
+    tenant_id: str, products_by_id: dict[str, dict[str, Any]], events_repository: Any | None,
+) -> dict[str, dict[str, Any]]:
+    """The scheduled events this page's products register for, by id (plans/WEBINAR.md §5).
+
+    Deliberately NOT part of `load_render_context`: that function resolves what the offer SELLS, and an
+    event is not sold -- it is announced. Keeping it out also leaves that function's return shape alone.
+
+    A missing event never raises. A product pointing at a deleted session must not jam the publish stream;
+    the page simply renders without a picker, which `render_email_cta` already handles.
+    """
+    if events_repository is None or not tenant_id:
+        return {}
+    found: dict[str, dict[str, Any]] = {}
+    for product in products_by_id.values():
+        event_id = str(((product or {}).get("lead_capture") or {}).get("event_id") or "")
+        if not event_id or event_id in found:
+            continue
+        try:
+            scheduled = events_repository.get(tenant_id, event_id)
+        except Exception:  # noqa: BLE001 — a page must publish whether or not this read succeeds
+            logger.warning("Could not read event %s for tenant %s", event_id, tenant_id)
+            continue
+        if scheduled:
+            found[event_id] = scheduled
+    return found
+
+
 def load_render_context(
     page: dict[str, Any],
     *,
@@ -1148,6 +1176,7 @@ def publish_page_document(
     stripe_keys_repository: Any | None = None,
     tenant_profiles_repository: Any | None = None,
     experiments_repository: Any | None = None,
+    events_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -1204,6 +1233,8 @@ def publish_page_document(
     )
     # Guard against a stale offer (a landing item pointing at a since-removed price) crashing the render and
     # jamming the publish stream (plans/OFFER_MODEL_REDESIGN.md P4). Prune the primary offer + its map entry.
+    events_by_id = _load_events_for_products(
+        str(page.get("tenant_id") or ""), products_by_id, events_repository)
     offer = _prune_unrenderable_landing_items(offer, products_by_id)
     if offer.get("offer_id"):
         offers_by_id[str(offer["offer_id"])] = offer
@@ -1347,7 +1378,8 @@ def publish_page_document(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
-            bnpl_messaging=bnpl_messaging, preferences=tenant_preferences, kind=kind,
+            bnpl_messaging=bnpl_messaging, preferences=tenant_preferences,
+            events_by_id=events_by_id, kind=kind,
         )
 
     artifacts = []
