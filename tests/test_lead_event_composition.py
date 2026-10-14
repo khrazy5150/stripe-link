@@ -63,6 +63,32 @@ class TheShape(unittest.TestCase):
         self.assertEqual(SHAPE["allowed_ctas"], ["email_capture"])
 
 
+class TheProductPickerOffersIt(unittest.TestCase):
+    """The tile in "Choose a lead capture action" — without it the action exists and no tenant can reach it."""
+
+    PRODUCTS = (ROOT / "dashboard" / "src" / "components" / "Products.vue").read_text(encoding="utf-8")
+
+    def test_the_action_is_in_the_picker(self):
+        self.assertIn('action: "register_event"', self.PRODUCTS)
+
+    def test_it_asks_which_event(self):
+        self.assertIn("form.lead_capture.event_id", self.PRODUCTS)
+
+    def test_it_says_what_to_do_when_there_are_none(self):
+        """Otherwise the dropdown is empty and the tenant has no idea why."""
+        self.assertIn("create one on the Events screen", self.PRODUCTS)
+
+    def test_re_confirming_the_action_keeps_the_chosen_event(self):
+        """Same rule as `target`: re-opening the picker and confirming must not silently clear it."""
+        self.assertIn("sameAction ? form.value.lead_capture.event_id", self.PRODUCTS)
+
+    def test_switching_action_drops_it(self):
+        start = self.PRODUCTS.index("function applyLeadAction()")
+        applied = self.PRODUCTS[start:self.PRODUCTS.index("\n}", start)]
+        self.assertIn('event_id: eventId', applied)
+        self.assertIn('const eventId = sameAction ?', applied)
+
+
 class TheProductMustNameTheEvent(unittest.TestCase):
     def _product(self, **lead_capture):
         base = {"schema_version": "1.0.0", "document_type": "product", "tenant_id": "t",

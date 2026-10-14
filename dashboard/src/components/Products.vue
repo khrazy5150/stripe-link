@@ -441,6 +441,19 @@
                    :placeholder="leadTargetPlaceholderFor(form.lead_capture.action)" />
           </label>
 
+          <label v-if="form.product_intent === 'lead_gen' && form.lead_capture.action === 'register_event'">
+            Which event
+            <select v-model="form.lead_capture.event_id">
+              <option value="">Choose an event…</option>
+              <option v-for="item in eventsStore.events" :key="item.event_id" :value="item.event_id">
+                {{ item.title }}
+              </option>
+            </select>
+            <span v-if="!eventsStore.events.length" class="field-note">
+              No events yet — create one on the Events screen, then come back.
+            </span>
+          </label>
+
           <div v-if="form.product_intent === 'lead_gen'" class="lead-action-toast">
             <span class="lead-action-info" aria-hidden="true">i</span>
             <div>
@@ -603,6 +616,7 @@
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { apiRequest, getStripeMode } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, unitCostToInput, useProductsStore } from "../stores/products";
+import { useEventsStore } from "../stores/events";
 import { useServicesStore } from "../stores/services";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
@@ -718,6 +732,7 @@ onMounted(async () => {
   // show. Not awaited with the rest: a failure here must not stop the product list from loading.
   refundStore.load();
   loadShippingConsequence();
+  eventsStore.ensureLoaded();
   const intent = takeViewIntent?.();
   if (!intent?.edit) return;
   if (!store.loaded) await store.load();
@@ -727,6 +742,9 @@ onMounted(async () => {
 // Services appear in this list (stores/products.js filteredProducts adapts them), so this screen fetches
 // them. Held on the products store rather than reached for inside the getter, which stays pure over state.
 const servicesStore = useServicesStore();
+// The "Register for an event" action picks one of these. Loaded alongside the rest rather than on demand,
+// so the dropdown is populated the moment the tenant chooses that action.
+const eventsStore = useEventsStore();
 const serviceWizardOpen = ref(false);
 const serviceSeed = ref({});
 watch(() => servicesStore.services, (rows) => store.setServices(rows), { immediate: true });
@@ -889,6 +907,7 @@ const leadActions = [
   { action: "call_number", label: "Call a number", description: "Prompt the visitor to call directly.", tone: "amber" },
   { action: "external_url", label: "Go to URL", description: "Send the visitor to an external page.", tone: "red" },
   { action: "social_redirect", label: "Social page", description: "Direct the visitor to a social profile.", tone: "pink" },
+  { action: "register_event", label: "Register for an event", description: "Save the visitor a seat at a live session.", tone: "teal" },
 ];
 
 const defaultLeadAction = { ...leadActions[0], target: "", platform: "other" };
@@ -1240,7 +1259,9 @@ function applyLeadAction() {
   // switching to a different one drops it, because a phone number is not a URL.
   const sameAction = form.value.lead_capture.action === draftLeadAction.value.action;
   const target = sameAction ? form.value.lead_capture.target : "";
-  form.value.lead_capture = { ...draftLeadAction.value, target };
+  // Same rule as `target`: re-confirming the same action keeps what was chosen, switching away drops it.
+  const eventId = sameAction ? form.value.lead_capture.event_id || "" : "";
+  form.value.lead_capture = { ...draftLeadAction.value, target, event_id: eventId };
   showLeadPicker.value = false;
 }
 
