@@ -844,6 +844,7 @@
                         <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
                       </div>
                       <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { label: '', title: '', body: '', badge: '', featured: false })">+ Add card</button>
+                      <label class="builder-toggle"><input v-model="element.crooked_badges" type="checkbox" /><span>Tilt the stickers</span></label>
                     </template>
 
                     <template v-else-if="element.type === 'photo'">
@@ -5762,7 +5763,7 @@ function newElement(type) {
   // Starts with ONE empty row: an element whose editor is blank reads as broken, and "+ Add photo" is
   // not an obvious first move when there is nothing on screen to add to.
   if (type === "photo") return { ...base, heading: "", images: [{ url: "", crop: null, caption: "", alt: "" }], side_by_side: false };
-  if (type === "info_cards") return { ...base, heading: "", presentation: "numbered",
+  if (type === "info_cards") return { ...base, heading: "", presentation: "numbered", crooked_badges: false,
     items: [{ label: "", title: "", body: "", badge: "", featured: false }] };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
@@ -6518,7 +6519,8 @@ function elementSection(element) {
                         ...(item.featured ? { featured: true } : {}) }));
     if (!items.length) return null;
     return { id: element.id, type: "info_cards", heading: element.heading || undefined,
-             presentation: element.presentation || "numbered", items };
+             presentation: element.presentation || "numbered",
+             ...(element.crooked_badges ? { crooked_badges: true } : {}), items };
   }
   if (element.type === "photo") {
     const images = (element.images || [])
@@ -6720,6 +6722,7 @@ function elementsFromPage(sections) {
     } else if (section.type === "info_cards") {
       elements.push({ id: localId("el"), type: "info_cards", heading: section.heading || "",
         presentation: section.presentation || "numbered",
+        crooked_badges: Boolean(section.crooked_badges),
         items: (section.items || []).map((item) => ({ label: item.label || "", title: item.title || "",
                                                       body: item.body || "", badge: item.badge || "",
                                                       featured: Boolean(item.featured) })) });

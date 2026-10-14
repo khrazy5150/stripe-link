@@ -112,7 +112,9 @@ class TheExtrasAreWeightNotMeaning(unittest.TestCase):
 
     def test_the_badge_uses_the_tenants_own_highlight_colours(self):
         """The same ^^highlight^^ tokens the Appearance panel already exposes, not a hardcoded yellow."""
-        rule = next(r for r in UNIVERSAL_BUNDLE_TEMPLATE_STYLES if isinstance(r, str) and ".sl-info-badge{" in r)
+        # Startswith, not "in": the crooked rule's selector also ENDS in `.sl-info-badge{`.
+        rule = next(r for r in UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if isinstance(r, str) and r.strip().startswith(".sl-info-badge{"))
         self.assertIn("var(--sl-highlight-bg)", rule)
         self.assertIn("var(--sl-highlight-bg-text)", rule)
 
@@ -124,6 +126,59 @@ class TheExtrasAreWeightNotMeaning(unittest.TestCase):
 
     def test_no_badge_means_no_empty_sticker(self):
         self.assertNotIn("sl-info-badge", cards())
+
+
+class TheStickerIsStraightUntilAskedOtherwise(unittest.TestCase):
+    """Changed 2026-10-13: it shipped tilted. A tilt is a strong stylistic choice, and a default that has
+    to be undone is a worse default than one that has to be opted into."""
+
+    def test_no_tilt_by_default(self):
+        self.assertNotIn("has-crooked-badges", cards(items=[{"title": "A", "badge": "x"}]))
+
+    def test_the_base_rule_carries_no_rotation(self):
+        rule = next(r for r in UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if isinstance(r, str) and r.strip().startswith(".sl-info-badge{"))
+        self.assertNotIn("rotate", rule)
+
+    def test_the_flag_tilts_them(self):
+        html = cards(crooked_badges=True, items=[{"title": "A", "badge": "x"}])
+        self.assertIn("has-crooked-badges", html)
+        self.assertIn(".sl-info.has-crooked-badges .sl-info-badge{transform:rotate(", CSS)
+
+    def test_it_is_a_block_decision_not_a_card_one(self):
+        """The references tilt the whole set or none of it, and per-card would be fiddly for no gain."""
+        self.assertIn("crooked_badges", BUILDER)
+        self.assertNotIn("item.crooked", BUILDER)
+
+    def test_the_builder_round_trips_it(self):
+        self.assertIn("element.crooked_badges ? { crooked_badges: true }", BUILDER)
+        self.assertIn("crooked_badges: Boolean(section.crooked_badges)", BUILDER)
+
+    def test_it_must_be_a_boolean_on_save(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_page_document(page({"crooked_badges": "yes", "items": [{"title": "A"}]}))
+
+
+class SeveralBlocksCanCoexist(unittest.TestCase):
+    """The author: "it's currently NOT possible to create several of these ... one style only."""
+
+    def test_two_blocks_with_different_styles_both_validate(self):
+        doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        doc["sections"] = [
+            {"type": "info_cards", "id": "a", "presentation": "numbered", "items": [{"title": "A"}]},
+            {"type": "info_cards", "id": "b", "presentation": "labelled", "items": [{"title": "B"}]},
+        ]
+        validate_page_document(doc)
+
+    def test_each_keeps_its_own_style_when_rendered(self):
+        self.assertIn("is-numbered", cards(presentation="numbered", items=[{"title": "A"}]))
+        self.assertIn("is-labelled", cards(presentation="labelled", items=[{"title": "B"}]))
+
+    def test_it_is_keyed_by_element_id_not_type(self):
+        """`sectionOrderKey` keys a repeatable type by element id; keying two blocks by TYPE would
+        collapse them into one row in the builder (the 2026-09-02 phantom-row bug)."""
+        self.assertTrue(RULES["elements"]["info_cards"]["repeatable"])
+        self.assertIn("isRepeatableSection", BUILDER)
 
 
 class TheBodyIsRealProse(unittest.TestCase):
@@ -154,7 +209,9 @@ class ItIsRegisteredAndValidated(unittest.TestCase):
     def test_catalog_entry(self):
         spec = RULES["elements"]["info_cards"]
         self.assertEqual(spec["ui"], "add")
-        self.assertFalse(spec["repeatable"])
+        # Repeatable at the author's request: a numbered "what you'll learn" set and a labelled "the
+        # tools" set are two blocks with different styles on one page, which is the content_block case.
+        self.assertTrue(spec["repeatable"])
 
     def test_it_sits_next_to_the_element_it_is_not(self):
         order = RULES["default_order"]

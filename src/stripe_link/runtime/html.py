@@ -788,9 +788,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-info-count::before{content:counter(sl-info);font-family:var(--sl-font-heading);font-size:2.4rem;font-style:italic;letter-spacing:0;color:var(--sl-accent)}",
     "    .sl-info-title{font-family:var(--sl-font-heading);font-size:1.9rem;line-height:1.25;color:var(--sl-card-heading,var(--sl-content-heading))}",
     "    .sl-info-body{font-size:1.5rem;line-height:1.6;color:var(--sl-card-text,var(--sl-content-text))}",
-    # The sticker: the ^^highlight^^ colours the tenant already controls, the theme's accent face, and a
-    # couple of degrees of rotation so it reads as something stuck on rather than another label.
-    "    .sl-info-badge{position:absolute;top:-1.2rem;right:1.6rem;transform:rotate(-2deg);background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);font-family:var(--sl-font-accent);font-size:1.3rem;line-height:1.3;padding:0.5rem 1rem;border-radius:0.6rem;max-width:min(26rem,70%)}",
+    # The sticker: the ^^highlight^^ colours the tenant already controls, in the theme's accent face.
+    # STRAIGHT by default -- a tilt is a strong stylistic choice, and a default that must be undone is a
+    # worse default than one that must be opted into.
+    "    .sl-info.has-crooked-badges .sl-info-badge{transform:rotate(-2deg)}",
+    "    .sl-info-badge{position:absolute;top:-1.2rem;right:1.6rem;background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);font-family:var(--sl-font-accent);font-size:1.3rem;line-height:1.3;padding:0.5rem 1rem;border-radius:0.6rem;max-width:min(26rem,70%)}",
     # NUMBERED: title in a narrow column, body beside it. Only where there is room -- on a phone the two
     # columns become two strips four characters wide, which is what the author's own screenshot shows.
     "    .sl-info.is-numbered .sl-info-card{display:grid;gap:0.4rem 1.6rem}",
@@ -6713,9 +6715,11 @@ def render_info_cards(section: dict[str, Any]) -> str:
     style = section_theme_vars(section)
     style_attr = f' style="{escape(style)}"' if style else ""
     themed = " sl-section-themed" if style else ""
+    # Per BLOCK, not per card: the references tilt the whole set or none of it.
+    crooked = " has-crooked-badges" if section.get("crooked_badges") else ""
     section_id = escape(str(section.get("id", "info-cards")))
     return "\n".join([
-        f'    <section class="sl-info is-{presentation}{themed}" data-section-id="{section_id}"'
+        f'    <section class="sl-info is-{presentation}{crooked}{themed}" data-section-id="{section_id}"'
         f' data-section-type="info_cards"{style_attr}>',
         *rows,
         "    </section>",

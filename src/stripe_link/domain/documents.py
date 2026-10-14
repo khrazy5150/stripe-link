@@ -1813,6 +1813,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "heading", "Info cards heading")
             if section.get("presentation") is not None:
                 require_enum(section, "presentation", {"numbered", "labelled"}, "Info cards presentation")
+            optional_bool(section, "crooked_badges", "Info cards crooked_badges")
             items = optional_limited_object_list(section, "items", 10, "Info cards items")
             for item in items:
                 # A card is its title; body/label/badge decorate it. Requiring the body too would refuse

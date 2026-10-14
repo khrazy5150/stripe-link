@@ -55,7 +55,11 @@ class RepeatableSectionTests(unittest.TestCase):
         # what makes the palette button open a NEW section every click, and for link cards that reads as a
         # bug: a tenant clicking "Link cards" again means "another link", not "another grid". Grouping into
         # "Shop"/"Read" was a guess about how these pages get used; the click behaviour was observed.
-        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon"})
+        # info_cards joined 2026-10-13 at the author's request, and the link_cards reasoning above does
+        # NOT transfer: a second click there meant "another link" (one more row in the same grid), while
+        # here it means another BLOCK with its own style — a numbered "what you'll learn" set and a
+        # labelled "the tools" set are two sections on one page, exactly like two content blocks.
+        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon", "info_cards"})
 
     def test_container_sections_are_singletons(self):
         # Testimonials and FAQ are ONE section holding many items, each with its own add control. A

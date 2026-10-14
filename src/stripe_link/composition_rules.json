@@ -229,7 +229,7 @@
       "kind": "capability",
       "channel": "body",
       "heading_role": "h2",
-      "repeatable": false,
+      "repeatable": true,
       "tokens": [
         "content_heading",
         "content_text",
