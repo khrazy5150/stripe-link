@@ -217,3 +217,61 @@ class TheDocumentValidator(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSessionHasALiveWindow(unittest.TestCase):
+    """A webinar is a free event whose point is that people WATCH it, so the page's job changes at the
+    start time: collect a lead before, push them at the join URL during, say they missed it after.
+
+    `session_state` is deliberately separate from `registration_state`. They disagree during the live
+    window, which is the whole reason both exist -- a session that has started is no longer registerable in
+    the ordinary sense, but that is exactly when someone needs the link put in front of them.
+    """
+
+    EVENT = {"duration_minutes": 90}
+
+    def state(self, offset):
+        return events.session_state(self.EVENT, occ(starts=NOW + offset), now=NOW)
+
+    def test_before_it_starts(self):
+        self.assertEqual(self.state(3600), events.UPCOMING)
+
+    def test_the_moment_it_starts(self):
+        """The old model called this "passed" -- the page said "you missed it" as the host said hello."""
+        self.assertEqual(self.state(0), events.LIVE)
+
+    def test_while_it_runs(self):
+        self.assertEqual(self.state(-45 * 60), events.LIVE)
+
+    def test_the_moment_it_ends(self):
+        self.assertEqual(self.state(-90 * 60), events.ENDED)
+
+    def test_after_it_ends(self):
+        self.assertEqual(self.state(-180 * 60), events.ENDED)
+
+    def test_cancelled_still_beats_everything(self):
+        gone = occ(starts=NOW - 60, status="cancelled")
+        self.assertEqual(events.session_state(self.EVENT, gone, now=NOW), events.CANCELLED)
+
+    def test_an_event_with_no_duration_assumes_a_sensible_one(self):
+        """Better than declaring a webinar over while the host is still talking."""
+        self.assertEqual(events.duration_minutes({}), events.DEFAULT_DURATION_MINUTES)
+        self.assertEqual(events.session_state({}, occ(starts=NOW - 60), now=NOW), events.LIVE)
+
+    def test_a_stored_duration_wins(self):
+        self.assertEqual(events.duration_minutes({"duration_minutes": 30}), 30)
+        self.assertEqual(events.session_state({"duration_minutes": 30}, occ(starts=NOW - 31 * 60), now=NOW),
+                         events.ENDED)
+
+    def test_the_live_sitting_is_findable(self):
+        e = event(occ("later", SOON), occ("now", NOW - 60), occ("done", NOW - 86_400))
+        self.assertEqual(events.live_occurrence(e, now=NOW)["occurrence_id"], "now")
+
+    def test_nothing_live_is_none(self):
+        self.assertIsNone(events.live_occurrence(event(occ(starts=SOON)), now=NOW))
+
+    def test_registration_and_session_states_disagree_during_the_window(self):
+        """The property both functions exist for."""
+        running = occ(starts=NOW - 60)
+        self.assertEqual(events.registration_state(running, now=NOW), events.PASSED)
+        self.assertEqual(events.session_state(self.EVENT, running, now=NOW), events.LIVE)

@@ -142,3 +142,45 @@ class ThePublisherLoadsThemSafely(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheLiveState(unittest.TestCase):
+    """"The landing page's job is to collect these leads and push them to the URL at the appropriate time."
+    During the session that job is the link, and nothing else."""
+
+    def test_the_join_link_replaces_the_form(self):
+        """A visitor arriving mid-session does not want to fill anything in, they want the room."""
+        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {}, title="")
+        self.assertIn("https://zoom.us/j/1", markup)
+        self.assertNotIn("<input", markup)
+        self.assertIn('data-event-live="true"', markup)
+
+    def test_it_opens_in_a_new_tab_without_leaking_the_opener(self):
+        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {}, title="")
+        self.assertIn('target="_blank"', markup)
+        self.assertIn('rel="noopener"', markup)
+
+    def test_a_dangerous_join_url_is_refused(self):
+        """A tenant types this and the page puts it in an href."""
+        markup = html.render_event_live({"join_url": "javascript:alert(1)"}, {}, {}, title="")
+        self.assertNotIn("javascript:", markup)
+        self.assertIn("not posted the link yet", markup)
+
+    def test_no_link_says_so_rather_than_rendering_a_dead_button(self):
+        markup = html.render_event_live({}, {}, {}, title="")
+        self.assertNotIn("sl-event-join", markup)
+        self.assertIn("not posted the link yet", markup)
+
+    def test_the_tenant_can_word_it(self):
+        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {},
+                                        {"live_title": "Doors are open", "live_label": "Enter the room"},
+                                        title="")
+        self.assertIn("Doors are open", markup)
+        self.assertIn("Enter the room", markup)
+
+    def test_the_live_check_comes_before_the_registration_check(self):
+        """A form shown while the host is already talking is the page failing at the only moment that
+        matters."""
+        source = open(html.__file__, encoding="utf-8").read()
+        cta = source[source.index("    if scheduled_event is not None:"):][:1400]
+        self.assertLess(cta.index("event_live_occurrence"), cta.index("event_open_occurrences"))

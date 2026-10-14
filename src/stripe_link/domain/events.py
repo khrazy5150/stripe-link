@@ -21,6 +21,59 @@ FULL = "full"
 PASSED = "passed"
 CANCELLED = "cancelled"
 
+# What the SESSION is doing, which is a different question from whether you may still register.
+# A webinar is a free event whose whole point is that people watch the presentation, so the page's job
+# changes at the start time: before it collects a lead, during it pushes them at the join URL, after it
+# says they missed it (author, 2026-10-14).
+UPCOMING = "upcoming"
+LIVE = "live"
+ENDED = "ended"
+
+# How long a session runs when the event does not say. Long enough that a page is not declaring a webinar
+# over while the host is still talking, which is the failure that matters here.
+DEFAULT_DURATION_MINUTES = 90
+
+
+def duration_minutes(event: Any) -> int:
+    try:
+        minutes = int((event or {}).get("duration_minutes") or 0)
+    except (TypeError, ValueError, AttributeError):
+        minutes = 0
+    return minutes if minutes > 0 else DEFAULT_DURATION_MINUTES
+
+
+def ends_at(event: Any, occurrence: Any) -> int:
+    """When this sitting finishes. 0 when it has no start."""
+    start = starts_at(occurrence)
+    return start + duration_minutes(event) * 60 if start else 0
+
+
+def session_state(event: Any, occurrence: Any, *, now: int) -> str:
+    """UPCOMING, LIVE, ENDED or CANCELLED -- what the PAGE should be doing right now.
+
+    Deliberately separate from `registration_state`. That one answers "may this person still sign up";
+    this one answers "is the thing happening". They disagree during the live window, which is the whole
+    reason both exist: a session that has started is no longer registerable in the ordinary sense, but it
+    is exactly when someone needs the join link put in front of them.
+    """
+    if str((occurrence or {}).get("status") or "scheduled") == "cancelled":
+        return CANCELLED
+    start = starts_at(occurrence)
+    if not start:
+        return ENDED
+    moment = int(now)
+    if moment < start:
+        return UPCOMING
+    return LIVE if moment < ends_at(event, occurrence) else ENDED
+
+
+def live_occurrence(event: Any, *, now: int) -> dict[str, Any] | None:
+    """The sitting happening right now, if one is. The page shows its join link above everything else."""
+    for row in occurrences(event):
+        if session_state(event, row, now=now) == LIVE:
+            return row
+    return None
+
 
 def occurrences(event: Any) -> list[dict[str, Any]]:
     """Every occurrence on the event, as dicts. Anything that is not one is dropped rather than raising:

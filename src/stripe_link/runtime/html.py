@@ -42,6 +42,8 @@ from stripe_link.domain.fonts import (
     REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
 )
 from stripe_link.domain.events import (
+    live_occurrence as event_live_occurrence,
+    next_occurrence as event_next_occurrence,
     open_occurrences as event_open_occurrences,
     seats_left as event_seats_left,
     starts_at as event_starts_at,
@@ -944,6 +946,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-occurrence{display:flex;align-items:center;gap:0.8rem;padding:1rem 1.2rem;border:1px solid var(--sl-price-card-border);border-radius:0.8rem;cursor:pointer;color:var(--sl-price-title)}",
     "    .sl-occurrence:has(input:checked){border-color:var(--sl-price-card-selected-border);box-shadow:0 0 0 1px var(--sl-price-card-selected-border)}",
     "    .sl-occurrence-seats{margin-left:auto;font-size:1.2rem;font-weight:700;color:var(--sl-price-amount)}",
+    "    .sl-event-live-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
+    "    .sl-event-join{display:block;text-align:center;text-decoration:none}",
     "    .sl-event-closed-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
@@ -2893,7 +2897,7 @@ def countdown_timer_colors(page: dict[str, Any], section: dict[str, Any]) -> tup
 
 
 EVENT_DATE_PRESENTATIONS = ("band", "card")
-EVENT_DATE_SOURCES = ("auto", "sale", "flash_sale", "custom")
+EVENT_DATE_SOURCES = ("auto", "event", "sale", "flash_sale", "custom")
 
 
 def _page_epoch(page: dict[str, Any], key: str) -> int:
@@ -2901,6 +2905,23 @@ def _page_epoch(page: dict[str, Any], key: str) -> int:
         return max(0, int((page.get(key) or {}).get("ends_at") or 0))
     except (TypeError, ValueError, AttributeError):
         return 0
+
+
+def _next_session_start(now: int) -> tuple[int, str]:
+    """When the page's next open session starts, and the zone it is announced in. (0, "") if none.
+
+    Reads the render-scoped event index, so the element does not need to know which product carries the
+    event -- a registration page has one, and "the next one still open" is the only sensible answer.
+    """
+    best, zone = 0, ""
+    for scheduled in _RENDER_EVENTS.values():
+        upcoming = event_next_occurrence(scheduled, now=now)
+        if not upcoming:
+            continue
+        starts = event_starts_at(upcoming)
+        if starts and (not best or starts < best):
+            best, zone = starts, str(upcoming.get("timezone") or "")
+    return best, zone
 
 
 def resolve_event_date(section: dict[str, Any], page: dict[str, Any]) -> int:
@@ -2922,10 +2943,16 @@ def resolve_event_date(section: dict[str, Any], page: dict[str, Any]) -> int:
             return max(0, int(section.get("date") or 0))
         except (TypeError, ValueError):
             return 0
+    if source == "event":
+        return _next_session_start(int(time.time()))[0]
     if source == "sale":
         return _page_epoch(page, "sale")
     if source == "flash_sale":
         return _page_epoch(page, "flash_sale")
+    # `auto` is about SALES and stays that way. A webinar is not a sale and its session is not a deadline
+    # on an offer (author, 2026-10-14: "webinars have nothing to do with sales, they are their own thing"),
+    # so a registration page names `source: "event"` explicitly rather than reaching the session through a
+    # pricing fallback. Blending the two would make the element mean different things on different pages.
     return _page_epoch(page, "flash_sale") or _page_epoch(page, "sale")
 
 
@@ -2963,6 +2990,13 @@ def render_event_date(section: dict[str, Any], page: dict[str, Any]) -> str:
     if presentation not in EVENT_DATE_PRESENTATIONS:
         presentation = "band"
     tz_name = str(section.get("timezone") or "")
+    source = str(section.get("source") or "auto")
+    if source == "event" and not section.get("timezone"):
+        # The session's own zone, not the store's: "9:30 AM AEST" is part of what is being announced, and
+        # the occurrence is where that was chosen.
+        session_zone = _next_session_start(int(time.time()))[1]
+        if session_zone:
+            tz_name = session_zone
     with_time = section.get("show_time") is not False
     text = format_event_date(epoch, tz_name, with_time=with_time)
     machine = datetime.fromtimestamp(epoch, tz=load_zone(tz_name)).isoformat()
@@ -7734,10 +7768,18 @@ def render_email_cta(
     # so the next person reaches for the citation instead of the checkbox (author's decision: "we must comply
     # to legal statutes").
     if scheduled_event is not None:
+        now_epoch = int(time.time())
+        # A webinar is a free event whose point is that people WATCH it, so the page's job changes at the
+        # start time: collect a lead before, push them at the join URL during, say they missed it after
+        # (author, 2026-10-14). The live window is checked FIRST -- a form shown while the host is already
+        # talking is the page failing at the only moment that matters.
+        live = event_live_occurrence(scheduled_event, now=now_epoch)
+        if live is not None:
+            return render_event_live(scheduled_event, live, section, title=title)
         # Asked at PUBLISH with the same function the endpoint uses, so a page cannot offer a session the
         # server will refuse. A page is a cached artifact, so the server still checks -- this decides what
         # the visitor is shown, not whether the registration is allowed.
-        open_rows = event_open_occurrences(scheduled_event, now=int(time.time()))
+        open_rows = event_open_occurrences(scheduled_event, now=now_epoch)
         if not open_rows:
             return render_event_closed(scheduled_event, section, title=title, description=description)
         inputs = [render_occurrence_picker(open_rows)] + inputs
@@ -7788,6 +7830,40 @@ def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
         )
     rows.append('        </fieldset>')
     return "\n".join(rows)
+
+
+def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any],
+                      section: dict[str, Any] | None, *, title: str) -> str:
+    """The session is running. One job: get the visitor into it.
+
+    The join link is the whole page at this moment, so the form is replaced rather than sat beside -- a
+    visitor who arrives mid-session does not want to fill anything in, they want the room. Someone who
+    never registered is let in too: a free event exists to be watched, and turning away an attendee to
+    protect a lead record has the priority backwards.
+
+    No join URL yet is the one case this cannot rescue, so it says so plainly instead of rendering a button
+    that goes nowhere.
+    """
+    section = section or {}
+    join_url = safe_href(str(scheduled_event.get("join_url") or ""))
+    heading = escape(str(section.get("live_title") or "We're live now"))
+    rows = [
+        '    <section class="sl-checkout-cta sl-email-cta sl-event-live" data-section-type="checkout_cta"'
+        ' data-cta-type="email" data-event-live="true">',
+        '      <div class="sl-lead-form">',
+        (f'        <p class="sl-lead-title">{title}</p>' if title else ""),
+        f'        <p class="sl-event-live-heading">{heading}</p>',
+    ]
+    if join_url:
+        rows.append(
+            f'        <a class="sl-cta sl-event-join" href="{escape(join_url)}" target="_blank" '
+            f'rel="noopener">{escape(str(section.get("live_label") or "Join the session"))}</a>'
+        )
+    else:
+        rows.append('        <p class="sl-lead-description">The host has not posted the link yet. '
+                    'Check your email — it will be sent there.</p>')
+    rows.extend(["      </div>", "    </section>"])
+    return "\n".join(row for row in rows if row)
 
 
 def render_event_closed(scheduled_event: dict[str, Any], section: dict[str, Any] | None,

@@ -856,6 +856,7 @@
                         <span>Which date</span>
                         <select v-model="element.source">
                           <option value="auto">Automatic — the flash sale's expiry, or the sale's</option>
+                          <option value="event">The event's next session</option>
                           <option value="sale">The Sale's expiry</option>
                           <option value="flash_sale">The Flash Sale's expiry</option>
                           <option value="custom">A date I pick</option>
@@ -3056,6 +3057,9 @@ function resolvedEventDate(element) {
   const source = element?.source || "auto";
   const sale = Number(builder.sale?.ends_at) || 0;
   const flash = Number(builder.flash_sale?.ends_at) || 0;
+  // `event` and `auto`-with-an-event resolve on the SERVER from the page's event; the builder has no copy
+  // of it, so the preview defers rather than inventing a date. The iframe shows the real one.
+  if (source === "event") return 0;
   if (source === "custom") return Number(element?.date) || 0;
   if (source === "sale") return sale;
   if (source === "flash_sale") return flash;

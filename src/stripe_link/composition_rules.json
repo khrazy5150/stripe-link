@@ -849,7 +849,12 @@
         "related_products",
         "tip_jar"
       ],
-      "_comment": "A webinar registration page (plans/WEBINAR.md). lead_capture plus the one thing a session page cannot do without: the DATE. `event_date` is in sections rather than merely allowed, because a page announcing a live session without saying when is not a draft -- it is wrong. trust_badges are NOT excluded as they are on lead_capture: a free session is still asking for an email address, and 'no spam' is the objection being answered. phone_call is not an allowed CTA here -- the ask is a seat, not a call."
+      "_comment": "A webinar registration page (plans/WEBINAR.md). lead_capture plus the one thing a session page cannot do without: the DATE. `event_date` is in sections rather than merely allowed, because a page announcing a live session without saying when is not a draft -- it is wrong. trust_badges are NOT excluded as they are on lead_capture: a free session is still asking for an email address, and 'no spam' is the objection being answered. phone_call is not an allowed CTA here -- the ask is a seat, not a call. The date band names `source: \"event\"` outright rather than relying on the element's `auto` chain, which is about SALE expiry: a session is not a deadline on an offer, and the two must not resolve through one fallback.",
+      "section_defaults": {
+        "event_date": {
+          "source": "event"
+        }
+      }
     },
     "lead_call": {
       "sections": [

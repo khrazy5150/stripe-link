@@ -1828,7 +1828,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             # Where the moment comes from. Absent = "auto", which reads the page's own flash-sale or sale
             # expiry -- the element derives rather than asking a tenant to retype a date the page holds.
             if section.get("source") is not None:
-                require_enum(section, "source", {"auto", "sale", "flash_sale", "custom"}, "Date source")
+                require_enum(section, "source", {"auto", "event", "sale", "flash_sale", "custom"}, "Date source")
             # Only meaningful when source is "custom"; absent/0 = nothing to show, which the renderer
             # honours by emitting no element at all.
             optional_non_negative_int(section, "date", "Date date")

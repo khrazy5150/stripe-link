@@ -8,6 +8,23 @@ the v2 sketch in §10 is explicitly *not* approved and is recorded so the v1 sha
 > is a small one: an **Event** object, a **confirmation email**, and a **post-event state**. Read §3 before
 > estimating anything — the temptation is to rebuild machinery that is already running.
 
+## 0. What a webinar actually is (author, 2026-10-14)
+
+> "A webinar is just a **free event** that's basically a sales pitch to get customers to buy something
+> later. The point is to get people to **watch the presentation in its entirety**. The landing page's job is
+> to **collect these leads and push them to the URL at the appropriate time**."
+
+Two things follow, and both corrected this design after it was first written:
+
+* **A webinar is not a sale, and its session is not a deadline on an offer.** The `event_date` element's
+  `auto` source resolves a SALE expiry and stays that way; a registration page names `source: "event"`
+  outright. Blending them would make one element mean different things on different pages.
+* **The page has three jobs, not two.** Before the session it collects a lead; **during** it pushes the
+  visitor at the join URL; after it says they missed it. The first model collapsed "has started" into
+  "passed", so the page said "you missed it" at the exact moment the link mattered most. `session_state`
+  (UPCOMING / LIVE / ENDED / CANCELLED) is separate from `registration_state` for this reason -- they
+  disagree during the live window, which is the whole point of having both.
+
 ## 1. What we're building
 
 A **webinar registration page**: a visitor arrives, sees what the session is and when, hands over their
@@ -155,6 +172,21 @@ schedule). Recorded here so v1 does not block it:
   thing in the stack — Zoom exists.
 - Recommendation: ship v1, find out whether tenants run webinars at all, and if they do, build
   **auto-webinar before live**.
+
+## 10a. Known constraint for P2: registrations are not queryable by session
+
+Registrations are leads in `LeadsTable`, keyed `PK=TENANT#<tenant>` / `SK=LEAD_SUBMISSION#<lead_id>`. Each
+carries `event_id` + `occurrence_id`, so they are **logically** segregated -- but there is **no index on
+either**, so "everyone registered for Wednesday" means listing the tenant's whole lead set and filtering in
+memory.
+
+This is why `registered_count` is maintained on the occurrence rather than derived: counting would
+otherwise read a tenant's entire lead history on every submission.
+
+P2's reminder sweep will feel it. The fix when it is worth paying for is a GSI keyed
+`OCCURRENCE#<occurrence_id>` on the leads table, which makes the registrant list a direct query and makes
+the count derivable rather than maintained. Deliberately not built on speculation (author: "leads are not
+customers and therefore shouldn't get top priority").
 
 ## 11. Open questions
 
