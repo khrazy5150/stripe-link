@@ -1817,8 +1817,12 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 require_string(logo, "image_url", "Client marquee logo image_url")
                 optional_string(logo, "name", "Client marquee logo name")
         elif section_type == "event_date":
-            # Absent/0 = nothing to show, which the renderer honours by emitting no element at all. So the
-            # date is optional here: a tenant may add the element before they know the date.
+            # Where the moment comes from. Absent = "auto", which reads the page's own flash-sale or sale
+            # expiry -- the element derives rather than asking a tenant to retype a date the page holds.
+            if section.get("source") is not None:
+                require_enum(section, "source", {"auto", "sale", "flash_sale", "custom"}, "Date source")
+            # Only meaningful when source is "custom"; absent/0 = nothing to show, which the renderer
+            # honours by emitting no element at all.
             optional_non_negative_int(section, "date", "Date date")
             optional_string(section, "label", "Date label")
             optional_string(section, "icon", "Date icon", max_length=8)

@@ -853,11 +853,22 @@
 
                     <template v-else-if="element.type === 'event_date'">
                       <label class="offer-field">
+                        <span>Which date</span>
+                        <select v-model="element.source">
+                          <option value="auto">Automatic — the flash sale's expiry, or the sale's</option>
+                          <option value="sale">The Sale's expiry</option>
+                          <option value="flash_sale">The Flash Sale's expiry</option>
+                          <option value="custom">A date I pick</option>
+                        </select>
+                      </label>
+                      <label v-if="element.source === 'custom'" class="offer-field">
                         <span>Date and time</span>
                         <input v-model="eventDateLocal[element.id]" type="datetime-local" />
                       </label>
-                      <p v-if="!element.date" class="field-note">
-                        Without a date this element shows nothing on the page.
+                      <p v-if="!resolvedEventDate(element)" class="field-note">
+                        {{ element.source === "custom"
+                           ? "Pick a date, or this element shows nothing on the page."
+                           : "No expiry is set for that source yet — set one under Sale & Flash Sale, or this element shows nothing on the page." }}
                       </p>
                       <label class="offer-field">
                         <span>Time zone</span>
@@ -875,7 +886,7 @@
                       </label>
                       <input v-model.trim="element.label" type="text" placeholder="Line before the date (optional), e.g. FREE LIVE TRAINING:" />
                       <input v-model.trim="element.icon" type="text" maxlength="8" placeholder="Icon (optional), e.g. 📅" />
-                      <p v-if="element.date" class="field-note">Shows: {{ eventDatePreview(element) }}</p>
+                      <p v-if="resolvedEventDate(element)" class="field-note">Shows: {{ eventDatePreview(element) }}</p>
                     </template>
 
                     <template v-else-if="element.type === 'info_cards'">
@@ -3027,10 +3038,22 @@ const eventDateLocal = reactive(new Proxy({}, {
 function builderElementById(id) {
   return (builder.elements || []).find((element) => element.id === id) || null;
 }
+// Mirrors resolve_event_date() in runtime/html.py. `auto` prefers the FLASH sale: a page carrying both is
+// running the shorter window inside the longer one, and the date worth announcing is the one about to pass.
+function resolvedEventDate(element) {
+  const source = element?.source || "auto";
+  const sale = Number(builder.sale?.ends_at) || 0;
+  const flash = Number(builder.flash_sale?.ends_at) || 0;
+  if (source === "custom") return Number(element?.date) || 0;
+  if (source === "sale") return sale;
+  if (source === "flash_sale") return flash;
+  return flash || sale;
+}
 // What the page will actually print, so the tenant checks the sentence rather than trusting the epoch.
 function eventDatePreview(element) {
-  if (!element?.date) return "";
-  const when = new Date(Number(element.date) * 1000);
+  const epoch = resolvedEventDate(element);
+  if (!epoch) return "";
+  const when = new Date(epoch * 1000);
   const options = { weekday: "long", month: "long", day: "numeric", year: "numeric" };
   if (element.show_time !== false) {
     Object.assign(options, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
@@ -5874,7 +5897,7 @@ function newElement(type) {
   if (type === "photo") return { ...base, heading: "", images: [{ url: "", crop: null, caption: "", alt: "" }], side_by_side: false };
   // The store's own zone is the right first guess, and the tenant can change it per element -- a Denver
   // business can announce a webinar at 7PM EST.
-  if (type === "event_date") return { ...base, date: 0, timezone: profileStore.business?.timezone || browserTimeZone(),
+  if (type === "event_date") return { ...base, source: "auto", date: 0, timezone: profileStore.business?.timezone || browserTimeZone(),
     show_time: true, presentation: "band", label: "", icon: "" };
   if (type === "info_cards") return { ...base, heading: "", presentation: "numbered", crooked_badges: false,
     items: [{ label: "", title: "", body: "", badge: "", featured: false }] };
@@ -6512,7 +6535,7 @@ function rowSummary(row) {
   if (row.type === "content_block") return e.title?.trim() || excerpt(e.text) || "empty";
   if (row.type === "photo") return countLabel((e.images || []).filter((i) => (i.url || "").trim()).length, "photo");
   if (row.type === "info_cards") return countLabel((e.items || []).filter((i) => (i.title || "").trim()).length, "card");
-  if (row.type === "event_date") return e.date ? eventDatePreview(e) : "no date set";
+  if (row.type === "event_date") return resolvedEventDate(e) ? eventDatePreview(e) : "no date set";
   // The author IS the section — whose credibility it borrows is the one thing worth reading off a
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
@@ -6625,8 +6648,11 @@ function elementSection(element) {
     return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), ...(element.divider ? { divider: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
   }
   if (element.type === "event_date") {
-    if (!element.date) return null;   // no date, nothing to show -- do not store an empty band
-    return { id: element.id, type: "event_date", date: Number(element.date),
+    // A derived source is legitimate with no date of its own, so only a CUSTOM source with no date is
+    // empty. Dropping a derived one would delete the element the moment the sale's expiry was cleared.
+    if (element.source === "custom" && !element.date) return null;
+    return { id: element.id, type: "event_date", source: element.source || "auto",
+             ...(element.source === "custom" ? { date: Number(element.date) } : {}),
              timezone: element.timezone || undefined,
              show_time: element.show_time !== false,
              presentation: element.presentation || "band",
@@ -6842,7 +6868,8 @@ function elementsFromPage(sections) {
         elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
       }
     } else if (section.type === "event_date") {
-      elements.push({ id: localId("el"), type: "event_date", date: Number(section.date) || 0,
+      elements.push({ id: localId("el"), type: "event_date", source: section.source || "auto",
+        date: Number(section.date) || 0,
         timezone: section.timezone || "", show_time: section.show_time !== false,
         presentation: section.presentation || "band",
         label: section.label || "", icon: section.icon || "" });

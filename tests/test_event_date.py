@@ -17,7 +17,8 @@ import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 from stripe_link.domain.store_timezone import load_zone
-from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES, format_event_date, render_event_date
+from stripe_link.runtime.html import (UNIVERSAL_BUNDLE_TEMPLATE_STYLES, format_event_date,
+                                      render_event_date, resolve_event_date)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BUILDER = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
@@ -25,6 +26,14 @@ RULES = json.loads((ROOT / "src" / "stripe_link" / "composition_rules.json").rea
 FIXTURE = ROOT / "schemas" / "examples" / "page-creatine-standard.json"
 # 2026-10-31 20:00 America/New_York
 HALLOWEEN = 1793491200
+
+
+def shown(section, pg=None):
+    """Render with a page. A literal `date` implies the custom source, which is what it is for."""
+    section = dict(section)
+    if "date" in section and "source" not in section:
+        section["source"] = "custom"
+    return render_event_date(section, pg or {})
 
 
 def page(section):
@@ -74,42 +83,89 @@ class NoDateMeansNoElement(unittest.TestCase):
     def test_nothing_renders_without_one(self):
         for value in (None, 0, "", "soon", -5):
             with self.subTest(value=value):
-                self.assertEqual(render_event_date({"date": value, "label": "x"}), "")
+                self.assertEqual(shown({"date": value, "label": "x"}), "")
 
-    def test_the_builder_refuses_to_store_an_empty_one(self):
-        self.assertIn("if (!element.date) return null;", BUILDER)
+    def test_the_builder_refuses_to_store_an_empty_CUSTOM_one(self):
+        """Only a custom source with no date is empty. Dropping a DERIVED one would delete the element the
+        moment the sale's expiry was cleared."""
+        self.assertIn('if (element.source === "custom" && !element.date) return null;', BUILDER)
 
     def test_the_builder_says_so_rather_than_leaving_it_silent(self):
-        self.assertIn("Without a date this element shows nothing", BUILDER)
+        self.assertIn("this element shows nothing on the page", BUILDER)
+
+
+class TheDateComesFromThePageUnlessTold(unittest.TestCase):
+    """The author: "the tenant should simply enable it and it automatically gets the date from a Sale or
+    Flash Sale", with a dropdown for the page that has both."""
+
+    PAGE = {"sale": {"ends_at": HALLOWEEN}, "flash_sale": {"ends_at": HALLOWEEN - 86400}}
+
+    def test_auto_prefers_the_flash_sale(self):
+        """A page carrying both runs the shorter window inside the longer one, so the date worth
+        announcing is the one about to pass."""
+        self.assertEqual(resolve_event_date({}, self.PAGE), HALLOWEEN - 86400)
+
+    def test_auto_falls_back_to_the_sale(self):
+        self.assertEqual(resolve_event_date({}, {"sale": {"ends_at": HALLOWEEN}}), HALLOWEEN)
+
+    def test_each_source_can_be_pinned(self):
+        self.assertEqual(resolve_event_date({"source": "sale"}, self.PAGE), HALLOWEEN)
+        self.assertEqual(resolve_event_date({"source": "flash_sale"}, self.PAGE), HALLOWEEN - 86400)
+
+    def test_a_pinned_source_does_not_fall_back(self):
+        """Pinning is an instruction; quietly showing the other sale's date would contradict it."""
+        self.assertEqual(resolve_event_date({"source": "flash_sale"}, {"sale": {"ends_at": HALLOWEEN}}), 0)
+
+    def test_custom_uses_its_own_date_and_ignores_the_page(self):
+        self.assertEqual(resolve_event_date({"source": "custom", "date": 123}, self.PAGE), 123)
+
+    def test_an_unknown_source_falls_back_to_auto(self):
+        self.assertEqual(resolve_event_date({"source": "whenever"}, self.PAGE), HALLOWEEN - 86400)
+
+    def test_a_missing_or_malformed_page_is_survivable(self):
+        for pg in ({}, {"sale": None}, {"sale": {}}, {"flash_sale": {"ends_at": "soon"}}):
+            with self.subTest(page=pg):
+                self.assertEqual(resolve_event_date({}, pg), 0)
+
+    def test_it_renders_from_the_page_with_no_date_of_its_own(self):
+        self.assertIn("2026", render_event_date({"timezone": "UTC"}, self.PAGE))
+
+    def test_the_builder_mirrors_the_same_preference(self):
+        self.assertIn("return flash || sale;", BUILDER)
+
+    def test_the_builder_offers_every_source(self):
+        for value in ('value="auto"', 'value="sale"', 'value="flash_sale"', 'value="custom"'):
+            with self.subTest(value=value):
+                self.assertIn(value, BUILDER)
 
 
 class TheMarkupIsBothReadableAndParseable(unittest.TestCase):
     def test_it_emits_a_machine_readable_time(self):
-        html = render_event_date({"date": HALLOWEEN, "timezone": "America/New_York"})
+        html = shown({"date": HALLOWEEN, "timezone": "America/New_York"})
         self.assertIn('<time class="sl-event-date-value" datetime="2026-10-31T20:00:00-04:00"', html)
 
     def test_the_icon_is_decorative(self):
-        html = render_event_date({"date": HALLOWEEN, "icon": "📅"})
+        html = shown({"date": HALLOWEEN, "icon": "📅"})
         self.assertIn('class="sl-event-date-icon" aria-hidden="true"', html)
 
     def test_optional_parts_leave_no_empty_tags(self):
-        html = render_event_date({"date": HALLOWEEN})
+        html = shown({"date": HALLOWEEN})
         self.assertNotIn("sl-event-date-icon", html)
         self.assertNotIn("sl-event-date-label", html)
 
     def test_the_label_is_escaped(self):
-        self.assertIn("&lt;script&gt;", render_event_date({"date": HALLOWEEN, "label": "<script>"}))
+        self.assertIn("&lt;script&gt;", shown({"date": HALLOWEEN, "label": "<script>"}))
 
 
 class TheTwoStyles(unittest.TestCase):
     def test_band_is_the_default(self):
-        self.assertIn("is-band", render_event_date({"date": HALLOWEEN}))
+        self.assertIn("is-band", shown({"date": HALLOWEEN}))
 
     def test_card_is_selectable(self):
-        self.assertIn("is-card", render_event_date({"date": HALLOWEEN, "presentation": "card"}))
+        self.assertIn("is-card", shown({"date": HALLOWEEN, "presentation": "card"}))
 
     def test_an_unknown_style_falls_back(self):
-        self.assertIn("is-band", render_event_date({"date": HALLOWEEN, "presentation": "neon"}))
+        self.assertIn("is-band", shown({"date": HALLOWEEN, "presentation": "neon"}))
 
     def test_the_band_uses_the_tenants_own_highlight_colours(self):
         """The amber strip in the reference, without hardcoding a colour the theme cannot reach."""

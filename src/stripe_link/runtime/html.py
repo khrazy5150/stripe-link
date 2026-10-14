@@ -2747,7 +2747,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
     "photo": {"render": lambda c: render_photo(c.section), "version": 1},
     "info_cards": {"render": lambda c: render_info_cards(c.section), "version": 1},
-    "event_date": {"render": lambda c: render_event_date(c.section), "version": 1},
+    "event_date": {"render": lambda c: render_event_date(c.section, c.page), "version": 1},
     "video": {"render": lambda c: render_video(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
@@ -2873,6 +2873,40 @@ def countdown_timer_colors(page: dict[str, Any], section: dict[str, Any]) -> tup
 
 
 EVENT_DATE_PRESENTATIONS = ("band", "card")
+EVENT_DATE_SOURCES = ("auto", "sale", "flash_sale", "custom")
+
+
+def _page_epoch(page: dict[str, Any], key: str) -> int:
+    try:
+        return max(0, int((page.get(key) or {}).get("ends_at") or 0))
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def resolve_event_date(section: dict[str, Any], page: dict[str, Any]) -> int:
+    """Which moment this element announces, as epoch seconds. 0 means there is nothing to show.
+
+    A tenant should not retype a date the page already holds -- the same reasoning that makes Product
+    details and Related products derive rather than ask. `sale.ends_at` and `flash_sale.ends_at` are both
+    already stored and already honoured by the pricing, so the element reads one of them.
+
+    `auto` prefers the FLASH sale when it has a date: a page carrying both is running the shorter, louder
+    window inside the longer one, and the date worth announcing is the one about to pass. The dropdown
+    exists for the tenant who disagrees, which is why the preference is a default rather than a rule.
+    """
+    source = str(section.get("source") or "auto")
+    if source not in EVENT_DATE_SOURCES:
+        source = "auto"
+    if source == "custom":
+        try:
+            return max(0, int(section.get("date") or 0))
+        except (TypeError, ValueError):
+            return 0
+    if source == "sale":
+        return _page_epoch(page, "sale")
+    if source == "flash_sale":
+        return _page_epoch(page, "flash_sale")
+    return _page_epoch(page, "flash_sale") or _page_epoch(page, "sale")
 
 
 def format_event_date(epoch: int, tz_name: str, *, with_time: bool) -> str:
@@ -2899,12 +2933,9 @@ def format_event_date(epoch: int, tz_name: str, *, with_time: bool) -> str:
     return f"{date_part} at {hour}:{moment.minute:02d} {meridiem} {label}".strip()
 
 
-def render_event_date(section: dict[str, Any]) -> str:
+def render_event_date(section: dict[str, Any], page: dict[str, Any]) -> str:
     """The date of the thing, spelled out. No date means NO element -- there is nothing to say."""
-    try:
-        epoch = int(section.get("date") or 0)
-    except (TypeError, ValueError):
-        epoch = 0
+    epoch = resolve_event_date(section, page)
     if epoch <= 0:
         return ""
 
