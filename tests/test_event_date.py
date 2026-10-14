@@ -144,6 +144,11 @@ class TheMarkupIsBothReadableAndParseable(unittest.TestCase):
         html = shown({"date": HALLOWEEN, "timezone": "America/New_York"})
         self.assertIn('<time class="sl-event-date-value" datetime="2026-10-31T20:00:00-04:00"', html)
 
+    def test_the_builder_uses_the_shared_icon_picker(self):
+        """The author: use the picker from Trust Badges rather than asking for an emoji by hand."""
+        self.assertIn("showIconPicker(element.icon", BUILDER)
+        self.assertNotIn('v-model.trim="element.icon"', BUILDER)
+
     def test_the_icon_is_decorative(self):
         html = shown({"date": HALLOWEEN, "icon": "📅"})
         self.assertIn('class="sl-event-date-icon" aria-hidden="true"', html)

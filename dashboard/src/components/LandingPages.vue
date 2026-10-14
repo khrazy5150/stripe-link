@@ -885,7 +885,12 @@
                         </select>
                       </label>
                       <input v-model.trim="element.label" type="text" placeholder="Line before the date (optional), e.g. FREE LIVE TRAINING:" />
-                      <input v-model.trim="element.icon" type="text" maxlength="8" placeholder="Icon (optional), e.g. 📅" />
+                      <label class="offer-field">
+                        <span>Icon <small>(optional)</small></span>
+                        <button type="button" class="badge-icon-picker-btn" aria-label="Choose an icon for the date"
+                                @click.stop="showIconPicker(element.icon, (emoji) => { element.icon = emoji; }, 'Choose an Icon')"
+                        >{{ element.icon || '—' }}</button>
+                      </label>
                       <p v-if="resolvedEventDate(element)" class="field-note">Shows: {{ eventDatePreview(element) }}</p>
                     </template>
 
@@ -899,15 +904,22 @@
                         </select>
                       </label>
                       <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
-                        <input v-model.trim="item.label" type="text"
-                               :placeholder="element.presentation === 'labelled' ? 'Eyebrow, e.g. TOOL 01' : 'Replaces the number (optional)'" />
+                        <div class="element-subrow-inline">
+                          <button type="button" class="badge-icon-picker-btn"
+                                  :aria-label="`Choose an icon for card ${i + 1}`"
+                                  :title="element.presentation === 'labelled' ? 'Icon' : 'An icon replaces the number; \u2014 keeps numbering'"
+                                  @click.stop="showIconPicker(item.icon, (emoji) => { item.icon = emoji; }, 'Choose an Icon')"
+                          >{{ item.icon || '—' }}</button>
+                          <input v-model.trim="item.label" type="text"
+                                 :placeholder="element.presentation === 'labelled' ? 'Eyebrow, e.g. TOOL 01' : 'Text instead of the number (optional)'" />
+                        </div>
                         <input v-model.trim="item.title" type="text" placeholder="Title" />
                         <textarea v-model.trim="item.body" rows="3" placeholder="What this point says. Leave a blank line to start a new paragraph."></textarea>
                         <input v-model.trim="item.badge" type="text" placeholder="Corner sticker (optional), e.g. sells from: $990" />
                         <label class="builder-toggle"><input v-model="item.featured" type="checkbox" /><span>Highlight this card</span></label>
                         <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
                       </div>
-                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { label: '', title: '', body: '', badge: '', featured: false })">+ Add card</button>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { label: '', icon: '', title: '', body: '', badge: '', featured: false })">+ Add card</button>
                       <label class="builder-toggle"><input v-model="element.crooked_badges" type="checkbox" /><span>Tilt the stickers</span></label>
                     </template>
 
@@ -5900,7 +5912,7 @@ function newElement(type) {
   if (type === "event_date") return { ...base, source: "auto", date: 0, timezone: profileStore.business?.timezone || browserTimeZone(),
     show_time: true, presentation: "band", label: "", icon: "" };
   if (type === "info_cards") return { ...base, heading: "", presentation: "numbered", crooked_badges: false,
-    items: [{ label: "", title: "", body: "", badge: "", featured: false }] };
+    items: [{ label: "", icon: "", title: "", body: "", badge: "", featured: false }] };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
@@ -6663,6 +6675,7 @@ function elementSection(element) {
       .filter((item) => (item.title || "").trim() || (item.body || "").trim())
       .map((item) => ({ title: (item.title || "").trim(), body: (item.body || "").trim() || undefined,
                         label: (item.label || "").trim() || undefined,
+                        icon: (item.icon || "").trim() || undefined,
                         badge: (item.badge || "").trim() || undefined,
                         ...(item.featured ? { featured: true } : {}) }));
     if (!items.length) return null;
@@ -6877,9 +6890,9 @@ function elementsFromPage(sections) {
       elements.push({ id: localId("el"), type: "info_cards", heading: section.heading || "",
         presentation: section.presentation || "numbered",
         crooked_badges: Boolean(section.crooked_badges),
-        items: (section.items || []).map((item) => ({ label: item.label || "", title: item.title || "",
-                                                      body: item.body || "", badge: item.badge || "",
-                                                      featured: Boolean(item.featured) })) });
+        items: (section.items || []).map((item) => ({ label: item.label || "", icon: item.icon || "",
+                                                      title: item.title || "", body: item.body || "",
+                                                      badge: item.badge || "", featured: Boolean(item.featured) })) });
     } else if (section.type === "photo") {
       elements.push({ id: localId("el"), type: "photo", heading: section.heading || "",
         side_by_side: Boolean(section.side_by_side),

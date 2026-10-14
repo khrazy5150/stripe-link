@@ -5042,6 +5042,18 @@ button:disabled {
   padding: 0.8rem;
 }
 
+/* An icon picker beside its field rather than stacked above it: the button is a fixed square and the
+   input takes the rest, so the pair reads as one control. */
+.element-subrow-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.element-subrow-inline > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* The Live Preview iframe holds the server's own render_page() output — the published page, verbatim. */
 /* One flexible column below the header. The card previously had SEVEN children against
    grid-template-rows: auto minmax(0,1fr), so the iframe landed in an implicit auto row sized by its own

@@ -181,6 +181,44 @@ class SeveralBlocksCanCoexist(unittest.TestCase):
         self.assertIn("isRepeatableSection", BUILDER)
 
 
+class AnIconCanReplaceTheNumber(unittest.TestCase):
+    """The author asked for the Trust Badges icon picker here, with "no icon" as the default -- which is
+    what makes the card fall back to being numbered."""
+
+    def test_no_icon_means_the_counter(self):
+        self.assertIn("sl-info-count", cards(items=[{"title": "A"}]))
+
+    def test_an_icon_replaces_the_counter(self):
+        html = cards(items=[{"title": "A", "icon": "🚀"}])
+        self.assertIn('<span class="sl-info-icon" aria-hidden="true">🚀</span>', html)
+        self.assertNotIn("sl-info-count", html)
+
+    def test_an_icon_and_a_label_share_one_slot(self):
+        """Two elements would break the numbered grid's three columns."""
+        html = cards(items=[{"title": "A", "icon": "🔧", "label": "TOOL 01"}])
+        self.assertIn('<p class="sl-info-label"><span class="sl-info-icon" aria-hidden="true">🔧</span>TOOL 01</p>', html)
+
+    def test_the_icon_is_decorative(self):
+        """The <ol> already carries the sequence; the glyph says nothing a reader needs announced."""
+        self.assertIn('class="sl-info-icon" aria-hidden="true"', cards(items=[{"title": "A", "icon": "🚀"}]))
+
+    def test_it_is_escaped(self):
+        self.assertIn("&lt;", cards(items=[{"title": "A", "icon": "<b>"}]))
+
+    def test_the_builder_uses_the_shared_picker(self):
+        self.assertIn("showIconPicker(item.icon", BUILDER)
+        self.assertIn("{{ item.icon || '—' }}", BUILDER)
+
+    def test_the_builder_round_trips_it(self):
+        self.assertIn('icon: (item.icon || "").trim() || undefined', BUILDER)
+        self.assertIn('icon: item.icon || ""', BUILDER)
+
+    def test_an_over_long_icon_is_refused_on_save(self):
+        from stripe_link.domain.documents import DocumentValidationError
+        with self.assertRaises(DocumentValidationError):
+            validate_page_document(page({"items": [{"title": "A", "icon": "x" * 40}]}))
+
+
 class TheBodyIsRealProse(unittest.TestCase):
     def test_a_blank_line_starts_a_new_paragraph(self):
         html = cards(items=[{"title": "A", "body": "First thought.\n\nWho buys it: everyone."}])

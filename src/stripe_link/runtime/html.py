@@ -823,6 +823,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The marked card is outlined in the page accent and nothing else changes -- it is the one to look at,
     # not a different kind of card.
     "    .sl-info-card.is-featured{border-color:var(--sl-accent);box-shadow:0 0 0 1px var(--sl-accent)}",
+    "    .sl-info-icon{font-size:2rem;line-height:1;margin-right:0.4rem}",
     "    .sl-info-label{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--sl-card-muted,var(--sl-muted))}",
     # The counter lives in CSS so reordering cards renumbers them and the glyph carries no content.
     "    .sl-info-cards{counter-reset:sl-info}",
@@ -6873,6 +6874,7 @@ def render_info_cards(section: dict[str, Any]) -> str:
     rows.append(f'      <{list_tag} class="sl-info-cards">')
     for item in items:
         label = str(item.get("label") or "").strip()
+        marker_icon = str(item.get("icon") or "").strip()
         title = str(item.get("title") or "").strip()
         body = str(item.get("body") or "").strip()
         badge = str(item.get("badge") or "").strip()
@@ -6883,9 +6885,15 @@ def render_info_cards(section: dict[str, Any]) -> str:
             # aria-hidden: it repeats a price or aside that the body already states, and a screen reader
             # meeting it before the title hears the aside first.
             card.append(f'          <span class="sl-info-badge" aria-hidden="true">{escape(badge)}</span>')
-        # In `numbered` the eyebrow slot holds the counter unless the tenant typed one over it.
-        if label:
-            card.append(f'          <p class="sl-info-label">{escape(label)}</p>')
+        # ONE marker slot, so the numbered grid keeps its three columns. An icon and a label can share it
+        # ("TOOL 01" beside a glyph); the counter appears only when the tenant chose neither, which is what
+        # makes "no icon" mean "number it".
+        marker = "".join(part for part in (
+            f'<span class="sl-info-icon" aria-hidden="true">{escape(marker_icon)}</span>' if marker_icon else "",
+            escape(label) if label else "",
+        ) if part)
+        if marker:
+            card.append(f'          <p class="sl-info-label">{marker}</p>')
         elif numbered:
             card.append('          <p class="sl-info-label sl-info-count" aria-hidden="true"></p>')
         if title:

@@ -1845,6 +1845,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 require_string(item, "title", "Info card title")
                 optional_string(item, "body", "Info card body")
                 optional_string(item, "label", "Info card label")
+                # Replaces the number when set; empty means the card is numbered.
+                optional_string(item, "icon", "Info card icon", max_length=8)
                 optional_string(item, "badge", "Info card badge")
                 optional_bool(item, "featured", "Info card featured")
         elif section_type == "photo":
