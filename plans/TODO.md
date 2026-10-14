@@ -734,6 +734,38 @@ Dev has no business holding a live key under any topology. Small, independent, d
 
 ## Security
 
+### 🔓 tenant CRUD writes trust the `tenant_id` IN THE REQUEST BODY (found 2026-10-14)
+
+Noticed while fixing a missing tenant stamp on the Events store. The authorizer proves **who is calling**;
+it does not constrain **whose partition they write to**. On every document CRUD route the handler takes the
+tenant from the PAYLOAD:
+
+* `document_route.save_document` validates the body and calls `repository.put(document)`;
+* `DynamoDocumentRepository.put` builds the key from `document["tenant_id"]`.
+
+So an authenticated tenant can POST a document naming someone else's `tenant_id` and write into their
+partition. Reads are safer by construction — `get`/`list_for_tenant`/`delete` take the tenant from
+`tenant_id_from_event(event)`, i.e. from the request context — which is exactly what makes the write path
+the odd one out.
+
+**Why it is here and not fixed:** this is the established pattern for every entity (products, offers,
+services, collections, sites, events…), so changing it is one cross-cutting change, not a patch, and it
+wants doing deliberately rather than inside an unrelated bug fix (author, 2026-10-14: "make a note of the
+security risk so we can visit it later").
+
+**The fix when we take it:** stamp the tenant server-side in `save_document` from
+`tenant_id_from_event(event)` and **overwrite** whatever the body said — the same resolution the read paths
+already use. Then the client's copy becomes a hint rather than an authority, and the dashboard stores that
+stamp it (`services.js`, `events.js`) keep working unchanged.
+
+**Worth measuring first:** whether any handler legitimately writes on behalf of another tenant (a platform
+admin path, a stream processor reusing the same helper). `handlers/admin_*` is the place to look. If one
+does, the overwrite needs an explicit opt-out rather than a surprise.
+
+Scope: every `document_route` caller. Guard afterwards with a test asserting the body's `tenant_id` cannot
+change the key written.
+
+
 ### ⭐ subscription renewals are recorded as orders — SHIPPED 2026-09-22
 
 Found from a real renewal: two daily subscriptions charged successfully in Stripe (invoices `-0002`) and the
