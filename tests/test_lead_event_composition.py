@@ -74,6 +74,20 @@ class TheProductPickerOffersIt(unittest.TestCase):
     def test_it_asks_which_event(self):
         self.assertIn("form.lead_capture.event_id", self.PRODUCTS)
 
+    def test_the_CREATE_WIZARD_asks_too_not_just_the_edit_form(self):
+        """The bug this exists to prevent, reported 2026-10-14: the selector was added to the edit form
+        only, so creating a product walked to the last step and failed with "lead_capture.event_id must be
+        a non-empty string" -- a field the create flow never showed."""
+        wizard = self.PRODUCTS[self.PRODUCTS.index("wizardStepKey === 'details'"):]
+        wizard = wizard[:wizard.index("wizardStepKey === 'pricing'")]
+        self.assertIn("form.lead_capture.event_id", wizard)
+
+    def test_the_wizard_blocks_on_the_step_that_asks(self):
+        """Required where it is asked, not discovered two steps later as a save error."""
+        guard = self.PRODUCTS[self.PRODUCTS.index("const wizardCanAdvance"):][:1200]
+        self.assertIn('action === "register_event"', guard)
+        self.assertIn("Boolean(form.value.lead_capture.event_id)", guard)
+
     def test_it_says_what_to_do_when_there_are_none(self):
         """Otherwise the dropdown is empty and the tenant has no idea why."""
         self.assertIn("create one on the Events screen", self.PRODUCTS)

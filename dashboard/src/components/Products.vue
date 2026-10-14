@@ -288,6 +288,18 @@
                 <PhoneInput v-if="leadTargetIsPhone" v-model="form.lead_capture.target" />
                 <input v-else v-model.trim="form.lead_capture.target" :placeholder="leadTargetPlaceholder" />
               </label>
+              <label v-if="form.lead_capture.action === 'register_event'">
+                Which event <span class="required">*</span>
+                <select v-model="form.lead_capture.event_id">
+                  <option value="">Choose an event…</option>
+                  <option v-for="item in eventsStore.events" :key="item.event_id" :value="item.event_id">
+                    {{ item.title }}
+                  </option>
+                </select>
+                <span v-if="!eventsStore.events.length" class="field-note">
+                  No events yet — create one on the Events screen, then come back.
+                </span>
+              </label>
             </template>
 
             <template v-else>
@@ -795,7 +807,14 @@ const wizardCanAdvance = computed(() => {
     // A category is what files the product in the shared taxonomy, and the Details step now ASKS for one --
     // so it can be required here rather than discovered as a save error pointing at an off-screen field.
     if (wizardIntent.value === "transaction" && !form.value.product_category) return false;
-    if (wizardIntent.value === "lead_gen") return Boolean(form.value.lead_capture.action);
+    if (wizardIntent.value === "lead_gen") {
+      if (!form.value.lead_capture.action) return false;
+      // Same reasoning as the category above: the step now ASKS which event, so it is required HERE
+      // rather than discovered two steps later as "lead_capture.event_id must be a non-empty string" --
+      // a save error naming a field the tenant never saw (reported 2026-10-14).
+      if (form.value.lead_capture.action === "register_event") return Boolean(form.value.lead_capture.event_id);
+      return true;
+    }
     if (wizardIntent.value === "tip_jar") {
       return form.value.prices[0].allow_custom || (form.value.prices[0].presets || []).some((a) => Number(a) > 0);
     }
@@ -910,7 +929,9 @@ const leadActions = [
   { action: "register_event", label: "Register for an event", description: "Save the visitor a seat at a live session.", tone: "teal" },
 ];
 
-const defaultLeadAction = { ...leadActions[0], target: "", platform: "other" };
+// `event_id` is in the default shape so the field exists before anything is chosen — a v-model binding
+// onto an absent key works, but every reader then has to cope with `undefined`.
+const defaultLeadAction = { ...leadActions[0], target: "", platform: "other", event_id: "" };
 const draftLeadAction = ref({ ...defaultLeadAction });
 const form = ref(defaultProductForm());
 
