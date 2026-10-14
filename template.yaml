@@ -770,6 +770,9 @@ Resources:
           OFFERS_TABLE: !Ref OffersTable
           PRODUCTS_TABLE: !Ref ProductsTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          # The confirmation is sent AS THE TENANT, and the sender identity comes off the owner's
+          # profile. Without this the mail goes out with no identity at all (plans/WEBINAR.md P2).
+          USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-leads-api-${Environment}"
       CodeUri: src/
       Handler: handlers.leads.handler
@@ -786,6 +789,16 @@ Resources:
             TableName: !Ref EventsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref NotificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        # Registration confirmations, carrying the .ics as an attachment.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
         - DynamoDBReadPolicy:

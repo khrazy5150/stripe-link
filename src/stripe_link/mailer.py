@@ -85,6 +85,41 @@ def _tenant_shows_signature(tenant_id: str, profiles_repo: Any | None = None) ->
         return True
 
 
+def _raw_message(*, sender: str, recipient: str, subject: str, html: str, text: str,
+                 reply_to: str, calendar: str, filename: str) -> bytes:
+    """The same message as MIME, with the calendar file attached.
+
+    Attached as `text/calendar` AND given a filename: the first is what makes Gmail and Outlook offer an
+    "add to calendar" control inline, the second is what lets everyone else save a file their client
+    understands. One part serves both because the alternative is sending it twice.
+    """
+    from email.mime.application import MIMEApplication
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    message = MIMEMultipart("mixed")
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = recipient
+    if reply_to:
+        message["Reply-To"] = reply_to
+
+    alternative = MIMEMultipart("alternative")
+    if text:
+        alternative.attach(MIMEText(text, "plain", "utf-8"))
+    if html:
+        alternative.attach(MIMEText(html, "html", "utf-8"))
+    message.attach(alternative)
+
+    invite = MIMEApplication(calendar.encode("utf-8"), _subtype="octet-stream")
+    invite.set_type("text/calendar")
+    invite.set_param("method", "PUBLISH")
+    invite.set_param("charset", "UTF-8")
+    invite.add_header("Content-Disposition", "attachment", filename=filename)
+    message.attach(invite)
+    return message.as_bytes()
+
+
 def send_email(
     *,
     to: str,
@@ -97,6 +132,8 @@ def send_email(
     signature: bool | None = None,
     profiles_repo: Any | None = None,
     user_profiles_repo: Any | None = None,
+    calendar_invite: str = "",
+    calendar_filename: str = "invite.ics",
     client: Any | None = None,
 ) -> dict[str, Any]:
     """Send one message as the tenant, appending the platform sign-off unless they have paid it away.
@@ -142,6 +179,14 @@ def send_email(
         "Destination": {"ToAddresses": [recipient]},
         "Content": {"Simple": {"Subject": {"Data": subject, "Charset": "UTF-8"}, "Body": body}},
     }
+    if calendar_invite:
+        # RAW, because SESv2's Simple content cannot carry an attachment. Everything above still applies --
+        # the signature has already been appended to `html`/`text` -- so this swaps only how the same
+        # message is encoded, and the choke point stays one function.
+        request["Content"] = {"Raw": {"Data": _raw_message(
+            sender=request["FromEmailAddress"], recipient=recipient, subject=subject,
+            html=html, text=text, reply_to=reply, calendar=calendar_invite, filename=calendar_filename,
+        )}}
     reply = str(reply_to or "").strip()
     if reply:
         request["ReplyToAddresses"] = [reply]

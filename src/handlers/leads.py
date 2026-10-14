@@ -204,6 +204,7 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
         return error_response(str(exc), code="invalid_lead")
 
     if scheduled_event is not None:
+        _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id)
         # Best-effort, and AFTER the lead is safely stored: a failed count must not lose a registration.
         # Read-compare-write, so a burst can overbook by one (plans/WEBINAR.md §4) -- the registration is
         # the record that matters, and the count exists to close the door roughly, not exactly.
@@ -214,6 +215,40 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
 
     _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode)
     return json_response({"lead_id": lead_id, "status": "captured"}, status_code=201)
+
+
+def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id):
+    """Confirm the seat, with the calendar file. Best-effort by design.
+
+    A send that fails must never cost the registration: the lead is already stored, and a visitor who sees
+    an error after giving their address will simply submit again, producing a second lead for a seat they
+    already hold. So every failure here is logged and swallowed -- the person IS registered, which is the
+    fact that matters, and the reminder sweep will reach them again before the session.
+    """
+    recipient = str((fields or {}).get("email") or "").strip()
+    if not recipient:
+        return
+    try:
+        from stripe_link.domain.events import occurrence_by_id
+        from stripe_link.domain.ics import invite_for_occurrence
+        from stripe_link.domain.registration_email import registration_confirmation
+        from stripe_link.mailer import send_email
+
+        occurrence = occurrence_by_id(scheduled_event, occurrence_id)
+        if occurrence is None:
+            return
+        message = registration_confirmation(
+            scheduled_event, occurrence, name=str((fields or {}).get("name") or ""))
+        if not message["subject"]:
+            return
+        send_email(
+            to=recipient, subject=message["subject"], html=message["html"], text=message["text"],
+            tenant_id=tenant_id,
+            calendar_invite=invite_for_occurrence(scheduled_event, occurrence),
+            calendar_filename="session.ics",
+        )
+    except Exception as exc:  # noqa: BLE001 — a failed confirmation must not fail the registration
+        logger.warning("registration stored but confirmation not sent for %s: %s", recipient, exc)
 
 
 def _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode="test"):
