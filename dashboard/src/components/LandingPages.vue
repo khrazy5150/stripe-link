@@ -6875,34 +6875,52 @@ function elementSection(element) {
 // Rebuild the editable element list from an existing page's sections (round-trip on edit).
 function elementsFromPage(sections) {
   const elements = [];
+  // KEEP the saved section id. `sectionOrderKey` keys a REPEATABLE type by its id, so regenerating one
+  // here silently invalidated every order the tenant had dragged: `section_order` still named the old id,
+  // nothing matched it, and the page fell back to the baseline the next time it was opened. Non-repeatable
+  // types key by TYPE and never noticed, which is why this survived.
+  //
+  // A legacy content_block section can hold several blocks and becomes several elements; the first keeps
+  // the section's id and the rest get fresh ones, so ids stay unique. `seen` also covers a document that
+  // somehow carries a duplicate id, where two elements sharing one would break both the drag keys and
+  // Vue's list keys.
+  const seen = new Set();
+  const keepId = (section) => {
+    const id = section?.id;
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      return id;
+    }
+    return localId("el");
+  };
   for (const section of sections || []) {
     if (section.type === "content_block") {
       for (const block of section.blocks || []) {
-        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
+        elements.push({ id: keepId(section), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
       }
     } else if (section.type === "event_date") {
-      elements.push({ id: localId("el"), type: "event_date", source: section.source || "auto",
+      elements.push({ id: keepId(section), type: "event_date", source: section.source || "auto",
         date: Number(section.date) || 0,
         timezone: section.timezone || "", show_time: section.show_time !== false,
         presentation: section.presentation || "band",
         label: section.label || "", icon: section.icon || "" });
     } else if (section.type === "info_cards") {
-      elements.push({ id: localId("el"), type: "info_cards", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "info_cards", heading: section.heading || "",
         presentation: section.presentation || "numbered",
         crooked_badges: Boolean(section.crooked_badges),
         items: (section.items || []).map((item) => ({ label: item.label || "", icon: item.icon || "",
                                                       title: item.title || "", body: item.body || "",
                                                       badge: item.badge || "", featured: Boolean(item.featured) })) });
     } else if (section.type === "photo") {
-      elements.push({ id: localId("el"), type: "photo", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "photo", heading: section.heading || "",
         side_by_side: Boolean(section.side_by_side),
         images: (section.images || []).map((image) => ({ url: image.url || "", crop: image.crop || null,
                                                          caption: image.caption || "", alt: image.alt || "" })) });
     } else if (section.type === "testimonials") {
-      elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
     } else if (section.type === "page_ribbon") {
-      elements.push({ id: localId("el"), type: "page_ribbon",
+      elements.push({ id: keepId(section), type: "page_ribbon",
         purpose: section.purpose || "custom", presentation: section.presentation || "image_left",
         image_url: section.image_url || "", image_crop: section.image_crop || null,
         eyebrow: section.eyebrow || "",
@@ -6914,58 +6932,58 @@ function elementsFromPage(sections) {
                collect_phone: Boolean(section.cta?.collect_phone) },
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "video") {
-      elements.push({ id: localId("el"), type: "video", url: section.url || "",
+      elements.push({ id: keepId(section), type: "video", url: section.url || "",
         heading: section.heading || "", caption: section.caption || "", poster: section.poster || "",
         aspect: Number(section.aspect) || 1.7777777778 });
     } else if (section.type === "before_after") {
-      elements.push({ id: localId("el"), type: "before_after", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "before_after", heading: section.heading || "",
         before_url: section.before_url || "", after_url: section.after_url || "",
         before_crop: section.before_crop || null, after_crop: section.after_crop || null,
         before_label: section.before_label || "Before", after_label: section.after_label || "After",
         ratio: Number(section.ratio) || 1.3333333333,
         start: Number.isFinite(Number(section.start)) ? Number(section.start) : 50 });
     } else if (section.type === "numbered_list") {
-      elements.push({ id: localId("el"), type: "numbered_list", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "numbered_list", heading: section.heading || "",
         items: (section.items || []).map((i) => String(i || "")) });
     } else if (section.type === "quote") {
-      elements.push({ id: localId("el"), type: "quote", text: section.text || "",
+      elements.push({ id: keepId(section), type: "quote", text: section.text || "",
         title: section.title || "", image_url: section.image_url || "",
         attribution: section.attribution || "", style: section.style === "fancy" ? "fancy" : "minimal",
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "bragging_points") {
-      elements.push({ id: localId("el"), type: "bragging_points", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "bragging_points", heading: section.heading || "",
         items: (section.items || []).map((i) => ({ value: i.value || "", label: i.label || "" })),
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "author_bio") {
-      elements.push({ id: localId("el"), type: "author_bio", photo_url: section.photo_url || "",
+      elements.push({ id: keepId(section), type: "author_bio", photo_url: section.photo_url || "",
         image_crop: section.image_crop || null,
         name: section.name || "", headline: section.headline || "", body: section.body || "",
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "price_highlight") {
-      elements.push({ id: localId("el"), type: "price_highlight",
+      elements.push({ id: keepId(section), type: "price_highlight",
         main_text: section.main_text || "", subtext: section.subtext || "" });
     } else if (section.type === "coupon") {
-      elements.push({ id: localId("el"), type: "coupon", coupon_id: section.coupon_id || "",
+      elements.push({ id: keepId(section), type: "coupon", coupon_id: section.coupon_id || "",
         code: section.code || "", value_text: section.value_text || "", headline: section.headline || "",
         terms: section.terms || "", cta_label: section.cta_label || "",
         destination_url: section.destination_url || "", expires_at: section.expires_at ?? null });
     } else if (section.type === "rating") {
-      elements.push({ id: localId("el"), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
+      elements.push({ id: keepId(section), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
     } else if (section.type === "client_marquee") {
-      elements.push({ id: localId("el"), type: "client_marquee", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "client_marquee", heading: section.heading || "",
         logos: (section.logos || []).map((l) => ({ name: l.name || "", image_url: l.image_url || "" })),
         scroll: section.scroll === "always" || section.scroll === "never" ? section.scroll : "auto",
         scroll_seconds: Number(section.scroll_seconds) || 30,
         logo_backing: section.logo_backing === "none" ? "none" : "card" });
     } else if (section.type === "faq") {
-      elements.push({ id: localId("el"), type: "faq", heading: section.heading || "Frequently Asked Questions", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
+      elements.push({ id: keepId(section), type: "faq", heading: section.heading || "Frequently Asked Questions", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
     } else if (section.type === "product_details") {
-      elements.push({ id: localId("el"), type: "product_details" });
+      elements.push({ id: keepId(section), type: "product_details" });
     } else if (section.type === "related_products") {
-      elements.push({ id: localId("el"), type: "related_products", heading: section.heading || "Related products" });
+      elements.push({ id: keepId(section), type: "related_products", heading: section.heading || "Related products" });
     } else if (section.type === "tip_jar") {
       elements.push({
-        id: localId("el"), type: "tip_jar", heading: section.heading || "",
+        id: keepId(section), type: "tip_jar", heading: section.heading || "",
         // A page saved before the picker existed has a URL and no destination: read it as "Another link",
         // which is exactly what it was, rather than silently reassigning it to a platform.
         destination: section.destination || "other",
@@ -6974,12 +6992,12 @@ function elementsFromPage(sections) {
         url: section.url || "", label: section.label || "Leave a tip", note: section.note || "",
       });
     } else if (section.type === "social_links") {
-      elements.push({ id: localId("el"), type: "social_links", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "social_links", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ url: item.url || "" })) });
     } else if (section.type === "link_cards") {
       // `image` on the wire, `image_url` in the form — the upload helper writes image_url, and every other
       // element in this builder spells it that way.
-      elements.push({ id: localId("el"), type: "link_cards", heading: section.heading || "",
+      elements.push({ id: keepId(section), type: "link_cards", heading: section.heading || "",
         items: (section.items || []).map((item) => ({
           url: item.url || "", label: item.label || "",
           description: item.description || "", image_url: item.image || "",
