@@ -3,7 +3,7 @@ export const menuSchema = {
   document_type: "menu",
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
-    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "collections", "services", "reviews", "abTesting"] },
+    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "collections", "services", "events", "reviews", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "leads", "notifications", "invoices", "refunds", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["billing", "stripeConnect", "ai", "registration", "configuration", "profile", "preferences"] },
   ],

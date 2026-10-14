@@ -20,6 +20,23 @@ class ItIsReachable(unittest.TestCase):
         self.assertIn('key: "events"', MENU)
         self.assertIn('view: "events"', MENU)
 
+    def test_the_entry_is_in_a_GROUP_and_therefore_rendered(self):
+        """The bug this exists to prevent, found 2026-10-14 from a screenshot of the sidebar: the item map
+        and the GROUPS are two separate lists, and only the groups decide what is drawn. The entry existed,
+        was correct, and appeared nowhere -- and the first version of this test checked only the map."""
+        import re
+        groups = re.search(r"groups: \[(.*?)\n  \]", MENU, re.S).group(1)
+        self.assertIn('"events"', groups)
+
+    def test_every_item_is_reachable_from_some_group(self):
+        """Derived rather than listed, so the next entry added to the map cannot go unrendered either."""
+        import re
+        groups = re.search(r"groups: \[(.*?)\n  \]", MENU, re.S).group(1)
+        grouped = set(re.findall(r'"(\w+)"', groups))
+        declared = set(re.findall(r"^    (\w+): \{", MENU, re.M))
+        self.assertEqual(declared - grouped, set(),
+                         "these menu items are defined but in no group, so nothing draws them")
+
     def test_its_icon_exists(self):
         """A menu entry naming a glyph the icon map lacks renders an empty square."""
         icon = MENU[MENU.index('key: "events"'):][:200]
