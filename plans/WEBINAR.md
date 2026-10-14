@@ -222,8 +222,19 @@ an SMS registration they have nothing to do with.
 1. **P1 — Event + registration.** EventsTable, `lead_event` offer type and composition, occurrence picker,
    server-side future/capacity checks, post-event state.
 2. **P2 — Comms.** Confirmation email with `.ics`; reminders retargeted from appointments to registrations.
-3. **P3 — Operations.** Registrant list and export in the dashboard (likely falls out of the existing leads
-   screen), cancellation, "notify me of the next one".
+3. **P3 — Operations.** Registrant list and export, and cancellation. BUILT 2026-10-14, except
+   "notify me of the next one", which is left out deliberately: it is the smallest and most speculative of
+   the three, and nobody has asked for it.
+
+   The guess that the list would "fall out of the existing leads screen" was half right. That screen
+   already listed registrations and exported CSV, but had no idea events existed — so two sittings of one
+   event were indistinguishable and "who is coming on Wednesday" was unanswerable. It now shows the
+   session on each row, filters by it, and exports `event` + `session` columns.
+
+   Cancellation turned out to be two things under one word. The TENANT cancelling a sitting is built: the
+   events handler diffs the save against what it replaced and emails that sitting's registrants, offering
+   the next open sitting when there is one. A REGISTRANT un-registering is not built — it needs the
+   link-based, no-accounts approach the tip jar uses, and nobody has asked.
 
 ## 13. Budget note
 

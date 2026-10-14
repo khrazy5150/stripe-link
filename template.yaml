@@ -1045,6 +1045,10 @@ Resources:
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
           EVENTS_TABLE: !Ref EventsTable
+          # Cancelling a session emails the people who registered, which means listing them
+          # (LeadsTable) and sending as the tenant (profiles for tier + sender identity).
+          LEADS_TABLE: !Ref LeadsTable
+          USER_PROFILES_TABLE: !Ref UserProfilesTable
           # Reachable but unused: the repository module names every table, and envreach follows imports
           # transitively because a missing variable fails at RUNTIME. Declared without a matching IAM
           # policy on purpose -- this handler never reads tenant profiles, and granting what it does not
@@ -1057,6 +1061,18 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref EventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LeadsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        # Cancellation notices.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
       Events:
         EventsCreate:
           Type: Api

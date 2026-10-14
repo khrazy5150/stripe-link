@@ -123,3 +123,44 @@ def registration_reminder(
         "</div>",
     ])
     return {"subject": subject, "html": html, "text": text}
+
+
+def registration_cancelled(
+    event: dict[str, Any],
+    occurrence: dict[str, Any],
+    *,
+    name: str = "",
+    replacement: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """A session has been called off. `{subject, html, text}`.
+
+    The one email here that nobody wants to receive, so it says the thing itself in the subject line and
+    does not bury it. If the tenant has another sitting still open, it is offered -- that is the difference
+    between "cancelled" and "cancelled, and here is what to do about it", and it is the only reason to
+    mention the event again at all.
+    """
+    title = str(event.get("title") or "").strip() or "Your session"
+    when = _when(event, occurrence)
+    if not when:
+        return {"subject": "", "html": "", "text": ""}
+
+    greeting = f"Hi {name.strip()}," if str(name or "").strip() else "Hi,"
+    subject = f"Cancelled: {title} — {when}"
+    alternative = _when(event, replacement) if replacement else ""
+
+    lines = [greeting, "", f"{title} on {when} has been cancelled.", ""]
+    lines += [f"We're running it again on {alternative} — your seat is not transferred automatically, so "
+              "register again if you'd like to come.", ""] if alternative else \
+             ["Sorry for the change of plan.", ""]
+    text = "\n".join(lines).rstrip()
+
+    html = "".join([
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:16px;line-height:1.5">',
+        f"<p>{escape(greeting)}</p>",
+        f"<p><strong>{escape(title)}</strong> on {escape(when)} has been <strong>cancelled</strong>.</p>",
+        (f"<p>We're running it again on <strong>{escape(alternative)}</strong>. Your seat is not "
+         "transferred automatically, so register again if you'd like to come.</p>"
+         if alternative else "<p>Sorry for the change of plan.</p>"),
+        "</div>",
+    ])
+    return {"subject": subject, "html": html, "text": text}

@@ -35,12 +35,24 @@ export const useLeadsStore = defineStore("leads", {
     error: "",
     message: "Loading leads…",
     filterStatus: "all",
+    filterSession: "all",
   }),
 
   getters: {
     filteredLeads(state) {
-      if (state.filterStatus === "all") return state.leads;
-      return state.leads.filter((lead) => lead.status === state.filterStatus);
+      let rows = state.leads;
+      if (state.filterStatus !== "all") rows = rows.filter((lead) => lead.status === state.filterStatus);
+      // A webinar registration is a lead carrying its session (plans/WEBINAR.md §4). "Who is coming on
+      // Wednesday" is the question a host asks on the morning of a session, and without this the two
+      // sittings of one event are indistinguishable in the list.
+      if (state.filterSession === "registrations") {
+        rows = rows.filter((lead) => lead.event_id);
+      } else if (state.filterSession !== "all") {
+        const [eventId, occurrenceId] = String(state.filterSession).split("::");
+        rows = rows.filter((lead) => lead.event_id === eventId
+          && (!occurrenceId || lead.occurrence_id === occurrenceId));
+      }
+      return rows;
     },
   },
 
@@ -50,6 +62,7 @@ export const useLeadsStore = defineStore("leads", {
       this.loading = false;
       this.loaded = false;
       this.error = "";
+      this.filterSession = "all";
       this.message = "Loading leads…";
       this.filterStatus = "all";
     },
