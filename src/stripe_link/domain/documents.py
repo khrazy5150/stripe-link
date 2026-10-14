@@ -694,7 +694,12 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
     )
     require_string(lead_capture, "title", "Product lead_capture.title")
     require_string(lead_capture, "description", "Product lead_capture.description")
-    if action in {"capture_email", "capture_phone", "capture_email_phone"}:
+    if action == "register_event":
+        # Registering is capturing, plus the session being registered FOR. Without the event the page has
+        # nothing to announce and the registration has nothing to point at, so it is required here even
+        # though an Event document may legitimately exist with no occurrences scheduled yet.
+        require_string(lead_capture, "event_id", "Product lead_capture.event_id")
+    if action in {"capture_email", "capture_phone", "capture_email_phone", "register_event"}:
         fields = lead_capture.get("fields")
         if not isinstance(fields, list) or not fields:
             raise DocumentValidationError("Product lead_capture.fields must be a non-empty array for capture actions.")
@@ -734,6 +739,9 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
 LEAD_CAPTURE_ACTIONS = frozenset({
     "capture_email", "capture_phone", "capture_email_phone",
     "call_number", "external_url", "social_redirect",
+    # A seat at a scheduled session (plans/WEBINAR.md). A capture action with a DATE attached: it collects
+    # the same fields, and the thing that makes it different is the event it registers for.
+    "register_event",
 })
 
 

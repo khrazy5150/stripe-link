@@ -828,6 +828,29 @@
       ],
       "_comment": "Squeeze page. checkout_cta IS the inline form -- removing it would remove the thing the page exists for. hero_media is optional and doubles as a background image; a capture page works with no image at all. Covers capture_email, capture_phone and capture_email_phone: the field differs, the page does not."
     },
+    "lead_event": {
+      "sections": [
+        "brand_label",
+        "hero_media",
+        "hero",
+        "event_date",
+        "checkout_cta",
+        "legal_footer"
+      ],
+      "allowed_ctas": [
+        "email_capture"
+      ],
+      "excludes": [
+        "offer_price_selector",
+        "price_highlight",
+        "product_carousel",
+        "product_details",
+        "refund_policy",
+        "related_products",
+        "tip_jar"
+      ],
+      "_comment": "A webinar registration page (plans/WEBINAR.md). lead_capture plus the one thing a session page cannot do without: the DATE. `event_date` is in sections rather than merely allowed, because a page announcing a live session without saying when is not a draft -- it is wrong. trust_badges are NOT excluded as they are on lead_capture: a free session is still asking for an email address, and 'no spam' is the objection being answered. phone_call is not an allowed CTA here -- the ask is a seat, not a call."
+    },
     "lead_call": {
       "sections": [
         "brand_label",

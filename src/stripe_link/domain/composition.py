@@ -240,6 +240,8 @@ LEAD_COMPOSITIONS = {
     "call_number": "lead_call",
     "external_url": "lead_bridge",
     "social_redirect": "lead_social",
+    # A session page is a capture page that must also say WHEN (plans/WEBINAR.md).
+    "register_event": "lead_event",
 }
 # An offer that says lead_gen without naming an action still must not get a checkout page. The capture
 # shape is the safe default: it is the only one that keeps a form, so nothing the tenant typed is lost.
