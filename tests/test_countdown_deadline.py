@@ -128,6 +128,38 @@ class TheBannerIsCentred(unittest.TestCase):
             with self.subTest(prop=prop):
                 self.assertIn(prop, rule)
 
+    def test_the_marquee_crosses_the_whole_banner(self):
+        """It used to animate 100% -> -100% on an inline-flex span, where 100% was the CLOCK's own width:
+        a narrow clock appeared and vanished well inside the banner. The lead-in is now one BANNER width
+        (a percentage padding resolves against the containing block), and the travel is the element's own
+        width -- so it enters at one edge and leaves by the other."""
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES as STYLES
+        content = next(r for r in STYLES
+                       if isinstance(r, str) and "data-marquee='true'] .sl-countdown-content{" in r)
+        self.assertIn("padding-left:100%", content)
+        frames = next(r for r in STYLES if isinstance(r, str) and "@keyframes sl-countdown-marquee" in r)
+        self.assertIn("translateX(0)", frames)
+        self.assertIn("translateX(-100%)", frames)
+
+    def test_the_banner_drops_its_side_padding_so_the_travel_is_exact(self):
+        """Side padding would start the clock that far inside the visible edge and leave the same sliver
+        showing as it exits."""
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES as STYLES
+        rule = next(r for r in STYLES
+                    if isinstance(r, str) and r.strip().startswith(".sl-countdown[data-marquee='true']{"))
+        self.assertIn("padding-left:0", rule)
+        self.assertIn("padding-right:0", rule)
+        self.assertIn("overflow:hidden", rule)
+        self.assertIn("justify-content:flex-start", rule)
+
+    def test_it_keeps_its_own_keyframe_name(self):
+        """`sl-marquee` is the client-logo strip's, defined later, and the later definition wins -- which
+        once gave the countdown the logo's 0 -> -50% and restarted it from the middle."""
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES as STYLES
+        content = next(r for r in STYLES
+                       if isinstance(r, str) and "data-marquee='true'] .sl-countdown-content{" in r)
+        self.assertIn("animation:sl-countdown-marquee", content)
+
     def test_the_marquee_still_refuses_to_wrap(self):
         """It scrolls one continuous strip; wrapping stacks the halves and shears the animation."""
         from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES

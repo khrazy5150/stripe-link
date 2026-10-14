@@ -530,7 +530,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    @media (max-width: 480px){.sl-countdown-digits{gap:0.5rem}.sl-countdown-unit{min-width:0;flex:1;padding:0.6rem 0.4rem}.sl-countdown-unit b{font-size:1.9rem}.sl-countdown-unit small{font-size:0.95rem;letter-spacing:0.04em}}",
     "    .sl-countdown[data-sticky='true']{position:sticky;top:0;z-index:20}",
     "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 85%,transparent)}",
-    "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
+    # Horizontal padding is dropped so the travel is EXACT: `padding-left:100%` below resolves against
+    # this element's content box, so any side padding would start the clock that far inside the visible
+    # edge and leave the same sliver showing when it exits. Vertical padding is untouched.
+    "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap;justify-content:flex-start;padding-left:0;padding-right:0}",
     # Own keyframe name: `sl-marquee` is also defined by the client-logo strip further down, and the later
     # definition wins — which gave the countdown the logo animation (0 -> -50%), so it restarted from the
     # middle instead of wrapping off one edge and back in the other.
@@ -540,11 +543,26 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # to a second line and each line is centred on its own.
     "    .sl-countdown-content{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.8rem}",
     # The marquee scrolls one continuous strip; wrapping it would stack the halves and shear the animation.
-    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;flex-wrap:nowrap;align-items:center;gap:0.8rem;animation:sl-countdown-marquee var(--sl-countdown-marquee-duration,14s) linear infinite}",
+    #
+    # `padding-left:100%` is the travel, not decoration. A percentage padding resolves against the
+    # CONTAINING BLOCK, so it is one banner width -- which parks the clock just past the right edge and
+    # makes the element (banner + clock) wide. translateX(-100%) then moves it by its own width, so the
+    # clock crosses the full banner and leaves by the left edge, with no stretch where it is invisible.
+    #
+    # The previous rule animated 100% -> -100% on an inline-flex span, where 100% was the CLOCK's own
+    # width: a narrow clock appeared and vanished well inside the banner, never reaching either edge.
+    #
+    # The client-logo strip solves the same problem by DUPLICATING its row and travelling 0 -> -50%. That
+    # cannot be copied here: the island writes the time into the first `[data-countdown-display]` it finds,
+    # so a second copy would hang on whatever the server rendered.
+    #
+    # flex-start, because a centred flex item with a banner-width padding would be shifted by half its own
+    # overflow and lose the alignment the padding just bought.
+    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{flex:none;display:inline-flex;flex-wrap:nowrap;align-items:center;gap:0.8rem;padding-left:100%;animation:sl-countdown-marquee var(--sl-countdown-marquee-duration,14s) linear infinite}",
     # Scrolling past the deadline reads as a live offer that has already gone.
     "    .sl-countdown[data-expired='true'] .sl-countdown-content{animation:none}",
     "    .sl-countdown time{font-family:var(--sl-font-mono);background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",
-    "    @keyframes sl-countdown-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
+    "    @keyframes sl-countdown-marquee{from{transform:translateX(0)}to{transform:translateX(-100%)}}",
     "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
     "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
     # p OR h1 -- the brand mark carries the H1 on a composition with no hero (see render_brand_label). The
