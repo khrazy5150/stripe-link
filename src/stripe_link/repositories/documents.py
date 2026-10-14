@@ -1674,6 +1674,21 @@ def review_invites_repository(table: Any | None = None, *, mode: str | None = No
     )
 
 
+def events_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Scheduled events (plans/WEBINAR.md P1).
+
+    NOT mode-scoped, unlike services and appointments. A webinar carries no Stripe state and is not a
+    transaction -- registration is free, and a tenant flipping between test and live should not find their
+    sessions have vanished. The registrations themselves are leads, which are not mode-scoped either.
+    """
+    return DynamoDocumentRepository(
+        os.environ.get("EVENTS_TABLE", ""),
+        document_type="event",
+        id_field="event_id",
+        table=table,
+    )
+
+
 def services_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),

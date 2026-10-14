@@ -975,6 +975,52 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /collections/{collection_id}
             Method: DELETE
+  EventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Environment:
+        Variables:
+          # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
+          # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
+          # A missing name here is a RUNTIME failure, not a deploy failure.
+          EVENTS_TABLE: !Ref EventsTable
+          # Reachable but unused: the repository module names every table, and envreach follows imports
+          # transitively because a missing variable fails at RUNTIME. Declared without a matching IAM
+          # policy on purpose -- this handler never reads tenant profiles, and granting what it does not
+          # use would be the wrong half to copy from the other CRUD functions.
+          TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+      FunctionName: !Sub "${ProjectPrefix}-events-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.events.handler
+      Description: Scheduled events (webinars) and their occurrences — tenant-scoped CRUD.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+      Events:
+        EventsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /events
+            Method: POST
+        EventsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /events
+            Method: GET
+        EventGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /events/{event_id}
+            Method: GET
+        EventDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /events/{event_id}
+            Method: DELETE
   ReviewsPublicFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -5396,6 +5442,24 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-events-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
 
   ProductsTable:
     Type: AWS::DynamoDB::Table

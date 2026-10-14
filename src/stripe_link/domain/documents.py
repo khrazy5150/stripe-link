@@ -3173,6 +3173,45 @@ def _validate_service_price(price: dict[str, Any], *, where: str) -> None:
         validate_recurring_price(price)
 
 
+def validate_event(document: dict[str, Any]) -> None:
+    """A scheduled event and its occurrences (plans/WEBINAR.md P1)."""
+    from .events import OCCURRENCE_STATUSES, PROVIDERS
+
+    require_document_fields(document, "event", "event_id")
+    require_string(document, "title", "Event title")
+    optional_string(document, "description", "Event description")
+    if document.get("provider") is not None:
+        require_enum(document, "provider", set(PROVIDERS), "Event provider")
+    # Optional: a tenant creates the event before the meeting is scheduled with the provider, and
+    # refusing the save until they have a link would make them keep it in a note instead. The page and the
+    # confirmation both degrade when it is absent.
+    if document.get("join_url"):
+        join_url = require_string(document, "join_url", "Event join_url")
+        if not join_url.lower().startswith(("http://", "https://")):
+            raise DocumentValidationError("Event join_url must start with http:// or https://.")
+    if document.get("duration_minutes") is not None:
+        require_positive_int(document, "duration_minutes", "Event duration_minutes")
+
+    rows = optional_limited_object_list(document, "occurrences", 24, "Event occurrences")
+    seen: set[str] = set()
+    for row in rows:
+        occurrence_id = require_string(row, "occurrence_id", "Event occurrence_id")
+        # Registrations point at an occurrence by id, so a duplicate would make "which session did they
+        # sign up for" unanswerable -- and silently send half of them the wrong reminder.
+        if occurrence_id in seen:
+            raise DocumentValidationError(f"Event occurrence_id '{occurrence_id}' is used twice.")
+        seen.add(occurrence_id)
+        require_positive_int(row, "starts_at", "Event occurrence starts_at")
+        # Not validated against a zone list, for the reason business.timezone is not: the renderer already
+        # degrades to UTC loudly, and refusing a save over a tz database would lock a tenant out.
+        optional_string(row, "timezone", "Event occurrence timezone", max_length=64)
+        # 0/absent = unlimited. A negative capacity is a typo that would close registration permanently.
+        optional_non_negative_int(row, "capacity", "Event occurrence capacity")
+        optional_non_negative_int(row, "registered_count", "Event occurrence registered_count")
+        if row.get("status") is not None:
+            require_enum(row, "status", set(OCCURRENCE_STATUSES), "Event occurrence status")
+
+
 def validate_service(document: dict[str, Any]) -> None:
     fulfillment_mode = document.get("fulfillment_mode")
     if fulfillment_mode is not None and fulfillment_mode not in {"scheduled", "no_booking"}:
