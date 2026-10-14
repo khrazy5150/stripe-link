@@ -851,6 +851,33 @@
                       <label class="builder-toggle"><input v-model="element.divider" type="checkbox" /><span>Add a dividing line</span></label>
                     </template>
 
+                    <template v-else-if="element.type === 'event_date'">
+                      <label class="offer-field">
+                        <span>Date and time</span>
+                        <input v-model="eventDateLocal[element.id]" type="datetime-local" />
+                      </label>
+                      <p v-if="!element.date" class="field-note">
+                        Without a date this element shows nothing on the page.
+                      </p>
+                      <label class="offer-field">
+                        <span>Time zone</span>
+                        <select v-model="element.timezone">
+                          <option v-for="z in timeZoneOptions(element.timezone)" :key="z" :value="z">{{ z }}</option>
+                        </select>
+                      </label>
+                      <label class="builder-toggle"><input v-model="element.show_time" type="checkbox" /><span>Include the time</span></label>
+                      <label class="offer-field">
+                        <span>Style</span>
+                        <select v-model="element.presentation">
+                          <option value="band">Band — a full-width announcement strip</option>
+                          <option value="card">Card — a quieter panel in the flow</option>
+                        </select>
+                      </label>
+                      <input v-model.trim="element.label" type="text" placeholder="Line before the date (optional), e.g. FREE LIVE TRAINING:" />
+                      <input v-model.trim="element.icon" type="text" maxlength="8" placeholder="Icon (optional), e.g. 📅" />
+                      <p v-if="element.date" class="field-note">Shows: {{ eventDatePreview(element) }}</p>
+                    </template>
+
                     <template v-else-if="element.type === 'info_cards'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <label class="offer-field">
@@ -2551,6 +2578,7 @@ import { computed, inject, onBeforeUnmount, onMounted, provide, reactive, ref, w
 import SelectorCard from "./SelectorCard.vue";
 import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
+import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
 import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
@@ -2985,6 +3013,41 @@ function localInputToEpoch(value) {
   if (!value) return 0;
   const ms = new Date(value).getTime();
   return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+}
+// Per-element date bridge. A plain computed cannot serve a LIST of elements, so this is a reactive map
+// keyed by element id -- the same datetime-local <-> epoch conversion the sale and countdown already use.
+const eventDateLocal = reactive(new Proxy({}, {
+  get: (_t, id) => epochToLocalInput(builderElementById(String(id))?.date || 0),
+  set: (_t, id, value) => {
+    const element = builderElementById(String(id));
+    if (element) element.date = localInputToEpoch(value) || 0;
+    return true;
+  },
+}));
+function builderElementById(id) {
+  return (builder.elements || []).find((element) => element.id === id) || null;
+}
+// What the page will actually print, so the tenant checks the sentence rather than trusting the epoch.
+function eventDatePreview(element) {
+  if (!element?.date) return "";
+  const when = new Date(Number(element.date) * 1000);
+  const options = { weekday: "long", month: "long", day: "numeric", year: "numeric" };
+  if (element.show_time !== false) {
+    Object.assign(options, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+  }
+  if (element.timezone) options.timeZone = element.timezone;
+  try {
+    return when.toLocaleString(undefined, options);
+  } catch {
+    return when.toLocaleString();   // an unknown zone must not break the row
+  }
+}
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 const countdownEndsAtLocal = computed({
   get: () => epochToLocalInput(builder.countdown.ends_at),
@@ -5809,6 +5872,10 @@ function newElement(type) {
   // Starts with ONE empty row: an element whose editor is blank reads as broken, and "+ Add photo" is
   // not an obvious first move when there is nothing on screen to add to.
   if (type === "photo") return { ...base, heading: "", images: [{ url: "", crop: null, caption: "", alt: "" }], side_by_side: false };
+  // The store's own zone is the right first guess, and the tenant can change it per element -- a Denver
+  // business can announce a webinar at 7PM EST.
+  if (type === "event_date") return { ...base, date: 0, timezone: profileStore.business?.timezone || browserTimeZone(),
+    show_time: true, presentation: "band", label: "", icon: "" };
   if (type === "info_cards") return { ...base, heading: "", presentation: "numbered", crooked_badges: false,
     items: [{ label: "", title: "", body: "", badge: "", featured: false }] };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
@@ -6445,6 +6512,7 @@ function rowSummary(row) {
   if (row.type === "content_block") return e.title?.trim() || excerpt(e.text) || "empty";
   if (row.type === "photo") return countLabel((e.images || []).filter((i) => (i.url || "").trim()).length, "photo");
   if (row.type === "info_cards") return countLabel((e.items || []).filter((i) => (i.title || "").trim()).length, "card");
+  if (row.type === "event_date") return e.date ? eventDatePreview(e) : "no date set";
   // The author IS the section — whose credibility it borrows is the one thing worth reading off a
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
@@ -6555,6 +6623,14 @@ function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
     return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), ...(element.divider ? { divider: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined, image_crop: element.image_crop || undefined }] };
+  }
+  if (element.type === "event_date") {
+    if (!element.date) return null;   // no date, nothing to show -- do not store an empty band
+    return { id: element.id, type: "event_date", date: Number(element.date),
+             timezone: element.timezone || undefined,
+             show_time: element.show_time !== false,
+             presentation: element.presentation || "band",
+             label: element.label || undefined, icon: element.icon || undefined };
   }
   if (element.type === "info_cards") {
     const items = (element.items || [])
@@ -6765,6 +6841,11 @@ function elementsFromPage(sections) {
       for (const block of section.blocks || []) {
         elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", image_crop: block.image_crop || null, centered: Boolean(section.centered), divider: Boolean(section.divider) });
       }
+    } else if (section.type === "event_date") {
+      elements.push({ id: localId("el"), type: "event_date", date: Number(section.date) || 0,
+        timezone: section.timezone || "", show_time: section.show_time !== false,
+        presentation: section.presentation || "band",
+        label: section.label || "", icon: section.icon || "" });
     } else if (section.type === "info_cards") {
       elements.push({ id: localId("el"), type: "info_cards", heading: section.heading || "",
         presentation: section.presentation || "numbered",

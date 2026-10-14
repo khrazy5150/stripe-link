@@ -1816,6 +1816,19 @@ def validate_page_document(document: dict[str, Any]) -> None:
             for logo in logos:
                 require_string(logo, "image_url", "Client marquee logo image_url")
                 optional_string(logo, "name", "Client marquee logo name")
+        elif section_type == "event_date":
+            # Absent/0 = nothing to show, which the renderer honours by emitting no element at all. So the
+            # date is optional here: a tenant may add the element before they know the date.
+            optional_non_negative_int(section, "date", "Date date")
+            optional_string(section, "label", "Date label")
+            optional_string(section, "icon", "Date icon", max_length=8)
+            # Not validated against a zone list, for the reason business.timezone is not: the renderer
+            # already degrades to UTC with a warning, and refusing a save over a tz database somewhere
+            # would lock a tenant out of their own page.
+            optional_string(section, "timezone", "Date timezone", max_length=64)
+            optional_bool(section, "show_time", "Date show_time")
+            if section.get("presentation") is not None:
+                require_enum(section, "presentation", {"band", "card"}, "Date presentation")
         elif section_type == "info_cards":
             optional_string(section, "heading", "Info cards heading")
             if section.get("presentation") is not None:

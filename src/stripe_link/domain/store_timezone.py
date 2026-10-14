@@ -16,7 +16,10 @@ UTC, which is visibly a placeholder rather than a plausible wrong answer.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 FALLBACK = "UTC"
 
@@ -163,6 +166,26 @@ def store_cutoff_hour(business: Any) -> int:
     except (TypeError, ValueError):
         return DEFAULT_CUTOFF_HOUR
     return hour if 0 <= hour <= 23 else DEFAULT_CUTOFF_HOUR
+
+
+def load_zone(name: Any):
+    """An IANA name as a tzinfo, or UTC when it cannot be loaded.
+
+    `zoneinfo` is standard library but needs a tz database from the OS image or the `tzdata` package. A
+    name this runtime cannot resolve must never crash a page over a timezone, and must not silently shift
+    the displayed moment either -- so it falls back to UTC and says so in the log.
+
+    `scheduling._zone` and `delivery_estimate._zone` are older private copies of this. They are left alone
+    here rather than refactored blind; this is the public one for new callers.
+    """
+    from zoneinfo import ZoneInfo
+
+    wanted = _text(name) or "UTC"
+    try:
+        return ZoneInfo(wanted)
+    except Exception as exc:  # noqa: BLE001 - any failure to resolve means UTC, loudly
+        logger.warning("timezone %r unavailable (%s: %s); displaying in UTC", wanted, type(exc).__name__, exc)
+        return ZoneInfo("UTC")
 
 
 def store_timezone(business: Any) -> str:

@@ -41,6 +41,7 @@ from stripe_link.domain.image_crop import crop_style_vars
 from stripe_link.domain.fonts import (
     REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
 )
+from stripe_link.domain.store_timezone import load_zone
 from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import (LIGHT_INK as SECTION_LIGHT_INK, SECTION_TONES,
                                               readable_ink as section_readable_ink, section_theme_vars,
@@ -804,6 +805,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # paragraphs stack flush and read as the run-on block they were split up to fix. Two classes outrank
     # the one-class `margin:0` rules, so it wins wherever it applies.
     "    .sl-para + .sl-para{margin-top:0.9em}",
+    # BAND: the full-width announcement bar. Painted with the tenant's own ^^highlight^^ tokens, which is
+    # what makes it the amber strip in the reference without hardcoding a colour the theme cannot reach.
+    "    .sl-event-date{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:center;gap:0.6rem 1rem;text-align:center}",
+    "    .sl-event-date.is-band{background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);border-radius:0.8rem;padding:1.2rem 1.6rem;font-weight:800;text-transform:uppercase;letter-spacing:0.04em}",
+    # CARD: the quieter form -- a bordered panel that sits in the flow rather than interrupting it.
+    "    .sl-event-date.is-card{background:var(--sl-card);color:var(--sl-card-text,var(--sl-content-text));border:1px solid var(--sl-content-border);border-radius:var(--sl-radius);padding:1.6rem}",
+    "    .sl-event-date-label{font-weight:700;letter-spacing:0.06em;text-transform:uppercase;font-size:1.3rem}",
+    "    .sl-event-date-value{font-family:var(--sl-font-heading);font-size:1.8rem;line-height:1.3}",
+    "    .sl-event-date.is-band .sl-event-date-value{font-size:1.5rem}",
+    "    .sl-event-date-icon{font-size:1.6rem;line-height:1}",
     "    .sl-info{display:grid;gap:1.6rem}",
     "    .sl-info-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;color:var(--sl-content-heading);text-align:center}",
     "    .sl-info-cards{list-style:none;display:grid;gap:1.6rem;counter-reset:sl-info}",
@@ -2736,6 +2747,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
     "photo": {"render": lambda c: render_photo(c.section), "version": 1},
     "info_cards": {"render": lambda c: render_info_cards(c.section), "version": 1},
+    "event_date": {"render": lambda c: render_event_date(c.section), "version": 1},
     "video": {"render": lambda c: render_video(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
@@ -2858,6 +2870,72 @@ def countdown_timer_colors(page: dict[str, Any], section: dict[str, Any]) -> tup
 
     tokens = theme_tokens(page)
     return str(tokens["countdown_bg"]), str(tokens["countdown_end_bg"])
+
+
+EVENT_DATE_PRESENTATIONS = ("band", "card")
+
+
+def format_event_date(epoch: int, tz_name: str, *, with_time: bool) -> str:
+    """A moment in plain English: "Saturday, October 31, 2026", optionally "... at 7:00 PM EST".
+
+    Rendered at PUBLISH rather than by a script, because the answer never changes: a fixed moment in a
+    fixed zone is the same sentence forever, and a page that prints its date without JavaScript is one
+    fewer thing that can fail in front of a visitor.
+
+    The zone is the EVENT's, not the store's. A business in Denver can announce a webinar at 7PM EST, and
+    the references label the host's zone rather than converting to the reader's -- "7PM EST" is part of
+    what is being announced. It is also the only reachable answer: `business.timezone` lives on the USER
+    profile and the renderer is handed the TENANT profile.
+
+    Built by hand rather than with strftime's %-d / %-I, which are glibc extensions and not portable.
+    """
+    moment = datetime.fromtimestamp(int(epoch), tz=load_zone(tz_name))
+    date_part = f"{moment.strftime('%A')}, {moment.strftime('%B')} {moment.day}, {moment.year}"
+    if not with_time:
+        return date_part
+    hour = moment.hour % 12 or 12
+    meridiem = "AM" if moment.hour < 12 else "PM"
+    label = moment.strftime("%Z") or str(tz_name or "")
+    return f"{date_part} at {hour}:{moment.minute:02d} {meridiem} {label}".strip()
+
+
+def render_event_date(section: dict[str, Any]) -> str:
+    """The date of the thing, spelled out. No date means NO element -- there is nothing to say."""
+    try:
+        epoch = int(section.get("date") or 0)
+    except (TypeError, ValueError):
+        epoch = 0
+    if epoch <= 0:
+        return ""
+
+    presentation = str(section.get("presentation") or "band")
+    if presentation not in EVENT_DATE_PRESENTATIONS:
+        presentation = "band"
+    tz_name = str(section.get("timezone") or "")
+    with_time = section.get("show_time") is not False
+    text = format_event_date(epoch, tz_name, with_time=with_time)
+    machine = datetime.fromtimestamp(epoch, tz=load_zone(tz_name)).isoformat()
+    label = str(section.get("label") or "").strip()
+    icon = str(section.get("icon") or "").strip()
+
+    inner = "".join(part for part in (
+        f'<span class="sl-event-date-icon" aria-hidden="true">{escape(icon)}</span>' if icon else "",
+        f'<span class="sl-event-date-label">{escape(label)}</span>' if label else "",
+        # <time datetime=...>: the sentence is for people, the attribute is what a calendar scraper or
+        # assistive technology can actually parse.
+        f'<time class="sl-event-date-value" datetime="{escape(machine)}">{escape(text)}</time>',
+    ) if part)
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "event-date")))
+    return "\n".join([
+        f'    <section class="sl-event-date is-{presentation}{themed}" data-section-id="{section_id}"'
+        f' data-section-type="event_date"{style_attr}>',
+        f"      {inner}",
+        "    </section>",
+    ])
 
 
 COUNTDOWN_MODES = ("duration", "deadline")

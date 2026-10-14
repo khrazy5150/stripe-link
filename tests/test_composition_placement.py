@@ -59,7 +59,10 @@ class RepeatableSectionTests(unittest.TestCase):
         # NOT transfer: a second click there meant "another link" (one more row in the same grid), while
         # here it means another BLOCK with its own style — a numbered "what you'll learn" set and a
         # labelled "the tools" set are two sections on one page, exactly like two content blocks.
-        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon", "info_cards"})
+        # event_date joined 2026-10-14: the author's own references print the same date TWICE on one page
+        # — a band near the top and a card beside the sign-up — so a second click means another placement
+        # of the date, not another date.
+        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon", "info_cards", "event_date"})
 
     def test_container_sections_are_singletons(self):
         # Testimonials and FAQ are ONE section holding many items, each with its own add control. A

@@ -9,6 +9,7 @@
     "hero",
     "headline",
     "subheadline",
+    "event_date",
     "coupon",
     "brand_hero",
     "seller_profile",
@@ -55,6 +56,22 @@
         "countdown_bg",
         "countdown_end_bg",
         "countdown_text"
+      ]
+    },
+    "event_date": {
+      "placement": "free",
+      "label": "Date",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "none",
+      "repeatable": true,
+      "tokens": [
+        "content_heading",
+        "content_text",
+        "content_border",
+        "highlight_bg",
+        "highlight_bg_text"
       ]
     },
     "brand_label": {
