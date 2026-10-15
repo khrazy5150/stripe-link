@@ -375,6 +375,24 @@ rate, label, charge the buyer, track -- does not exist yet.
 - **Why deferred:** design locked 2026-07-08, no code yet; awaiting greenlight to start Phase 1
   (Booking.services[] + read adapter + Service.fulfillment_mode, no behavior change).
 
+### ⭐ HIGH — a service a tenant defines in Services cannot produce a rankable offer page
+
+- **What:** the renderer builds `Product` JSON-LD from a **product** document, so the only route to a
+  markup-bearing, independently rankable offer page runs through a *Product of type `service`*. The Services
+  screen implies a different route, and a tenant who follows it ends up with work that can never rank.
+  Design: **`plans/SERVICES_IN_OFFERS.md` §9b** (added 2026-10-15).
+- **Decision:** the **Services module owns the workflow** and shares the commercial model with Products. A
+  tenant must never be told to create a duplicate Product to sell work they have already defined — that
+  exposes an implementation workaround as a business workflow.
+- **The renderer keys on what the page IS**, not which record produced it: genuinely purchasable online,
+  fixed stated scope, own public URL. All three → `Product`/`Offer` markup is honest. Otherwise it is a
+  service overview and must be marked up as one — **do not bolt a `Product` node onto it**;
+  misrepresentation is what carries manual-action risk, not self-serving reviews.
+- **Why HIGH:** this is the single thing standing between a local service business and any organic search
+  presence at all, and the ambiguity actively misleads tenants today. It is also not only an SEO play — a
+  priced, fixed-scope entry offer converts far better than "call for a quote" and puts the fulfiller on the
+  property where the large job gets quoted.
+
 ### Consider adding a wizard for the services page
 - Idea only — not planned yet. The Create Service flow is dense; a guided wizard (Basics → Pricing
   → "fulfill yourself or delegate?" → conditional staff/calendar/check-in steps) could simplify it
@@ -3574,6 +3592,56 @@ choice.
 - **Why deferred:** P1 already covers the on-page identity + local-SEO need; live GBP sync is a separate
   external-integration effort (Google API access + app verification), similar in shape to the calendar OAuth
   path — best started when GBP management becomes a priority.
+
+### ⭐ HIGH — reviews render in the wrong places (found 2026-10-15, walking a live purchase)
+
+Two defects in shipped behaviour, both visible to buyers today. Neither is a plan gap — the reviews work,
+they are just put in the wrong place on the page.
+
+- **Both review blocks render BELOW the page footer.** `legal_footer` is a `pinned_bottom` element inside the
+  page body; `render_reviews_block()` and `render_business_reviews_block()` are appended after the whole
+  body (`html.py`, the `reviews_block` / `business_reviews_block` entries in the page assembly). The footer
+  must be the last thing on the page. **Fix belongs with the element-ordering work** — recorded here so it
+  is not rediscovered a third time.
+- **Business reviews render on TRANSACTIONAL pages.** `render_business_reviews_block()` is called
+  unconditionally on every page, so "What our customers say" sits on checkout landing pages beside the
+  product's own reviews — competing with the only review set that can earn a snippet. Business reviews
+  belong on the non-transactional surfaces (Store profile / storefront / category), which **already exist**
+  as page kinds. Rule written up in `plans/REVIEWS.md` "Where each kind of review surfaces".
+
+**Why HIGH:** both are on live pages now, cost nothing to reason about, and the second one actively works
+against the product-star strategy the whole reviews system exists to serve.
+
+### ⭐ HIGH — the "Reviews" builder element (REVIEWS.md Phase 2.5)
+
+- **What:** a palette element that *controls* the auto-appended reviews block — heading, placement,
+  show/hide — instead of the block silently appending itself. Today a tenant cannot move it, retitle it or
+  suppress it on one page. Asked for directly (2026-10-15: *"the Reviews element is NOT there"*).
+- **The constraint that matters:** **"hide" must drop the markup too.** Leaving `AggregateRating` in the
+  head while removing the visible reviews is exactly the mismatch Google's guidelines forbid, and it is the
+  one way this element could do real harm. Placement is free; visibility and markup move together.
+- **Also in Phase 2.5:** re-label the hand-typed **"Rating"** element (it is an external cited rating,
+  visible-text-only, no markup) so it stops reading as the reviews system. Do NOT rename it to "Reviews" —
+  two conflicting star displays on one page.
+
+### ⭐ HIGH — the Google review rail: routing, and the stop signal it does not have
+
+- **What:** route invited buyers to Google's `writereview?placeid=` deep link as an alternative destination,
+  with the destination **derived from the Site's offers** rather than asked. Full design in
+  `plans/REVIEWS.md` (amended 2026-10-15) + `plans/BUSINESS_PROFILE_AND_GBP.md` "Productized services".
+- **Why HIGH — the demand is not theoretical.** Service business owners want Google reviews badly enough to
+  stand over a customer while they post one (author, 2026-10-15). This is the growth engine they cannot
+  build themselves.
+- **The hard part, decided but not built:** Google has **no create-review API and no callback**, so we
+  cannot know the review happened and cannot cancel the follow-up sequence. Ship **click-stops-the-sequence
+  + a shorter Google cadence**, upgrade to **GBP API read-back** when OAuth lands (GBP P2, above). Shipping
+  the Google destination on the full 4-touch cadence with no stop signal is the one version not to build —
+  it nags people who already reviewed, and they blame us, not Google.
+- **Dependencies:** a valid `place_id` (guard: fall back to Junior Bay rather than send a dead link); SMS
+  channel gated on 10DLC; polite cancellation gated on GBP OAuth.
+- **Compliance, non-negotiable:** no sentiment gating — every invited buyer gets the same ask and the same
+  link. And **no UI copy may promise stars**: meeting Google's requirements makes a page *eligible*, it does
+  not guarantee display.
 
 ### Reviews — future phases
 - **What:** the first-party review aggregator + post-purchase invite sequence shipped (Phases 1–2). Still
