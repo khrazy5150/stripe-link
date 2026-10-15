@@ -306,3 +306,180 @@ Two bugs this exposed, both the house pattern of *two things that must agree wit
 Guarded by `tests/test_section_order_parity.py` over `tests/fixtures/section_order_cases.json`: an
 algorithm can't be shared across Python and JS, so both runtimes execute the same fixtures and must agree
 with each other *and* with expectations hand-written from `composition_rules.json`.
+
+---
+
+# 4d. Slots — the baseline stops being a hand-maintained list (designed 2026-10-15, NOT built)
+
+## The problem with a flat list
+
+§4a researched a good sequence and shipped it as `default_order`: **39 absolute positions, authored by
+hand.** That gives a new element no rule about where it belongs, so every element added since has been
+wedged in by whoever added it. The researched spine is still visible —
+
+    product_details → rating → testimonials → content_block → client_marquee → faq
+    → trust_badges → price_highlight → offer_price_selector → shipping → checkout_cta → refund_policy
+
+— but `event_date`, `coupon`, `brand_hero`, `seller_profile`, `social_links`, `catalog_grid`, `link_cards`
+and `tip_jar` now sort **in front of `product_details`**, which is why the default reads as arbitrary
+(author, 2026-10-15: *"the default order is so whacked"*). More elements are certain, so a flat list will
+keep producing this.
+
+## The model
+
+An element declares **what question it answers**, not what index it occupies. Three new catalog properties
+sit beside `placement`:
+
+| Property | Meaning |
+|---|---|
+| `slot` | which narrative question this answers. Structural elements only. |
+| `rank` | position WITHIN the slot. Ties keep catalog order, so most elements need none. |
+| `order_mode` | `ordered` (the skeleton decides) or `authored` (the tenant decides) |
+| `slots` | optional ordered list, one slot per INSTANCE — for elements that bracket a page |
+
+`baseline_order(goal)` becomes **derived**: sort the `ordered` elements by `(slot index, rank)`. The flat
+list stops being authored and becomes an output, which is the whole point — a new element cannot land
+arbitrarily because it cannot ship without a slot.
+
+### The slots, in page order
+
+1. `announce` — *is this time-bound?*
+2. `identity` — *who is selling?*
+3. `what` — *what is it?*
+4. `proof` — *is it any good?*
+5. `explain` — *tell me more*
+6. `objection` — *but what about…*
+7. `ask` — *the one ask*
+8. `reassure` — *what if it's wrong?*
+9. `after` — *what next?*
+
+Nine slots is the number a human can reorder and defend. **That is what finally makes per-goal overrides
+affordable** — §4a supports `goals.<goal>.default_order` and deliberately defines none, because
+re-authoring 39 entries per goal is guesswork. Reordering nine slots is not: `paid_ads` moves `ask`
+earlier; `email_list` ("a warm audience… straight to the offer") pulls `proof` after it.
+
+## Structural vs editorial — the distinction that makes this work
+
+Some elements are the page's **skeleton**; some are the tenant's **prose**. A content block has no
+inherent position because it has no inherent meaning — it is whatever they wrote. Slot-ordering it is how
+a fourth content block jumps *backwards* to join the first three.
+
+- **`ordered`** — position comes from the slot.
+- **`authored`** — position comes from the author. A new instance **appends at the current end of the free
+  band**; the tenant arranges from there.
+
+Check it against the reported behaviour (author, 2026-10-15): *"tenants may create 3 of those in a row, add
+some other elements and create 2 more again."* Under `authored`, each append lands after the last thing
+added — three in a row, then other elements, then two more. **Zero drags**, and no rule about content
+blocks specifically.
+
+**The summary rule: the software owns the skeleton, the tenant owns the prose, and anything the tenant has
+dragged beats both** (§4c — `page.section_order` is absent until they drag, and a stored order always wins).
+
+## Within a slot: sequence, never stagger
+
+Interleaving proof with explanation is tempting and is rejected, for a reason that outweighs the
+aesthetics: **it makes the page unstable.** If elements interleave, adding a seventh reshuffles everything
+above it, and a tenant who dragged nothing gets a different page tomorrow because they added one block.
+A baseline's whole value is being predictable. It also needs judgement we do not have — placing a
+testimonial between two content blocks is only right if you know what those blocks say.
+
+**Hard constraint, not a preference:** `rating` and the product-reviews block stay adjacent. They are the
+same claim, and Google requires the visible review text to match the `AggregateRating` markup
+([[REVIEWS]]). No slot reordering, per-goal override or rank edit may separate them.
+
+## Missing elements close up
+
+Order is a **sort**, not a grid of fixed positions — `_order_entries` returns indices. An absent element is
+simply not in the list and everything after it closes up. No placeholders, no reserved positions, and
+nothing "takes its place".
+
+## Repeated instances: `slots` gives the sandwich for free
+
+Instances currently key by `section.id`, so instance two sorts immediately after instance one. A second
+**Date** element therefore lands against the first, where it says nothing — in practice it belongs beside
+the ask, bracketing the page (author, 2026-10-15).
+
+An element may declare an ordered list of slots, one per instance; instance *n* takes slot *n*, and
+instances past the end stay with the last. Only **five** elements repeat, so this is a small surface:
+
+| Element | `slots` | Why |
+|---|---|---|
+| `event_date` | `["announce", "reassure"]` | top of page, then again beside the ask where a deadline does its work |
+| `content_block` | — | `authored`; the tenant places every instance |
+| `info_cards` | — | `authored` |
+| `page_ribbon` | `["after"]` | a lead magnet belongs after the ask, every instance |
+| `catalog_grid` | `["what"]` | storefront pages; instances stay together |
+
+Auto-placement is a **default**: it governs only instances the tenant has not positioned. Drag once and
+the software stops guessing.
+
+## Assignments — argue with these, not with the concept
+
+**Locked bands are unchanged** and carry no slot: `lead` (`countdown_timer`, `brand_label`), `pinned_top`
+(`seo_title`, `hero_media`, `hero`, `headline`, `subheadline`), `pinned_bottom` (`legal_footer`).
+`structured_data` is `placement: none` (head channel) and is never ordered.
+
+| Element | slot | rank | mode |
+|---|---|---|---|
+| `event_date` | announce | 10 | ordered |
+| `coupon` | announce | 20 | ordered |
+| `brand_hero` | identity | 10 | ordered |
+| `seller_profile` | identity | 20 | ordered |
+| `social_links` | identity | 30 | ordered |
+| `product_details` | what | 10 | ordered |
+| `product_carousel` | what | 20 | ordered |
+| `catalog_grid` | what | 30 | ordered |
+| `before_after` | what | 40 | ordered |
+| `rating` | proof | 10 | ordered |
+| *(product reviews)* | proof | 15 | ordered |
+| `testimonials` | proof | 20 | ordered |
+| `quote` | proof | 30 | authored |
+| `client_marquee` | proof | 40 | ordered |
+| `bragging_points` | proof | 50 | ordered |
+| `content_block` | explain | — | authored |
+| `numbered_list` | explain | — | authored |
+| `info_cards` | explain | — | authored |
+| `photo` | explain | — | authored |
+| `video` | explain | — | authored |
+| `author_bio` | explain | 90 | ordered |
+| `faq` | objection | 10 | ordered |
+| `trust_badges` | objection | 20 | ordered |
+| `price_highlight` | ask | 10 | ordered |
+| `offer_price_selector` | ask | 20 | ordered |
+| `shipping` | ask | 30 | ordered |
+| `checkout_cta` | ask | 40 | ordered |
+| `refund_policy` | reassure | 10 | ordered |
+| `related_products` | after | 10 | ordered |
+| `tip_jar` | after | 20 | ordered |
+| `link_cards` | after | 30 | ordered |
+| `page_ribbon` | after | 40 | ordered |
+| *(business reviews)* | after | 50 | ordered |
+
+Notes on the ones worth arguing about:
+
+- **`proof` rank** is "what a cold reader gets from it": a number that scans instantly → the reviews
+  substantiating it → curated longer proof → a single punch → logos → claims-about-self last, weakest
+  because it is the seller talking.
+- **`author_bio` ranks last in `explain`** rather than sitting in `identity`: on an offer page it is
+  credibility for the argument just made, not the masthead.
+- **`before_after` is `what`, not `proof`** — it shows the thing, and a tenant who means it as proof can
+  drag it.
+- **`quote` is `authored`** despite being proof: it is a pull-quote, placed for rhythm inside prose.
+- **`checkout_cta` stays last in `ask`**, and `ask` stays after the persuasion — §4a's reasoning holds.
+  It is non-repeatable, so there is exactly ONE ask, and moving a single ask above the proof is strictly
+  worse. Revisit only together with a repeat CTA.
+- **The two review blocks join the catalog here**, which is also how they stop rendering below the footer:
+  today they are appended after the whole body and are in no band at all ([[REVIEWS]] "Where each kind of
+  review surfaces").
+
+## What this does not change
+
+- **No tenant data migrates.** `page.section_order` holds deltas and a stored order always wins (§4c), so
+  every existing page is untouched — exactly as §4a promised for the first baseline.
+- **`default_order` may stay in the file as a generated artifact** for diffability, but it stops being the
+  source. A test asserts the derived list covers every `ordered` catalog element exactly once, which is
+  what makes a missing slot a build failure rather than a silently odd page.
+- **Parity still binds.** `tests/test_section_order_parity.py` runs both runtimes over the same fixtures;
+  the derivation lands in `composition.baseline_order()` and `pageComposer.baselineOrder()` together or
+  not at all.

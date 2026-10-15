@@ -1720,6 +1720,43 @@ So one fix serves both, and the accessible answer is the simpler one:
 Worth doing regardless of the mobile timeline — the keyboard gap is a real accessibility defect today
 (WCAG 2.1.1 Keyboard), not just a phone problem.
 
+### ⭐ HIGH — the baseline order is a hand-authored list of 39, and it has drifted (designed 2026-10-15)
+
+Design: **`plans/BUILDER_SECTION_ORDER.md` §4d** — slot/rank/mode assigned for all 39, ready to argue with
+element by element. **Not built.**
+
+§4a researched a good sequence and shipped it as `default_order`: 39 **absolute positions, authored by
+hand**. That gives a new element no rule about where it belongs, so every element added since has been
+wedged in by whoever added it. The researched spine survives (`product_details → rating → testimonials →
+… → trust_badges → offer_price_selector → checkout_cta → refund_policy`) but `event_date`, `coupon`,
+`brand_hero`, `seller_profile`, `social_links`, `catalog_grid`, `link_cards` and `tip_jar` now sort **in
+front of `product_details`** — which is why the default reads as arbitrary. More elements are certain, so
+a flat list keeps producing this.
+
+**The model:** an element declares *what question it answers*, not what index it occupies. Nine narrative
+slots (`announce → identity → what → proof → explain → objection → ask → reassure → after`), a `rank`
+within the slot, and `baseline_order()` derives the flat list. An element cannot ship without a slot.
+
+**Three things it fixes that are separately on this list:**
+
+- **The sandwich.** A repeated element may declare one slot PER INSTANCE, so a second **Date** lands
+  beside the ask instead of against the first one. Only five elements repeat, so the surface is tiny.
+- **Content blocks.** Structural elements take their position from the slot; **editorial** ones
+  (`content_block`, `photo`, `video`, `numbered_list`, `info_cards`, `quote`) take it from the author and
+  append at the end of the free band. "Three in a row, other elements, then two more" then costs zero
+  drags — today the fourth jumps backwards to join the first three.
+- **Reviews below the footer.** Both review blocks join the catalog here (`proof` and `after`), which is
+  the same change as giving them a placement at all — today they are appended after the whole body and
+  are in no band.
+
+**Also unlocks the unfinished half of §4a:** per-goal overrides are supported and deliberately undefined,
+because re-authoring 39 entries per goal is guesswork. Reordering **nine slots** is not.
+
+**No tenant data migrates** — `page.section_order` holds deltas and a stored order always wins (§4c).
+Parity still binds: `tests/test_section_order_parity.py` runs both runtimes over the same fixtures, so the
+derivation lands in `composition.baseline_order()` and `pageComposer.baselineOrder()` together or not at
+all.
+
 ### ✅ Builder section order: the form IS the page map — SHIPPED (verified 2026-09-07)
 
 **Verified shipped 2026-09-07.** The invariant holds: Page Settings is a separate group above Page
