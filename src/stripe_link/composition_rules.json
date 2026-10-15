@@ -818,7 +818,8 @@
         "external"
       ],
       "excludes": [
-        "tip_jar"
+        "tip_jar",
+        "product_details"
       ]
     },
     "bundle": {
@@ -839,7 +840,8 @@
         "external"
       ],
       "excludes": [
-        "tip_jar"
+        "tip_jar",
+        "product_details"
       ]
     },
     "listicle": {
@@ -998,7 +1000,8 @@
       ],
       "excludes": [
         "trust_badges",
-        "tip_jar"
+        "tip_jar",
+        "product_details"
       ],
       "default_cta_label": "Send tip",
       "_comment": "A tip jar. Transactional, so it keeps the price selector and the CTA -- but it is not a SALES page: nothing ships, nothing is delivered, and there is no purchase decision to de-risk, so the trust badges a checkout page leans on ('Secure checkout', 'Money-back guarantee') have nothing to say here and are excluded outright, as on a link hub (author, 2026-09-13). The tip_jar ELEMENT is excluded for the same reason `single` excludes it: a page that already takes tips does not link to another one. The refund policy stays -- see plans/PAY_WHAT_YOU_WANT.md 5f, which is an open question rather than a settled one. The CTA says \"Send tip\", not \"Buy Now\": nothing is being bought, and the verb on the button is the last thing a supporter reads before their card is charged."

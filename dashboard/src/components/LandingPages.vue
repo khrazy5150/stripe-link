@@ -1491,7 +1491,7 @@
                     </template>
 
                     <template v-else-if="element.type === 'product_details'">
-                      <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
+                      <p class="element-empty">On a page selling several products, this block follows the carousel — as the visitor swipes, it swaps to the current product's gallery, badges and description. Nothing to configure.</p>
                     </template>
 
                     <template v-else-if="element.type === 'social_links'">
