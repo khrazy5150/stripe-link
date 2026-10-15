@@ -63,25 +63,75 @@ class ThePicker(unittest.TestCase):
 class TheClosedState(unittest.TestCase):
     def test_the_form_is_replaced_not_disabled(self):
         """A disabled form invites people to try. There is no input to fill in at all."""
-        markup = render_event_closed({}, {}, title="Live training", description="")
+        markup = render_event_closed({}, {})
         self.assertNotIn("<input", markup)
         self.assertNotIn("data-lead-form", markup)
         self.assertIn('data-event-closed="true"', markup)
 
     def test_it_says_what_happened(self):
-        markup = render_event_closed({}, {}, title="", description="")
+        markup = render_event_closed({}, {})
         self.assertIn("Registration has closed", markup)
         self.assertIn("already taken place", markup)
 
+    def test_it_does_not_lead_with_an_invitation_it_cannot_honour(self):
+        """It used to keep the lead form's title -- "Reserve your spot" -- in the card's boldest type, with
+        the closure below it in body weight. The first person to look at a closed page read line one and
+        moved on (2026-10-15). An offer you cannot accept is not a heading."""
+        markup = render_event_closed({}, {})
+        self.assertNotIn("sl-lead-title", markup)
+        self.assertLess(markup.index("Registration has closed"), markup.index("already taken place"))
+
+    def test_it_is_announced_to_a_screen_reader(self):
+        """It replaces the thing a visitor came to use, so it is a status, not decoration."""
+        self.assertIn('role="status"', render_event_closed({}, {}))
+
     def test_the_tenant_can_word_it(self):
-        markup = render_event_closed({}, {"closed_title": "You missed it", "closed_text": "Next one in May."},
-                                     title="", description="")
+        markup = render_event_closed({}, {"closed_title": "You missed it", "closed_text": "Next one in May."})
         self.assertIn("You missed it", markup)
         self.assertIn("Next one in May.", markup)
 
     def test_the_wording_is_escaped(self):
-        markup = render_event_closed({}, {"closed_title": "<script>"}, title="", description="")
+        markup = render_event_closed({}, {"closed_title": "<script>"})
         self.assertIn("&lt;script&gt;", markup)
+
+
+class TheClosedStateLooksLikeAnAlert(unittest.TestCase):
+    """Red on white, not another price card. The card it used to share styling with is the one thing on the
+    page it has to contradict, and sharing its look is why the notice read as part of the offer."""
+
+    CSS = None
+
+    @classmethod
+    def setUpClass(cls):
+        from stripe_link.runtime.html import TEMPLATE_STYLES
+        cls.CSS = "\n".join(
+            line for style in TEMPLATE_STYLES.values()
+            for line in (style if isinstance(style, (list, tuple)) else [str(style)]))
+
+    def rule(self, selector):
+        import re
+        found = re.search(re.escape(selector) + r"\{([^}]*)\}", self.CSS)
+        return found.group(1) if found else ""
+
+    def test_the_card_turns_red(self):
+        body = self.rule(".sl-event-closed .sl-lead-form")
+        self.assertIn("background:var(--sl-closed-bg,#dc2626)", body)
+        self.assertIn("border-color:var(--sl-closed-bg,#dc2626)", body)
+
+    def test_the_words_turn_white(self):
+        for selector in (".sl-event-closed .sl-event-closed-heading", ".sl-event-closed .sl-lead-description"):
+            with self.subTest(selector=selector):
+                self.assertIn("color:var(--sl-closed-text,#fff)", self.rule(selector))
+
+    def test_the_alert_rules_come_after_the_card_rules(self):
+        """Specificity is higher either way, but the @supports/hero lesson from this same codebase is that
+        source order is the thing that actually bites. Assert the order rather than rely on the count."""
+        self.assertLess(self.CSS.index(".sl-lead-form{"), self.CSS.index(".sl-event-closed .sl-lead-form{"))
+
+    def test_the_heading_outweighs_the_note(self):
+        heading = self.rule(".sl-event-closed .sl-event-closed-heading")
+        self.assertIn("font-size:2.2rem", heading)
+        self.assertIn("font-weight:800", heading)
 
 
 class TheRenderScopedIndex(unittest.TestCase):

@@ -959,6 +959,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-description{font-size:1.4rem;color:var(--sl-price-description)}",
+    # An ALERT, not a card: the whole job of this block is to contradict the page above it, so it must not
+    # look like the page above it. Deliberately NOT a catalog token -- a catalog token has to be defined by
+    # every preset, and a stop sign that changes colour with the palette is not a stop sign. Same shape as
+    # `--sl-icon-alert` above: an overridable var with a strong default, not an advertised control.
+    "    .sl-event-closed .sl-lead-form{background:var(--sl-closed-bg,#dc2626);border-color:var(--sl-closed-bg,#dc2626);gap:0.6rem}",
+    "    .sl-event-closed .sl-event-closed-heading{color:var(--sl-closed-text,#fff);font-size:2.2rem;font-weight:800;line-height:1.25}",
+    "    .sl-event-closed .sl-lead-description{color:var(--sl-closed-text,#fff);font-size:1.5rem;opacity:0.92}",
     "    .sl-lead-input{width:100%;padding:1.2rem 1.4rem;border:1px solid var(--sl-price-card-border);border-radius:0.8rem;background:var(--sl-background);color:var(--sl-text);font-size:1.5rem}",
     "    .sl-lead-consent{display:flex;align-items:flex-start;gap:0.8rem;font-size:1.3rem;color:var(--sl-price-description);text-align:left}",
     "    .sl-lead-consent input{margin-top:0.3rem}",
@@ -7866,7 +7873,7 @@ def render_email_cta(
         # the visitor is shown, not whether the registration is allowed.
         open_rows = event_open_occurrences(scheduled_event, now=now_epoch)
         if not open_rows:
-            return render_event_closed(scheduled_event, section, title=title, description=description)
+            return render_event_closed(scheduled_event, section, description=description)
         inputs = [render_occurrence_picker(open_rows)] + inputs
 
     return "\n".join([
@@ -7952,11 +7959,19 @@ def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any
 
 
 def render_event_closed(scheduled_event: dict[str, Any], section: dict[str, Any] | None,
-                        *, title: str, description: str) -> str:
+                        *, description: str = "") -> str:
     """What the page says once no session is open.
 
     The form is REPLACED, not disabled: a disabled form invites people to try, and a registration page that
     silently keeps collecting addresses for a session that already ran is the worst failure available here.
+
+    **It does not keep the form's title.** This used to lead with the lead-capture title -- "Reserve your
+    spot" -- in the card's boldest type, with "Registration has closed" below it in body weight. A reader
+    who got one line in read an invitation and moved on, which is exactly what happened to the first person
+    who looked at it (2026-10-15). An offer you cannot accept is not a heading.
+
+    Styled as an ALERT rather than as a price card, for the same reason: the one thing on the page that
+    contradicts everything above it has to look different from everything above it.
     """
     section = section or {}
     heading = escape(str(section.get("closed_title") or "Registration has closed"))
@@ -7965,8 +7980,7 @@ def render_event_closed(scheduled_event: dict[str, Any], section: dict[str, Any]
     return "\n".join([
         '    <section class="sl-checkout-cta sl-email-cta sl-event-closed" data-section-type="checkout_cta"'
         ' data-cta-type="email" data-event-closed="true">',
-        '      <div class="sl-lead-form">',
-        (f'        <p class="sl-lead-title">{title}</p>' if title else ""),
+        '      <div class="sl-lead-form" role="status">',
         f'        <p class="sl-event-closed-heading">{heading}</p>',
         f'        <p class="sl-lead-description">{note}</p>',
         '      </div>',
