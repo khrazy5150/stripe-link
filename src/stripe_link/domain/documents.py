@@ -284,8 +284,8 @@ def validate_upsell_scaffold(value: Any, label: str) -> None:
     optional_bool(value, "countdown_enabled", f"{label}.countdown_enabled")
     optional_bool(value, "savings_badge", f"{label}.savings_badge")
     if value.get("countdown_minutes") is not None:
-        minutes = value.get("countdown_minutes")
-        if not isinstance(minutes, int) or isinstance(minutes, bool) or not (1 <= minutes <= 60):
+        minutes = whole_number(value.get("countdown_minutes"))
+        if minutes is None or not (1 <= minutes <= 60):
             raise DocumentValidationError(f"{label}.countdown_minutes must be an integer from 1 to 60.")
 
 
@@ -360,6 +360,43 @@ def optional_non_negative_int(document: dict[str, Any], field: str, label: str |
         return
     if not isinstance(value, int) or value < 0:
         raise DocumentValidationError(f"{label or field} must be a non-negative integer.")
+
+
+def whole_number(value: Any) -> int | None:
+    """`value` as an int if it IS a whole number, else None.
+
+    `isinstance(x, int)` is the wrong question for anything that may have come back out of DynamoDB, which
+    hands every number over as a `Decimal`. Any validator used on a read-modify-write path therefore has to
+    ask about the VALUE rather than the Python type that carried it -- otherwise it refuses to re-validate
+    a document the software itself has just written. The Approve button in the dashboard did exactly that,
+    answering "Review rating must be an integer from 1 to 5" about a review rated 5 (reported 2026-10-14),
+    and the same trap was sitting unexercised in the cart (a second add-to-cart) and in experiments.
+
+    Bools are excluded deliberately: `True` is an `int` in Python and is not a quantity.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else None
+    return value if isinstance(value, int) else None
+
+
+def require_int_in_range(document: dict[str, Any], field: str, low: int, high: int,
+                        label: str | None = None) -> int:
+    """A whole number between `low` and `high`, as a VALUE rather than as a Python type.
+
+    `isinstance(x, int)` is the wrong question for anything that may have come back out of DynamoDB, which
+    hands every number over as a `Decimal`. A review stored with `rating: 5` reads back as `Decimal('5')`,
+    and the bare isinstance check then refused to re-validate a document it had itself just written: the
+    Approve button in the dashboard returned "Review rating must be an integer from 1 to 5" about a review
+    rated 5 (reported 2026-10-14). `require_positive_int` beside this already knew; this did not.
+
+    Bools are excluded deliberately -- `True` is an `int` in Python and a rating of `True` is not a rating.
+    """
+    number = whole_number(document.get(field))
+    if number is None or not (low <= number <= high):
+        raise DocumentValidationError(f"{label or field} must be an integer from {low} to {high}.")
+    return number
 
 
 def optional_non_negative_number(document: dict[str, Any], field: str, label: str | None = None) -> None:
@@ -1816,7 +1853,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 5):
                 raise DocumentValidationError("Rating value must be a number between 0 and 5.")
             count = section.get("count")
-            if count is not None and (not isinstance(count, int) or isinstance(count, bool) or count < 0):
+            if count is not None and (whole_number(count) is None or whole_number(count) < 0):
                 raise DocumentValidationError("Rating count must be a non-negative integer.")
         elif section_type == "client_marquee":
             optional_string(section, "heading", "Client marquee heading")
@@ -1992,7 +2029,7 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
         optional_string(document, field, f"Tenant profile {field}")
     for field in ("current_period_end", "trial_ends_at"):
         value = document.get(field)
-        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+        if value is not None and (whole_number(value) is None or whole_number(value) < 0):
             raise DocumentValidationError(f"Tenant profile {field} must be a non-negative integer.")
 
 
@@ -2448,11 +2485,13 @@ def validate_cart(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Each cart line needs a product_id or service_id.")
         if not str(line.get("price_id") or "").strip():
             raise DocumentValidationError("Each cart line needs a price_id.")
-        qty = line.get("qty")
-        if not isinstance(qty, int) or isinstance(qty, bool) or not (1 <= qty <= MAX_LINE_QTY):
+        # Whole numbers, not Python ints: a cart is LOADED and added to, so every line after the first
+        # arrives back from DynamoDB as a Decimal. The bare isinstance check refused the second
+        # add-to-cart outright -- never hit in production only because no cart has ever held two lines.
+        qty = whole_number(line.get("qty"))
+        if qty is None or not (1 <= qty <= MAX_LINE_QTY):
             raise DocumentValidationError(f"Cart line qty must be an integer from 1 to {MAX_LINE_QTY}.")
-        amount = line.get("unit_amount")
-        if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+        if (amount := whole_number(line.get("unit_amount"))) is None or amount < 0:
             raise DocumentValidationError("Cart line unit_amount must be a non-negative integer.")
     # Slice D recovery fields (all optional).
     if document.get("email") is not None and not isinstance(document.get("email"), str):
@@ -2493,9 +2532,9 @@ def validate_review(document: dict[str, Any]) -> None:
     target = document.get("target")
     if not isinstance(target, dict) or target.get("type") not in REVIEW_TARGET_TYPES or not str(target.get("id") or "").strip():
         raise DocumentValidationError("Review target must be an object with a type (product|offer|business) and an id.")
-    rating = document.get("rating")
-    if not isinstance(rating, int) or isinstance(rating, bool) or not (1 <= rating <= 5):
-        raise DocumentValidationError("Review rating must be an integer from 1 to 5.")
+    # Normalised back to a plain int, so a review that has been round-tripped through DynamoDB is stored
+    # the way it was first written rather than carrying a Decimal onward.
+    document["rating"] = require_int_in_range(document, "rating", 1, 5, "Review rating")
     require_string(document, "author", "Review author")
     require_string(document, "body", "Review body")
     optional_string(document, "title", "Review title", max_length=200)
@@ -2615,7 +2654,7 @@ def validate_ledger_entry(document: dict[str, Any]) -> None:
     for key, value in amounts.items():
         if key not in _ledger_amount_components():
             raise DocumentValidationError(f"Unknown ledger amount component '{key}'.")
-        if not isinstance(value, int) or isinstance(value, bool):
+        if whole_number(value) is None:
             raise DocumentValidationError("Ledger amount components must be integers (minor units).")
 
 
@@ -2907,8 +2946,8 @@ def validate_experiment(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Experiment variant keys must be unique.")
         keys.add(key)
         page_ids.add(variant["page_id"])
-        weight = variant.get("weight")
-        if not isinstance(weight, int) or isinstance(weight, bool) or weight < 0:
+        weight = whole_number(variant.get("weight"))
+        if weight is None or weight < 0:
             raise DocumentValidationError("Experiment variant weight must be a non-negative integer.")
         total_weight += weight
 

@@ -1,5 +1,14 @@
 import { defineStore } from "pinia";
 import { apiRequest, getTenantId } from "../api/client";
+import { useToastsStore } from "./toasts";
+
+// A failure here is REPORTED WHERE THE CLICK WAS. The page-level banner sits above "Add a review", a
+// screen-height above the moderation buttons, so a failed Approve looked like a button that did nothing at
+// all -- which is how it was reported (2026-10-14). The banner stays for the record; the toast is what the
+// tenant actually sees.
+function reportFailure(message) {
+  useToastsStore().push({ severity: "warning", icon: "\u26a0\ufe0f", message });
+}
 
 export const REVIEW_STATUSES = ["pending", "approved", "rejected"];
 
@@ -79,6 +88,7 @@ export const useReviewsStore = defineStore("reviews", {
         return saved;
       } catch (error) {
         this.error = error.message || "Failed to update the review.";
+        reportFailure(this.error);
       }
     },
     async remove(review) {
@@ -89,6 +99,7 @@ export const useReviewsStore = defineStore("reviews", {
         this.reviews = this.reviews.filter((r) => r.review_id !== review.review_id);
       } catch (error) {
         this.error = error.message || "Failed to delete the review.";
+        reportFailure(this.error);
       }
     },
   },
