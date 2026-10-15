@@ -47,24 +47,44 @@ Slots directly into [[PAGE_COMPOSER]] + the goal axis ([[LANDING_PAGE_GOAL_COMPO
   emitted via the `discoverability` pack on the `head` channel. Lights up for service/appointment
   offer_types on local/SEO goals. Zero manual entry. The richer schema shape (specific @type, geo, hours) and the BODY-side local signals (localized alt, `<figcaption>` NAP, image dimensions, NAP consistency) are plans/LOCAL_SEO_SIGNALS.md, which is gated on this profile.
 
-## Productized services: how a local business earns stars at all
+## Productized services: how a local business becomes eligible for stars
 
 NAP consistency gets a local business **found**. It does nothing to get it **stars**, and the two have
 different ceilings — so this plan has to say what the other half is, or every service client ends up
 optimized for the local pack and invisible in organic results.
 
-**The ceiling.** Since 2019 Google suppresses organic star snippets for *self-serving* reviews — reviews
-about your business, on your own site, marked up as `LocalBusiness`/`Organization`. `Service` is not a
-review-snippet-eligible type at all. So a landscaper's or dentist's **firm** can never show stars from its
-own markup, no matter how many genuine reviews it collects. Firm reputation ranks on **GBP/Maps**, which is
-what the rest of this plan is for.
+**The ceiling.** Google does not display review snippets for *self-serving* reviews — where the entity
+controlling the reviews is the entity being reviewed — on pages using `LocalBusiness` or any other
+`Organization` type. `Service` is not a review-snippet-eligible type at all. So a landscaper's or dentist's
+**firm** cannot show stars from its own markup, however many genuine reviews it collects. Firm reputation
+ranks on **GBP/Maps**, which is what the rest of this plan is for.
 
-**The escape hatch.** `Product` is *not* restricted, and a discrete bookable service sold as an **Offer** is
-`Product`/`Offer`-eligible. "Branch cleanup — $99" is a product as far as Google is concerned; "landscaping
-services, call for a quote" is not. So a local business that can **package** a specific job at a price, on
-its own page, converts an un-rankable firm reputation into rankable offer reputation — and those reviews are
-collected first-party, through [[REVIEWS]], which is the only legal path to `AggregateRating` (GBP and other
-third-party reviews are permanently display-only).
+Two details that change what we build:
+
+- **The embedded-widget trick does not work either.** Google's rule explicitly covers reviews pulled in
+  through a third-party widget, naming Google Business and Facebook review widgets. So "show GBP reviews on
+  the site to get stars" is not a strategy; a GBP widget is trust content, nothing more.
+- **This is a display rule, not a penalty.** Google says you will not get a manual action merely for
+  carrying self-serving review markup — it simply will not be shown. The manual-action risk in this plan
+  comes from **misrepresentation** (markup that does not match the page), not from this. Keep the two
+  separate; conflating them makes us refuse harmless markup and relax about harmful markup.
+
+**The escape hatch, stated precisely.** `Product` is not subject to the self-serving rule, and a page that
+genuinely focuses on one purchasable thing can be eligible for product rich results. "Branch cleanup — $99",
+on its own page, buyable, is that kind of page; "landscaping services, call for a quote" is not. Those
+reviews are collected first-party through [[REVIEWS]], which is the only permitted path to
+`AggregateRating` — GBP and other third-party reviews are permanently display-only.
+
+**Eligibility is not a promise of stars, and we must never sell it as one.** Google's requirements are about
+what the page *is*: merchant listing experiences are for pages where a shopper can actually buy, and product
+rich results are for pages focused on a single product. Meeting them makes a page *eligible*; Google still
+decides what to display. So the product claim Junior Bay may make is **"this makes your offer eligible, and
+it converts better anyway"** — never "this gets you stars". Any UI copy that promises stars is a defect.
+
+This also rules out the shortcut of bolting a `Product` node onto a page that is really about a service. The
+markup has to describe the page. Where the page is a genuine fixed-scope purchasable offer, `Product` is
+honest; where it is a service overview, it is not, and that is misrepresentation — the thing that *does*
+carry manual-action risk.
 
 **This is why it belongs in this plan.** The review-invite destination is a per-Site choice — Junior Bay form
 *or* the Google write-review link, never both. The deciding question is **not** "is this a service
@@ -88,6 +108,10 @@ correctly routed to Google and loses nothing.
 - **Reviews about *that offer*.** Company-wide reviews reattached to a cheap offer to farm stars are the
   self-serving problem in a costume, and more exposed than the honest version — the mismatch between review
   text and offer is visible to a human reader.
+- **Bind each invitation to what was actually bought.** Store the offer id and the order id on the review
+  request, so adding an offer or restructuring a Site never retroactively redirects an outstanding
+  invitation or detaches a historical review from the work it describes. A review has to keep meaning what
+  it meant when it was written.
 - **Scope limit on the page**, not in the terms. "Up to 2 cubic yards, single-family residential, within 15
   miles" is what makes a fixed price honest and keeps the scope argument out of the reviews.
 
@@ -137,11 +161,19 @@ cache). Reviews/AggregateRating stay deferred (the renderer refuses hand-typed A
 - **Review storage**: reviews as their own per-business records (needed for AI replies in Phase 3) vs. only a
   denormalized summary in Phase 1. Leaning: store the summary now, full records when GBP sync lands.
 - **NAP mismatch handling** (Phase 2): warn-only vs. block publish.
-- **Productized services — which surface owns it?** Either the Services module learns to produce offer pages
-  carrying `Product`/`Offer` markup ([[SERVICES_IN_OFFERS]]), or the guidance becomes explicitly "productize
-  it as a Product and leave Services for booking". Today it is ambiguous, and ambiguity here costs a client
-  their only route to stars. Leaning: Services module, because a tenant who models the work as a Service
-  should not have to know the markup reason for doing it twice.
-- **Should the review-destination default be derived rather than asked?** The deciding question ("does this
-  business have offer pages that can rank?") is answerable from the Site's own pages, so the default could be
-  computed and re-evaluated as the tenant adds offers, with an override. Leaning: derive, warn on override.
+- **Productized services — which surface owns it?** RESOLVED in principle (2026-10-15): the **Services
+  module** owns the tenant-facing workflow and shares the commercial model with Products, rather than asking
+  a tenant to create a duplicate Product to make an existing service sellable. Requiring that duplicate
+  would expose an implementation workaround as a business workflow. The renderer then picks structured data
+  from **what the page actually is**, not from which record type produced it. Mechanics belong in
+  [[SERVICES_IN_OFFERS]]; this entry records the decision and the reason.
+- **Review destination: derived, not asked.** RESOLVED in principle (2026-10-15). Most tenants cannot answer
+  "Maps or organic?", and any answer they give goes stale as they add offers. Derive it from the published
+  Site: `business_reputation` when there are no qualifying standalone offers, `offer_reputation` when a
+  completed purchase can be tied to a published offer, plus an explicit override. The override changes the
+  *workflow*, never the honesty rules — no sentiment filtering, no promise of stars.
+  - **Not a page count.** Five thin offers are not better than one good one. The signal is whether an offer
+    is real, independently useful and genuinely purchasable — so the derivation inspects offer quality, and
+    the earlier "five offer pages vs one About page" line is an illustration, not a threshold.
+  - **Collect anyway when a page is not eligible.** Reviews carry conversion value with or without a rich
+    result, so ineligibility changes what we *claim*, not whether we ask.
