@@ -30,12 +30,28 @@ def contrast(one: str, two: str) -> float:
 
 class EveryPresetsBadgeIsReadable(unittest.TestCase):
     def test_all_sixteen_pass_wcag_aa(self):
-        for name, preset in UNIVERSAL_BUNDLE_THEME_PRESETS.items():
+        """Measured against the badge's own GROUND, which is what the numeral actually sits on.
+
+        A preset may darken that ground (`badge_bg`) to earn white ink on a hue whose raw accent is too
+        light for white — eight do, 2026-10-15. The guarantee is unchanged: whatever ground a preset
+        chooses, the ink is still measured against it, so this cannot be satisfied by forcing a colour.
+        """
+        for name in UNIVERSAL_BUNDLE_THEME_PRESETS:
             with self.subTest(preset=name):
-                ink = theme_tokens({"theme": {"preset": name}})["accent_text"]
+                tokens = theme_tokens({"theme": {"preset": name}})
+                ink, ground = tokens["badge_ink"], tokens["badge_bg"]
                 self.assertGreaterEqual(
-                    contrast(preset["accent"], ink), AA_NORMAL,
-                    f"{name}: {ink} on {preset['accent']} is unreadable")
+                    contrast(ground, ink), AA_NORMAL, f"{name}: {ink} on {ground} is unreadable")
+
+    def test_the_ground_defaults_to_the_accent(self):
+        """A preset that says nothing is exactly as it was: same ground, same measured ink."""
+        for name, preset in UNIVERSAL_BUNDLE_THEME_PRESETS.items():
+            if "badge_bg" in preset:
+                continue
+            with self.subTest(preset=name):
+                tokens = theme_tokens({"theme": {"preset": name}})
+                self.assertEqual(tokens["badge_bg"], preset["accent"])
+                self.assertEqual(tokens["badge_ink"], tokens["accent_text"])
 
     def test_the_reported_theme_is_dramatically_better(self):
         """1.41 before, which is why it looked like the numeral was missing."""
@@ -92,8 +108,11 @@ class TheBadgeActuallyUsesTheToken(unittest.TestCase):
         css = "\n".join(render_template_styles({"theme": {"preset": "tiktok-dark"},
                                                 "template": "universal_bundle"}))
         rule = next(line for line in css.splitlines() if ".sl-numbered-item::before" in line)
-        self.assertIn("color:var(--sl-accent-text", rule)
+        # `badge_ink` is measured against the badge's own ground, which `accent_text` was until a preset
+        # could darken that ground (2026-10-15). Still accent-aware; still never the CTA gradient's ink.
+        self.assertIn("color:var(--sl-badge-ink", rule)
         self.assertNotIn("color:var(--sl-cta-text", rule)
+        self.assertNotIn("color:var(--sl-accent-text", rule)
 
     def test_the_variable_is_emitted_with_the_derived_value(self):
         from stripe_link.runtime.html import render_template_styles
@@ -147,8 +166,16 @@ class EveryAccentBackgroundInksFromAccentText(unittest.TestCase):
         """Named explicitly as well as scanned, so a rename cannot silently drop one from the sweep."""
         wanted = {".sl-dl-submit", ".sl-ribbon-cta", ".sl-quote-fancy .sl-quote-figure",
                   ".sl-author-name", ".sl-numbered-item::before"}
-        seen = {sel for sel, _, ink in self.rules() if "accent-text" in ink}
-        self.assertEqual(wanted - seen, set(), "an element lost its accent-aware ink")
+        seen = {sel for sel, _, ink in self.rules() if "badge-ink" in ink}
+        self.assertEqual(wanted - seen, set(), "an element lost its badge-aware ink")
+
+    def test_none_of_them_still_inks_from_the_raw_accent_text(self):
+        """They all paint themselves with `badge_bg` now, so inking from `accent_text` would measure
+        against a ground they are not sitting on — the original bug, one token along."""
+        for selector, background, ink in self.rules():
+            if "--sl-badge-bg" in background:
+                with self.subTest(selector=selector):
+                    self.assertNotIn("accent-text", ink)
 
 
 if __name__ == "__main__":

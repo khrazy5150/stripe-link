@@ -117,6 +117,11 @@ HEADLINE_LOWERCASE_WORDS = {
     "vs.",
 }
 
+# `badge_bg` is the ground under the FILLED accent shapes -- numbered circles, the author pill, the
+# ribbon button. It defaults to `accent`, and a preset only states it to get WHITE ink on a hue whose
+# raw accent is too light for white to pass (author, 2026-10-15: dark numerals in a red circle read as
+# a mistake). Darkening the ground rather than forcing the ink keeps `readable_ink` in charge, so the
+# WCAG guarantee from 2026-10-12 still holds and a future preset cannot reintroduce the fault.
 UNIVERSAL_BUNDLE_THEME_PRESETS = {
     "techno-green": {
         "background": "#0b1220",
@@ -146,6 +151,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#6b7280",
         "brand": "#ff4181",
         "accent": "#ff6b9d",
+        "badge_bg": "#bd4f74",
         "headline": "#ff4181",
         "cta_from": "#d63d76",
         "cta_to": "#c22d66",
@@ -230,6 +236,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#64748b",
         "brand": "#0ea5e9",
         "accent": "#38bdf8",
+        "badge_bg": "#257da4",
         "headline": "#0284c7",
         "cta_from": "#0ea5e9",
         "cta_to": "#0284c7",
@@ -331,6 +338,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#a1a1aa",
         "brand": "#ef4444",
         "accent": "#f87171",
+        "badge_bg": "#bc5656",
         "headline": "#f87171",
         "cta_from": "#ef4444",
         "cta_to": "#dc2626",
@@ -352,6 +360,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#57534e",
         "brand": "#15803d",
         "accent": "#22c55e",
+        "badge_bg": "#178640",
         "headline": "#15803d",
         "cta_from": "#22c55e",
         "cta_to": "#16a34a",
@@ -373,6 +382,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#a5b4fc",
         "brand": "#6366f1",
         "accent": "#818cf8",
+        "badge_bg": "#656dc1",
         "headline": "#a5b4fc",
         "cta_from": "#6366f1",
         "cta_to": "#4f46e5",
@@ -396,6 +406,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#666666",
         "brand": "#0077b5",
         "accent": "#00a0dc",
+        "badge_bg": "#007dac",
         "headline": "#000000",
         "cta_from": "#0077b5",
         "cta_to": "#005582",
@@ -417,6 +428,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#8e8e8e",
         "brand": "#e1306c",
         "accent": "#fd1d1d",
+        "badge_bg": "#e91b1b",
         "headline": "#262626",
         "cta_from": "rgb(112,28,242)",
         "cta_to": "rgb(231,52,139)",
@@ -482,6 +494,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "muted": "#8899a6",
         "brand": "#1d9bf0",
         "accent": "#1a8cd8",
+        "badge_bg": "#177bbe",
         "headline": "#ffffff",
         "cta_from": "#1d9bf0",
         "cta_to": "#1a8cd8",
@@ -1011,7 +1024,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-author-photo{width:14rem;height:14rem;border-radius:50%;overflow:hidden;box-shadow:0 0 0 0.5rem var(--sl-section-border,var(--sl-accent))}",
     "    .sl-author-photo:not(.sl-cropped) img{width:100%;height:100%;object-fit:cover;display:block}",
     # A pill, so the name reads as an attribution rather than a second heading.
-    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-section-border-ink,var(--sl-accent-text,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
+    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-badge-bg,var(--sl-accent)));color:var(--sl-section-border-ink,var(--sl-badge-ink,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
     "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-author-body{margin:0;max-width:62rem;font-size:1.6rem;line-height:1.7;color:var(--sl-section-ink,var(--sl-muted))}",
     # BRAGGING POINTS. Same section-override contract as the author bio above.
@@ -1050,7 +1063,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # FANCY — a coloured card. `accent` paints the CARD here rather than a bar, so the text on it is the
     # derived accent-ink: the reference design's white-on-pink comes out of the contrast maths, not a
     # hardcoded colour, and holds for a pale card just as well.
-    "    .sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2.4rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-accent-text,#fff))}",
+    "    .sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2.4rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-badge-bg,var(--sl-accent)));color:var(--sl-section-accent-ink,var(--sl-badge-ink,#fff))}",
     # The photo is sized by HEIGHT with a fixed box, exactly as the reference does. Sizing it by width
     # alone let a PORTRAIT source render ~500px tall, which forced the card to wrap even on a desktop and
     # buried the words under a column of photograph.
@@ -1078,7 +1091,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # already carries the ordering for anything that reads the page rather than looks at it.
     "    .sl-numbered-items{list-style:none;counter-reset:sl-num;margin:0 auto;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem}",
     "    .sl-numbered-item{counter-increment:sl-num;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1.6rem;padding:1.6rem 2rem;border:1px solid var(--sl-content-border);border-radius:1rem;background:var(--sl-card);color:var(--sl-card-text,var(--sl-text))}",
-    "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-accent);color:var(--sl-accent-text,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
+    "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-badge-bg,var(--sl-accent));color:var(--sl-badge-ink,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
     "    .sl-numbered-text{margin:0;font-size:1.6rem;line-height:1.55;color:var(--sl-card-muted,var(--sl-content-text))}",
     # PAGE RIBBON — an Attention Block. Uses the shared section override, so a tenant can make it break
     # the page deliberately; that is the entire point of an interruption.
@@ -1141,7 +1154,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-body{margin:0;font-size:1.6rem;line-height:1.55;opacity:0.85}",
     # The CTA takes the section accent when the ribbon breaks the pattern, so its ink is the DERIVED
     # accent-ink and a tenant cannot colour the button into invisibility.
-    "    .sl-ribbon-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-accent-text,#fff));font-size:1.5rem;font-weight:700;text-decoration:none}",
+    "    .sl-ribbon-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:var(--sl-section-accent,var(--sl-badge-bg,var(--sl-accent)));color:var(--sl-section-accent-ink,var(--sl-badge-ink,#fff));font-size:1.5rem;font-weight:700;text-decoration:none}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-cta{justify-self:center}",
     "    .sl-page-ribbon.is-compact .sl-ribbon-headline{font-size:clamp(1.7rem,3vw,2.1rem)}",
     # The download dialog. Built by script, so its styles ship with the page whether or not it is used --
@@ -1155,7 +1168,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-dl-actions{display:flex;gap:1rem;justify-content:flex-end}",
     "    .sl-dl-actions button{padding:1rem 1.8rem;border-radius:999px;font-size:1.5rem;font-weight:700;cursor:pointer;font-family:inherit}",
     "    .sl-dl-cancel{background:none;border:1px solid var(--sl-content-border);color:inherit}",
-    "    .sl-dl-submit{border:0;background:var(--sl-accent);color:var(--sl-accent-text,#fff)}",
+    "    .sl-dl-submit{border:0;background:var(--sl-badge-bg,var(--sl-accent));color:var(--sl-badge-ink,#fff)}",
     "    .sl-dl-card{position:relative}",
     "    .sl-dl-dismiss{position:absolute;top:0.8rem;right:1rem;border:0;background:none;color:inherit;font-size:2.2rem;line-height:1;cursor:pointer;opacity:0.55}",
     "    .sl-ribbon-cta:disabled,.sl-dl-submit:disabled{opacity:0.6;cursor:default}",
@@ -1520,6 +1533,11 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     # It returns None for a colour it cannot parse; LIGHT_INK is what these rules used before, so an
     # unknown changes nothing rather than guessing.
     tokens.setdefault("accent_text", section_readable_ink(tokens["accent"]) or SECTION_LIGHT_INK)
+    # The ground under filled accent shapes, and the ink measured against THAT ground rather than against
+    # the accent. A preset that wants white numerals darkens the ground; the measurement still decides the
+    # ink, so the badge cannot end up unreadable whatever a preset chooses.
+    tokens.setdefault("badge_bg", tokens["accent"])
+    tokens.setdefault("badge_ink", section_readable_ink(tokens["badge_bg"]) or SECTION_LIGHT_INK)
     tokens.setdefault("price_radio", tokens["accent"])
     tokens.setdefault("price_title", tokens["text"])
     tokens.setdefault("price_description", tokens["muted"])

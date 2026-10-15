@@ -148,8 +148,8 @@ class SectionOverrideTests(unittest.TestCase):
     def test_the_fancy_card_text_is_derived_never_hardcoded(self):
         # The reference design is white-on-pink. That must come out of the contrast maths, so a PALE card
         # gets dark text instead of the same white the reference happened to use.
-        self.assertIn("color:var(--sl-section-accent-ink,var(--sl-accent-text,#fff))", CSS,
-                      "the fallback inks from the ACCENT, not from the CTA gradient: when no\n                       section override is set this sits on --sl-accent, and borrowing cta_text\n                       there made 12 of 16 presets fail WCAG AA (2026-10-12)")
+        self.assertIn("color:var(--sl-section-accent-ink,var(--sl-badge-ink,#fff))", CSS,
+                      "the fallback inks from the BADGE GROUND this sits on, not from the CTA gradient:\n                       borrowing cta_text made 12 of 16 presets fail WCAG AA (2026-10-12), and the\n                       ground became its own token when 8 presets darkened it (2026-10-15)")
         dark_card = render_quote({**QUOTE, "style": "fancy", "theme": {"bg": "#ffffff", "accent": "#d6336c"}})
         pale_card = render_quote({**QUOTE, "style": "fancy", "theme": {"bg": "#ffffff", "accent": "#fde68a"}})
         self.assertIn(f"--sl-section-accent-ink:{LIGHT_INK}", dark_card)
