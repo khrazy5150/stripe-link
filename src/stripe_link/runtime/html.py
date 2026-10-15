@@ -925,7 +925,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # entirely: the footer floated up under the hero and the form sat pinned to the bottom of the viewport
     # with a screen of white space between them -- the page the author called an abomination (2026-09-15).
     # The reserved strip the fixed bar needs goes with it, or the page ends in 12rem of nothing.
-    "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{position:static;z-index:auto;background:none;padding:0}",
+    # The page gutter rule up top excludes `.sl-checkout-cta`, because the BUY cta is a fixed bottom bar
+    # and is meant to be full-bleed. These three are not: they are inline blocks in the flow, so they take
+    # the same gutter every other section gets. Without it the card sat flush against both edges on a
+    # phone -- invisible at 52rem on a desktop, obvious the moment the closed notice went red (reported
+    # 2026-10-15). Same specificity as that rule, so this has to stay BELOW it.
+    "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{position:static;z-index:auto;background:none;padding:0;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
     "    body:has(.sl-email-cta){padding-bottom:0}",
     "    body:has(.sl-email-cta) main{padding-bottom:4rem}",
     # THE CTA PANEL -- one implementation for call, external and download (see render_cta_panel). They differ

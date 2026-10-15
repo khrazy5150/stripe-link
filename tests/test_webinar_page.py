@@ -256,3 +256,38 @@ class TheLiveState(unittest.TestCase):
         source = open(html.__file__, encoding="utf-8").read()
         cta = source[source.index("    if scheduled_event is not None:"):][:1400]
         self.assertLess(cta.index("event_live_occurrence"), cta.index("event_open_occurrences"))
+
+
+class TheInlineCtaTakesThePageGutter(unittest.TestCase):
+    """The gutter rule excludes `.sl-checkout-cta` because the BUY cta is a fixed, full-bleed bottom bar.
+    The email / call / external variants are inline blocks in the flow and are not, so they sat flush
+    against both edges on a phone — unnoticed at 52rem on a desktop until the closed notice went red."""
+
+    CSS = None
+
+    @classmethod
+    def setUpClass(cls):
+        from stripe_link.runtime.html import TEMPLATE_STYLES
+        cls.CSS = "\n".join(
+            line for style in TEMPLATE_STYLES.values()
+            for line in (style if isinstance(style, (list, tuple)) else [str(style)]))
+
+    def test_the_inline_variants_are_guttered(self):
+        import re
+        rule = re.search(r"\.sl-checkout-cta\.sl-email-cta[^{]*\{([^}]*)\}", self.CSS).group(1)
+        self.assertIn("width:min(52rem,calc(100% - 3.2rem))", rule)
+        self.assertIn("margin-left:auto", rule)
+        self.assertIn("margin-right:auto", rule)
+
+    def test_the_fixed_buy_bar_is_still_full_bleed(self):
+        """The exclusion is right for the bar it was written for — don't gutter a fixed bottom bar."""
+        import re
+        rule = re.search(r"\.sl-checkout-cta\{([^}]*)\}", self.CSS).group(1)
+        self.assertIn("position:fixed", rule)
+        self.assertIn("left:0", rule)
+        self.assertNotIn("margin-left:auto", rule)
+
+    def test_it_sits_below_the_rule_it_overrides(self):
+        """Equal specificity, so source order is what actually decides."""
+        self.assertLess(self.CSS.index("main > :not(.sl-countdown):not(.sl-checkout-cta)"),
+                        self.CSS.index(".sl-checkout-cta.sl-email-cta,"))
