@@ -113,8 +113,46 @@ is no voice capability, no inbound handling, and no number provisioning. Buildin
 
 That is worth doing when tenants ask for attributable phone leads. It is not worth blocking a ribbon on.
 
+## 6. No action at all — **built on the server, never offered**
+
+A ribbon is also a good-looking information banner: an announcement, a bonus callout, a "what you get"
+strip. Those want no button.
+
+`none` has been in `RIBBON_ACTIONS` all along and the renderer already honours it — it produces no `href`,
+so both button branches fall through and the banner renders alone. The builder's "Button does" select
+simply has no `<option value="none">`. One line, and a capability the server already has stops being
+invisible.
+
+## 7. Acts like the page's CTA (author, 2026-10-15)
+
+> *"Most landing pages, especially long ones, have several buttons that act like the CTA button for
+> variety. The Page Ribbon is the perfect element to do this."*
+
+**One emitter, not two.** `render_buy_cta` resolves the price, the Stripe mode, the coupon, the cart
+endpoint, the post-purchase funnel and the BNPL methods, and bakes all of it into the button. A ribbon that
+grows its own version disagrees the first time any of those changes — a stale price on one button, a
+bypassed upsell funnel on the other. "The exact same behaviour" has to mean literally the same code.
+
+**What it does depends on the offer, and the tenant does not have to care:**
+
+| offer | the ribbon button does |
+|---|---|
+| transaction | the same checkout action as the sticky buy button |
+| lead-gen | opens the registration dialog ([[LANDING_PAGE_CTA_AND_COMPOSITION]] "The CTA is a BUTTON") |
+
+**It inherits the gates, because it shares the emitter.** A closed event, a suspended tenant or a missing
+price turns off every ask on the page at once, including this one.
+
+**Label.** The ribbon keeps its own label field and does NOT auto-append the price. Variety is the point —
+a mid-page button rarely wants the same words — and a second button showing a stale amount is its own bug.
+
+**Consequence worth noting:** this is the repeat CTA that [[BUILDER_SECTION_ORDER]] §4a named as the
+precondition for reopening the baseline order. With one non-repeatable ask, the ask belongs after the
+persuasion. With a repeatable one, warm-traffic goals can move it up.
+
 ## Recommended order
 
+0. ~~**§6 no action**~~ and **§7 acts like the page's CTA** — added 2026-10-15.
 1. **§0 the click beacon** — unblocks call tracking (5a) and gives every action attribution.
 2. **§1 promote another page** — pure assembly of things that exist.
 3. ~~**§2 download, with the lead gate**~~ — **SHIPPED.** POST /downloads/lead; the gate reads the

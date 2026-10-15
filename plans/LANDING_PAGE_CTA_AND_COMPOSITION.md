@@ -40,6 +40,55 @@ Notes:
   page** (server HTML in `runtime/html.py`, + a small JS island for the interactive ones — email submit,
   booking calendar). Keep the two in sync via one shared markup contract.
 
+## The CTA is a BUTTON, not a form (added 2026-10-15)
+
+A lead CTA renders the form itself, inline, in the CTA slot. A buy CTA renders a button. That difference
+looks harmless and is the reason a long lead page cannot repeat its ask.
+
+**The trigger.** A Page Ribbon that "acts like the page's CTA" (see [[RIBBON_ACTIONS]] §7) is trivial for a
+buy offer — reuse the emitter — and impossible for a lead offer, because you cannot put a second copy of a
+form mid-page. The runtime says so already: the lead handler is
+`document.querySelector('[data-lead-form]')`, **singular**. A second form on the page is never bound and
+sits there dead.
+
+**The shape: one form, many buttons.** The form moves into a native `<dialog>`; the CTA becomes a button
+that calls `showModal()`. Every other ask on the page — a ribbon, a repeat CTA — opens the same dialog.
+One form instance, one submit path, one lead.
+
+Native `<dialog>` deliberately, not a hand-rolled overlay: focus trapping, Escape-to-close and an inert
+background come with it, and a registration form is exactly where hand-rolling those goes wrong.
+
+**No progressive-enhancement cost.** The form is already JS-submitted — `preventDefault()` then fetch — so
+it has never worked without JS. A dialog takes nothing away that existed.
+
+### It is a CHOICE, not a replacement
+
+Inline forms often convert better than modals: the field is in front of the visitor with no click in the
+way. Modals win when the page is long and the form would otherwise be far from the argument that earned the
+click. This is genuinely A/B-dependent, so the tenant picks:
+
+> **Registration form:** `Shown on the page` (default) · `Opens from a button`
+
+Defaulting to today's behaviour means no existing page changes when this ships, and the A/B module can
+settle it per page later. The ribbon's CTA action requires the button mode on a lead offer, and says so.
+
+### The closed-state gate is SHARED, not copied
+
+The gate lives in the CTA renderer today: with no open sitting, the form is replaced by the "Registration
+has closed" alert. Once other elements can open registration, each of them must ask the **same**
+`accepts_registration` function rather than carry its own idea of whether registration is open — otherwise
+a ribbon button cheerfully opens a modal for a webinar that ran last week.
+
+Done right this is the opposite of a risk: a closed event means **every** ask on the page shows the closed
+state, because they all read one answer.
+
+### Why this matters beyond the ribbon
+
+It makes the CTA one shape across every offer type — *a button that converts* — which is what lets any
+element host one. It is also the precondition [[BUILDER_SECTION_ORDER]] §4a named for reopening the
+baseline order: the ask sits after the persuasion precisely because `checkout_cta` is non-repeatable and
+there is exactly ONE of it. A repeatable ask changes that calculation.
+
 ## Page composition (addable / draggable elements)
 
 The universal page = an ordered list of element sections. Core elements come from the offer (hero, CTA);
