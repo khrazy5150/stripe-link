@@ -93,6 +93,37 @@ filter by target/status. Rejected reviews never render and never count toward th
 - **social_proof pack** — approved reviews feed the existing testimonials/ratings slots (a new source into
   existing surfaces, no new page vocabulary).
 
+## Where each kind of review surfaces (amended 2026-10-15)
+
+Product reviews and business reviews answer different questions and carry different markup rights, so they
+do not belong in the same places. Today the renderer makes no such distinction: `render_business_reviews_block()`
+is called unconditionally on **every** page, so "What our customers say" appears on transactional landing
+pages beside the product's own reviews.
+
+- **Product/offer reviews** — on the offer page they are about. Markup-eligible, and the visible text must
+  match the JSON-LD exactly.
+- **Business reviews** — on the **non-transactional** surfaces: the Store profile page, storefront and
+  category pages. They are trust and identity content, never markup (`LocalBusiness`/`Organization` review
+  snippets are not displayed; see below). On a checkout page they compete with the one review set that can
+  actually earn a snippet.
+- **A GBP widget earns nothing.** Google's self-serving rule explicitly covers reviews pulled in through a
+  third-party widget, naming Google Business and Facebook widgets. Showing GBP reviews on the site is trust
+  content, full stop — never a route to stars.
+
+**Those non-transactional surfaces already exist** and are the natural home for this: the page builder
+offers **offer / storefront / category / Store profile** page kinds, and `validate_page_document` makes
+`offer_id` optional for a page carrying `catalog_grid`, `seller_profile` or `brand_hero`. The multi-page
+structure around them (curated collections + navigation) is [[SITE_COLLECTIONS]], agreed and unbuilt — that
+work needs reviving, not re-planning.
+
+**Two render defects found while checking this (2026-10-15):**
+
+- **Both blocks render below the page footer.** `legal_footer` is a `pinned_bottom` element inside the page
+  body; the review blocks are appended after the whole body. The footer must be the last thing on the page.
+  Fix belongs with the element-ordering work, not here — recorded so it is not rediscovered.
+- **Business reviews render on transactional pages**, per the rule above. Changing this is a change to
+  current behaviour, not a constraint being preserved.
+
 ## Phasing
 
 - **Phase 1 SHIPPED (2026-07-23): store + manual entry + moderation + Product markup + visible render.**
@@ -102,7 +133,10 @@ filter by target/status. Rejected reviews never render and never count toward th
 - **Phase 2: post-purchase verified-review invitation + public submission** — the two are one flow (below).
   Also: business-target reviews for on-page trust + `social_proof` wiring.
 - **Phase 2.5 (builder integration):** a **"Reviews" builder element** that *controls* the auto-rendered
-  reviews block (heading / placement / show-hide) instead of it silently auto-appending. And **re-label the
+  reviews block (heading / placement / show-hide) instead of it silently auto-appending.
+  **"Hide" must drop the markup too** — leaving `AggregateRating` in the head while removing the visible
+  reviews is exactly the mismatch Google's guidelines forbid, and it is the one way this element could do
+  real harm. Placement is free; visibility and markup move together. And **re-label the
   existing hand-typed "Rating" element** — it is NOT the reviews system; it's an *external/cited* rating
   ("4.9 ★ on Google"), visible-text-only, no markup (the fabrication guard). Rename to e.g. "Star-rating
   badge", and later **auto-populate it from the GBP sync** so it's derived, not hand-typed. Do NOT rename
@@ -142,8 +176,19 @@ tune or disable:
 - **Steps (from receipt = delivery / service date):** (1) **day 1**, (2) **day 3**, (3) **day 7**, (4)
   **day 10**. Four touches, then stop.
 - **Stop conditions (critical — never nag a done customer):** the sequence cancels the moment the buyer
-  **submits a review** (or, for the Google destination, once we can detect it via the API read-back / a link
-  click). Also stops on unsubscribe/opt-out.
+  **submits a review**. Also stops on unsubscribe/opt-out.
+- **The Google destination has no stop signal, and this is its hardest problem** (2026-10-15). Google has no
+  create-review API and no callback, so we cannot know the review happened. The Junior Bay flow cancels on
+  submission; a Google-routed sequence either nags someone who already reviewed — the worst outcome, and the
+  one that makes a business owner angry at *us* rather than at Google — or stops early and loses
+  conversions. Three options, none free:
+  1. **Treat the link click as done.** Humane and cheap; weak, since they may click and abandon.
+  2. **A shorter cadence for Google** than for Junior Bay (e.g. 2 touches, not 4). Crude but honest.
+  3. **GBP API read-back** detects the review and cancels properly. The real fix — and it makes a polite
+     Google rail **depend on GBP OAuth** ([[BUSINESS_PROFILE_AND_GBP]] Phase 2).
+  **Decision: ship (1)+(2) together** — click-stops-the-sequence plus a shorter Google cadence — and upgrade
+  to (3) when OAuth lands. Shipping the Google destination on the full 4-touch email cadence with no stop
+  signal is the one version we should not build.
 - **Same destination every step** — the tenant's chosen Junior-Bay-or-Google link (see below); the follow-ups
   just re-send it. No sentiment branching (stays non-gating).
 - **SMS as an optional parallel channel (later):** if SMS origination is configured, mirror the sequence over
@@ -166,10 +211,21 @@ is no "push our review to Google." The achievable, high-value version:
 - **ONE destination per invite, tenant-chosen (do NOT ask twice).** The invite routes to a *single*
   destination — **Junior Bay** (first-party form → our Product AggregateRating snippets) OR **Google** (the
   writereview link → the business's Google/Maps presence) — never both. The destination is a **per-Site
-  preference** (multi-Site: a product store and a service business get their own), whose **default derives from
-  `Site.organization.entity_type`**: product/`OnlineStore` → Junior Bay; `LocalBusiness`/service subtypes →
-  Google. Tenant can override. This maps to the SEO reality: products win with on-site markup, services win on
-  Google/Maps (their on-site business reviews earn no stars — self-serving rule).
+  preference** (multi-Site: a product store and a service business get their own). Tenant can override. This
+  maps to the SEO reality: products win with on-site markup, services win on Google/Maps (their on-site
+  business reviews earn no stars — self-serving rule).
+  - **Default derived from the Site's OFFERS, not its `entity_type`** (amended 2026-10-15; see
+    [[BUSINESS_PROFILE_AND_GBP]] "Productized services"). `entity_type` says what the business *calls*
+    itself; it cannot see that a `LocalBusiness` landscaper has published five genuinely purchasable
+    fixed-scope offers and is now an organic-search opportunity. So: `business_reputation` (→ Google) when
+    the Site has no qualifying standalone offers; `offer_reputation` (→ Junior Bay) when a completed
+    purchase can be tied to a published, genuinely purchasable offer. `entity_type` remains the tiebreak
+    when there are no offers either way.
+  - **Judge offer QUALITY, not count.** Five thin offers are not a better organic opportunity than one good
+    one. The derivation asks whether an offer is real, independently useful and actually buyable — never
+    "how many pages exist".
+  - **Re-derived as the Site changes**, so a business that starts productizing migrates without being asked
+    a question it could not have answered on day one.
   - **Compliant, not gating:** the destination is a *uniform tenant policy*, applied to every invited buyer the
     same way. Gating = branching on the individual customer's likely sentiment; this never does.
   - **Guard:** destination = Google requires a valid `place_id`; if missing, fall back to Junior Bay rather

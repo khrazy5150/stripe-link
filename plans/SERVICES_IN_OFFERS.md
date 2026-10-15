@@ -196,6 +196,42 @@ this exact machinery; the difference is only whether an Appointment is attached
   multi-price/packages (single vs package of sessions, needs a booking-page price selector); recurring
   (subscription) services + customer-chooses (PWYW).
 
+## 9b. The service offer page and its structured data (added 2026-10-15)
+
+Decided in [[BUSINESS_PROFILE_AND_GBP]] ("Productized services"), recorded here because the mechanics are
+this plan's: **the Services module owns the tenant-facing workflow and shares the commercial model with
+Products.** A tenant must never be told to create a duplicate Product in order to sell work they have
+already defined as a Service — that exposes an implementation workaround as a business workflow.
+
+**Today's state, which is the reason this entry exists.** The renderer builds `Product` JSON-LD from a
+*product* document, so the only path to a markup-bearing, independently rankable offer page runs through a
+**Product of type `service`**. The Services screen implies a different route, and a tenant who follows it
+ends up with work that can never rank. That ambiguity is the defect; this plan is where it gets closed.
+
+**What the renderer should key on.** Not which record type produced the page — *what the page actually is*.
+The commercial facts belong on the offer and should be first-class:
+
+- is it **genuinely purchasable online** (a real checkout, not a quote request)?
+- does it have a **fixed, stated scope**?
+- does it have its **own public URL**?
+
+Where all three hold, the page is a single purchasable thing and `Product`/`Offer` markup describes it
+honestly. Where they do not, the page is a service overview and must be marked up as what it is.
+
+**Do not bolt a `Product` node onto a service overview.** Google's requirements are about the page: merchant
+listing experiences are for pages where a shopper can actually buy, and product rich results are for pages
+focused on a single product. Markup that does not match the page is misrepresentation — and
+misrepresentation, not self-serving reviews, is what carries manual-action risk.
+
+**And eligibility is not a promise.** Meeting the requirements makes a page *eligible*; Google still decides
+what to display. Junior Bay may say "this makes your offer eligible, and it converts better anyway" — never
+"this gets you stars". Any UI copy promising stars is a defect. Validate representative service offers
+against Google's current rules before any such claim ships.
+
+**Why a tenant does this anyway, independent of search:** a priced, fixed-scope entry offer converts far
+better than "call for a quote", and it puts the fulfiller on the property where the large job gets quoted in
+person. Search eligibility is a benefit where the facts support it, not the reason.
+
 ## 10. Open questions (resolve before/within each phase)
 
 - **Where `booking_flow` lives:** service default + per-offer-item override (leaning yes) vs offer-only.
@@ -207,6 +243,13 @@ this exact machinery; the difference is only whether an Appointment is attached
   but scheduling is per-service; confirm the thank-you flow handles "pay once, schedule the service part."
 - **Multi-price / packages for services:** single price now; packages (5-session bundle) deferred to
   Phase 4 (needs a booking-page price selector).
+- **Where the three commercial facts live** (§9b): derived at render time from the offer/service pair, or
+  stored explicitly on the offer? Leaning derived — a stored flag is a second source of truth that goes
+  stale the moment a tenant removes the checkout, and this one must never claim a page is purchasable when
+  it no longer is.
+- **Does a service offer page need its own page kind?** The builder has offer / storefront / category /
+  profile. A bookable fixed-scope offer may be just an `offer` page whose offer happens to be a service —
+  confirm before adding a fifth kind.
 
 ## 11. Relationship to existing plans
 
