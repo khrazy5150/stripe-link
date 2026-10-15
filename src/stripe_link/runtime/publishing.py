@@ -10,6 +10,20 @@ def _products_ship_physical(products_by_id) -> bool:
     return any((product.get("fulfillment") or {}).get("requires_shipping")
                for product in (products_by_id or {}).values())
 
+
+def _products_deliver_file(products_by_id) -> bool:
+    """Does anything on this offer hand the buyer a FILE?
+
+    The digital counterpart of the question above, and asked for the same reason: the thank-you page is one
+    artifact and the element has to be in it before any buyer arrives. Only the ORDER knows whether a
+    particular purchase includes the file, so the element still removes itself when asked -- this decides
+    whether it is worth putting there at all, and keeps a download placeholder off the thank-you page of an
+    offer that has no file to give.
+    """
+    return any(isinstance(product.get("digital_asset"), dict)
+               and (product.get("digital_asset") or {}).get("bucket_key")
+               for product in (products_by_id or {}).values())
+
 import copy
 import json
 import base64
@@ -1527,7 +1541,8 @@ def publish_page_document(
     # something publish never produced, and only a live sale revealed it. The artifact is small, noindex, and
     # unreachable unless the router sends someone to it, so there is nothing to gain by withholding it.
     ty_page, ty_offer = synthesize_thank_you_page(
-        page, offer, ships_physical=_products_ship_physical(products_by_id))
+        page, offer, ships_physical=_products_ship_physical(products_by_id),
+        delivers_file=_products_deliver_file(products_by_id))
     ty_html = render_page(
         ty_page, ty_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
         robots=NOINDEX_ROBOTS, site=site, page_type="thank_you",
@@ -1622,7 +1637,8 @@ def render_funnel_step_html(
         # `preview=True`: the Live Preview has no order behind a session_id, so the shipping element shows
         # a marked example date instead of trying to fetch one.
         ty_page, ty_offer = synthesize_thank_you_page(
-            page, offer, preview=True, ships_physical=_products_ship_physical(products_by_id))
+            page, offer, preview=True, ships_physical=_products_ship_physical(products_by_id),
+            delivers_file=_products_deliver_file(products_by_id))
         return render_page(ty_page, ty_offer, {}, page_type="thank_you", **common)
     plan = post_purchase_plan(offer, products_by_id)
     if step == "upsell_carousel" or (step.startswith("upsell:") and plan["strategy"] == "carousel"):

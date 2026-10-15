@@ -12,6 +12,12 @@ from urllib.parse import urlencode
 
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
+# Which order statuses still entitle the buyer to the file. A PARTIAL refund has not undone the purchase,
+# and a completed order is a paid one that has been fulfilled -- taking the download away from either would
+# punish the buyer for the tenant's bookkeeping. Shared, because the receipt link and the thank-you page
+# both decide this and two copies would eventually disagree about who may download what.
+DOWNLOADABLE_STATUSES = frozenset({"paid", "partially_refunded", "completed"})
+
 
 def sanitize_filename(filename: str) -> str:
     name = _SAFE_FILENAME.sub("_", str(filename or "").strip()).strip("._") or "download"

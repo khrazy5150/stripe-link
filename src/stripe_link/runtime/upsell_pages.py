@@ -394,7 +394,7 @@ def _business_days_from_now(count: int) -> str:
 
 def synthesize_thank_you_page(
     source_page: dict[str, Any], source_offer: dict[str, Any], *, preview: bool = False,
-    ships_physical: bool = False,
+    ships_physical: bool = False, delivers_file: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (page, offer): the funnel's terminal thank-you screen on the Universal Bundle template, inheriting
     the source page's theme. It sells nothing (no price/CTA), so its offer carries no items — render_page only
@@ -448,6 +448,16 @@ def synthesize_thank_you_page(
                          "title": config.get("shipping_eta_title") or "Shipping",
                          # Only in the builder, where there is no order behind a session_id to ask about.
                          **({"example": _preview_arrival_example()} if preview else {})})
+    # THE FILE THEY JUST BOUGHT, in the same slot and for the same reason as the shipping element above:
+    # it is what the buyer opened this page for. Hidden until the island has an order to show -- a download
+    # link is purchase-verified, so there is nothing honest to display before a purchase has been verified,
+    # and no fallback sentence worth leaving on screen if the fetch fails. The receipt email carries the
+    # same link, which is the backup; this is the one the buyer sees first.
+    if delivers_file:
+        sections.append({"id": "digital-download", "type": "digital_download",
+                         "title": config.get("download_title") or "Your download is ready",
+                         # Only in the builder, where there is no order behind a session_id to ask about.
+                         **({"example": "your-file.pdf"} if preview else {})})
     if config.get("message"):
         sections.append({"id": "content", "type": "content_block", "blocks": [{"title": "", "text": config["message"]}]})
     if config.get("enable_next_steps"):

@@ -220,6 +220,28 @@ def normalize_stripe_mode(value: Any) -> str:
     return "live" if str(value or "").strip().lower() == "live" else "test"
 
 
+def stripe_mode_from_session_id(session_id: Any) -> str:
+    """The mode a Checkout Session id DECLARES, or "" when it declares nothing.
+
+    `cs_live_...` and `cs_test_...` say which books they belong to, and they say it in the one piece of data
+    every link about an order already carries. That matters because `resolve_stripe_mode` can only read what
+    the caller remembered to send, and the two public links a buyer is handed -- the download link in their
+    receipt and the thank-you page's fetch -- both forgot: each resolved to the fail-safe "test" and then
+    looked for a live order in the test books. A paying customer was told "No paid order found for this
+    download" about an order that was sitting there, paid (prod, live purchase, 2026-10-14).
+
+    Preferred OVER the request's own mode wherever a session id is in hand, because it cannot be forgotten
+    and cannot disagree with itself: a `cs_live_` session is not a test session whatever a query string says.
+    Empty for anything that does not declare one, and the caller then falls back to `resolve_stripe_mode`.
+    """
+    raw = str(session_id or "").strip()
+    if raw.startswith("cs_live_"):
+        return "live"
+    if raw.startswith("cs_test_"):
+        return "test"
+    return ""
+
+
 def resolve_stripe_mode(event: dict[str, Any], body: dict[str, Any] | None = None, *, default: str = "test") -> str:
     """The canonical per-request Stripe mode (test/live) for the decoupled model: read it from the REQUEST — body
     `mode`, `?mode=`, or the `X-Stripe-Mode` header — instead of inferring it from the deployment environment

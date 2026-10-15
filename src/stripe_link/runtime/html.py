@@ -882,6 +882,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-next-step-icon{font-size:2.4rem}",
     "    .sl-next-step strong{font-family:var(--sl-font-heading);font-size:1.5rem;color:var(--sl-headline)}",
     "    .sl-next-step p{color:var(--sl-card-muted,var(--sl-content-text));font-size:1.35rem;line-height:1.5}",
+    "    .sl-ty-dl{display:grid;justify-items:center;margin-top:1.6rem}",
+    "    .sl-ty-dl[hidden]{display:none}",
+    "    .sl-ty-dl-card{background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:var(--sl-radius);padding:2rem 2.4rem;display:grid;gap:1rem;justify-items:center;text-align:center;max-width:42rem;width:100%;color:var(--sl-card-text,var(--sl-text))}",
+    "    .sl-ty-dl-icon{font-size:2.8rem;line-height:1}",
+    "    .sl-ty-dl-card strong{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-headline)}",
+    "    .sl-ty-dl-file{color:var(--sl-card-muted,var(--sl-content-text));font-size:1.35rem;word-break:break-all}",
+    "    .sl-ty-dl-note{color:var(--sl-card-muted,var(--sl-content-text));font-size:1.25rem}",
     "    .sl-ty-footer{text-align:center;display:grid;gap:1rem;margin-top:2.4rem;padding-top:2rem;border-top:1px solid var(--sl-content-border)}",
     "    .sl-ty-footer h2{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-headline)}",
     "    .sl-ty-footer p{color:var(--sl-content-text);font-size:1.45rem;line-height:1.6}",
@@ -2756,6 +2763,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2) — emitted by synthesize_thank_you_page only.
     "celebration": {"render": lambda c: render_celebration(c.section), "version": 1},
     "shipping_eta": {"render": lambda c: render_shipping_eta(c.section), "version": 1},
+    "digital_download": {"render": lambda c: render_digital_download(c.section), "version": 1},
     "next_steps": {"render": lambda c: render_next_steps(c.section), "version": 1},
     "thank_you_footer": {"render": lambda c: render_thank_you_footer(c.section), "version": 1},
     "testimonials": {"render": lambda c: render_testimonials(c.section), "version": 1},
@@ -6042,6 +6050,83 @@ def _shipping_eta_island() -> str:
         "          });",
         "        })",
         "        .catch(function(){});",
+        "    })();",
+        "    </script>",
+    ])
+
+
+def render_digital_download(section: dict[str, Any]) -> str:
+    """The file this buyer just paid for, on the thank-you page.
+
+    **Starts hidden and fills itself in.** The link is purchase-verified -- it exists only once there is a
+    paid order to verify -- and this page is one published artifact serving every buyer, so the URL cannot
+    be baked in at render time. Unlike the shipping element there is no honest fallback sentence to leave on
+    screen: "your download is ready" above no link is a broken promise, so nothing shows until the server
+    has answered, and the element removes itself when the answer is that this order has no file.
+
+    The builder gets a marked example instead, because the Live Preview has no order to ask about and a
+    tenant who cannot see the element cannot know their buyers get one.
+    """
+    title = str(section.get("title") or "").strip() or "Your download is ready"
+    example = str(section.get("example") or "").strip()
+    section_id = escape(str(section.get("id", "digital-download")))
+    api_base = escape(str(_RENDER_STATE.get("api_base_url") or ""))
+    tenant_id = escape(str(_RENDER_STATE.get("tenant_id") or ""))
+    parts = [
+        f'    <section class="sl-ty-dl" data-section-id="{section_id}" data-section-type="digital_download"'
+        f' data-api-base-url="{api_base}" data-tenant-id="{tenant_id}"'
+        + ("" if example else " hidden") + ">",
+        '      <div class="sl-ty-dl-card">',
+        '        <span class="sl-ty-dl-icon" aria-hidden="true">\u2b07\ufe0f</span>',
+        f"        <strong>{escape(title)}</strong>",
+        (f'        <p class="sl-ty-dl-file">{escape(example)}</p>' if example else
+         '        <p class="sl-ty-dl-file"></p>'),
+        ('        <span class="sl-cta sl-ty-download">Download</span>' if example else
+         '        <a class="sl-cta sl-ty-download" href="#" download>Download</a>'),
+        ('        <p class="sl-ty-dl-note">Example &mdash; your buyers get their own purchase-verified link.</p>'
+         if example else
+         '        <p class="sl-ty-dl-note">We\u2019ve emailed this link to you as well.</p>'),
+        "      </div>",
+        "    </section>",
+        _digital_download_island() if not example else "",
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def _digital_download_island() -> str:
+    """Ask the order behind `session_id` for its file, then reveal the element or remove it.
+
+    The SAME endpoint and the same `session_id` the shipping element already uses -- one fetch per concern
+    rather than one route per concern, because the stack is at CloudFormation's transform limit.
+
+    The URL it is handed is the purchase-verified `/download` link, not the file: clicking it re-checks the
+    order server-side, so a link scraped off this page is worth no more than the order behind it.
+    """
+    return "\n".join([
+        "    <script>",
+        "    (function(){",
+        "      var box = document.querySelector('.sl-ty-dl');",
+        "      if (!box) return;",
+        "      var api = box.dataset.apiBaseUrl || '';",
+        "      var tenant = box.dataset.tenantId || '';",
+        "      var session = new URLSearchParams(window.location.search).get('session_id') || '';",
+        # No session means a direct visit: there is no order to verify, so there is no link to offer.
+        "      if (!api || !tenant || !session) { box.remove(); return; }",
+        "      fetch(api.replace(/\\/$/, '') + '/upsell/session?session_id=' + encodeURIComponent(session)",
+        "            + '&clientID=' + encodeURIComponent(tenant))",
+        "        .then(function(r){ return r.json(); })",
+        "        .then(function(body){",
+        "          var file = (body && body.download) || null;",
+        "          if (!file || !file.url) { box.remove(); return; }",
+        "          var link = box.querySelector('.sl-ty-download');",
+        "          var name = box.querySelector('.sl-ty-dl-file');",
+        "          if (name && file.filename) { name.textContent = file.filename; }",
+        "          if (link) { link.setAttribute('href', file.url); }",
+        "          box.removeAttribute('hidden');",
+        "        })",
+        # Removed rather than left hidden: a failed fetch is still no verified link, and the receipt email
+        # carries the same one, so the buyer is not stranded.
+        "        .catch(function(){ box.remove(); });",
         "    })();",
         "    </script>",
     ])

@@ -10,8 +10,8 @@ import os
 import secrets
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
-from stripe_link.domain.downloads import asset_bucket_key, sanitize_filename
+from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, stripe_mode_from_session_id, tenant_id_from_event
+from stripe_link.domain.downloads import DOWNLOADABLE_STATUSES, asset_bucket_key, sanitize_filename
 from stripe_link.domain.business_email import is_disposable, sender_display_name, verified_email
 from stripe_link.domain.lead_magnets import COLLECTABLE_FIELDS, download_offer, find_ribbon, missing_fields
 from stripe_link.domain.leads import build_lead_submission, is_spam, lead_id_for
@@ -108,14 +108,16 @@ def serve_handler(event, context, *, products_repo=None, orders_repo=None, s3_cl
     if not (tenant_id and session_id and product_id):
         return error_response("tenant_id, session_id, and product_id are required.", code="missing_params")
 
-    mode = resolve_stripe_mode(event)
+    # The SESSION ID decides, not the query string. This link is read out of an inbox, and the one it was
+    # built with carried no `mode` at all -- so every live purchase resolved to the fail-safe "test" and was
+    # told "No paid order found" about an order that was there, paid. `cs_live_` is not a test session.
+    mode = stripe_mode_from_session_id(session_id) or resolve_stripe_mode(event)
     orders_repo = orders_repo or orders_repository(mode=mode)
     products_repo = products_repo or products_repository(mode=mode)
-    downloadable_statuses = {"paid", "partially_refunded", "completed"}
     try:
         order = orders_repo.get(tenant_id, f"order_{session_id}")
         status = str((order or {}).get("payment_status") or (order or {}).get("status") or "")
-        if not order or status not in downloadable_statuses:
+        if not order or status not in DOWNLOADABLE_STATUSES:
             return error_response("No paid order found for this download.", status_code=403, code="not_purchased")
         if str((order.get("product") or {}).get("product_id") or "") != product_id:
             return error_response("This order does not include that product.", status_code=403, code="product_mismatch")

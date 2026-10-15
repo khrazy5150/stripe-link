@@ -2,13 +2,14 @@ import os
 import time
 from urllib.request import urlopen
 
-from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, stripe_mode_from_session_id, tenant_id_from_event
 from stripe_link.silo import current_silo
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError, find_price, load_offer_products, resolve_offer)
+from stripe_link.domain.downloads import DOWNLOADABLE_STATUSES, digital_download_links
 from stripe_link.domain.shipping import destination_address_from_session
 from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -83,7 +84,10 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
     # WHICH product this upsell sells. The offer is the funnel's SOURCE offer, so its items are the
     # original bundle -- quoting those would disclose the wrong parcel entirely.
     product_id = str(params.get("product_id") or "").strip()
-    mode = "live" if str(params.get("mode") or "").strip() == "live" else "test"
+    # The session id FIRST, for the same reason the download link needs it: the thank-you page's own fetch
+    # sends no `mode`, so a live order was looked up with test credentials and the page quietly showed the
+    # buyer nothing. A `cs_live_` session cannot be answered out of the test books.
+    mode = stripe_mode_from_session_id(session_id) or ("live" if str(params.get("mode") or "").strip() == "live" else "test")
 
     if not tenant_id:
         return error_response("clientID or tenant_id is required.", code="missing_tenant")
@@ -153,8 +157,47 @@ def get_upsell_session(event, *, stripe_repo, secret_cipher, opener):
         # like any other, it already calls this with the same `session_id`, and the stack is at 94.8% of
         # CloudFormation's transform limit -- a route costs template bytes we may need for something that
         # cannot be answered anywhere else.
-        "delivery": _delivery_promise(tenant_id, session_id, mode=resolve_stripe_mode(event)),
+        "delivery": _delivery_promise(tenant_id, session_id, mode=mode),
+        # THE FILE THEY JUST BOUGHT, for the thank-you page's download element. Same reasoning as
+        # `delivery` above, and the same endpoint for the same reason: the thank-you screen already calls
+        # this with this session_id, and the stack is at CloudFormation's transform limit, so a route is
+        # spent only on a question that cannot be answered anywhere else.
+        #
+        # `{}` means this order delivers no file, and the element then removes itself. It has to be asked
+        # per ORDER rather than baked into the page: the page is one artifact serving every buyer, and the
+        # link is purchase-verified, so it only exists once there is a purchase to verify.
+        "download": _download_delivery(tenant_id, session_id, mode=mode),
     })
+
+
+def _download_delivery(tenant_id, session_id, *, mode, orders_repo=None, products_repo=None):
+    """The digital file this paid order delivers, as `{url, filename}`, or `{}`.
+
+    Best-effort and read-only, like `_delivery_promise`. The URL is the SAME purchase-verified link the
+    receipt email carries -- built by the same function -- so the page and the email cannot hand out two
+    different links, and neither hands out the file itself. `/download` re-checks the order on every click.
+    """
+    try:
+        if not tenant_id or not session_id or not os.environ.get("ORDERS_TABLE"):
+            return {}
+        orders = orders_repo or orders_repository(mode=mode)
+        order = orders.get(tenant_id, f"order_{session_id}") or {}
+        # Paid only. An unpaid or failed session must not be shown a link, even one that would refuse it:
+        # offering a download that then says "no paid order found" is worse than offering nothing.
+        if str(order.get("payment_status") or order.get("status") or "") not in DOWNLOADABLE_STATUSES:
+            return {}
+        product_id = str((order.get("product") or {}).get("product_id") or "")
+        if not product_id:
+            return {}
+        products = products_repo or products_repository(mode=mode)
+        product = products.get(tenant_id, product_id) or {}
+        links = digital_download_links(order, product, os.environ.get("PUBLIC_API_BASE_URL", ""))
+        if not links:
+            return {}
+        return {"url": links[0]["url"], "filename": links[0]["label"]}
+    except Exception as exc:  # noqa: BLE001 — a thank-you page must render whatever happened here
+        print(f"[download] delivery unavailable for {session_id}: {type(exc).__name__}: {exc}")
+        return {}
 
 
 def _delivery_promise(tenant_id, session_id, *, mode, orders_repo=None):
