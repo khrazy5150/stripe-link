@@ -191,7 +191,10 @@ is no "push our review to Google." The achievable, high-value version:
 - [[PAGE_COMPOSER]] / goal composition — reviews feed the `social_proof` pack; `AggregateRating` rides the
   `discoverability`/head channel like the other structured data.
 - Offers/Products (incl. services-as-Offers) — the Product/Offer target is what makes **service** businesses
-  work: review the bookable offer, not the firm.
+  work: review the bookable offer, not the firm. The full rule — when a local business should productize to
+  earn stars, how the invite destination follows from that, and the honesty guardrails — lives in
+  [[BUSINESS_PROFILE_AND_GBP]] under "Productized services", so it sits beside the GBP side of the same
+  decision rather than being argued twice.
 - `runtime/html.py` Product JSON-LD (already emits `Product`/`Offer`/seller) — extend with `review` +
   `aggregateRating`. The existing "no hand-typed AggregateRating" guard is the compliance baseline.
 
