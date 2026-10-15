@@ -251,9 +251,16 @@ class ItIsRegisteredAndValidated(unittest.TestCase):
         # tools" set are two blocks with different styles on one page, which is the content_block case.
         self.assertTrue(spec["repeatable"])
 
-    def test_it_sits_next_to_the_element_it_is_not(self):
-        order = RULES["default_order"]
-        self.assertEqual(order.index("info_cards"), order.index("numbered_list") + 1)
+    def test_it_is_placed_by_the_author_like_the_element_it_is_not(self):
+        """Both are AUTHORED (BUILDER_SECTION_ORDER 4d): a set of info cards has no inherent position
+        because it has no inherent meaning. They used to be asserted ADJACENT in the hand-authored
+        baseline; now neither has a baseline position at all, which is the same statement made properly."""
+        from stripe_link.domain.composition import baseline_order, element_order_mode
+
+        for element in ("info_cards", "numbered_list"):
+            with self.subTest(element=element):
+                self.assertEqual(element_order_mode(element), "authored")
+                self.assertNotIn(element, baseline_order())
 
     def test_numbered_list_items_are_still_plain_strings(self):
         """The reason this is a separate element. If this ever fails, the two have merged."""

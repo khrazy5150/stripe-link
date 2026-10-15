@@ -57,12 +57,23 @@ class AddableElementRegistrationTests(unittest.TestCase):
                 self.assertIn(f'"{element}"', registry.group(1),
                               f"{element} has no entry in SECTION_REGISTRY — it would render as nothing")
 
-    def test_each_has_a_baseline_order_slot(self):
-        # Already asserted elsewhere for all placeable elements; repeated here so an addable element is
-        # checked by this file too, which is the one a new element's author will read.
+    def test_each_declares_where_it_goes(self):
+        """Already asserted elsewhere for all placeable elements; repeated here so an addable element is
+        checked by this file too, which is the one a new element's author will read.
+
+        A slot, or `order_mode: authored` meaning the tenant places it (BUILDER_SECTION_ORDER 4d). There is
+        no third answer, and "I forgot" is not one of them."""
+        from stripe_link.domain.composition import baseline_order
+
+        baseline = set(baseline_order())
         for element in ADDABLE:
             with self.subTest(element=element):
-                self.assertIn(element, RULES["default_order"])
+                spec = RULES["elements"][element]
+                if spec.get("order_mode") == "authored":
+                    self.assertNotIn(element, baseline)
+                else:
+                    self.assertIn(spec.get("slot"), set(RULES["slots"]))
+                    self.assertIn(element, baseline)
 
 
 if __name__ == "__main__":

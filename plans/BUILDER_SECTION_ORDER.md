@@ -309,7 +309,25 @@ with each other *and* with expectations hand-written from `composition_rules.jso
 
 ---
 
-# 4d. Slots — the baseline stops being a hand-maintained list (designed 2026-10-15, NOT built)
+# 4d. Slots — the baseline stops being a hand-maintained list
+
+> **STATUS: BUILT 2026-10-15.** `slots` + per-element `slot`/`rank`/`order_mode`/`slots` in
+> `composition_rules.json`; derived by `composition.baseline_order()` and `pageComposer.baselineOrder()`.
+> **`default_order` is gone from the file** — it was the hand-authored source this replaces, and leaving a
+> stale copy that tests assert against is the second source of truth the change exists to remove.
+> Guarded by `test_section_order_parity.py` (both runtimes, same fixtures, incl. the sandwich) and
+> `test_composition_placement.py` (every element declares a slot or `authored`; the derived list covers
+> every ordered element exactly once; every declared slot is in the vocabulary).
+>
+> Two things the build settled that the design did not say:
+> - **Locked bands stay in the derived baseline.** They carry no slot and need none, since band sorting
+>   dominates — but dropping them made the hero block (`seo_title`/`hero_media`/`hero`/`headline`/
+>   `subheadline`) tie on "not in the baseline", which would have made the H1's position depend on the
+>   sections array.
+> - **Adding an AUTHORED element records the arrangement.** §4c says adding is not rearranging, and that
+>   still holds for everything with a slot. An authored element has no slot, so where the tenant put it is
+>   the only answer there is — without this, the last two of "three blocks, other elements, two more" jump
+>   back to join the first three.
 
 ## The problem with a flat list
 
@@ -451,8 +469,8 @@ the software stops guessing.
 | `checkout_cta` | ask | 40 | ordered |
 | `refund_policy` | reassure | 10 | ordered |
 | `related_products` | after | 10 | ordered |
-| `tip_jar` | after | 20 | ordered |
-| `link_cards` | after | 30 | ordered |
+| `link_cards` | after | 20 | ordered |
+| `tip_jar` | after | 30 | ordered |
 | `page_ribbon` | after | 40 | ordered |
 | *(business reviews)* | after | 50 | ordered |
 
@@ -469,6 +487,10 @@ Notes on the ones worth arguing about:
 - **`checkout_cta` stays last in `ask`**, and `ask` stays after the persuasion — §4a's reasoning holds.
   It is non-repeatable, so there is exactly ONE ask, and moving a single ask above the proof is strictly
   worse. Revisit only together with a repeat CTA.
+- **`tip_jar` ranks after `link_cards`** — a tip jar above someone's links is begging before
+  introducing yourself. The assignment table first had these the wrong way round and an existing
+  tip-jar test caught it, which is the argument for deriving from declared slots rather than
+  hand-maintaining indices: the reasoning is written down where it can be checked.
 - **The two review blocks join the catalog here**, which is also how they stop rendering below the footer:
   today they are appended after the whole body and are in no band at all ([[REVIEWS]] "Where each kind of
   review surfaces").

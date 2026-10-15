@@ -192,11 +192,54 @@ export function isMovable(key) {
   return elementPlacement(key) === "free";
 }
 
+// The slot vocabulary, in page order. Mirrors composition.slot_order().
+export function slotOrder(goal = "") {
+  const override = goal ? rules.goals?.[goal]?.slot_order : null;
+  return [...(override || rules.slots || [])];
+}
+
+// Which slot each INSTANCE of an element wants. One entry for almost everything; an element that brackets
+// a page declares more (event_date is ["announce", "reassure"]). Mirrors composition.element_slots().
+export function elementSlots(type) {
+  const spec = rules.elements?.[type] || {};
+  const declared = (spec.slots || []).filter((s) => typeof s === "string");
+  if (declared.length) return declared;
+  return typeof spec.slot === "string" && spec.slot ? [spec.slot] : [];
+}
+
+// `ordered` (the skeleton decides) or `authored` (the tenant does). Mirrors composition.element_order_mode().
+export function elementOrderMode(type) {
+  return (rules.elements?.[type] || {}).order_mode === "authored" ? "authored" : "ordered";
+}
+
 // The default sequence for a page nobody has reordered. Mirrors composition.baseline_order() -- both read
-// the same composition_rules.json, so they cannot drift. See plans/BUILDER_SECTION_ORDER.md 4a.
+// the same composition_rules.json and must DERIVE it the same way, so they cannot drift.
+// See plans/BUILDER_SECTION_ORDER.md 4a/4d: derived from slots, because a hand-authored list of 39 absolute
+// positions gave a new element no rule about where it belongs, and drifted until the default read as
+// arbitrary. Authored elements are deliberately absent — they sort after everything with a baseline
+// position, i.e. at the end of the free band, in the order they were added.
 export function baselineOrder(goal = "") {
   const override = goal ? rules.goals?.[goal]?.default_order : null;
-  return [...(override || rules.default_order || [])];
+  if (override) return [...override];
+  const slots = new Map(slotOrder(goal).map((slot, index) => [slot, index]));
+  const tail = slots.size;
+  const entries = [];
+  Object.entries(rules.elements || {}).forEach(([key, spec], position) => {
+    const band = spec.placement || "free";
+    if (band === "none") return;
+    if (band !== "free") {
+      // The locked bands carry no slot and need none — band sorting dominates — but they must be here, or
+      // the hero block ties on "not in the baseline" and the H1's position follows the sections array.
+      entries.push([PLACEMENT_BANDS.indexOf(band), -1, 0, position, key]);
+      return;
+    }
+    if (elementOrderMode(key) === "authored") return;
+    const first = elementSlots(key)[0] || "";
+    entries.push([PLACEMENT_BANDS.indexOf("free"), slots.has(first) ? slots.get(first) : tail,
+                  Number(spec.rank || 0), position, key]);
+  });
+  entries.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
+  return entries.map((entry) => entry[4]);
 }
 
 // lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Keys absent from tenantOrder fall back to
@@ -213,7 +256,8 @@ export function baselineOrder(goal = "") {
 // the BASELINE order of their TYPE, so a tenant who never drags anything still gets a researched sequence.
 // An entry in neither list sorts last, never first — an unplaced element must not jump to the top of a page.
 function orderEntries(entries, tenantOrder = [], goal = "") {
-  const baseline = new Map(baselineOrder(goal).map((key, index) => [key, index]));
+  const order = baselineOrder(goal);
+  const baseline = new Map(order.map((key, index) => [key, index]));
   const rank = new Map(tenantOrder.map((key, index) => [key, index]));
   const fallback = rank.size;
   const tail = baseline.size;
@@ -221,15 +265,37 @@ function orderEntries(entries, tenantOrder = [], goal = "") {
     const index = PLACEMENT_BANDS.indexOf(elementPlacement(type));
     return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
   };
-  const within = (entry) =>
-    rank.has(entry.key) ? rank.get(entry.key) : fallback + (baseline.has(entry.type) ? baseline.get(entry.type) : tail);
+  // A SECOND instance of a bracketing element takes the next slot its type declares, not the position of
+  // the first one, so a second Date lands beside the ask. Instances past the end stay with the LAST slot.
+  const slots = new Map(slotOrder(goal).map((slot, index) => [slot, index]));
+  const instanceBaseline = new Map();
+  const seen = new Map();
+  entries.forEach((entry, index) => {
+    const declared = elementSlots(entry.type);
+    const count = seen.get(entry.type) || 0;
+    seen.set(entry.type, count + 1);
+    if (count === 0 || declared.length <= 1) return;
+    const wantedSlot = declared[Math.min(count, declared.length - 1)];
+    if (!slots.has(wantedSlot)) return;
+    // Positioned as if it were the first element of that later slot, so it sorts AMONG that slot's members
+    // rather than ahead of all of them.
+    const nearest = order
+      .filter((key) => (elementSlots(key)[0] || "") === wantedSlot)
+      .map((key) => (baseline.has(key) ? baseline.get(key) : tail));
+    instanceBaseline.set(index, nearest.length ? Math.min(...nearest) : tail);
+  });
+  const within = (entry, index) => {
+    if (rank.has(entry.key)) return rank.get(entry.key);
+    if (instanceBaseline.has(index)) return fallback + instanceBaseline.get(index);
+    return fallback + (baseline.has(entry.type) ? baseline.get(entry.type) : tail);
+  };
   // Ties keep their incoming position, so several content blocks (all at the same baseline slot) hold their
   // relative order instead of collapsing together arbitrarily.
   return entries
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) =>
       band(a.entry.type) - band(b.entry.type) ||
-      within(a.entry) - within(b.entry) ||
+      within(a.entry, a.index) - within(b.entry, b.index) ||
       a.index - b.index)
     .map(({ entry }) => entry);
 }

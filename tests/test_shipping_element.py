@@ -181,7 +181,9 @@ class TheComposerKnowsIt(unittest.TestCase):
 
     def test_it_sits_before_the_buy_button(self):
         """A buyer chooses a destination BEFORE pressing buy, not after."""
-        order = self.RULES["default_order"]
+        from stripe_link.domain.composition import baseline_order
+
+        order = baseline_order()
         self.assertLess(order.index("shipping"), order.index("checkout_cta"))
 
     def test_it_is_OPT_IN_rather_than_on_by_default(self):

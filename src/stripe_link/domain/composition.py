@@ -395,13 +395,79 @@ def is_movable(key: str) -> bool:
     return element_placement(key) == "free"
 
 
-def baseline_order(goal: str = "") -> list[str]:
-    """The default section sequence for a page nobody has reordered (plans/BUILDER_SECTION_ORDER.md 4a).
+def slot_order(goal: str = "") -> list[str]:
+    """The slot vocabulary, in page order. A goal may reorder it via goals.<goal>.slot_order.
 
-    A goal may override it wholesale via goals.<goal>.default_order; none do today, deliberately.
+    Nine entries, which is the number a human can reorder and defend — and the reason per-goal ordering is
+    finally affordable (plans/BUILDER_SECTION_ORDER.md 4d). Re-authoring 39 absolute positions per goal was
+    guesswork, which is why §4a supported the hook and deliberately defined none.
+    """
+    override = ((RULES.get("goals", {}).get(goal) or {}).get("slot_order")) if goal else None
+    return list(override or RULES.get("slots", []))
+
+
+def element_slots(section_type: str) -> list[str]:
+    """Which slot each INSTANCE of this element wants, in instance order.
+
+    One entry for almost everything. An element that brackets a page declares more: `event_date` is
+    ["announce", "reassure"], so a second Date lands beside the ask instead of against the first one, where
+    it says nothing (author, 2026-10-15). Instances past the end stay with the last.
+    """
+    spec = RULES.get("elements", {}).get(section_type) or {}
+    declared = [s for s in (spec.get("slots") or []) if isinstance(s, str)]
+    if declared:
+        return declared
+    slot = spec.get("slot")
+    return [slot] if isinstance(slot, str) and slot else []
+
+
+def element_order_mode(section_type: str) -> str:
+    """`ordered` — the skeleton decides — or `authored`, meaning the tenant does.
+
+    An authored element has no inherent position because it has no inherent meaning: a content block is
+    whatever the tenant wrote. Slot-ordering one is how a fourth content block jumps BACKWARDS to join the
+    first three. Authored elements are absent from the baseline entirely, so `_order_entries` sorts them
+    after everything that has a baseline position — i.e. at the end of the free band, in the order they
+    were added.
+    """
+    spec = RULES.get("elements", {}).get(section_type) or {}
+    return "authored" if spec.get("order_mode") == "authored" else "ordered"
+
+
+def baseline_order(goal: str = "") -> list[str]:
+    """The default section sequence for a page nobody has reordered (plans/BUILDER_SECTION_ORDER.md 4a/4d).
+
+    DERIVED from the catalog's slots, not authored. §4a researched a good sequence and shipped it as 39
+    absolute positions maintained by hand, which gave a new element no rule about where it belongs — so
+    every element added since was wedged in by whoever added it, and the list drifted until the default
+    read as arbitrary. Declaring a slot is a rule; an index is not.
+
+    A goal may still override the whole sequence via goals.<goal>.default_order (§4a's hook, kept), or
+    reorder the slots via goals.<goal>.slot_order, which is the cheap one. Neither is defined today.
     """
     override = ((RULES.get("goals", {}).get(goal) or {}).get("default_order")) if goal else None
-    return list(override or RULES.get("default_order", []))
+    if override:
+        return list(override)
+    slots = {slot: index for index, slot in enumerate(slot_order(goal))}
+    tail = len(slots)
+    entries = []
+    for position, (key, spec) in enumerate(RULES.get("elements", {}).items()):
+        band = spec.get("placement") or "free"
+        if band == "none":
+            continue
+        if band != "free":
+            # The locked bands carry no slot and need none — `_order_entries` sorts by band first, so all
+            # that matters is their order WITHIN the band. They must still be here: dropping them left the
+            # hero block (seo_title/hero_media/hero/headline/subheadline) tying on "not in the baseline",
+            # which made the H1's position depend on the sections array.
+            entries.append((PLACEMENT_BANDS.index(band), -1, 0, position, key))
+            continue
+        if element_order_mode(key) == "authored":
+            continue
+        first = (element_slots(key) or [""])[0]
+        entries.append((PLACEMENT_BANDS.index("free"), slots.get(first, tail),
+                        int(spec.get("rank") or 0), position, key))
+    return [key for *_, key in sorted(entries)]
 
 
 def _order_entries(entries, tenant_order=(), goal: str = ""):
@@ -420,16 +486,44 @@ def _order_entries(entries, tenant_order=(), goal: str = ""):
     sequence. An entry in neither list sorts last rather than first. Ties keep their incoming position.
     """
     entries = list(entries)
-    baseline = {key: index for index, key in enumerate(baseline_order(goal))}
+    order = baseline_order(goal)
+    baseline = {key: index for index, key in enumerate(order)}
     rank = {key: index for index, key in enumerate(tenant_order)}
     fallback = len(rank)
     tail = len(baseline)
+
+    # A SECOND instance of a bracketing element takes the next slot its type declares, not the position of
+    # the first one. `event_date` is ["announce", "reassure"], so the second Date lands beside the ask.
+    # Counted over the incoming entries, which is why this is computed once rather than inside sort_key.
+    seen: dict[str, int] = {}
+    instance_baseline: dict[int, int] = {}
+    slots = {slot: index for index, slot in enumerate(slot_order(goal))}
+    for index, (_, section_type) in enumerate(entries):
+        declared = element_slots(section_type)
+        count = seen.get(section_type, 0)
+        seen[section_type] = count + 1
+        if count == 0 or len(declared) <= 1:
+            continue
+        # Instances past the end stay with the LAST declared slot rather than falling back to the first —
+        # a third Date belongs with the second, not back at the top.
+        wanted_slot = declared[min(count, len(declared) - 1)]
+        # Position it as if it were the first element of that later slot, so it sorts among that slot's
+        # members rather than ahead of all of them.
+        wanted = slots.get(wanted_slot)
+        if wanted is None:
+            continue
+        nearest = [baseline.get(key, tail) for key in order
+                   if (element_slots(key) or [""])[0] == wanted_slot]
+        instance_baseline[index] = min(nearest) if nearest else tail
 
     def sort_key(pair):
         index, (key, section_type) = pair
         band = element_placement(section_type)
         band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
-        within = rank[key] if key in rank else fallback + baseline.get(section_type, tail)
+        if key in rank:
+            within = rank[key]
+        else:
+            within = fallback + instance_baseline.get(index, baseline.get(section_type, tail))
         return (band_index, within, index)
 
     return [index for index, _ in sorted(enumerate(entries), key=sort_key)]

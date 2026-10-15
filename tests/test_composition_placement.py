@@ -120,17 +120,52 @@ class OrderSectionKeysTests(unittest.TestCase):
         ordered = order_section_keys(["faq", "product_details"], tenant_order=["faq", "product_details"])
         self.assertEqual(ordered, ["faq", "product_details"])
 
-    def test_every_placeable_element_has_a_baseline_slot(self):
-        # Forces the two files to agree: an element added to the catalog without a baseline slot fails
-        # here rather than silently sorting to the end of the page.
+    def test_every_placeable_element_declares_where_it_goes(self):
+        """An element must say where it belongs — a SLOT, or `order_mode: authored` meaning the tenant
+        decides (plans/BUILDER_SECTION_ORDER.md 4d). Declaring neither fails here rather than silently
+        sorting to the end of every page.
+
+        This replaces the old "is it in default_order" check. That list was hand-authored, so the check
+        could only catch an element nobody had added to it; it could not catch one added in the wrong
+        place, which is how the list drifted until the default read as arbitrary. A slot is a rule.
+        """
         baseline = set(baseline_order())
+        slots = set(RULES["slots"])
         for key, spec in RULES["elements"].items():
-            if spec.get("placement") != "none":
-                with self.subTest(element=key):
-                    self.assertIn(key, baseline, f"{key} has no slot in default_order")
+            if spec.get("placement") == "none":
+                continue
+            with self.subTest(element=key):
+                if spec.get("placement") != "free":
+                    # Locked bands need no slot — band sorting dominates — but they must be ordered
+                    # among themselves, so they stay in the baseline.
+                    self.assertIn(key, baseline, f"{key} is locked but missing from the baseline")
+                    continue
+                if spec.get("order_mode") == "authored":
+                    self.assertNotIn(key, baseline, f"authored {key} must NOT have a baseline position")
+                    self.assertNotIn("slot", spec, f"authored {key} must not declare a slot")
+                    continue
+                self.assertIn(spec.get("slot"), slots, f"{key} declares no slot and is not authored")
+                self.assertIn(key, baseline, f"{key} has a slot but is missing from the derived baseline")
         for key in baseline:
             with self.subTest(baseline=key):
-                self.assertIn(key, RULES["elements"], f"default_order lists unknown element {key}")
+                self.assertIn(key, RULES["elements"], f"baseline lists unknown element {key}")
+
+    def test_the_derived_baseline_covers_every_ordered_element_exactly_once(self):
+        baseline = baseline_order()
+        self.assertEqual(len(baseline), len(set(baseline)), "an element appears twice in the baseline")
+        expected = {k for k, v in RULES["elements"].items()
+                    if v.get("placement") not in ("none", None)
+                    and not (v.get("placement") == "free" and v.get("order_mode") == "authored")}
+        self.assertEqual(set(baseline), expected)
+
+    def test_every_declared_slot_is_in_the_vocabulary(self):
+        """Including the per-instance `slots` lists — a typo there would silently drop an instance back
+        to its type's position, which is the sandwich quietly not happening."""
+        slots = set(RULES["slots"])
+        for key, spec in RULES["elements"].items():
+            for slot in ([spec["slot"]] if spec.get("slot") else []) + list(spec.get("slots") or []):
+                with self.subTest(element=key, slot=slot):
+                    self.assertIn(slot, slots)
 
     def test_an_unslotted_element_sorts_last_not_first(self):
         ordered = order_section_keys(["faq", "made_up_element", "product_details"])

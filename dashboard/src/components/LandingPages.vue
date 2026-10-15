@@ -2622,7 +2622,7 @@ import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
+import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -6542,7 +6542,12 @@ async function commitNewSection() {
   // its baseline position, which is the researched sequence and the whole point of having a baseline.
   // Recording an order here would quietly promote "I added a section" into "I have arranged this page
   // myself" and freeze the page against every future baseline change.
-  if (builder.section_order?.length) {
+  // An AUTHORED element (content block, photo, video, quote, numbered list, info cards) has no baseline
+  // slot at all — it has no inherent position because it has no inherent meaning, so where the tenant put
+  // it IS the answer (plans/BUILDER_SECTION_ORDER.md 4d). Adding one therefore records the arrangement,
+  // which is what makes "three blocks, some other elements, then two more" hold its shape instead of the
+  // last two jumping back to join the first three.
+  if (builder.section_order?.length || elementOrderMode(element?.type) === "authored") {
     // Once they HAVE arranged it, their order is authoritative — the new section joins the end of it
     // rather than jumping to a baseline slot they never chose. Keyed the way readers key it: only
     // repeatable types key by element id, everything else by type.

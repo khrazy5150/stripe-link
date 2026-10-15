@@ -59,7 +59,9 @@ class TipJarAvailabilityTests(unittest.TestCase):
     def test_it_has_a_baseline_slot_after_the_links(self):
         # The destinations come first, then the ask: a tip jar above someone's links is begging before
         # introducing yourself.
-        order = RULES["default_order"]
+        from stripe_link.domain.composition import baseline_order
+
+        order = baseline_order()
         self.assertIn("tip_jar", order)
         self.assertGreater(order.index("tip_jar"), order.index("link_cards"))
 

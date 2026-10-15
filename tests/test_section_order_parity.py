@@ -67,7 +67,9 @@ class ComposePageOwnsOrderTests(unittest.TestCase):
 
     def test_unarranged_page_gets_the_baseline(self):
         got = [s["id"] for s in compose_page({}, self.PAGE)]
-        self.assertEqual(got, ["ab", "cb", "cta"], "baseline puts author_bio before content_block, cta last")
+        self.assertEqual(got, ["ab", "cta", "cb"],
+                         "author_bio(explain) before checkout_cta(ask); content_block is AUTHORED, so it "
+                         "has no slot and lands at the end of the free band (4d)")
 
     def test_tenant_order_is_obeyed_when_present(self):
         # Keyed the way sections are keyed: content_block is repeatable so it keys by id, the rest by type.
@@ -122,10 +124,21 @@ class RowListMatchesPageTests(unittest.TestCase):
                 self.assertEqual(row_order, [i for i in page_order if i in set(row_order)])
 
     def test_a_repeatable_element_is_placed_by_its_type(self):
-        # The specific regression: an id-keyed row has no baseline entry of its own, so without the type it
-        # sorts to the very end instead of to content_block's slot ahead of the FAQ.
+        """The specific regression: an id-keyed row has no baseline entry of its OWN, so an implementation
+        that forgets the type sorts it to the very end instead of to its type's slot.
+
+        Uses `catalog_grid` — repeatable AND still `ordered` — rather than `content_block`. Content blocks
+        became AUTHORED in 4d and genuinely belong at the end, so the correct answer and the regression's
+        answer now coincide for them: the test would pass while guarding nothing.
+        """
+        rows = [("el_cg", "catalog_grid"), ("faq", "faq"), ("author_bio", "author_bio")]
+        # catalog_grid(what) -> author_bio(explain) -> faq(objection).
+        self.assertEqual(order_section_keys(rows, []), ["el_cg", "author_bio", "faq"])
+
+    def test_an_authored_element_sorts_to_the_end_of_its_band(self):
+        """The other half of 4d, kept beside its opposite so the two rules are read together."""
         rows = [("el_cb", "content_block"), ("faq", "faq"), ("author_bio", "author_bio")]
-        self.assertEqual(order_section_keys(rows, []), ["author_bio", "el_cb", "faq"])
+        self.assertEqual(order_section_keys(rows, []), ["author_bio", "faq", "el_cb"])
 
 
 class JsMirrorMatchesPythonTests(unittest.TestCase):
@@ -156,7 +169,12 @@ class JsMirrorMatchesPythonTests(unittest.TestCase):
                 orderSections(c.sections.map(([type, id]) => ({{ type, id }})), c.tenant_order).map((s) => s.id)),
               order_section_keys: f.order_section_keys.map((c) => orderSectionKeys(c.keys, c.tenant_order)),
               typed_entries: orderSectionKeys(
+                [{{key: "el_cg", type: "catalog_grid"}}, {{key: "faq", type: "faq"}}, {{key: "author_bio", type: "author_bio"}}], []),
+              authored_entries: orderSectionKeys(
                 [{{key: "el_cb", type: "content_block"}}, {{key: "faq", type: "faq"}}, {{key: "author_bio", type: "author_bio"}}], []),
+              sandwich: orderSections(
+                [{{type: "event_date", id: "d1"}}, {{type: "checkout_cta", id: "cta"}}, {{type: "event_date", id: "d2"}}], []
+              ).map((s) => s.id),
               keys: [sectionOrderKey({{type: "content_block", id: "cb1"}}), sectionOrderKey({{type: "author_bio", id: "ab"}})],
             }}));
             """
@@ -174,8 +192,16 @@ class JsMirrorMatchesPythonTests(unittest.TestCase):
         self.assertEqual(js["order_section_keys"],
                          [order_section_keys(c["keys"], c["tenant_order"]) for c in FIXTURES["order_section_keys"]])
         self.assertEqual(js["keys"], ["cb1", "author_bio"])
-        self.assertEqual(js["typed_entries"], ["author_bio", "el_cb", "faq"],
+        self.assertEqual(js["typed_entries"], ["el_cg", "author_bio", "faq"],
                          "JS must place an id-keyed row by its TYPE, exactly as Python does")
+        self.assertEqual(js["authored_entries"], ["author_bio", "faq", "el_cb"],
+                         "an AUTHORED type sorts after everything with a slot, in both runtimes")
+        # The second instance of a bracketing element takes the NEXT slot its type declares (4d), so a
+        # second Date lands beside the ask rather than against the first one. Both runtimes or neither.
+        self.assertEqual(js["sandwich"], ["d1", "cta", "d2"])
+        self.assertEqual(js["sandwich"], [s["id"] for s in order_sections(
+            [{"type": "event_date", "id": "d1"}, {"type": "checkout_cta", "id": "cta"},
+             {"type": "event_date", "id": "d2"}], [])])
         # ...and both match the fixtures' declared expectations, not merely each other.
         self.assertEqual(js["order_sections"], [c["out"] for c in FIXTURES["order_sections"]])
         self.assertEqual(js["order_section_keys"], [c["out"] for c in FIXTURES["order_section_keys"]])
