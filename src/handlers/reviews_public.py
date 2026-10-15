@@ -41,22 +41,80 @@ def _form_values(event) -> dict:
     return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
 
 
+def _requested_mode(event, method: str) -> str:
+    """The mode the REQUEST asks for.
+
+    `resolve_stripe_mode` reads a JSON body, a query param or a header -- and this form posts back
+    **urlencoded**, which is none of the three. So the POST reads its own hidden field first; without that,
+    a form that rendered correctly from `?mode=live` would submit itself into the test books and the
+    submission would 404 after the buyer had typed their review.
+    """
+    if method == "POST":
+        declared = str(_form_values(event).get("mode") or "").strip().lower()
+        if declared in ("live", "test"):
+            return declared
+    return resolve_stripe_mode(event)
+
+
+def _settle_product(build_repo, tenant_id: str, product_id: str, requested: str):
+    """Find the product, and report which mode's books it was found in. `(product, mode)`.
+
+    The requested mode first. Falling back to the OTHER one is what makes invites already sitting in
+    inboxes work: they were sent before the link carried a `mode` at all, so they resolve to the fail-safe
+    "test" and their live product is simply not there. A product is public, read-only and tenant-scoped, so
+    looking in both books costs one `get` on a path that was about to answer 404 anyway.
+
+    Logged when it happens, because once every invite in circulation carries its mode this should stop --
+    and if it does not, something new has forgotten it.
+    """
+    if not tenant_id or not product_id:
+        return None, requested
+    other = "test" if requested == "live" else "live"
+    for mode in (requested, other):
+        try:
+            product = build_repo(mode).get(tenant_id, product_id)
+        except Exception:  # noqa: BLE001 — a lookup failure in one mode must not hide the other
+            product = None
+        if product:
+            if mode != requested:
+                print(f"[review] product {product_id} found in {mode}, link asked for {requested}")
+            return product, mode
+    return None, requested
+
+
 def handler(event, context, *, reviews_repo=None, products_repo=None, sites_repo=None, invites_repo=None):
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
-    mode = resolve_stripe_mode(event)
-    reviews_repo = reviews_repo or reviews_repository()
-    products_repo = products_repo or products_repository(mode=mode)
+    if method not in {"GET", "POST"}:
+        return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
+
+    requested = _requested_mode(event, method)
+    values = query_params(event) if method == "GET" else _form_values(event)
+    tenant_id = str(values.get("tenant_id") or "").strip()
+    product_id = str(values.get("product_id") or "").strip()
+
+    # The honeypot answers before anything is looked up: a bot must not be able to tell a real product
+    # from an invented one by how long the reply takes or what it says.
+    if method == "POST" and str(values.get(HONEYPOT_FIELD) or "").strip():
+        return _html_response(_page("Thank you!", "Your review has been received."))
+
+    def build_repo(mode):
+        return products_repo or products_repository(mode=mode)
+
+    product, mode = _settle_product(build_repo, tenant_id, product_id, requested)
+    if not product:
+        return _html_response(_page("This review link is no longer valid.", "The product could not be found."), status=404)
+
+    # Sites and invites are read from the mode the PRODUCT turned out to be in, so a healed link marks the
+    # review a verified purchase and cancels the remaining emails instead of silently doing neither.
     if sites_repo is None and os.environ.get("SITES_TABLE"):
         sites_repo = sites_repository(mode=mode)
     if invites_repo is None and os.environ.get("REVIEWS_TABLE"):
         invites_repo = review_invites_repository(mode=mode)
     if method == "GET":
-        return render_form(event, products_repo, sites_repo)
-    if method == "POST":
-        return submit_review(event, reviews_repo, products_repo, invites_repo)
-    return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
+        return render_form(values, product, mode, sites_repo)
+    return submit_review(event, values, product, mode, reviews_repo or reviews_repository(), invites_repo)
 
 
 def _business_name(sites_repo, tenant_id: str) -> str:
@@ -72,27 +130,17 @@ def _business_name(sites_repo, tenant_id: str) -> str:
     return ""
 
 
-def render_form(event, products_repo, sites_repo):
-    params = query_params(event)
+def render_form(params, product, mode, sites_repo):
     tenant_id = str(params.get("tenant_id") or "").strip()
-    product_id = str(params.get("product_id") or "").strip()
-    product = products_repo.get(tenant_id, product_id) if tenant_id and product_id else None
-    if not product:
-        return _html_response(_page("This review link is no longer valid.", "The product could not be found."), status=404)
-    product_name = str(product.get("name") or "your purchase")
     business = _business_name(sites_repo, tenant_id)
-    return _html_response(_form_html(tenant_id, product_id, product_name, business, str(params.get("invite") or ""), str(params.get("token") or "")))
+    return _html_response(_form_html(
+        tenant_id, str(product.get("product_id") or ""), str(product.get("name") or "your purchase"),
+        business, str(params.get("invite") or ""), str(params.get("token") or ""), mode=mode))
 
 
-def submit_review(event, reviews_repo, products_repo, invites_repo=None):
-    values = _form_values(event)
-    # Honeypot: a real person leaves it blank. Silently thank-and-drop so bots learn nothing.
-    if str(values.get(HONEYPOT_FIELD) or "").strip():
-        return _html_response(_page("Thank you!", "Your review has been received."))
+def submit_review(event, values, product, mode, reviews_repo, invites_repo=None):
     tenant_id = str(values.get("tenant_id") or "").strip()
-    product_id = str(values.get("product_id") or "").strip()
-    if not tenant_id or not product_id or not products_repo.get(tenant_id, product_id):
-        return _html_response(_page("This review link is no longer valid.", "The product could not be found."), status=404)
+    product_id = str(product.get("product_id") or "").strip()
     try:
         rating = int(str(values.get("rating") or "").strip() or 0)
     except ValueError:
@@ -120,7 +168,11 @@ def submit_review(event, reviews_repo, products_repo, invites_repo=None):
         validate_review(review)
         reviews_repo.put(review)
     except (DocumentValidationError, RepositoryError) as exc:
-        return _html_response(_form_html(tenant_id, product_id, str(products_repo.get(tenant_id, product_id).get("name") or ""), "", "", "", error=str(exc)), status=400)
+        # Back to the form with what they typed still standing, not a dead end -- and carrying the same
+        # mode, so a corrected resubmission lands in the books the product was actually found in.
+        return _html_response(_form_html(tenant_id, product_id, str(product.get("name") or ""), "",
+                                         str(values.get("invite") or ""), str(values.get("token") or ""),
+                                         mode=mode, error=str(exc)), status=400)
     return _html_response(_page("Thank you!", "Your review has been submitted and will appear once it's approved."))
 
 
@@ -171,7 +223,7 @@ def _page(title: str, message: str) -> str:
             f"<h1>{_e(title)}</h1><p class=sub>{_e(message)}</p></div></div></body></html>")
 
 
-def _form_html(tenant_id, product_id, product_name, business, invite_id, token, error: str = "") -> str:
+def _form_html(tenant_id, product_id, product_name, business, invite_id, token, *, mode: str = "test", error: str = "") -> str:
     stars = "".join(
         f"<input type=radio id=star{n} name=rating value={n}{' checked' if n == 5 else ''}>"
         f"<label for=star{n} title='{n} of 5'>&#9733;</label>"
@@ -189,6 +241,9 @@ def _form_html(tenant_id, product_id, product_name, business, invite_id, token, 
         f"<input type=hidden name=product_id value='{_e(product_id)}'>"
         f"<input type=hidden name=invite value='{_e(invite_id)}'>"
         f"<input type=hidden name=token value='{_e(token)}'>"
+        # Carried forward because this posts urlencoded, which `resolve_stripe_mode` cannot read: a form
+        # that rendered from the live books would otherwise submit itself into the test ones.
+        f"<input type=hidden name=mode value='{_e(mode)}'>"
         f"<input class=hp type=text name={HONEYPOT_FIELD} tabindex=-1 autocomplete=off>"
         f"<label>Your rating</label><div class=stars>{stars}</div>"
         f"<label for=author>Your name</label><input id=author name=author maxlength=120 required>"

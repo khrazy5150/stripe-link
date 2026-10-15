@@ -60,12 +60,22 @@ def mark_step_sent(invite: dict[str, Any], day: int, now: int) -> dict[str, Any]
 
 
 def review_link(base_url: str, invite: dict[str, Any]) -> str:
+    """The emailed "Leave a review" link.
+
+    Carries `mode`, because products are stored per Stripe mode (`PRODUCT#live#...`) and the form resolves
+    the mode from the REQUEST. Without it every invite resolved to the fail-safe "test" and told a real
+    buyer "This review link is no longer valid -- the product could not be found" about a live product that
+    was there (reported 2026-10-14, same cause as the download link that refused a paid order the same day).
+    """
     from urllib.parse import urlencode
     query = urlencode({
         "tenant_id": invite.get("tenant_id", ""),
         "product_id": (invite.get("target") or {}).get("id", ""),
         "invite": invite.get("invite_id", ""),
         "token": invite.get("token", ""),
+        # The invite's OWN mode, not the sender's ambient one: the invite was written beside the order it
+        # came from and is the only thing here that knows which books that was.
+        "mode": "live" if str(invite.get("stripe_mode") or "").strip().lower() == "live" else "test",
     })
     return f"{str(base_url).rstrip('/')}/review?{query}"
 
