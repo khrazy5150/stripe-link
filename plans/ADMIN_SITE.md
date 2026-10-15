@@ -34,6 +34,39 @@ What the screen needs, and why each part:
 same failure one step later. Pair the screen with a real `abuse@` that notifies a person, and let the screen
 be where that person then works.
 
+## 1b. Review removal queue (added 2026-10-15)
+
+The same shape as §1, a different target — and the reason it lands here is a decision taken in
+[[REVIEWS]]: **tenants may no longer approve, reject or delete reviews.** Only a real buyer can write one
+(submission requires the invite token), every review publishes on submission, and removal moves to this
+site. A tenant's lever becomes a report.
+
+Reuse the §1 intake rather than building a second one: the same `abuse_reports` table and the same
+`POST /report` endpoint, with the target being a review rather than a page.
+
+| | Why |
+|---|---|
+| Reviews **held by the harm filter** | Objective matches only — phone numbers, emails, URLs, slurs. The filter never judges sentiment, so anything here is a genuine "is this publishable" question. Held, not published. |
+| Reports **from tenants**, with the reason they gave | The only path by which a tenant can act at all. |
+| **How many reports name this reviewer or this tenant** | Same question §1 asks of `source_ip`: one grudge or a pattern? A tenant reporting every two-star review is visible here, and that is deliberate. |
+| Remove with a **reason code** | Fixed list: spam, not a customer, abusive or illegal content, personal data, wrong product, reviewer withdrawal. **"Low rating" is not on the list.** Stored on the review. |
+| Dismiss with a note | A dismissed report leaves the review published, untouched. |
+
+**The rule that makes this queue honest: a report never hides the review.** If flagging pulled a review
+down pending a decision, tenants would flag every two-star review and recover curation with a delay — the
+integrity promise laundered through this queue. The review stays up until the platform removes it.
+
+**What this queue must not become.** A merchant can no longer protect their own page, so the platform's
+response time is now their exposure — more directly than in §1, where the reporter is usually a stranger.
+A slur or a published phone number sitting live for three days because nobody read this is worse for that
+merchant than the delete button they used to have. Two things keep it off this queue in the first place,
+and they are part of the same design, not optional extras: the **automated harm filter** (most urgent
+content never publishes) and **reviewer self-erasure** (the author withdraws their own words through a
+tokenized link, no human involved). Ship those with it, not after it.
+
+**Same caveat as §1, and sharper:** the monitored address and a target response time are the part no screen
+supplies. Here a paying merchant is the one waiting.
+
 ## 2. Candidates, unagreed
 
 Collected so they are not lost. None of these is a commitment, and several may belong elsewhere.

@@ -93,6 +93,92 @@ filter by target/status. Rejected reviews never render and never count toward th
 - **social_proof pack** — approved reviews feed the existing testimonials/ratings slots (a new source into
   existing surfaces, no new page vocabulary).
 
+## Review integrity: who may write one, and who may remove one (decided 2026-10-15)
+
+The reviews a tenant displays are a claim made to their customers and, through `AggregateRating`, to Google.
+A tenant who can approve the good ones and reject the bad ones is making that claim about a set they chose.
+So the power to curate has to go — but removing it is only safe once **writing** a review is restricted,
+and today it is not.
+
+### The hole this closes
+
+The public review form takes **anonymous submissions**. `GET /review?tenant_id=…&product_id=…` renders for
+anyone, `submit_review` accepts a tokenless POST, and `_consume_invite` says so outright: *"an open/tokenless
+submission is fine — just not verified."* The invite token only sets `verified_purchase`.
+
+Both ids are **in the public HTML of every published page** — `checkout-tenant-id` and
+`checkout-product-id`, emitted because the checkout script needs them. Verified against a live page
+(2026-10-15). There is also **no rate limit** on the endpoint: a honeypot field and nothing else.
+
+So moderation is currently the only thing between an anonymous POST and a merchant's live page. Remove it
+with nothing in its place and the result is an open publishing vector on someone else's domain.
+
+### The decisions
+
+1. **Only a real buyer may write a review.** Submission **requires the invite token**. The token is already
+   single-use and bound to `(order, product)`, so the plumbing exists. `verified_purchase` stops being a
+   flag and becomes the definition — every review is one.
+2. **There is no tenant approval step.** A submitted review publishes. The tenant cannot approve, reject,
+   hold or delete. This is the whole point: integrity is not won by letting a tenant refuse a review, it is
+   won by making sure only a real customer can write one.
+3. **Three removal paths, and only one needs a human at the platform:**
+   - **An automated pre-publication harm filter.** Objective patterns only — phone numbers, email
+     addresses, URLs, a slur list. A match holds the review for admin review instead of publishing it.
+     **This is a HARM filter, never a QUALITY filter**: it must be structurally incapable of holding a
+     review for being negative, or moderation has been rebuilt with extra steps. Rating is not an input.
+   - **Reviewer self-erasure.** A tokenized link in the reviewer's own confirmation — the opaque-token,
+     no-accounts pattern already used by tip-jar cancel and cart unsubscribe. The person who wrote it can
+     withdraw it. This discharges the erasure right with no human, no tenant and no admin.
+   - **Tenant reports abuse → the platform admin decides.** Reuses the existing abuse intake
+     ([[ADMIN_SITE]] §1). Rare, once anonymity is gone.
+4. **A report NEVER hides the review.** If flagging pulled a review down pending a decision, tenants would
+   flag every two-star review and get curation back with a delay — the integrity promise laundered through
+   the platform's own queue. The tenant's lever is a **report**, not a switch. The review stays up until
+   the platform removes it.
+5. **A tenant may still refuse to display reviews at all** — all of them, via the Phase 2.5 element. That
+   is not curation: no subset is chosen, no claim is made, and the markup goes with it (see Phase 2.5).
+   All-or-nothing is the only display lever a tenant gets.
+
+### What this costs, stated plainly
+
+The merchant can no longer protect their own page; the platform's response time becomes their exposure. A
+slur or a doxxed number sitting live for three days because nobody read the queue is worse for them than a
+delete button would have been. That trade is only acceptable because paths 1 and 2 keep the urgent cases
+away from the queue. **It therefore needs the monitored address and a target response time that
+[[ADMIN_SITE]] already names as the part code cannot supply** — and it needs them more than the page-abuse
+queue does, because here a paying merchant is the one waiting.
+
+At one tenant the queue is empty and free. At five hundred it is a support function. Paths 1 and 2 are what
+stop it needing to be staffed; do not ship path 3 alone and rely on an inbox.
+
+### Statuses: redefined, not migrated
+
+`REVIEW_STATUSES` stays `{pending, approved, rejected}` — renaming them would be a migration for no
+behavioural gain, and existing documents keep working. What changes is who may move a review between them
+and why:
+
+| Stored | Now means | Who sets it |
+|---|---|---|
+| `approved` | published and visible | the system, on submission |
+| `pending` | **held by the harm filter**, awaiting a platform admin | the filter only — never a tenant |
+| `rejected` | removed, with a stored reason code | platform admin, or reviewer self-erasure |
+
+Removal always carries a **reason code** from a fixed list (spam, not a customer, abusive or illegal
+content, personal data, wrong product, reviewer withdrawal). **"Low rating" is not on the list and no UI
+offers it** — that is the structural change that makes sentiment-curation impossible rather than merely
+discouraged.
+
+### Consequences to carry through
+
+- **The dashboard Reviews screen loses Approve / Reject / Delete** and becomes a read-only record plus a
+  "report a problem" action. The screen keeps earning its place: it is where a tenant reads what customers
+  said, and where [[REVIEWS]]'s invite performance will surface.
+- **`verified_purchase` must become visible** — on the page, in the JSON-LD, and in the dashboard. It is
+  written today and used **nowhere** (`reviews_public.py:165` is its only appearance in the codebase). Once
+  every review is a verified purchase it is also the claim worth making to a reader.
+- **The public form without a token should stop rendering**, not just stop accepting. A form that collects
+  a review and then refuses it wastes a real person's effort.
+
 ## Where each kind of review surfaces (amended 2026-10-15)
 
 Product reviews and business reviews answer different questions and carry different markup rights, so they

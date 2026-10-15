@@ -3593,6 +3593,45 @@ choice.
   external-integration effort (Google API access + app verification), similar in shape to the calendar OAuth
   path — best started when GBP management becomes a priority.
 
+### ⭐⭐ HIGH — anyone can post a review; the tenant decides which ones survive (found 2026-10-15)
+
+Two halves of one problem, and neither is safe to fix alone. Design: **`plans/REVIEWS.md` "Review integrity"**
++ **`plans/ADMIN_SITE.md` §1b**.
+
+**Half one — writing.** The public review form takes **anonymous submissions**. `GET /review` renders for
+anyone with a `tenant_id` and `product_id`, and `submit_review` accepts a tokenless POST — `_consume_invite`
+says so: *"an open/tokenless submission is fine — just not verified."* Both ids are **in the public HTML of
+every published page** (`checkout-tenant-id`, `checkout-product-id`, emitted for the checkout script;
+verified against a live page). There is **no rate limit** — a honeypot and nothing else. Today moderation is
+the only thing between an anonymous POST and a merchant's live page.
+
+**Half two — curating.** A tenant can approve the good reviews and reject the bad ones, which makes
+`AggregateRating` a claim about a set they chose. `verified_purchase` is written at
+`reviews_public.py:165` and read **nowhere**, so a tenant moderating cannot even tell a real buyer from a
+stranger.
+
+**The fix, in order — and the order matters:**
+
+1. **Require the invite token to submit.** Single-use, already bound to `(order, product)`. Every review
+   becomes a verified purchase by construction. Stop rendering the tokenless form, do not merely refuse it.
+2. **Then remove the approval step.** Reviews publish on submission; the tenant cannot approve, reject or
+   delete. Doing this *before* step 1 would turn the anonymous hole into an open publishing vector.
+3. **Three removal paths**: an automated **harm** filter (phone numbers, emails, URLs, slurs — never
+   sentiment, rating is not an input), **reviewer self-erasure** via a tokenized link (the tip-jar /
+   cart-unsubscribe pattern), and **tenant report → platform admin** via the existing abuse intake.
+   Removal always carries a reason code; **"low rating" is not on the list and no UI offers it**.
+4. **A report never hides the review** — otherwise tenants flag every two-star and recover curation with a
+   delay.
+5. **Surface `verified_purchase`** on the page, in the JSON-LD and in the dashboard.
+
+**Why ⭐⭐:** half one is an open write path to live merchant pages with markup Google reads, today. Half two
+undermines the entire reason the review system exists. A tenant may still hide **all** reviews via the
+Phase 2.5 element (markup goes with them) — all-or-nothing is not curation.
+
+**Cost to accept:** the merchant can no longer protect their own page, so platform response time becomes
+their exposure. Paths in (3) keep the urgent cases off the queue; the monitored address and a target
+response time are the part no screen supplies.
+
 ### ⭐ HIGH — reviews render in the wrong places (found 2026-10-15, walking a live purchase)
 
 Two defects in shipped behaviour, both visible to buyers today. Neither is a plan gap — the reviews work,
