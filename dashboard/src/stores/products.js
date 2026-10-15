@@ -32,6 +32,19 @@ function localId(prefix = "local") {
 }
 
 /**
+ * The product's id, minted here if the form does not have one yet.
+ *
+ * A NEW product needs an id before it is saved, because two things are keyed on it while the tenant is
+ * still filling the form in: the generated SKU, and the storage key a download file is uploaded under.
+ * Minting it once, in one place, is what keeps the uploaded object and the saved product pointing at each
+ * other -- `buildProductDocument` keeps `form.product_id` when it is already set.
+ */
+export function ensureProductId(form) {
+  if (!form.product_id) form.product_id = localId("local");
+  return form.product_id;
+}
+
+/**
  * A merchant SKU: 5 chars from each of the first two name words, then product_id's unique tail.
  * e.g. "Creatine Gummies" + local_fgt7iPiPiL3 -> CREAT-GUMMI-FGT7IPIPIL3
  *

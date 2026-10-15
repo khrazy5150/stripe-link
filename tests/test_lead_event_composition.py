@@ -84,7 +84,10 @@ class TheProductPickerOffersIt(unittest.TestCase):
 
     def test_the_wizard_blocks_on_the_step_that_asks(self):
         """Required where it is asked, not discovered two steps later as a save error."""
-        guard = self.PRODUCTS[self.PRODUCTS.index("const wizardCanAdvance"):][:1200]
+        # Bounded by the END of the computed, not by a character count: a fixed slice fails the moment a
+        # line is added above the branch it is checking, which says nothing about the branch.
+        guard = self.PRODUCTS[self.PRODUCTS.index("const wizardCanAdvance"):]
+        guard = guard[:guard.index("\n});")]
         self.assertIn('action === "register_event"', guard)
         self.assertIn("Boolean(form.value.lead_capture.event_id)", guard)
 

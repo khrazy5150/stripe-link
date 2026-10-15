@@ -265,6 +265,13 @@
               <section v-if="form.product_type === 'physical'" class="wizard-subsection">
                 <ProductVariantsField :form="form" surface="wizard" :consequence="shippingConsequence" />
               </section>
+
+              <!-- The digital counterpart of the box above: what the buyer actually receives. Asked HERE,
+                   while the tenant is describing the product, because the alternative was to save it and
+                   reopen it -- and a download product saved without its file sells a receipt and nothing
+                   else. Optional: the file can still be attached later from the edit form. -->
+              <ProductDownloadField v-if="form.product_type === 'digital'" :form="form"
+                                    v-model:uploading="uploadingAsset" @error="formError = $event" />
             </template>
 
             <template v-else-if="wizardIntent === 'lead_gen'">
@@ -433,18 +440,8 @@
             <span class="field-note">Choose whether this product collects payment or captures lead information. Payment products are set up to charge through Stripe automatically.</span>
           </label>
 
-          <section v-if="form.product_type === 'digital' && form.product_intent === 'transaction'" class="digital-asset-field">
-            <div class="field-heading"><span>Download File</span></div>
-            <div v-if="form.digital_asset && form.digital_asset.filename" class="digital-asset-current">
-              <span class="font-mono">📎 {{ form.digital_asset.filename }}</span>
-              <button type="button" class="secondary-action" @click="form.digital_asset = null">Remove</button>
-            </div>
-            <label v-else class="digital-asset-picker">
-              <input type="file" :disabled="uploadingAsset" @change="onDigitalFileChange" />
-              <span>{{ uploadingAsset ? "Uploading…" : "Choose a file to deliver after purchase" }}</span>
-            </label>
-            <span class="field-note">Buyers receive a secure, purchase-verified download link in their receipt email.</span>
-          </section>
+          <ProductDownloadField v-if="form.product_type === 'digital' && form.product_intent === 'transaction'"
+                                :form="form" v-model:uploading="uploadingAsset" @error="formError = $event" />
 
           <label v-if="form.product_intent === 'lead_gen' && leadTargetLabelFor(form.lead_capture.action)">
             {{ leadTargetLabelFor(form.lead_capture.action) }}
@@ -553,7 +550,9 @@
 
           <footer class="product-modal-footer">
             <button class="secondary-action" type="button" @click="closeCreateModal">Cancel</button>
-            <button class="primary-action" type="submit" :disabled="store.savingStatus">
+            <!-- Held while a file is still uploading, for the same reason the wizard holds its step:
+                 the save would carry no digital_asset and the tenant would be told it worked. -->
+            <button class="primary-action" type="submit" :disabled="store.savingStatus || uploadingAsset">
               {{ store.savingStatus ? "Saving..." : "Save Product" }}
             </button>
           </footer>
@@ -627,7 +626,7 @@
 <script setup>
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { apiRequest, getStripeMode } from "../api/client";
-import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, unitCostToInput, useProductsStore } from "../stores/products";
+import { defaultProductPrice, ensureProductId, formatMoney, generateSku, normalizeTag, priceSummary, unitCostToInput, useProductsStore } from "../stores/products";
 import { useEventsStore } from "../stores/events";
 import { useServicesStore } from "../stores/services";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
@@ -657,6 +656,7 @@ import { useRefundPolicyStore } from "../stores/refundPolicy";
 import ProductImagesField from "./products/ProductImagesField.vue";
 import ProductTagsField from "./products/ProductTagsField.vue";
 import ProductVariantsField from "./products/ProductVariantsField.vue";
+import ProductDownloadField from "./products/ProductDownloadField.vue";
 import { defaultColorVariant, defaultSizeVariant } from "../utils/productVariants";
 import ListCard from "./shared/ListCard.vue";
 
@@ -798,6 +798,10 @@ const intentNamePlaceholder = computed(() => ({
 // Step 1 needs a choice; step 2 needs a name, and a lead product needs its action -- without one there is
 // nothing for the page to do. Everything else on step 2 has a workable default.
 const wizardCanAdvance = computed(() => {
+  // An upload in flight holds the step open. Advancing mid-upload leaves the file to land on a form that
+  // has already moved on -- or, on the last step, to land after the save, which is how a download product
+  // gets created with nothing to deliver.
+  if (uploadingAsset.value) return false;
   if (wizardStepKey.value === "purpose") return Boolean(wizardIntent.value);
   if (wizardStepKey.value === "pricing") {
     return !form.value.prices.some((price) => price.pricing_model === "recurring" && !price.billing_interval);
@@ -1114,7 +1118,7 @@ function defaultProductForm() {
 // only when creating, only if the tenant hasn't typed their own, and never once the product exists.
 watch(() => form.value.name, (name) => {
   if (editingProduct.value || skuTouched.value) return;
-  form.value.sku = generateSku(name, ensureProductId());
+  form.value.sku = generateSku(name, ensureProductId(form.value));
 });
 
 function openCreateModal() {
@@ -1375,29 +1379,6 @@ function canBuildWithAi(product) {
   if (!product || product.__service) return false;
   if (product.product_type === "service") return false;
   return product.product_intent !== "lead_gen" && product.product_intent !== "tip_jar";
-}
-
-function ensureProductId() {
-  if (!form.value.product_id) {
-    const alpha = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    form.value.product_id = "local_" + Array.from({ length: 11 }, () => alpha[Math.floor(Math.random() * alpha.length)]).join("");
-  }
-  return form.value.product_id;
-}
-
-async function onDigitalFileChange(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  uploadingAsset.value = true;
-  formError.value = "";
-  try {
-    form.value.digital_asset = await store.uploadDigitalAsset(ensureProductId(), file);
-  } catch (error) {
-    formError.value = `Upload failed: ${error.message}`;
-  } finally {
-    uploadingAsset.value = false;
-    event.target.value = "";
-  }
 }
 
 function canSyncProduct(product) {
