@@ -381,6 +381,22 @@ def whole_number(value: Any) -> int | None:
     return value if isinstance(value, int) else None
 
 
+def real_number(value: Any) -> float | None:
+    """`value` as a float if it IS a number, else None — the float-allowing sibling of `whole_number`.
+
+    Same trap, different type check: `isinstance(x, (int, float))` is False for the `Decimal` DynamoDB
+    hands back, so any validator using it refuses to re-validate a document the software itself wrote.
+    Found by hitting it (2026-10-15): a page carrying a `rating` element could not be saved a second time,
+    because `rating.value` allows fractions and so was missed by the integer sweep that fixed the rest.
+    `organization.geo` had it too, and a Site with coordinates is saved from the Sites editor every time.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        return float(value)
+    return None
+
+
 def require_int_in_range(document: dict[str, Any], field: str, low: int, high: int,
                         label: str | None = None) -> int:
     """A whole number between `low` and `high`, as a VALUE rather than as a Python type.
@@ -1850,7 +1866,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "rating":
             optional_string(section, "label", "Rating label")
             value = section.get("value")
-            if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 5):
+            number = real_number(value)
+            if value is not None and (number is None or not 0 <= number <= 5):
                 raise DocumentValidationError("Rating value must be a number between 0 and 5.")
             count = section.get("count")
             if count is not None and (whole_number(count) is None or whole_number(count) < 0):
@@ -2892,7 +2909,7 @@ def validate_site_organization(organization: Any) -> None:
             raise DocumentValidationError("organization.geo must be an object.")
         for coord in ("latitude", "longitude"):
             value = geo.get(coord)
-            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+            if value is not None and real_number(value) is None:
                 raise DocumentValidationError(f"organization.geo.{coord} must be a number.")
     hours = organization.get("opening_hours")
     if hours is not None:

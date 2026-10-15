@@ -192,3 +192,53 @@ class SameTrapElsewhereTests(unittest.TestCase):
             self.assertIsInstance(whole_number(value), int, msg=repr(value))
         for value in (True, False, "5", None, 4.5, Decimal("4.5")):
             self.assertIsNone(whole_number(value), msg=repr(value))
+
+
+class TheSameTrapInFloatsTests(unittest.TestCase):
+    """The integer sweep missed every check that ALLOWS fractions.
+
+    `isinstance(x, (int, float))` is False for a Decimal just as `isinstance(x, int)` is, so the two
+    float-allowing validators had the identical bug and were not caught by looking for the integer form.
+    Found by hitting it: writing a page that carries a `rating` element and saving it again (2026-10-15).
+    """
+
+    def test_a_page_with_a_rating_can_be_saved_twice(self):
+        from stripe_link.domain.documents import validate_page_document
+
+        page = {
+            "schema_version": "2026-05-29", "document_type": "page", "tenant_id": "t1",
+            "page_id": "p1", "name": "Sample", "offer_id": "o1",
+            # As the page comes back out of DynamoDB on the second save.
+            "route": {"slug": "sample"},
+            "sections": [{"type": "rating", "id": "r", "value": Decimal("4.5"), "count": Decimal("128")}],
+        }
+        validate_page_document(page)
+
+    def test_a_site_with_coordinates_can_be_saved_twice(self):
+        """A Site with geo is re-validated on every save from the Sites editor, so this one was live."""
+        from stripe_link.domain.documents import validate_site
+
+        validate_site({
+            "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_ABC123",
+            "tenant_id": "t1", "environment": "live", "name": "Axel Mart", "status": "active",
+            "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},
+            "organization": {"name": "Axel Mart", "entity_type": "OnlineStore",
+                             # As they come back out of DynamoDB.
+                             "geo": {"latitude": Decimal("47.6062"), "longitude": Decimal("-122.3321")}},
+            "indexing": {"eligibility": "blocked"},
+            "pages": {"/": {"page_id": "page_home01", "page_type": "landing", "enabled": True}},
+            "created_at": 1, "updated_at": 1,
+        })
+
+    def test_nonsense_is_still_refused(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_page_document, real_number
+
+        for value in (True, "4.5", None):
+            self.assertIsNone(real_number(value), msg=repr(value))
+        for bad in (Decimal("5.5"), 6, -1):
+            with self.assertRaises(DocumentValidationError, msg=repr(bad)):
+                validate_page_document({
+                    "schema_version": "2026-05-29", "document_type": "page", "tenant_id": "t1",
+                    "page_id": "p1", "name": "Sample", "offer_id": "o1",
+                    "route": {"slug": "sample"},
+                    "sections": [{"type": "rating", "id": "r", "value": bad}]})
