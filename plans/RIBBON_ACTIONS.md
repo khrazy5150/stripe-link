@@ -113,7 +113,7 @@ is no voice capability, no inbound handling, and no number provisioning. Buildin
 
 That is worth doing when tenants ask for attributable phone leads. It is not worth blocking a ribbon on.
 
-## 6. No action at all — **built on the server, never offered**
+## 6. No action at all — **SHIPPED 2026-10-15**
 
 A ribbon is also a good-looking information banner: an announcement, a bonus callout, a "what you get"
 strip. Those want no button.
@@ -123,7 +123,7 @@ so both button branches fall through and the banner renders alone. The builder's
 simply has no `<option value="none">`. One line, and a capability the server already has stops being
 invisible.
 
-## 7. Acts like the page's CTA (author, 2026-10-15)
+## 7. Acts like the page's CTA — **SHIPPED 2026-10-15**
 
 > *"Most landing pages, especially long ones, have several buttons that act like the CTA button for
 > variety. The Page Ribbon is the perfect element to do this."*

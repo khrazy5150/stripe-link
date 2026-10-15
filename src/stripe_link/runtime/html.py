@@ -974,6 +974,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-event-live-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-event-join{display:block;text-align:center;text-decoration:none}",
     "    .sl-event-closed-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
+    "    .sl-lead-dialog{border:0;padding:0;background:none;max-width:min(52rem,calc(100vw - 3.2rem));width:100%}",
+    "    .sl-lead-dialog::backdrop{background:rgba(0,0,0,0.6)}",
+    "    .sl-lead-dialog .sl-lead-form{width:100%}",
+    "    .sl-lead-dialog-dismiss{display:flex;justify-content:flex-end;margin:0 0 -3.2rem 0;position:relative;z-index:1}",
+    "    .sl-lead-dialog-close{border:0;background:none;color:var(--sl-price-description);font-size:2.4rem;line-height:1;padding:0.6rem 1rem;cursor:pointer}",
+    "    .sl-checkout-cta.is-dialog{display:flex;justify-content:center}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-description{font-size:1.4rem;color:var(--sl-price-description)}",
@@ -2112,6 +2118,11 @@ _RENDER_CATEGORY_PAGES: dict[str, dict[str, str]] = {}
 # product_id -> its markup-eligible reviews for this render (plans/REVIEWS.md). Feeds the Product
 # aggregateRating/review JSON-LD AND the visible reviews block (Google requires the review text on-page).
 _RENDER_REVIEWS: dict[str, list[dict[str, Any]]] = {}
+
+# Set by the lead CTA when it renders its form inside a <dialog>, read by any element that offers to open
+# it. Render-scoped like the other indexes so one tenant's page cannot leak into another's on a warm
+# container -- cleared in the same `finally`.
+_RENDER_LEAD_DIALOG: dict[str, str] = {}
 # Business-target reviews for the page's Site — a visible trust block, NEVER a self-serving LocalBusiness
 # AggregateRating (Google suppresses those; plans/REVIEWS.md).
 _RENDER_BUSINESS_REVIEWS: list[dict[str, Any]] = []
@@ -2347,6 +2358,7 @@ def render_page(
         if isinstance(cat_entry, dict) and cat_entry.get("page_type") == "category" and cat_entry.get("category"):
             _RENDER_CATEGORY_PAGES[str(cat_entry["category"])] = {"slug": str(cat_slug), "label": str(cat_entry.get("label") or "")}
     _RENDER_REVIEWS.clear()
+    _RENDER_LEAD_DIALOG.clear()
     _RENDER_BUSINESS_REVIEWS.clear()
     for review in (reviews or []):
         target = review.get("target") or {}
@@ -2377,6 +2389,7 @@ def render_page(
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_CATEGORY_PAGES.clear()
         _RENDER_REVIEWS.clear()
+        _RENDER_LEAD_DIALOG.clear()
         _RENDER_BUSINESS_REVIEWS.clear()
         _RENDER_ORG.clear()
         _RENDER_SEO.clear()
@@ -2805,7 +2818,10 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
-    "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url), "version": 1},
+    "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url,
+                                                          offer=c.offer, resolved_offer=c.resolved_offer,
+                                                          checkout_url=c.checkout_url,
+                                                          products_by_id=c.products_by_id), "version": 1},
     "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
     "photo": {"render": lambda c: render_photo(c.section), "version": 1},
     "info_cards": {"render": lambda c: render_info_cards(c.section), "version": 1},
@@ -6642,7 +6658,8 @@ RIBBON_PURPOSES = ("promote_offer", "capture_lead", "promote_content", "custom")
 # same ideas. `none` is explicit: a ribbon with nothing to click is a content block, and should say so.
 # `promote_page` is a redirect whose target the BUILDER resolves from the tenant's own page list, so the
 # renderer treats it identically — the difference is where the URL comes from, not what happens on click.
-RIBBON_ACTIONS = ("redirect", "promote_page", "download", "email_file", "call_phone", "email", "none")
+RIBBON_ACTIONS = ("redirect", "promote_page", "download", "email_file", "call_phone", "email",
+                  "cta", "none")
 RIBBON_IMAGE_SIZES = "(max-width: 700px) 100vw, 320px"
 # A tenant types this URL, so the scheme is an injection surface: `javascript:` in an href executes on
 # click. Allow only schemes that navigate, plus same-origin paths.
@@ -6681,8 +6698,83 @@ def cropped_media(inner: str, crop: Any, surface: str, base_class: str) -> str:
     return f'<div class="{base_class} sl-cropped" style="{escape(style)}">{inner}</div>'
 
 
+def lead_form_is_open(offer: dict[str, Any] | None,
+                      products_by_id: dict[str, dict[str, Any]] | None) -> bool:
+    """Is there a registration form to open at all?
+
+    An offer with no scheduled event always has one. An event-backed offer has one only while a sitting is
+    open: during the session the page pushes the join link instead, and afterwards it shows the closed
+    notice. Resolved with the SAME `first_offer_lead_capture` / `event_open_occurrences` the CTA uses, so
+    every ask on the page turns off together instead of each forming its own opinion
+    (plans/RIBBON_ACTIONS.md §7).
+    """
+    capture = first_offer_lead_capture(offer or {}, products_by_id or {}) or {}
+    event_id = str(capture.get("event_id") or "")
+    scheduled = _RENDER_EVENTS.get(event_id) if event_id else None
+    if scheduled is None:
+        return True
+    now_epoch = int(time.time())
+    if event_live_occurrence(scheduled, now=now_epoch) is not None:
+        return False
+    return bool(event_open_occurrences(scheduled, now=now_epoch))
+
+
+def lead_dialog_enabled(page: dict[str, Any] | None) -> bool:
+    """Does this page's lead CTA open from a button? Read from the page's own sections, so the answer does
+    not depend on which element the renderer happens to reach first."""
+    for section in ((page or {}).get("sections") or []):
+        if isinstance(section, dict) and section.get("type") == "checkout_cta":
+            return str(section.get("form_presentation") or "inline").strip().lower() == "dialog"
+    return False
+
+
+def page_ask_attrs(page: dict[str, Any] | None, offer: dict[str, Any] | None,
+                   resolved_offer: dict[str, Any] | None, checkout_url: str | None,
+                   api_base_url: str | None,
+                   products_by_id: dict[str, dict[str, Any]] | None = None) -> tuple[str, str] | None:
+    """`(tag_open_attrs, element)` for a button that does what the page's own CTA does, or None.
+
+    THE point of this function is that there is one of it. `render_buy_cta` resolves the price, the Stripe
+    mode, the coupon, the cart endpoint, the post-purchase funnel and the BNPL methods into its button; a
+    second emitter that re-derived any of that would disagree the first time one changed -- a stale price on
+    one button, a bypassed upsell funnel on the other. "Acts exactly like the page's CTA" has to mean the
+    same code, not similar code (plans/RIBBON_ACTIONS.md §7).
+
+    Returns None when the page has no repeatable ask: a lead page whose form is shown inline has nothing to
+    open, and a closed event has nothing to offer at all. The caller then renders no button, which is the
+    honest outcome -- an ask that cannot be honoured is worse than no ask.
+    """
+    if not offer:
+        return None
+    if str(offer.get("product_intent") or "") == "lead_gen":
+        # A lead page in dialog mode: every ask opens the ONE form. Read from the PAGE rather than from a
+        # flag the CTA sets while rendering, because a tenant may drag a ribbon ABOVE the CTA and then the
+        # flag would not be set yet -- the ribbon would silently lose its button depending on where it sat.
+        if not lead_dialog_enabled(page):
+            return None
+        if not lead_form_is_open(offer, products_by_id):
+            # A closed or live event replaces the form entirely, so there is no dialog to open. Asked with
+            # the SAME functions the CTA uses rather than inferred from whether the CTA has rendered --
+            # otherwise the answer would depend on where the tenant dragged this element.
+            return None
+        return ('type="button" data-lead-open', "button")
+    context = checkout_context(page or {}, offer, resolved_offer or {}, checkout_url, api_base_url)
+    href = escape(str(context.get("href") or ""))
+    if not href:
+        return None
+    attrs = " ".join(
+        f'data-{escape(key)}="{escape(str(value))}"'
+        for key, value in (context.get("data") or {}).items()
+        if value is not None and value != ""
+    )
+    return (f'href="{href}" {attrs}'.strip(), "a")
+
+
 def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = None,
-                       api_base_url: str | None = None) -> str:
+                       api_base_url: str | None = None, *, offer: dict[str, Any] | None = None,
+                       resolved_offer: dict[str, Any] | None = None,
+                       checkout_url: str | None = None,
+                       products_by_id: dict[str, dict[str, Any]] | None = None) -> str:
     """An Attention Block, presented as a ribbon: a mid-scroll interruption that ASKS for something.
 
     Not a content_block (plans/ATTENTION_PRIMITIVE.md §4a): a content block informs, a ribbon acts. Same
@@ -6756,6 +6848,14 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
             f' data-stripe-mode="{mode}"'
             f' data-collect="{escape(collect)}">{escape(label)}</button>'
         )
+    elif action == "cta" and label:
+        # Whatever the page's own CTA does, done by the same code (plans/RIBBON_ACTIONS.md §7). `None` means
+        # the page has no repeatable ask right now -- an inline lead form, or an event that has closed --
+        # and then this renders NO button, because an ask that cannot be honoured is worse than no ask.
+        ask = page_ask_attrs(page, offer, resolved_offer, checkout_url, api_base_url, products_by_id)
+        if ask:
+            attrs, tag = ask
+            copy.append(f'        <{tag} class="sl-ribbon-cta sl-ribbon-cta-ask" {attrs}>{escape(label)}</{tag}>')
     elif href and label:
         external = href.startswith(("http://", "https://"))
         rel = ' rel="noopener"' + (' target="_blank"' if external else "")
@@ -7899,8 +7999,16 @@ def render_email_cta(
             return render_event_closed(scheduled_event, section, description=description)
         inputs = [render_occurrence_picker(open_rows)] + inputs
 
-    return "\n".join([
-        "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
+    # SHOWN ON THE PAGE, or opened from a button. Inline is the default, so no existing page changes:
+    # inline forms often convert better (the field is already in front of the visitor), modals win when
+    # the page is long and the form would otherwise sit far from the argument that earned the click. It is
+    # A/B-dependent, so the tenant chooses (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md).
+    #
+    # Only the dialog mode makes the ask REPEATABLE: the form stays a single instance -- the lead handler
+    # is `querySelector('[data-lead-form]')`, singular, so a second copy would never be bound -- and every
+    # button on the page opens that one. Recorded render-scoped so a ribbon can find it.
+    as_dialog = str(section.get("form_presentation") or "inline").strip().lower() == "dialog"
+    form_rows = [
         f"      <form class=\"sl-lead-form\" data-lead-form data-endpoint=\"{endpoint}\" "
         f"data-tenant-id=\"{tenant_id}\" data-offer-id=\"{offer_id}\" data-page-id=\"{page_id}\" "
         f"data-stripe-mode=\"{'live' if str(offer.get('stripe_mode') or '').strip().lower() == 'live' else 'test'}\""
@@ -7915,8 +8023,31 @@ def render_email_cta(
         f"        <button class=\"sl-cta\" type=\"submit\">{label}</button>",
         "        <p class=\"sl-lead-status\" data-lead-status role=\"status\" aria-live=\"polite\"></p>",
         "      </form>",
+    ]
+    if not as_dialog:
+        return "\n".join(line for line in [
+            "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
+            *form_rows,
+            "    </section>",
+        ] if line)
+
+    _RENDER_LEAD_DIALOG["open_selector"] = "[data-lead-open]"
+    # Native <dialog>, not a hand-rolled overlay: focus trapping, Escape-to-close and an inert background
+    # come with showModal(), and a registration form is exactly where hand-rolling those goes wrong.
+    # The section is ONLY the button. The title and description stay inside the dialog, where they head the
+    # form -- repeating them on the page under a button that opens them is the same two lines twice.
+    # Whatever pitches the button is the page's own content: the hero, or the ribbon that hosts it.
+    return "\n".join(line for line in [
+        "    <section class=\"sl-checkout-cta sl-email-cta is-dialog\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
+        f"      <button class=\"sl-cta\" type=\"button\" data-lead-open>{label}</button>",
         "    </section>",
-    ])
+        f"    <dialog class=\"sl-lead-dialog\" data-lead-dialog aria-label=\"{title or 'Registration'}\">",
+        "      <form method=\"dialog\" class=\"sl-lead-dialog-dismiss\">",
+        "        <button class=\"sl-lead-dialog-close\" type=\"submit\" aria-label=\"Close\">&times;</button>",
+        "      </form>",
+        *form_rows,
+        "    </dialog>",
+    ] if line)
 
 
 def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
@@ -8860,6 +8991,19 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        });",
         "      });",
         # Inline lead-capture form: POST to /leads, honeypot on the server, show a thank-you on success.
+        # One dialog, any number of buttons. `showModal()` gives focus trapping, Escape-to-close and an
+        # inert background for free, which a hand-rolled overlay has to earn and usually does not.
+        "      const leadDialog = document.querySelector('[data-lead-dialog]');",
+        "      if (leadDialog) {",
+        "        document.querySelectorAll('[data-lead-open]').forEach((trigger) => {",
+        "          trigger.addEventListener('click', () => {",
+        "            if (typeof leadDialog.showModal === 'function') { leadDialog.showModal(); }",
+        # Older browsers without <dialog>: show it in the flow rather than leaving a dead button. The form
+        # is a real form either way, so the only thing lost is the overlay.
+        "            else { leadDialog.setAttribute('open', ''); leadDialog.scrollIntoView({behavior: 'smooth', block: 'center'}); }",
+        "          });",
+        "        });",
+        "      }",
         "      const leadForm = document.querySelector('[data-lead-form]');",
         "      if (leadForm) {",
         "        const statusEl = leadForm.querySelector('[data-lead-status]');",

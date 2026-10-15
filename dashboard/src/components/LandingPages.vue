@@ -779,6 +779,22 @@
                   <span>Button Label</span>
                   <input v-model.trim="builder.cta_label" type="text" />
                 </label>
+                <!-- Shown on the page, or opened from a button. Inline is the default and is what every
+                     page did before this existed. Only the dialog mode makes the ask REPEATABLE: the form
+                     stays one instance and every button opens it, which is what lets a Page Ribbon act as
+                     a CTA (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md). -->
+                <label v-if="builderCta.type === 'email'" class="offer-field">
+                  <span>Registration form</span>
+                  <select v-model="builder.cta_form_presentation">
+                    <option value="inline">Shown on the page</option>
+                    <option value="dialog">Opens from a button</option>
+                  </select>
+                  <span class="field-note">
+                    {{ builder.cta_form_presentation === "dialog"
+                       ? "The page shows a button; the form opens over it. Lets a Page Ribbon act as a second CTA."
+                       : "The form sits on the page. A Page Ribbon cannot repeat it — there is no button to copy." }}
+                  </span>
+                </label>
                 <!-- The CTA panel's own controls. It is part of THIS section -- the shape is borrowed from
                      the page ribbon, but it is not a separate ribbon element, so it is edited here. One
                      panel serves call, external and download, so one set of controls does too. -->
@@ -1032,6 +1048,14 @@
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
                             <option value="email">Opens their email app</option>
+                            <!-- The server has honoured `none` since the element shipped: no href, so both
+                                 button branches fall through and the banner renders alone. It was simply
+                                 never offered (RIBBON_ACTIONS.md §6). -->
+                            <!-- Does exactly what the page's own CTA does, by calling the same emitter
+                                 (RIBBON_ACTIONS.md §7). On a lead page this needs the form in dialog mode,
+                                 which the hint below says rather than leaving a button that does nothing. -->
+                            <option value="cta">The same as the page's main button</option>
+                            <option value="none">Nothing — it is an information banner</option>
                           </select>
                         </label>
                       </div>
@@ -3964,6 +3988,7 @@ function defaultBuilderForm() {
     cta_label: "Buy Now",
     // The inline lead form's own heading and sub-line. Empty means "use the product's per-action default",
     // which is what the placeholder shows -- only an edit is stored.
+    cta_form_presentation: "inline",
     cta_form_title: "",
     cta_kicker: "",
     // Absent on the document means "the default for this CTA type" -- the number shows, a destination host
@@ -5093,6 +5118,7 @@ function populateBuilderFromPage(page) {
       || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
     // Only the OVERRIDE is loaded. The product's default shows as a placeholder, so loading it as a value
     // would store it back on the next save -- the same loop that wrote a filename into the hero.
+    cta_form_presentation: cta.form_presentation === "dialog" ? "dialog" : "inline",
     cta_form_title: cta.form_title || "",
     cta_kicker: cta.kicker || "",
     cta_show_destination: typeof cta.show_destination === "boolean"
@@ -5490,6 +5516,7 @@ function builderSectionCandidates(intent) {
       kicker: builder.cta_kicker || undefined,
       show_destination: builder.cta_show_destination,
       tone: builder.cta_tone !== "contrast" ? builder.cta_tone : undefined,
+      form_presentation: builder.cta_form_presentation === "dialog" ? "dialog" : undefined,
       form_title: builder.cta_form_title || undefined,
       live_title: builder.cta_live_title || undefined,
       live_label: builder.cta_live_label || undefined,

@@ -1958,6 +1958,13 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 optional_string(item, "slug", "Catalog grid item slug")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
+            # Whether a lead form is SHOWN on the page or opened from a button. Inline is the default, so a
+            # page that says nothing behaves exactly as it always has. Only the dialog mode makes the ask
+            # repeatable, because the form stays one instance and every button opens it
+            # (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md "The CTA is a BUTTON").
+            if section.get("form_presentation") is not None:
+                require_enum(section, "form_presentation", {"inline", "dialog"},
+                             "Checkout CTA form_presentation")
             # One line above the panel's identifying detail -- "Available 24 hours", "No account needed".
             # Shared by call / external / download, so the name is not call-specific.
             optional_string(section, "kicker", "Checkout CTA kicker", max_length=60)

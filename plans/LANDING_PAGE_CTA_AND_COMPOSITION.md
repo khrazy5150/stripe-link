@@ -40,7 +40,7 @@ Notes:
   page** (server HTML in `runtime/html.py`, + a small JS island for the interactive ones — email submit,
   booking calendar). Keep the two in sync via one shared markup contract.
 
-## The CTA is a BUTTON, not a form (added 2026-10-15)
+## The CTA is a BUTTON, not a form — **SHIPPED 2026-10-15**
 
 A lead CTA renders the form itself, inline, in the CTA slot. A buy CTA renders a button. That difference
 looks harmless and is the reason a long lead page cannot repeat its ask.

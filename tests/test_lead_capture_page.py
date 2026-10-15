@@ -511,7 +511,10 @@ class CtaDialogTests(unittest.TestCase):
         # save, which is the loop that wrote a filename into the hero.
         load = BUILDER.split("cta_form_title: cta.form_title", 1)[1][:120]
         self.assertIn('|| ""', load)
-        save = BUILDER.split('id: "checkout-cta"', 1)[1][:400]
+        # Bounded by the END of the section literal, not a character count: a fixed slice fails the moment
+        # a field is added above the one it checks, which says nothing about that field.
+        save = BUILDER.split('id: "checkout-cta"', 1)[1]
+        save = save[:save.index("\n    });")]
         self.assertIn("form_title: builder.cta_form_title || undefined", save)
 
 
