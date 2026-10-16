@@ -142,46 +142,48 @@ class LayoutTests(unittest.TestCase):
             html = render_coupon(_section(business_name="Luxe Spa — Downtown"), _offer(), {}, CHECKOUT)
         self.assertIn("Luxe Spa — Downtown", html)
 
-    def test_the_image_falls_back_to_the_offers_own_product_picture(self):
+    # The picture is CHOSEN, not inherited. These five used to assert a fallback chain -- image_url, then
+    # the offer's product photo, then the platform favicon -- which is exactly what made the default image
+    # impossible to remove (author, 2026-10-15). The chain is gone; what replaces it is tested here and in
+    # test_coupon_image_source.py.
+
+    def test_no_source_means_no_picture(self):
+        """Absent is NONE. A coupon that never chose a picture stops having one at its next publish, which
+        is the whole point of the change."""
+        html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+        self.assertIn("sl-coupon-noimage", html)
+        self.assertNotIn("sl-coupon-media", html)
+
+    def test_the_product_photo_is_no_longer_borrowed(self):
         products = {"p1": {"product_id": "p1", "images": ["https://cdn.example/massage.jpg"]}}
         html = render_coupon(_section(), _offer(), products, CHECKOUT)
-        self.assertIn("https://cdn.example/massage.jpg", html)
-        self.assertIn("sl-coupon-media", html)
-
-    def test_an_authored_image_wins_over_the_product_picture(self):
-        products = {"p1": {"product_id": "p1", "images": ["https://cdn.example/massage.jpg"]}}
-        html = render_coupon(_section(image_url="https://cdn.example/campaign.jpg"), _offer(), products, CHECKOUT)
-        self.assertIn("campaign.jpg", html)
         self.assertNotIn("massage.jpg", html)
 
-    def test_no_picture_falls_back_to_the_platform_mark(self):
-        # An empty panel looks unfinished. The mark is the LAST resort, contained rather than cropped,
-        # because a square logo filled into a tall panel loses its edges.
+    def test_the_platform_mark_is_no_longer_borrowed(self):
+        """It was the LAST resort and the reason an image appeared with nothing configured at all."""
         with patch("stripe_link.runtime.html.default_favicon_url", return_value="https://cdn/icon/favicon.png"):
             html = render_coupon(_section(), _offer(), {}, CHECKOUT)
-        self.assertIn("https://cdn/icon/favicon.png", html)
-        self.assertIn("sl-coupon-media-logo", html)
-        self.assertNotIn("sl-coupon-noimage", html)
-
-    def test_the_platform_mark_is_decorative_so_it_gets_empty_alt(self):
-        # It says nothing the text does not; a screen reader should not announce it before the offer.
-        with patch("stripe_link.runtime.html.default_favicon_url", return_value="https://cdn/icon/favicon.png"):
-            html = render_coupon(_section(), _offer(), {}, CHECKOUT)
-        self.assertIn('alt=""', html)
-
-    def test_a_real_picture_always_beats_the_platform_mark(self):
-        products = {"p1": {"product_id": "p1", "images": ["https://cdn.example/massage.jpg"]}}
-        with patch("stripe_link.runtime.html.default_favicon_url", return_value="https://cdn/icon/favicon.png"):
-            html = render_coupon(_section(), _offer(), products, CHECKOUT)
-        self.assertIn("massage.jpg", html)
         self.assertNotIn("favicon.png", html)
         self.assertNotIn("sl-coupon-media-logo", html)
+        self.assertIn("sl-coupon-noimage", html)
 
-    def test_single_column_only_when_the_platform_mark_is_unconfigured(self):
-        # default_favicon_url() returns "" when the asset CDN is not configured -- then there is genuinely
-        # nothing to show, and an empty panel would be worse than none.
-        with patch("stripe_link.runtime.html.default_favicon_url", return_value=""):
-            html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+    def test_an_uploaded_picture_is_used(self):
+        products = {"p1": {"product_id": "p1", "images": ["https://cdn.example/massage.jpg"]}}
+        html = render_coupon(_section(image_source="upload", image_url="https://cdn.example/campaign.jpg"),
+                             _offer(), products, CHECKOUT)
+        self.assertIn("campaign.jpg", html)
+        self.assertNotIn("massage.jpg", html)
+        self.assertIn("sl-coupon-media", html)
+
+    def test_an_uploaded_picture_describes_itself(self):
+        """A chosen photograph is not decorative, so it keeps a real alt -- unlike the mark that used to
+        sit here, which said nothing the text did not."""
+        html = render_coupon(_section(image_source="upload", image_url="https://cdn.example/campaign.jpg"),
+                             _offer(), {}, CHECKOUT)
+        self.assertNotIn('alt=""', html)
+
+    def test_single_column_when_there_is_no_picture(self):
+        html = render_coupon(_section(image_source="none"), _offer(), {}, CHECKOUT)
         self.assertIn("sl-coupon-noimage", html)
         self.assertNotIn("sl-coupon-media", html)
 

@@ -1838,6 +1838,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "refund_policy":
             optional_bool(section, "enabled", "Refund policy enabled")
             optional_string(section, "heading", "Refund policy heading")
+        elif section_type == "coupon":
+            # Which picture the ticket carries. A typo would silently mean "no image", and a tenant who
+            # uploaded one would see an empty panel with nothing to explain it.
+            if section.get("image_source") is not None:
+                require_enum(section, "image_source", {"none", "hero", "upload"}, "Coupon image_source")
         elif section_type == "faq":
             # Opening one question closes the others. Stored only when the tenant turns it OFF: absent
             # means on, so a page republished after this gains the behaviour without being edited.

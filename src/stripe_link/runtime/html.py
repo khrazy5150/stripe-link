@@ -6506,24 +6506,31 @@ def render_coupon(
         section.get("cta_label") or ("Click to redeem this offer" if live else "This offer has ended")
     ).strip()
 
-    # The tenant's own picture, then the thing being sold, then the platform mark. A coupon with an empty
-    # panel looks unfinished, and the mark is better than nothing there -- but it is the LAST resort, and a
-    # tenant who sets image_url or sells something with a photo never sees it.
-    image = str(section.get("image_url") or "").strip()
-    if not image:
-        for item in (offer or {}).get("items") or []:
-            product = (products_by_id or {}).get(str(item.get("product_id") or ""))
-            if product:
-                image = first_image(product)
-                if image:
-                    break
-    # A logo is not a photograph: cropping a square mark to fill a tall panel would cut its edges off, so
-    # it is contained and padded instead. Read from platform config rather than hardcoded -- the helper
-    # returns "" when unconfigured, which correctly falls back to the single-column layout.
+    # The tenant SAYS which picture, rather than a fallback chain deciding for them. It used to walk
+    # image_url -> the offer's product photo -> the platform favicon, which meant a coupon always had an
+    # image and there was no way to say "none" -- reported 2026-10-15 as "no way to get rid of the default
+    # image", and there was no way to upload one either.
+    #
+    # Absent means NONE, deliberately: the complaint was about an image nobody asked for, so a coupon that
+    # never chose one stops having one at its next publish.
+    source = str(section.get("image_source") or "none").strip().lower()
+    image = ""
+    crop = None
+    if source == "upload":
+        image = str(section.get("image_url") or "").strip()
+        crop = section.get("image_crop")
+    elif source == "hero":
+        # The page's own hero, resolved the SAME way the hero renders it, so the two cannot disagree about
+        # which picture the page leads with.
+        hero_section = next((row for row in ((page or {}).get("sections") or [])
+                             if isinstance(row, dict) and row.get("type") == "hero_media"), {})
+        hero_product = first_offer_product(offer or {}, products_by_id or {})
+        hero_images = hero_media_images(hero_section, offer or {}, hero_product)
+        image = str(next((row for row in hero_images if row), "") or "").strip()
+    # Kept for the one case where a picture is a MARK rather than a photograph: a square logo contained and
+    # padded instead of cropped to fill. Nothing reaches it now that the favicon fallback is gone, and it
+    # stays because the layout branch below still reads it.
     is_logo = False
-    if not image:
-        image = str(default_favicon_url() or "").strip()
-        is_logo = bool(image)
 
     transacts = not composition_key(offer or {}).startswith("lead_")
     if not live:
@@ -6557,8 +6564,12 @@ def render_coupon(
         # description a screen reader would read out before the offer itself.
         alt = "" if is_logo else escape(headline or business or "Offer")
         logo_class = " sl-coupon-media-logo" if is_logo else ""
-        media = (f'      <div class="sl-coupon-media{logo_class}">'
-                 f'<img src="{escape(image)}" alt="{alt}" loading="lazy" decoding="async"></div>')
+        # Through the shared cropper like every other croppable surface, so the class, the custom
+        # properties and the "no crop means no extra markup" rule are decided in one place.
+        media = "      " + cropped_media(
+            f'<img src="{escape(image)}" alt="{alt}" loading="lazy" decoding="async">',
+            crop, "coupon", f"sl-coupon-media{logo_class}",
+        )
 
     body = [
         media,

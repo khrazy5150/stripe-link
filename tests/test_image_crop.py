@@ -236,7 +236,7 @@ class CssIsolationTests(unittest.TestCase):
         picker, frames a photo, and the page ignores it.
         """
         from stripe_link.runtime.html import (render_author_bio, render_before_after, render_content_blocks,
-                                              render_photo)
+                                              render_coupon, render_photo)
 
         root = pathlib.Path(__file__).resolve().parents[1]
         declared = set(json.loads((root / "src/stripe_link/image_ratios.json").read_text())["placement"])
@@ -257,6 +257,12 @@ class CssIsolationTests(unittest.TestCase):
             "photo": render_photo({
                 "id": "ph", "type": "photo",
                 "images": [{"url": "https://i/x/large.webp", "crop": dict(crop)}]}),
+            # Only the UPLOAD source is croppable: "hero" borrows the hero's own picture and "none" has
+            # nothing to frame (plans/RIBBON_ACTIONS.md is unrelated; see the coupon image source work).
+            "coupon": render_coupon(
+                {"id": "c", "type": "coupon", "code": "X", "image_source": "upload",
+                 "image_url": "https://i/x/large.webp", "image_crop": dict(crop)},
+                {"offer_type": "single", "items": []}, {}, "", None, {}),
         }
         self.assertEqual(declared, set(rendered),
                          "a declared surface with no coverage here is one nobody has proven crops")
@@ -299,6 +305,7 @@ class MechanismTests(unittest.TestCase):
             # directly -- the shape is asked once, which is what keeps the two halves aligned.
             "before_after": None,
             "photo": "dashboard/src/components/LandingPages.vue",
+            "coupon": "dashboard/src/components/LandingPages.vue",
         }
         declared = set(table["placement"]) | set(table["asset"])
         self.assertEqual(declared, set(OWNER), "every declared surface needs a named owner here")
