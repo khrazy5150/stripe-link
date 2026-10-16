@@ -155,3 +155,48 @@ class TheClosedGateIsSharedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheBuilderActuallySavesThemTests(unittest.TestCase):
+    """Both new actions have no TARGET, and the serializer's closing rule is "no target, no button".
+
+    It discarded the whole cta object, so the section stored `cta: null`, and on reload the editor fell
+    back to `section.cta?.action || "redirect"`. The tenant picked an option, saved, and found it had
+    reverted to "Opens a link" — reported as the dropdown being stuck (2026-10-15). Shipping an option the
+    save path throws away is worse than not shipping it.
+    """
+
+    BUILDER = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.BUILDER = (pathlib.Path(__file__).resolve().parents[1]
+                       / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def serializer(self):
+        body = self.BUILDER.split("function ribbonCta(cta) {", 1)[1]
+        return body[:body.index("\n}")]
+
+    def test_both_targetless_actions_survive_the_save(self):
+        body = self.serializer()
+        self.assertIn('if (action === "none") return', body)
+        self.assertIn('if (action === "cta") return { cta: { label, action } };', body)
+
+    def test_they_are_handled_BEFORE_the_target_rule(self):
+        """The rule that discarded them is still correct for everything that needs a destination."""
+        body = self.serializer()
+        self.assertLess(body.index('action === "cta"'), body.index('const target = (cta.target'))
+        self.assertLess(body.index('action === "none"'), body.index('const target = (cta.target'))
+
+    def test_a_banner_needs_no_label(self):
+        """`none` renders no button, so requiring a label to store the choice would lose it again."""
+        body = self.serializer()
+        self.assertLess(body.index('action === "none"'), body.index("if (!label) return {};"))
+
+    def test_a_link_without_a_url_still_renders_no_button(self):
+        self.assertIn("return target ? { cta: { label, action, target } } : {};", self.serializer())
+
+    def test_neither_is_asked_for_a_destination(self):
+        """An empty Link box beside an action that never reads one is a question with no answer."""
+        self.assertIn("element.cta.action === 'none'", self.BUILDER)
+        self.assertIn("element.cta.action === 'cta'", self.BUILDER)

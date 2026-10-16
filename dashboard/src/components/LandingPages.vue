@@ -1109,6 +1109,16 @@
                         </small>
                         <small v-else class="field-note">Only published pages can be chosen. The live URL is filled in for you, and refreshed each time you save.</small>
                       </div>
+                      <!-- Neither of the targetless actions gets a destination field: "none" renders no
+                           button, and "cta" goes wherever the page's own button goes. Showing an empty
+                           Link box beside them asks for something that is never read. -->
+                      <p v-else-if="element.cta.action === 'none'" class="field-note">
+                        No button — this ribbon is an information banner.
+                      </p>
+                      <p v-else-if="element.cta.action === 'cta'" class="field-note">
+                        Goes wherever this page's main button goes, so there is nothing to fill in. On a
+                        lead page the form must be set to “Opens from a button”, or this renders no button.
+                      </p>
                       <label v-else class="offer-field">
                         <span>{{ element.cta.action === "call_phone" ? "Phone number" : element.cta.action === "email" ? "Email address" : "Link" }}</span>
                         <input v-model.trim="element.cta.target" type="text" :placeholder="element.cta.action === 'call_phone' ? '+1 555 010 1234' : element.cta.action === 'email' ? 'hello@example.com' : 'https://… or /another-page'" />
@@ -6693,8 +6703,17 @@ async function moveSectionBefore(dragKey, dropKey) {
 // kind of quietly-wrong link this codebase keeps producing.
 function ribbonCta(cta) {
   const action = cta.action || "redirect";
+  // NEITHER of these has a target, and the "no target, no button" rule at the bottom would throw both
+  // away: the section saved with `cta: null`, so on reload the editor fell back to "redirect" and the
+  // choice looked like it would not stick (reported 2026-10-15).
+  //
+  // `none` needs no label either — the whole point is that no button renders. The label is kept anyway so
+  // switching back to a real action does not lose what the tenant typed.
+  if (action === "none") return { cta: { action, label: (cta.label || "").trim() } };
   const label = (cta.label || "").trim();
   if (!label) return {};
+  // `cta` borrows the page's own ask, so the destination is whatever the page CTA does. Nothing to target.
+  if (action === "cta") return { cta: { label, action } };
   if (action === "email_file" && !businessEmailVerified.value) return {};
   if (action === "download" || action === "email_file") {
     // The asset IS the target here. Without a file there is nothing to hand over, so no button renders —
