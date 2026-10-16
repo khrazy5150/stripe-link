@@ -20,6 +20,12 @@ from stripe_link.domain.review_invites import review_link
 
 LIVE_PRODUCT = {"tenant_id": "t1", "product_id": "prod_a", "name": "Digital Marketing 101"}
 
+# The invite every request now carries. This file is about which BOOKS a link reads, not about who may
+# write — that is test_review_authorisation.py.
+INVITE = {"invite_id": "invite_1", "token": "tok", "status": "active", "order_id": "order_1",
+          "target": {"type": "product", "id": "prod_a"}}
+CREDENTIALS = {"invite": "invite_1", "token": "tok"}
+
 
 class FakeReviews:
     def __init__(self):
@@ -50,11 +56,11 @@ class ModedProducts:
 
 class FakeInvites:
     def __init__(self, invite=None):
-        self.invite = invite
+        self.invite = invite if invite is not None else dict(INVITE)
         self.saved = []
 
     def get(self, tenant_id, invite_id):
-        return self.invite if self.invite and self.invite["invite_id"] == invite_id else None
+        return dict(self.invite) if self.invite and self.invite["invite_id"] == invite_id else None
 
     def put(self, doc):
         self.saved.append(dict(doc))
@@ -86,8 +92,9 @@ class FormTests(unittest.TestCase):
         self.products = ModedProducts({"live": {("t1", "prod_a"): LIVE_PRODUCT}})
 
     def get(self, params):
-        return handler({"httpMethod": "GET", "queryStringParameters": params}, None,
-                       reviews_repo=self.reviews, products_repo=self.products.for_mode("live"), sites_repo=None)
+        return handler({"httpMethod": "GET", "queryStringParameters": {**CREDENTIALS, **params}}, None,
+                       reviews_repo=self.reviews, products_repo=self.products.for_mode("live"),
+                       sites_repo=None, invites_repo=FakeInvites())
 
     def test_a_live_link_renders_the_live_product(self):
         response = self.get({"tenant_id": "t1", "product_id": "prod_a", "mode": "live"})
@@ -118,7 +125,7 @@ class HealingTests(unittest.TestCase):
         original = module.products_repository
         module.products_repository = lambda mode=None: self.products.for_mode(mode)
         try:
-            return self.call({"httpMethod": "GET", "queryStringParameters": params})
+            return self.call({"httpMethod": "GET", "queryStringParameters": {**CREDENTIALS, **params}})
         finally:
             module.products_repository = original
 
@@ -158,7 +165,7 @@ class SubmitTests(unittest.TestCase):
 
     def base(self, **extra):
         return {"tenant_id": "t1", "product_id": "prod_a", "mode": "live", "rating": "5",
-                "author": "Keith", "body": "Worth it.", "company_website": "", **extra}
+                "author": "Keith", "body": "Worth it.", "company_website": "", **CREDENTIALS, **extra}
 
     def test_a_live_submission_is_stored(self):
         response = self.post(self.base())

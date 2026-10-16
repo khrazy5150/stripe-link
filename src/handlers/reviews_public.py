@@ -112,9 +112,51 @@ def handler(event, context, *, reviews_repo=None, products_repo=None, sites_repo
         sites_repo = sites_repository(mode=mode)
     if invites_repo is None and os.environ.get("REVIEWS_TABLE"):
         invites_repo = review_invites_repository(mode=mode)
+    # ONLY A REAL BUYER. Checked before the form renders, not only before it is accepted: a form that
+    # collects a review and then refuses it wastes a real person's effort, and one that renders for anyone
+    # is an invitation to try.
+    invite = _authorised_invite(invites_repo, tenant_id, product_id, values)
+    if invite is None:
+        return _not_invited()
+
     if method == "GET":
         return render_form(values, product, mode, sites_repo)
     return submit_review(event, values, product, mode, reviews_repo or reviews_repository(), invites_repo)
+
+
+def _authorised_invite(invites_repo, tenant_id: str, product_id: str, values) -> dict | None:
+    """The invite this request is authorised by, or None.
+
+    READ-ONLY: a GET must not spend the token, or opening the email twice would burn it. `_consume_invite`
+    does the spending, on the POST.
+
+    This is what closes the anonymous hole (plans/REVIEWS.md "Review integrity"). The form used to render
+    for anyone holding a tenant_id and a product_id — both of which sit in the public HTML of every
+    published page — and `submit_review` accepted a tokenless POST. Moderation was the only thing between
+    an anonymous POST and a merchant's live page, and moderation is what this work removes.
+    """
+    invite_id = str(values.get("invite") or "").strip()
+    token = str(values.get("token") or "").strip()
+    if not invites_repo or not invite_id or not token:
+        return None
+    try:
+        invite = invites_repo.get(tenant_id, invite_id)
+    except Exception:  # noqa: BLE001 — a lookup failure is an unauthorised request, not a 500
+        return None
+    if not invite or invite.get("token") != token:
+        return None
+    # Bound to the PRODUCT as well as the order: an invite for one purchase must not review another.
+    if str((invite.get("target") or {}).get("id") or "") != product_id:
+        return None
+    return invite
+
+
+def _not_invited() -> dict:
+    """What someone without a valid invite is told. The same answer for a missing token, a wrong one and an
+    invite for another product, so the page cannot be used to probe which of the three it was."""
+    return _html_response(_page(
+        "This review link is no longer valid.",
+        "Reviews can only be left from the link we email after a purchase."), status=403)
 
 
 def _business_name(sites_repo, tenant_id: str) -> str:

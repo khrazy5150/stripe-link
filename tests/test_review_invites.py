@@ -165,13 +165,28 @@ class VerifiedSubmissionTests(unittest.TestCase):
         self.assertEqual(review["order_id"], "o1")
         self.assertEqual(invites.get("t1", "invite_o1")["status"], "completed")  # canceled — no more emails
 
-    def test_bad_token_is_not_verified(self):
+    def test_bad_token_is_REFUSED(self):
+        """It used to store an unverified review -- "an open/tokenless submission is fine, just not
+        verified". That was the hole: moderation was the only thing between an anonymous POST and a
+        merchant's live page, and moderation is what the integrity work removes
+        (plans/REVIEWS.md "Review integrity"). A wrong token now writes nothing at all."""
         invites = FakeInvites([_invite(now=0)])
         resp = self._post({"tenant_id": "t1", "product_id": "prod_a", "invite": "invite_o1", "token": "wrong",
                            "rating": "4", "author": "Jane", "body": "ok", "company_website": ""}, invites)
-        self.assertEqual(resp["statusCode"], 200)
-        self.assertNotIn("verified_purchase", self.reviews.saved[0])
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(self.reviews.saved, [])
         self.assertEqual(invites.get("t1", "invite_o1")["status"], "active")  # untouched
+
+    def test_verified_purchase_is_now_the_definition_not_a_flag(self):
+        """Every stored review carries it, because every stored review came through an invite."""
+        # ONE invite object: plan_invite mints a fresh random token per call, so reading the token from a
+        # second one would authorise nothing.
+        invite = _invite(now=0)
+        invites = FakeInvites([invite])
+        self._post({"tenant_id": "t1", "product_id": "prod_a", "invite": "invite_o1",
+                    "token": invite["token"], "rating": "5", "author": "Jane", "body": "Great.",
+                    "company_website": ""}, invites)
+        self.assertTrue(self.reviews.saved[0]["verified_purchase"])
 
 
 if __name__ == "__main__":

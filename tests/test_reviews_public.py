@@ -28,21 +28,46 @@ class FakeSites:
 
 PRODUCT = {"tenant_id": "t1", "product_id": "prod_a", "name": "Creatine Gummies"}
 
+# Every request now carries the invite emailed after a purchase: the form no longer renders for anyone
+# holding a tenant_id and a product_id (plans/REVIEWS.md "Review integrity"). These are the credentials,
+# not the subject of these tests — the auth itself is tested in test_review_authorisation.py.
+INVITE = {"invite_id": "invite_1", "token": "tok", "status": "active", "order_id": "order_1",
+          "target": {"type": "product", "id": "prod_a"}}
+CREDENTIALS = {"invite": "invite_1", "token": "tok"}
+
+
+class FakeInvites:
+    def __init__(self, invite=None):
+        self.invite = dict(invite) if invite else dict(INVITE)
+        self.saved = []
+
+    def get(self, tenant_id, invite_id):
+        return dict(self.invite) if invite_id == self.invite["invite_id"] else None
+
+    def put(self, doc):
+        self.saved.append(dict(doc))
+        self.invite = dict(doc)
+        return dict(doc)
+
 
 class PublicReviewFormTests(unittest.TestCase):
     def setUp(self):
         self.reviews = FakeReviews()
         self.products = FakeProducts([PRODUCT])
         self.sites = FakeSites()
+        self.invites = FakeInvites()
 
     def _get(self, params):
-        return handler({"httpMethod": "GET", "queryStringParameters": params}, None,
-                       reviews_repo=self.reviews, products_repo=self.products, sites_repo=self.sites)
+        return handler({"httpMethod": "GET", "queryStringParameters": {**CREDENTIALS, **params}}, None,
+                       reviews_repo=self.reviews, products_repo=self.products, sites_repo=self.sites,
+                       invites_repo=self.invites)
 
     def _post(self, values):
         return handler({"httpMethod": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"},
-                        "body": urlencode(values), "requestContext": {"identity": {"sourceIp": "1.2.3.4"}}}, None,
-                       reviews_repo=self.reviews, products_repo=self.products, sites_repo=self.sites)
+                        "body": urlencode({**CREDENTIALS, **values}),
+                        "requestContext": {"identity": {"sourceIp": "1.2.3.4"}}}, None,
+                       reviews_repo=self.reviews, products_repo=self.products, sites_repo=self.sites,
+                       invites_repo=self.invites)
 
     def test_get_renders_form_with_product_and_business(self):
         resp = self._get({"tenant_id": "t1", "product_id": "prod_a"})
