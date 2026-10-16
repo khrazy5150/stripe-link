@@ -1843,6 +1843,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
             # uploaded one would see an empty panel with nothing to explain it.
             if section.get("image_source") is not None:
                 require_enum(section, "image_source", {"none", "hero", "upload"}, "Coupon image_source")
+            # Which of the five looks. Absent means `modern`; a typo would silently mean it too, and the
+            # tenant would pick a style and watch the page ignore them.
+            if section.get("style") is not None:
+                require_enum(section, "style", {"modern", "original", "ribbon", "bold", "dark"},
+                             "Coupon style")
         elif section_type == "faq":
             # Opening one question closes the others. Stored only when the tenant turns it OFF: absent
             # means on, so a page republished after this gains the behaviour without being edited.

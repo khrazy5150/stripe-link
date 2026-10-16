@@ -1252,6 +1252,62 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Once applied the ticket is a receipt, not an invitation: it stops inviting another click.
     "    .sl-coupon.is-applied{cursor:default}",
     "    .sl-coupon.is-applied .sl-coupon-cta{display:none}",
+    # ---- Coupon styles (author, 2026-10-15) ---------------------------------------------------------
+    # Five looks over ONE markup shape, so a style is a stylesheet question and the renderer stays a
+    # renderer. Four follow the page preset through --sl-coupon-*; `dark` fixes all three on purpose --
+    # it is a style, not a palette, and a dark ticket whose colours moved with the theme would stop being
+    # the thing the tenant picked.
+    #
+    # ORIGINAL is the design that shipped first, kept because a tenant who likes it should not be moved off
+    # it. It PINS the three properties back to the values that used to be hardcoded fallbacks: now that the
+    # ticket follows the preset, "original" has to say so rather than rely on a fallback that never fires.
+    # The dashed ticket edging it uses is the base, so there is nothing else to restate.
+    "    .sl-coupon[data-coupon-style='original']{--sl-coupon-accent:#e0402c;--sl-coupon-bg:#fff;"
+    "--sl-coupon-text:#16181d;--sl-coupon-cta-ink:#fff}",
+    # MODERN is the default and paints a plain card: no dashed ticket edging, the eyebrow small in the
+    # accent, and the redeem line a filled pill rather than a line of coloured text.
+    "    .sl-coupon[data-coupon-style='modern']{border:1px solid color-mix(in srgb,var(--sl-coupon-text,#16181d) 12%,transparent);"
+    "border-radius:1.8rem;box-shadow:0 1rem 2.4rem rgba(0,0,0,0.10)}",
+    "    .sl-coupon[data-coupon-style='modern'] .sl-coupon-media{border-right:0;background:transparent}",
+    "    .sl-coupon[data-coupon-style='modern'] .sl-coupon-brand{font-size:1.15rem;letter-spacing:0.16em}",
+    "    .sl-coupon[data-coupon-style='modern'] .sl-coupon-cta{display:inline-flex;align-items:center;gap:0.6rem;"
+    "margin-top:1rem;padding:0.95rem 1.8rem;border-radius:999px;background:var(--sl-coupon-accent,#e0402c);"
+    "color:var(--sl-coupon-cta-ink,#fff);font-size:1.4rem}",
+    # RIBBON keeps the torn-ticket feel and flies the headline as a flag. The picture moves to the RIGHT,
+    # which is what makes the banner the first thing read.
+    "    .sl-coupon[data-coupon-style='ribbon']{grid-template-columns:minmax(0,1fr) minmax(10rem,38%);"
+    "border:2px solid color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 30%,transparent);border-radius:1.6rem;padding:0.9rem}",
+    "    .sl-coupon[data-coupon-style='ribbon'] .sl-coupon-media{order:2;border-right:0;border-radius:1rem;overflow:hidden}",
+    "    .sl-coupon[data-coupon-style='ribbon'] .sl-coupon-body{order:1;border:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 40%,transparent);"
+    "border-radius:1rem;padding:1.6rem 1.7rem}",
+    # The flag: accent ground, notched tail, and the brand line sitting inside it.
+    "    .sl-coupon[data-coupon-style='ribbon'] .sl-coupon-brand{background:var(--sl-coupon-accent,#e0402c);"
+    "color:var(--sl-coupon-cta-ink,#fff);padding:0.7rem 2.4rem 0.7rem 1.2rem;margin:0 0 0.6rem -2.9rem;"
+    "clip-path:polygon(0 0,100% 0,calc(100% - 1.2rem) 50%,100% 100%,0 100%)}",
+    # BOLD is the marker-pen one: a highlighter behind the eyebrow, a thick swipe under the value, and the
+    # picture tilted like a photograph dropped on the page.
+    "    .sl-coupon[data-coupon-style='bold']{border:0;border-radius:1.2rem;"
+    "box-shadow:0 1.4rem 3.4rem rgba(0,0,0,0.16)}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-media{border-right:0;background:transparent;padding:1.6rem}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-media img{border-radius:0.4rem;transform:rotate(2deg);"
+    "box-shadow:0 0.6rem 1.8rem rgba(0,0,0,0.22);border:0.7rem solid var(--sl-coupon-bg,#fff)}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-brand{display:inline;color:var(--sl-coupon-text,#16181d);"
+    "background:color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent);"
+    "box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:0.25rem 0.6rem}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-value{display:inline-block;font-size:clamp(3.6rem,10vw,5.4rem);"
+    "box-shadow:inset 0 -0.5em 0 color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent)}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-code{border:2px dashed color-mix(in srgb,var(--sl-coupon-text,#16181d) 35%,transparent);"
+    "background:transparent}",
+    # DARK is FIXED. Every other style tracks the preset; this one is chosen for its own look, so its three
+    # custom properties are set here rather than inherited.
+    "    .sl-coupon[data-coupon-style='dark']{--sl-coupon-bg:#111827;--sl-coupon-text:#f8fafc;"
+    "--sl-coupon-accent:#f5c518;--sl-coupon-cta-ink:#111827;--sl-coupon-code-bg:rgba(255,255,255,0.08);"
+    "border:2px dashed #f5c518;border-radius:1.4rem}",
+    "    .sl-coupon[data-coupon-style='dark'] .sl-coupon-media{border-right:0;padding:1.4rem;background:transparent}",
+    "    .sl-coupon[data-coupon-style='dark'] .sl-coupon-media img{border-radius:1rem}",
+    "    .sl-coupon[data-coupon-style='dark'] .sl-coupon-code{border:2px dashed #f5c518}",
+    "    .sl-coupon[data-coupon-style='dark'] .sl-coupon-cta{display:inline-flex;align-items:center;gap:0.6rem;"
+    "margin-top:1rem;padding:0.95rem 1.8rem;border-radius:999px;background:#f5c518;color:#111827;font-size:1.4rem}",
     "    .sl-coupon-expired{filter:grayscale(1);opacity:0.7;box-shadow:none}",
     "    @media (max-width:34rem){.sl-coupon{grid-template-columns:minmax(0,1fr)}"
     ".sl-coupon-media{border-right:0;border-bottom:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent)}"
@@ -1547,6 +1603,13 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     # The ground under filled accent shapes, and the ink measured against THAT ground rather than against
     # the accent. A preset that wants white numerals darkens the ground; the measurement still decides the
     # ink, so the badge cannot end up unreadable whatever a preset chooses.
+    # The coupon ticket, which paints its own ground. These were never set, so the renderer's hardcoded
+    # fallbacks (#e0402c on white) were the whole design and a ticket ignored the page preset — reported
+    # 2026-10-15 as the coupon not following the theme. The `dark` style overrides all three back to fixed
+    # values, deliberately: it is a style, not a palette.
+    tokens.setdefault("coupon_accent", tokens["accent"])
+    tokens.setdefault("coupon_bg", tokens.get("card") or "#ffffff")
+    tokens.setdefault("coupon_text", section_readable_ink(tokens.get("card") or "#ffffff") or "#16181d")
     tokens.setdefault("badge_bg", tokens["accent"])
     tokens.setdefault("badge_ink", section_readable_ink(tokens["badge_bg"]) or SECTION_LIGHT_INK)
     tokens.setdefault("price_radio", tokens["accent"])
@@ -6460,6 +6523,11 @@ def coupon_is_live(section: dict[str, Any], now: int | None = None) -> bool:
     return int(now if now is not None else time.time()) < expires_at
 
 
+# The five coupon looks. `original` is the design that shipped first, kept so a tenant who likes it is not
+# forced off it; `modern` is the default for new and unstated sections.
+COUPON_STYLES = ("modern", "original", "ribbon", "bold", "dark")
+
+
 def render_coupon(
     section: dict[str, Any],
     offer: dict[str, Any],
@@ -6552,6 +6620,12 @@ def render_coupon(
 
     style = section_theme_vars(section)
     style_attr = f' style="{escape(style)}"' if style else ""
+    # Which of the five looks. One markup shape, five stylesheets — the renderer stays a renderer, and a
+    # new look is a CSS question rather than a new branch here. Absent means `modern` (author, 2026-10-15).
+    coupon_style = str(section.get("style") or "modern").strip().lower()
+    if coupon_style not in COUPON_STYLES:
+        coupon_style = "modern"
+    style_attr += f' data-coupon-style="{escape(coupon_style)}"' 
     themed = " sl-section-themed" if style else ""
     section_id = escape(str(section.get("id", "coupon")))
     state = "" if live else " sl-coupon-expired"

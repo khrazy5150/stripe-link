@@ -143,7 +143,14 @@ class ToneContrastTests(unittest.TestCase):
         self.assertEqual(SECTION_TONES, ("contrast", "accent", "soft"))
         builder = _BUILDER
         self.assertIn('value="contrast">Bold — high contrast with the page', builder)
-        self.assertNotIn('value="dark"', builder)
+        # Scoped to the TONE pickers, not the whole file. The rule is about naming a RELATIONSHIP after a
+        # colour: a tone called "dark" was a lie because what it produced depended on the preset. A fixed
+        # look may still be called dark and be telling the truth -- the coupon's `dark` style pins navy and
+        # gold whatever the preset is, which is why it is allowed (2026-10-15). Narrowed rather than
+        # deleted, so a tone named after a colour still fails here.
+        for picker in re.findall(r'v-model="[^"]*_tone"[^>]*>(.*?)</select>', builder, re.S):
+            self.assertNotIn('value="dark"', picker)
+            self.assertNotIn('value="light"', picker)
 
     def test_no_tone_pairs_one_designed_pair_with_another(self):
         # The structural half of the rule, so the reason survives even if the presets change.

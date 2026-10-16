@@ -1447,6 +1447,18 @@
                         <span>Value shown on the ticket</span>
                         <input v-model.trim="element.value_text" type="text" placeholder="$20 OFF" />
                       </label>
+                      <!-- Five looks over one markup shape. Four follow the page preset; `dark` is fixed
+                           on purpose, because it is a style rather than a palette. -->
+                      <label class="offer-field">
+                        <span>Style</span>
+                        <select v-model="element.style">
+                          <option value="modern">Modern — clean card, pill button</option>
+                          <option value="bold">Bold — marker type, tilted photo</option>
+                          <option value="ribbon">Ribbon — flag banner, photo on the right</option>
+                          <option value="dark">Dark — fixed navy and gold</option>
+                          <option value="original">Original — the first design</option>
+                        </select>
+                      </label>
                       <!-- The tenant SAYS which picture. It used to fall back image_url -> product photo
                            -> platform favicon, so a coupon always had an image and there was no way to
                            say "none" -- nor any way to upload one (reported 2026-10-15). -->
@@ -6035,7 +6047,7 @@ function newElement(type) {
   // The coupon is denormalized from the Coupons module when the tenant picks one, so the fields the
   // renderer needs live ON the section: a published artifact must not have to query the coupon table.
   if (type === "coupon") return { ...base, coupon_id: "", code: "", value_text: "", headline: "",
-    image_source: "none", image_url: "", image_crop: null,
+    style: "modern", image_source: "none", image_url: "", image_crop: null,
     terms: "", cta_label: "", destination_url: "", expires_at: null };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
   // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
@@ -6970,6 +6982,7 @@ function elementSection(element) {
       cta_label: element.cta_label || undefined, destination_url: element.destination_url || undefined,
       // The picture, which this serializer never carried: the editor showed a Picture field and the save
       // dropped it, so nothing a tenant typed there ever reached the page (found 2026-10-15).
+      style: element.style && element.style !== "modern" ? element.style : undefined,
       image_source: element.image_source === "hero" || element.image_source === "upload"
         ? element.image_source : undefined,
       ...(element.image_source === "upload"
@@ -7078,6 +7091,7 @@ function elementsFromPage(sections) {
         code: section.code || "", value_text: section.value_text || "", headline: section.headline || "",
         terms: section.terms || "", cta_label: section.cta_label || "",
         destination_url: section.destination_url || "", expires_at: section.expires_at ?? null,
+        style: section.style || "modern",
         image_source: section.image_source === "hero" || section.image_source === "upload"
           ? section.image_source : "none",
         image_url: section.image_url || "", image_crop: section.image_crop || null });
