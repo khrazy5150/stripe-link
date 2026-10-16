@@ -3619,6 +3619,25 @@ choice.
 - **Why deferred:** the money-movement substrate works and orders report correctly today; this is the P&L /
   tax-reporting layer on top.
 
+### ⭐⭐ HIGH — tenant suspension SHIPPED dev 2026-10-16; prod pending
+
+plans/ADMIN_SITE.md §1c. The Admin Site can now list every tenant and shut one down: published pages come
+off the air in seconds, checkout refuses on links already in the wild, the dashboard locks at sign-in and
+refresh, and nothing can publish. Reversible — restore puts the pages back through the ordinary publish
+path. Nothing of the tenant's is deleted.
+
+`platform_status` is its own field, **not** `billing_status`, which is rewritten wholesale by
+`platform_subscription_sync` and would lift a suspension on the tenant's next Stripe event.
+
+**Left:**
+1. **Prod.** Dev only so far.
+2. **Custom domains keep resolving** to a platform that now 404s. Pulling the Cloudflare route on
+   suspension is a slower, separate action.
+3. **No notification to the tenant.** They discover it at sign-in, which names the reason. An email at
+   suspension time is a legal statement and should be written as one, not invented in a handler.
+4. **Resolving an abuse report** still has no screen — a suspension does not close the report that
+   prompted it.
+
 ## Business Profile & Reviews
 
 ### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)
