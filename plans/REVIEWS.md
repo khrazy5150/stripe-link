@@ -259,8 +259,26 @@ work needs reviving, not re-planning.
   - **Step 3 — the platform removes, in a separate stack.** `../admin-site` ([[ADMIN_SITE]] §1b): the
     allow-list, the queue of held reviews, release, and removal with a reason code the **server** supplies.
     Deployed to dev and verified against live dev data.
+  - **The tenant's report path — SHIPPED dev 2026-10-15, completing Step 3.** `POST /reviews` with
+    `action: "report"`, and the Reviews screen gains "Report a problem" where Approve/Reject/Delete used
+    to be. Three things about it are the design, not details:
+    - **It cannot hide a review**, and not because it chooses not to: `build_review_report` returns a
+      report document and the review is not an output, and the handler never writes to the reviews
+      repository on this path. Proved end to end on dev — report filed, review still `approved`, held
+      queue still empty.
+    - **It is authenticated**, which is a deliberate departure from this plan's first suggestion of the
+      public `POST /report`. Same table, different door. "How many reports name this tenant" is the
+      question [[ADMIN_SITE]] §1b exists to ask, and an anonymous intake cannot answer it — so a tenant
+      reporting every two-star review would be invisible, and the lever could be abused quietly.
+    - **The reasons a merchant is offered contain no "unfair" and no "low rating."** The report list is
+      separate from the admin's removal list although the words overlap: a report is an allegation and a
+      removal is a finding, and sharing one list would let the report pre-write the verdict.
+    It sits **before** the entitlement gate: a tenant whose plan no longer includes reviews still has live
+    reviews on live pages, and a billing tier is the wrong reason to remove someone's only way to flag a
+    published phone number.
   **Still open from this phase:** `verified_purchase` on the page and in the JSON-LD (it is in the
-  dashboard only), and the tenant-facing report path — a tenant's lever today is to contact the platform.
+  dashboard only), and the monitored address with a target response time — the part no screen supplies,
+  and the merchant is the one waiting now.
 - **Phase 3 (optional, later): Merchant Center product-review XML feed** for Google Shopping stars — only when
   we run Merchant Center feeds and have 50+ reviews.
 - **GBP reviews** land with the **Business Profile GBP sync (that plan's Phase 2)** — display-only, never in

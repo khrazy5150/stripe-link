@@ -3643,15 +3643,21 @@ screen renders what the API returns, so a reason cannot be added by editing the 
 
 **What is left, in the order it matters:**
 
-1. **The tenant-facing report path** — `POST /report` with a review as its target, plus the "how many
-   reports name this tenant" count the queue needs to tell a pattern from a grudge. A tenant's only lever
-   today is to contact the platform directly, which is a smaller gap than it sounds (the same person reads
-   either), but it is the half of §1b that is not built.
-2. **`verified_purchase` on the PAGE and in the JSON-LD.** It is read in the dashboard now and nowhere
+1. **`verified_purchase` on the PAGE and in the JSON-LD.** It is read in the dashboard now and nowhere
    else, and once every review is a verified purchase it is also the claim worth making to a reader.
-3. **The monitored address and a target response time.** The part no screen supplies, and the merchant is
+2. **Resolving a report.** Rows stay `open` forever today; the admin can remove the review but cannot say
+   "looked at it, nothing wrong". Needs its own small screen, and deliberately was not guessed at — the
+   IAM grant is read-only so the gap cannot be closed by accident.
+3. **The page-report queue** (§1's original purpose) is still unread by any screen, even though §1b's
+   reports now sit in the same table next to them.
+4. **The monitored address and a target response time.** The part no screen supplies, and the merchant is
    the one waiting now that they cannot take a review down themselves.
-4. **Prod.** None of this is in prod yet — see the deploy entry below.
+5. **Prod.** None of this is in prod yet — see the deploy entry below.
+
+**The tenant report path SHIPPED dev 2026-10-15** and closed what used to be item 1: `POST /reviews` with
+`action: "report"`, authenticated rather than the public `/report` the plan first suggested, because the
+"is this a pattern?" count needs a verified reporter. Proved end to end on live dev — report filed, review
+still `approved`, held queue still empty.
 
 Original finding, kept because the reasoning is why the order above is the order:
 

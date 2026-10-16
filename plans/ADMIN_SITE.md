@@ -102,10 +102,23 @@ Verified against live dev data, not only in tests: a token-less request is refus
 the allow-list admit/refuse pair answers 200/403; a real review was removed with a reason, read back from
 the table carrying `removed_by`, and rolled back to its captured original.
 
-**Not built yet**: the tenant-facing report path (§1b's intake, which is `POST /report` with a review as
-its target), the "how many reports name this tenant" count, and the monitored address. Until the intake
-lands, a tenant's only route is to contact the platform directly — which is a smaller gap than it sounds,
-because the queue they would be reporting into is read by the same person either way.
+**The intake landed the same day.** A tenant reports from the Reviews screen through `POST /reviews` with
+`action: "report"` — the **authenticated** route, not the public `POST /report` this section first
+proposed. Same `abuse_reports` table, so §1 and §1b remain one queue, but a different door: the public
+endpoint cannot say *which tenant* filed, and "how many reports name this tenant" is the question this
+section exists to ask. Reports arrive carrying `target_type: "review"`, the review's id, rating and
+author, and the **verified** `reported_by`.
+
+The admin side reads them and shows them as **notes beside a review that is still published**, in a
+"Reported" view kept separate from the held queue. Mixing the two would teach the reader that a report
+takes something down, which is the one thing it must never do. Each review carries the reports naming it
+and the reporter's running total, so one report can be told from a pattern. Reports are **read and never
+written** here — the IAM grant says so, because resolving a report is a different decision from removing a
+review and has its own screen still to design.
+
+**Not built yet**: resolving or dismissing a report (the rows stay `open`), the page-report side of this
+screen (§1's own queue, still unread), and the monitored address with a target response time — the part no
+screen supplies, and now a paying merchant is the one waiting.
 
 ## 2. Candidates, unagreed
 
