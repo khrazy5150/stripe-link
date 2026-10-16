@@ -1,15 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getTenantId } from "../api/client";
-import { useToastsStore } from "./toasts";
-
-// A failure here is REPORTED WHERE THE CLICK WAS. The page-level banner sits above "Add a review", a
-// screen-height above the moderation buttons, so a failed Approve looked like a button that did nothing at
-// all -- which is how it was reported (2026-10-14). The banner stays for the record; the toast is what the
-// tenant actually sees.
-function reportFailure(message) {
-  useToastsStore().push({ severity: "warning", icon: "\u26a0\ufe0f", message });
-}
-
+import { apiRequest } from "../api/client";
 export const REVIEW_STATUSES = ["pending", "approved", "rejected"];
 
 export function reviewStatusLabel(status) {
@@ -75,32 +65,10 @@ export const useReviewsStore = defineStore("reviews", {
         this.saving = false;
       }
     },
-    async moderate(review, status) {
-      this.error = "";
-      try {
-        const body = await apiRequest(`/reviews/${encodeURIComponent(review.review_id)}/status`, {
-          method: "PATCH",
-          body: { tenant_id: review.tenant_id || getTenantId(), status },
-        });
-        const saved = body.review || { ...review, status };
-        const index = this.reviews.findIndex((r) => r.review_id === saved.review_id);
-        if (index >= 0) this.reviews.splice(index, 1, saved);
-        return saved;
-      } catch (error) {
-        this.error = error.message || "Failed to update the review.";
-        reportFailure(this.error);
-      }
-    },
-    async remove(review) {
-      this.error = "";
-      try {
-        const query = new URLSearchParams({ tenant_id: review.tenant_id || getTenantId() });
-        await apiRequest(`/reviews/${encodeURIComponent(review.review_id)}?${query.toString()}`, { method: "DELETE" });
-        this.reviews = this.reviews.filter((r) => r.review_id !== review.review_id);
-      } catch (error) {
-        this.error = error.message || "Failed to delete the review.";
-        reportFailure(this.error);
-      }
-    },
+    // NO moderate() and NO remove(). A tenant who could approve the good reviews and reject the bad
+    // ones would make the star rating a claim about a set they chose (plans/REVIEWS.md "Review
+    // integrity"). Only a real buyer can write one, every one publishes, and removal belongs to the
+    // author -- through the link in their own confirmation -- or to the platform.
+
   },
 });

@@ -13,6 +13,7 @@ The lesson is older than this bug (memory: "Decimal from DynamoDB" -- it 404'd p
 These tests therefore use Decimal fixtures, because an int fixture passes while the real document fails.
 """
 import json
+import pathlib
 import unittest
 from decimal import Decimal
 
@@ -108,34 +109,40 @@ class ModerationTests(unittest.TestCase):
         self.assertEqual(self.repo.put_calls, [])
 
 
-class ReportingTests(unittest.TestCase):
-    """A failed Approve must say so where the click was."""
+class TheTenantCanNoLongerCurateTests(unittest.TestCase):
+    """The moderation UI is gone (plans/REVIEWS.md "Review integrity").
 
-    SOURCE = None
+    A tenant who could approve the good reviews and reject the bad ones made `AggregateRating` a claim
+    about a set they chose. Only a real buyer can write one now, every one publishes, and removal belongs
+    to the author or to the platform.
+
+    These replace the tests for the failed-moderation toast: there is no moderation left to fail.
+    """
 
     @classmethod
     def setUpClass(cls):
-        import pathlib
-        cls.SOURCE = (pathlib.Path(__file__).resolve().parents[1]
-                      / "dashboard" / "src" / "stores" / "reviews.js").read_text(encoding="utf-8")
+        root = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+        cls.SCREEN = (root / "components" / "Reviews.vue").read_text(encoding="utf-8")
+        cls.STORE = (root / "stores" / "reviews.js").read_text(encoding="utf-8")
 
-    def test_moderation_failures_raise_a_toast(self):
-        """The page-level banner sits above "Add a review", a screen-height above the buttons -- so a
-        failed Approve read as a button that did nothing at all."""
-        body = self.SOURCE.split("async moderate(", 1)[1].split("async remove(", 1)[0]
-        self.assertIn("reportFailure(this.error)", body)
+    def test_the_screen_offers_no_approve_reject_or_delete(self):
+        for label in (">Approve<", ">Reject<", ">Delete<"):
+            with self.subTest(label=label):
+                self.assertNotIn(label, self.SCREEN)
 
-    def test_deletion_failures_do_too(self):
-        body = self.SOURCE.split("async remove(", 1)[1]
-        self.assertIn("reportFailure(this.error)", body)
+    def test_the_store_has_no_curation_actions(self):
+        """Removed rather than left unused: an action nobody calls is one the next screen will call."""
+        self.assertNotIn("async moderate(", self.STORE)
+        self.assertNotIn("async remove(", self.STORE)
 
-    def test_the_banner_is_still_set(self):
-        """The toast is transient; the banner remains the thing you can go back and read."""
-        self.assertIn('this.error = error.message || "Failed to update the review."', self.SOURCE)
+    def test_the_screen_still_reads_them(self):
+        """It is a record, not a dead end — and the thing worth showing is which are verified."""
+        self.assertIn("store.load()", self.SCREEN)
+        self.assertIn("review.verified_purchase", self.SCREEN)
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_verified_purchase_is_finally_surfaced(self):
+        """Written since the invite flow shipped and read NOWHERE until now."""
+        self.assertIn("Verified purchase", self.SCREEN)
 
 
 class SameTrapElsewhereTests(unittest.TestCase):

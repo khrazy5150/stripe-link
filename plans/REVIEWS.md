@@ -93,7 +93,19 @@ filter by target/status. Rejected reviews never render and never count toward th
 - **social_proof pack** — approved reviews feed the existing testimonials/ratings slots (a new source into
   existing surfaces, no new page vocabulary).
 
-## Review integrity: who may write one, and who may remove one (decided 2026-10-15)
+## Review integrity: who may write one, and who may remove one
+
+> **STATUS (2026-10-15): steps 1, 2 and two of the three removal paths SHIPPED to dev.**
+> Submission requires the invite token and the form no longer renders without one; reviews publish on
+> submission; the harm filter holds objectively unpublishable content; the author can withdraw from the
+> same email. The dashboard has lost Approve, Reject and Delete, and shows the verified-purchase badge
+> that had been written since the invite flow shipped and read nowhere.
+>
+> **STILL OPEN, and it is the gap that matters:** the tenant-reports → platform-decides path
+> ([[ADMIN_SITE]] §1b). Until it exists, a held review has no screen to be judged on and a published one
+> can only be taken down by its author. `PATCH /reviews/{id}/status` is deliberately still routed, because
+> removing it would leave the platform with no removal path at all — so the promise is currently enforced
+> in the dashboard, not in the API. §1b is what closes that, and it should be next.
 
 The reviews a tenant displays are a claim made to their customers and, through `AggregateRating`, to Google.
 A tenant who can approve the good ones and reject the bad ones is making that claim about a set they chose.

@@ -101,26 +101,17 @@
             </p>
             <p v-if="review.title" class="review-title">{{ review.title }}</p>
             <p class="review-body">{{ review.body }}</p>
-            <div class="button-row">
-              <button v-if="review.status !== 'approved'" class="secondary-action compact" type="button" @click="store.moderate(review, 'approved')">Approve</button>
-              <button v-if="review.status !== 'rejected'" class="secondary-action compact" type="button" @click="store.moderate(review, 'rejected')">Reject</button>
-              <button class="link-danger compact" type="button" @click="askDelete(review)">Delete</button>
-            </div>
+            <!-- NO Approve, Reject or Delete. A tenant who could keep the good ones and remove the bad
+                 ones would make the star rating a claim about a set they chose, and that is the claim
+                 this system exists to make honest (plans/REVIEWS.md "Review integrity"). Only a real
+                 buyer can write one, every one publishes, and removal belongs to the author or to the
+                 platform. A verified review you dislike is still true. -->
+            <div v-if="review.verified_purchase" class="review-verified">✓ Verified purchase</div>
           </article>
         </div>
       </div>
     </section>
 
-    <ConfirmDialog
-      :open="!!pendingDelete"
-      danger
-      title="Delete review?"
-      confirm-label="Delete"
-      @cancel="pendingDelete = null"
-      @confirm="confirmDelete"
-    >
-      Delete the review by "{{ pendingDelete?.author || 'this customer' }}"? This can't be undone.
-    </ConfirmDialog>
   </section>
 </template>
 
@@ -129,12 +120,10 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { apiRequest } from "../api/client";
 import { useReviewsStore, REVIEW_STATUSES, reviewStatusLabel, reviewStatusClass } from "../stores/reviews";
 import { useSitesStore } from "../stores/sites";
-import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
 const store = useReviewsStore();
 const sitesStore = useSitesStore();
 const products = ref([]);
-const pendingDelete = ref(null);
 
 const form = reactive({ target_type: "product", product_id: "", site_id: "", rating: 5, author: "", title: "", body: "", review_date: "", status: "approved" });
 const canSubmit = computed(() =>
@@ -166,15 +155,6 @@ async function submit() {
   } catch {
     /* store surfaces the error */
   }
-}
-
-function askDelete(review) {
-  pendingDelete.value = review;
-}
-async function confirmDelete() {
-  const review = pendingDelete.value;
-  pendingDelete.value = null;
-  if (review) await store.remove(review);
 }
 
 onMounted(async () => {

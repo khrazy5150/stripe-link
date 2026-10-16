@@ -31,12 +31,20 @@ class FakeProducts:
 
 
 class FakeReviews:
+    """Stores by id as well as appending, because withdrawal is a read-modify-write: without `get` the
+    handler's own except branch would swallow the AttributeError and report "nothing to remove"."""
+
     def __init__(self):
         self.saved = []
+        self.rows = {}
 
     def put(self, doc):
         self.saved.append(dict(doc))
+        self.rows[doc["review_id"]] = dict(doc)
         return dict(doc)
+
+    def get(self, tenant_id, review_id):
+        return dict(self.rows[review_id]) if review_id in self.rows else None
 
 
 class FakeInvites:
@@ -157,3 +165,89 @@ class TheDesignIsRecordedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheAuthorMayWithdrawTests(Base):
+    """The removal path that needs no human — not the tenant's, not the platform's.
+
+    It ships WITH the approval step being removed, not after it: taking away the tenant's delete while no
+    other path existed would have left a review nobody could take down, and the erasure right with nowhere
+    to go (plans/REVIEWS.md "Review integrity").
+    """
+
+    def write(self):
+        self.post(invite="invite_1", token="tok")
+        return self.reviews.saved[-1]["review_id"]
+
+    def test_the_invite_points_at_the_review_it_wrote(self):
+        """Which is what lets the author find their own words later, with no second token and no account."""
+        review_id = self.write()
+        self.assertEqual(self.invites.invite["review_id"], review_id)
+
+    def test_a_get_only_asks(self):
+        """An email client that prefetches links would otherwise remove a review nobody meant to touch."""
+        self.write()
+        response = self.get(invite="invite_1", token="tok", action="withdraw")
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("<form method=post>", response["body"])
+        self.assertIn("Remove your review?", response["body"])
+        self.assertEqual(self.reviews.saved[-1]["status"], "approved", "a GET must change nothing")
+
+    def test_a_post_removes_it(self):
+        self.write()
+        response = self.post(invite="invite_1", token="tok", action="withdraw")
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(self.reviews.saved[-1]["status"], "rejected")
+        self.assertEqual(self.reviews.saved[-1]["removed_reason"], "reviewer withdrawal")
+
+    def test_it_is_removed_by_status_not_deleted(self):
+        """The invite still points at it, and a row that vanished would make "did this ever exist"
+        unanswerable for whoever fields the question later."""
+        review_id = self.write()
+        self.post(invite="invite_1", token="tok", action="withdraw")
+        self.assertEqual(self.reviews.saved[-1]["review_id"], review_id)
+
+    def test_withdrawal_needs_the_same_credentials_as_writing(self):
+        self.write()
+        self.assertEqual(self.post(action="withdraw")["statusCode"], 403)
+        self.assertEqual(self.post(invite="invite_1", token="guessed", action="withdraw")["statusCode"], 403)
+
+    def test_an_invite_that_never_wrote_one_has_nothing_to_remove(self):
+        response = self.post(invite="invite_1", token="tok", action="withdraw")
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("Nothing to remove", response["body"])
+
+
+class TheHarmFilterHoldsWithoutJudgingTests(Base):
+    """A HARM filter, never a QUALITY filter. If it could be tuned to catch unhappy customers it would
+    rebuild tenant moderation with the platform holding the dial."""
+
+    def test_a_clean_review_publishes_immediately(self):
+        self.post(invite="invite_1", token="tok", body="Genuinely useful, no notes.")
+        self.assertEqual(self.reviews.saved[-1]["status"], "approved")
+
+    def test_a_one_star_review_publishes_just_the_same(self):
+        self.post(invite="invite_1", token="tok", rating="1", body="It did not work for me at all.")
+        self.assertEqual(self.reviews.saved[-1]["status"], "approved")
+
+    def test_contact_details_and_links_are_held(self):
+        for body in ("call me on +1 555 010 1234", "mail me at x@y.com", "try cheaper-course.com"):
+            with self.subTest(body=body):
+                self.setUp()
+                self.post(invite="invite_1", token="tok", body=body)
+                self.assertEqual(self.reviews.saved[-1]["status"], "pending")
+                self.assertTrue(self.reviews.saved[-1]["held_for"])
+
+    def test_the_reviewer_is_told_plainly(self):
+        """Not dressed up as success: they wrote something that cannot go straight up, and a cheerful
+        "it's live" would be a lie they could check."""
+        response = self.post(invite="invite_1", token="tok", body="ring me on 555 010 1234")
+        self.assertIn("checking this one", response["body"])
+
+    def test_the_rating_is_not_an_input(self):
+        from stripe_link.domain.review_harm import harm_reasons
+
+        for rating in (1, 3, 5):
+            with self.subTest(rating=rating):
+                self.assertEqual(harm_reasons({"rating": rating, "body": "Fine."}), [])
+                self.assertEqual(harm_reasons({"rating": rating, "body": "Call 555 010 1234"}), ["phone"])

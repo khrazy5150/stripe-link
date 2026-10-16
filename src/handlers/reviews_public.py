@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 
 from stripe_link.common import error_response, header_value, json_response, query_params, resolve_stripe_mode
 from stripe_link.domain.documents import DocumentValidationError, validate_review
+from stripe_link.domain.review_harm import harm_reasons
 from stripe_link.repositories.documents import RepositoryError, products_repository, review_invites_repository, reviews_repository, sites_repository
 
 HONEYPOT_FIELD = "company_website"
@@ -119,9 +120,20 @@ def handler(event, context, *, reviews_repo=None, products_repo=None, sites_repo
     if invite is None:
         return _not_invited()
 
+    reviews_repo = reviews_repo or reviews_repository()
+    # THE AUTHOR MAY WITHDRAW WHAT THEY WROTE. The same credentials that authorised writing authorise
+    # taking it back, so there is no second token to mint and -- folded onto this route rather than given
+    # its own -- no template bytes spent either (plans/TODO.md, the transform budget).
+    #
+    # This is the removal path that needs no human: not the tenant's, not the platform's. It also
+    # discharges the erasure right, which is why it ships with the approval step being removed rather
+    # than after it.
+    if str(values.get("action") or "").strip().lower() == "withdraw":
+        return withdraw_review(values, invite, reviews_repo, method)
+
     if method == "GET":
-        return render_form(values, product, mode, sites_repo)
-    return submit_review(event, values, product, mode, reviews_repo or reviews_repository(), invites_repo)
+        return render_form(values, product, mode, sites_repo, invite)
+    return submit_review(event, values, product, mode, reviews_repo, invites_repo)
 
 
 def _authorised_invite(invites_repo, tenant_id: str, product_id: str, values) -> dict | None:
@@ -172,7 +184,7 @@ def _business_name(sites_repo, tenant_id: str) -> str:
     return ""
 
 
-def render_form(params, product, mode, sites_repo):
+def render_form(params, product, mode, sites_repo, invite=None):
     tenant_id = str(params.get("tenant_id") or "").strip()
     business = _business_name(sites_repo, tenant_id)
     return _html_response(_form_html(
@@ -192,9 +204,20 @@ def submit_review(event, values, product, mode, reviews_repo, invites_repo=None)
         "schema_version": SCHEMA_VERSION, "document_type": "review", "tenant_id": tenant_id,
         "review_id": _new_review_id(), "target": {"type": "product", "id": product_id},
         "rating": rating, "author": str(values.get("author") or "").strip(),
-        "body": str(values.get("body") or "").strip(), "status": "pending", "source": "first_party",
+        "body": str(values.get("body") or "").strip(), "source": "first_party",
         "created_at": now, "updated_at": now,
     }
+    # PUBLISHED ON SUBMISSION. There is no tenant approval step: only a real buyer can reach this, and a
+    # tenant who could approve the good ones and reject the bad ones would make `AggregateRating` a claim
+    # about a set they chose (plans/REVIEWS.md "Review integrity").
+    #
+    # `pending` survives for ONE caller -- the harm filter, which holds objectively unpublishable content
+    # for a platform admin. It looks at the words, never the rating, and is the only thing that can put a
+    # review here.
+    reasons = harm_reasons(review)
+    review["status"] = "pending" if reasons else "approved"
+    if reasons:
+        review["held_for"] = reasons
     title = str(values.get("title") or "").strip()
     if title:
         review["title"] = title
@@ -209,13 +232,67 @@ def submit_review(event, values, product, mode, reviews_repo, invites_repo=None)
     try:
         validate_review(review)
         reviews_repo.put(review)
+        if invite:
+            # The invite now points AT the review. That link is what lets its author withdraw it from the
+            # same email later, with no second token and no account — the opaque-token, no-accounts
+            # pattern tip-jar cancel and cart unsubscribe already use.
+            invite["review_id"] = review["review_id"]
+            invite["tenant_id"] = tenant_id
+            invites_repo.put(invite)
     except (DocumentValidationError, RepositoryError) as exc:
         # Back to the form with what they typed still standing, not a dead end -- and carrying the same
         # mode, so a corrected resubmission lands in the books the product was actually found in.
         return _html_response(_form_html(tenant_id, product_id, str(product.get("name") or ""), "",
                                          str(values.get("invite") or ""), str(values.get("token") or ""),
                                          mode=mode, error=str(exc)), status=400)
-    return _html_response(_page("Thank you!", "Your review has been submitted and will appear once it's approved."))
+    if review["status"] == "pending":
+        # Said plainly rather than dressed up as success: they wrote something that cannot go straight up,
+        # and a cheerful "thanks, it's live" would be a lie they could check.
+        return _html_response(_page(
+            "Thank you — we're checking this one.",
+            "Your review mentions contact details, a link or language we check by hand before publishing."))
+    return _html_response(_page("Thank you!", "Your review is now live."))
+
+
+def withdraw_review(values, invite, reviews_repo, method: str):
+    """Take down the review this invite wrote. Confirms on GET, removes on POST.
+
+    A GET must not change anything -- an email client that prefetches links would otherwise delete a
+    review nobody meant to touch -- so the link opens a confirmation and the button posts.
+
+    Removes by STATUS rather than by deleting the row: the invite still points at it, and a row that
+    vanished would make "did this ever exist" unanswerable for the platform admin who has to field the
+    question later.
+    """
+    tenant_id = str(invite.get("tenant_id") or values.get("tenant_id") or "").strip()
+    review_id = str(invite.get("review_id") or "").strip()
+    if not review_id:
+        # The invite records it when the review is written. An invite that never produced one has nothing
+        # to withdraw, which is not an error -- it is the answer.
+        return _html_response(_page("Nothing to remove.", "There is no review attached to this link."))
+    if method == "GET":
+        hidden = "".join(
+            f'<input type="hidden" name="{_e(name)}" value="{_e(values.get(name) or "")}">'
+            for name in ("tenant_id", "product_id", "invite", "token", "mode"))
+        return _html_response(_confirm_page(
+            "Remove your review?",
+            "It will stop appearing on the page straight away. This cannot be undone.",
+            hidden + '<input type="hidden" name="action" value="withdraw">',
+            "Remove my review"))
+    try:
+        review = reviews_repo.get(tenant_id, review_id)
+    except Exception:  # noqa: BLE001
+        review = None
+    if not review:
+        return _html_response(_page("Nothing to remove.", "There is no review attached to this link."))
+    review["status"] = "rejected"
+    review["removed_reason"] = "reviewer withdrawal"
+    review["updated_at"] = int(time.time())
+    try:
+        reviews_repo.put(review)
+    except (DocumentValidationError, RepositoryError):
+        return _html_response(_page("We could not remove it.", "Please try again in a moment."), status=502)
+    return _html_response(_page("Removed.", "Your review no longer appears on the page."))
 
 
 def _consume_invite(invites_repo, tenant_id, invite_id, token, product_id, now):
@@ -256,6 +333,21 @@ _STYLE = (
     ".hp{position:absolute;left:-9999px}button{margin-top:1.5rem;width:100%;background:#4f46b5;color:#fff;border:0;"
     "border-radius:9px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}.err{color:#b91c1c;margin:.5rem 0 0}"
 )
+
+
+def _confirm_page(title: str, message: str, hidden: str, button: str) -> str:
+    """A question with a button, for anything a GET must not do by itself.
+
+    An email client that prefetches links would otherwise act on a bare link — which for a withdrawal
+    means deleting a review nobody meant to touch.
+    """
+    return (f"<!doctype html><html lang=en><head><meta charset=utf-8>"
+            f"<meta name=viewport content='width=device-width,initial-scale=1'>"
+            f"<meta name=robots content='noindex,nofollow'>"
+            f"<title>{_e(title)}</title><style>{_STYLE}</style></head><body><div class=wrap><div class=card>"
+            f"<h1>{_e(title)}</h1><p class=sub>{_e(message)}</p>"
+            f"<form method=post>{hidden}<button type=submit>{_e(button)}</button></form>"
+            f"</div></div></body></html>")
 
 
 def _page(title: str, message: str) -> str:

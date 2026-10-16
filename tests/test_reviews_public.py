@@ -80,14 +80,16 @@ class PublicReviewFormTests(unittest.TestCase):
     def test_get_unknown_product_is_404(self):
         self.assertEqual(self._get({"tenant_id": "t1", "product_id": "nope"})["statusCode"], 404)
 
-    def test_submit_creates_pending_first_party_review(self):
+    def test_submit_PUBLISHES_a_first_party_review(self):
         resp = self._post({"tenant_id": "t1", "product_id": "prod_a", "rating": "5",
                            "author": "Jane", "title": "Great", "body": "Loved it.", "company_website": ""})
         self.assertEqual(resp["statusCode"], 200)
         self.assertIn("Thank you", resp["body"])
         self.assertEqual(len(self.reviews.saved), 1)
         review = self.reviews.saved[0]
-        self.assertEqual(review["status"], "pending")
+        # Published on submission: there is no tenant approval step any more, and only a real buyer could
+        # have reached this (plans/REVIEWS.md "Review integrity").
+        self.assertEqual(review["status"], "approved")
         self.assertEqual(review["source"], "first_party")
         self.assertEqual(review["target"], {"type": "product", "id": "prod_a"})
         self.assertEqual(review["rating"], 5)
