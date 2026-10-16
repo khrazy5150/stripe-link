@@ -3630,7 +3630,28 @@ choice.
   external-integration effort (Google API access + app verification), similar in shape to the calendar OAuth
   path — best started when GBP management becomes a priority.
 
-### ⭐⭐ HIGH — anyone can post a review; the tenant decides which ones survive (found 2026-10-15)
+### ⭐⭐ HIGH — reviews: the write path and two removal paths SHIPPED dev 2026-10-15; the admin queue is what remains
+
+**Shipped:** submission requires the invite token and the tokenless form no longer renders; reviews publish
+on submission; the harm filter holds objectively unpublishable content without ever reading the rating; the
+author can withdraw from the same email; the dashboard lost Approve/Reject/Delete and gained the
+verified-purchase badge.
+
+**What is left, in the order it matters:**
+
+1. **The tenant-reports → platform-decides path** ([[ADMIN_SITE]] §1b), with the rule a report NEVER hides
+   the review. Until this exists a held review has no screen to be judged on, a published one can only be
+   taken down by its author, and `PATCH /reviews/{id}/status` stays routed deliberately — removing it would
+   leave the platform with no removal path at all, so the promise is enforced in the dashboard, not the
+   API. **This is the gap.**
+2. **`verified_purchase` on the PAGE and in the JSON-LD.** It is read in the dashboard now and nowhere
+   else, and once every review is a verified purchase it is also the claim worth making to a reader.
+3. **Reason codes as a fixed list.** Only `reviewer withdrawal` is written today and nothing validates it;
+   the point of the list is that "low rating" is not on it and no UI offers it.
+
+Original finding, kept because the reasoning is why the order above is the order:
+
+### ⭐⭐ (original) anyone can post a review; the tenant decides which ones survive (found 2026-10-15)
 
 Two halves of one problem, and neither is safe to fix alone. Design: **`plans/REVIEWS.md` "Review integrity"**
 + **`plans/ADMIN_SITE.md` §1b**.
