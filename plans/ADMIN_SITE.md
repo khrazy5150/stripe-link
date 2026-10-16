@@ -1,10 +1,28 @@
 # Admin Site
 
-Status: **collection point, not a design.** Nothing here is agreed or scheduled. It exists so that admin-shaped
-requirements stop being remembered and start being written down — the author's words, 2026-09-20: *"I probably
-won't remember to do this on my own, so let's record it in the plan."*
+Status: **a collection point that now has a stack under it.** §1b (review removal) is BUILT and deployed to
+dev as a separate repo, `../admin-site`; everything else here remains a requirement nobody has agreed or
+scheduled. The document still exists for its original purpose — so that admin-shaped requirements stop
+being remembered and start being written down — the author's words, 2026-09-20: *"I probably won't remember
+to do this on my own, so let's record it in the plan."*
 
-The first entry is the one that created the need, and it is the only one with a deadline attached to it.
+The first entry is the one that created the need; §1b is the one that got built first, because
+[[REVIEWS]] took the delete button away from tenants and something had to hold it.
+
+**Where the code lives: `../admin-site`, a sibling repo**, like `fonts-api` and `image-processing` — not a
+screen in the tenant dashboard. Three reasons, in the order they decided it:
+
+1. **The transform budget.** `stripe-link` sits against CloudFormation's 1MB transform limit; one new API
+   route failed a prod deploy on 2026-10-05, and the headroom won back since is spent on tenant features.
+   An admin stack has its own 1MB and does not compete.
+2. **Blast radius.** These screens suspend tenants and remove reviews. A dashboard deploy currently
+   redeploys ~75 Lambdas on the money path; shipping an admin button should not.
+3. **Audience and cadence.** Platform staff, not tenants. Neither release waits on the other.
+
+What it shares with `stripe-link`, and how: the **Cognito user pool** (by parameter — one sign-in per
+person), the **reviews table** (direct access, IAM scoped to the five actions it performs, no
+`DeleteItem`), and **nothing in S3** — bucket grants are added when a screen needs one, because a
+speculative grant is the hard thing to walk back.
 
 ---
 
@@ -66,6 +84,28 @@ tokenized link, no human involved). Ship those with it, not after it.
 
 **Same caveat as §1, and sharper:** the monitored address and a target response time are the part no screen
 supplies. Here a paying merchant is the one waiting.
+
+### What shipped (dev, 2026-10-15)
+
+`../admin-site`, 58 tests, deployed to `jb-admin-site-stack-dev`:
+
+| Piece | Where |
+|---|---|
+| The allow-list — **being signed in is not being an admin** | `jb-admins-{env}`, its own table in this stack, seeded with `keith@juniorbay.com` by the deploy under a condition so a redeploy never re-enables someone deliberately disabled. Adding another admin is a row, through the screen. |
+| The gate | `_admin_or_refusal`, applied in the dispatcher rather than per route — the failure mode of per-route checks is the route added later without one. There is no public route in that handler at all. |
+| Reason codes, server-side | `domain/review_removal.py`. The screen renders the list the **API** returns, so a reason cannot be added by editing the front end. A test asserts `low_rating` is absent, which is what makes sentiment curation impossible rather than merely discouraged. |
+| Removal is a **status**, never a delete | The row stays, the invite still points at it, and "did this ever exist" stays answerable. The IAM policy has no `DeleteItem`, so that is a property of the deploy and not of the code. |
+| Release of a held review | The other half of the queue: holding without a way out would be removal with extra steps. Only a `pending` review can be released — nothing here resurrects a review removed for a reason. |
+| Sign-in | Reuses `stripe-link`'s own `POST /auth/login` against the shared pool. No second sign-in to build, no second place a password is handled. |
+
+Verified against live dev data, not only in tests: a token-less request is refused by the authorizer (401);
+the allow-list admit/refuse pair answers 200/403; a real review was removed with a reason, read back from
+the table carrying `removed_by`, and rolled back to its captured original.
+
+**Not built yet**: the tenant-facing report path (§1b's intake, which is `POST /report` with a review as
+its target), the "how many reports name this tenant" count, and the monitored address. Until the intake
+lands, a tenant's only route is to contact the platform directly — which is a smaller gap than it sounds,
+because the queue they would be reporting into is read by the same person either way.
 
 ## 2. Candidates, unagreed
 

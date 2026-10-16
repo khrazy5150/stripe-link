@@ -243,6 +243,24 @@ work needs reviving, not re-planning.
   ("4.9 ★ on Google"), visible-text-only, no markup (the fabrication guard). Rename to e.g. "Star-rating
   badge", and later **auto-populate it from the GBP sync** so it's derived, not hand-typed. Do NOT rename
   "Rating" → "Reviews" (they're different things; two conflicting star displays would result).
+- **Phase 2.6 (integrity) — SHIPPED dev 2026-10-15.** All three decisions above, in the order that keeps
+  the queue small:
+  - **Step 1 — only a real buyer may write one.** Submission requires the invite token; a request without
+    one is refused identically whatever the cause (no token, used token, wrong product), because a refusal
+    that distinguishes them is an oracle for guessing. The form no longer renders without a token.
+  - **Step 2 — no approval step.** A review publishes on submission. The dashboard store has no
+    `moderate()` and no `remove()`, and says why in a comment where someone would otherwise add one back.
+    `PATCH /reviews/{id}/status` is still routed on purpose: the promise is kept in the screen, and
+    removing the route would be a migration for no behavioural gain.
+  - **Paths 1 and 2 of decision 3 — shipped WITH it, not after.** `domain/review_harm.py` holds a review
+    on objective matches only (phone, email, URL, slur) and reads title/body/author — **rating is not an
+    argument to the function**, which is the strongest form that promise can take. `withdraw_review()`
+    gives the author a tokenized GET-confirms/POST-removes link in their own confirmation.
+  - **Step 3 — the platform removes, in a separate stack.** `../admin-site` ([[ADMIN_SITE]] §1b): the
+    allow-list, the queue of held reviews, release, and removal with a reason code the **server** supplies.
+    Deployed to dev and verified against live dev data.
+  **Still open from this phase:** `verified_purchase` on the page and in the JSON-LD (it is in the
+  dashboard only), and the tenant-facing report path — a tenant's lever today is to contact the platform.
 - **Phase 3 (optional, later): Merchant Center product-review XML feed** for Google Shopping stars — only when
   we run Merchant Center feeds and have 50+ reviews.
 - **GBP reviews** land with the **Business Profile GBP sync (that plan's Phase 2)** — display-only, never in

@@ -3630,24 +3630,28 @@ choice.
   external-integration effort (Google API access + app verification), similar in shape to the calendar OAuth
   path — best started when GBP management becomes a priority.
 
-### ⭐⭐ HIGH — reviews: the write path and two removal paths SHIPPED dev 2026-10-15; the admin queue is what remains
+### ⭐ HIGH — reviews: the integrity work and the admin queue SHIPPED dev 2026-10-15; the tenant's report path is what remains
 
 **Shipped:** submission requires the invite token and the tokenless form no longer renders; reviews publish
 on submission; the harm filter holds objectively unpublishable content without ever reading the rating; the
 author can withdraw from the same email; the dashboard lost Approve/Reject/Delete and gained the
-verified-purchase badge.
+verified-purchase badge. **And the admin queue now exists** — `../admin-site`, a sibling repo with its own
+stack ([[ADMIN_SITE]] §1b), deployed to dev: the allow-list, the held-review queue, release, and removal
+with a **server-supplied** reason code. Verified against live dev data, not only in tests. That closes
+item 1 below and item 3: the reason list is in code with a test that `low_rating` is not in it, and the
+screen renders what the API returns, so a reason cannot be added by editing the front end.
 
 **What is left, in the order it matters:**
 
-1. **The tenant-reports → platform-decides path** ([[ADMIN_SITE]] §1b), with the rule a report NEVER hides
-   the review. Until this exists a held review has no screen to be judged on, a published one can only be
-   taken down by its author, and `PATCH /reviews/{id}/status` stays routed deliberately — removing it would
-   leave the platform with no removal path at all, so the promise is enforced in the dashboard, not the
-   API. **This is the gap.**
+1. **The tenant-facing report path** — `POST /report` with a review as its target, plus the "how many
+   reports name this tenant" count the queue needs to tell a pattern from a grudge. A tenant's only lever
+   today is to contact the platform directly, which is a smaller gap than it sounds (the same person reads
+   either), but it is the half of §1b that is not built.
 2. **`verified_purchase` on the PAGE and in the JSON-LD.** It is read in the dashboard now and nowhere
    else, and once every review is a verified purchase it is also the claim worth making to a reader.
-3. **Reason codes as a fixed list.** Only `reviewer withdrawal` is written today and nothing validates it;
-   the point of the list is that "low rating" is not on it and no UI offers it.
+3. **The monitored address and a target response time.** The part no screen supplies, and the merchant is
+   the one waiting now that they cannot take a review down themselves.
+4. **Prod.** None of this is in prod yet — see the deploy entry below.
 
 Original finding, kept because the reasoning is why the order above is the order:
 
