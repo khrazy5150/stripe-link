@@ -209,6 +209,35 @@ A fake repository records a `put` either way, so every test passed. Fixed by bum
 write is a change, and the lesson is in the test's own docstring: **the restore is verified against S3,
 never against its own return value.**
 
+### 1d. Reviewing what is actually sold (added 2026-10-16)
+
+**The landing page is the shop window.** A wholesome page can deliver anything at all — a "course" is
+whatever the file says it is — and an upsell is a product a reviewer never sees on the page they opened.
+So a pages list alone reviews the marketing, which is the wrong thing.
+
+The tenant view therefore also shows **the goods**: every product in every offer, both Stripe modes, with
+its description, images, funnel role, and a **15-minute link to the file a buyer receives**. This is the
+one place bucket access is genuinely warranted — the page is a URL, the deliverable is a file.
+
+- **Roles are derived** from each product's pricing context (`funnel_context_items`), the same rule the
+  renderer follows, so the admin sees the upsell a buyer actually meets rather than a placement the offer
+  once recorded.
+- **Folded onto the offers function**, which already owns the offers, the products and the media bucket.
+  It did **not** have `s3:GetObject` — a presigned URL it signed would have 403'd when clicked — so that
+  grant was added, `GetObject` only.
+- **Links open inline**, not as downloads: a forced download turns every review into a copy of a tenant's
+  file sitting on someone's laptop.
+- The **description is shown whole**, because a mismatch between what the tenant promises and what the
+  file contains is the clearest signal there is.
+- A catalog that cannot be read **says so and leaves the pages working**; a silent empty section would
+  read as "this tenant sells nothing".
+
+Verified in prod 2026-10-16: the catalog returned the real offer, and the signed link opened the actual
+deliverable — `application/pdf`, 48,673 bytes, 7 pages.
+
+**Still not covered:** services and physical products have no file to inspect, so for those the page and
+the description remain the only evidence; and nothing records WHO opened a tenant's file (see Open).
+
 ### Open
 
 - **Reason codes shown to the tenant?** Today the sign-in refusal names the reason. An impersonation or
@@ -216,6 +245,11 @@ never against its own return value.**
 - **Custom domains stay pointed at the platform** and will serve 404 once artifacts are gone. Removing the
   DNS/Cloudflare route on suspension is a separate, slower action and is not part of this.
 - **No bulk or automated suspension.** One tenant, one admin, one reason, every time.
+- **Opening a tenant's private file is not audited.** The suspend and remove actions log who did what;
+  reading a deliverable does not. It is a real access to someone's property and should leave a trace,
+  which is a small change and deliberately not guessed at here.
+- **Email on a new page** was considered and not built. The in-app badge is the version that does not get
+  muted in a week; a daily digest is the shape to revisit, not one message per page.
 
 ## 2. Candidates, unagreed
 
