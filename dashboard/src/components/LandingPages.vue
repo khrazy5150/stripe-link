@@ -1516,6 +1516,12 @@
 
                     <template v-else-if="element.type === 'faq'">
                       <input :value="element.heading" type="text" placeholder="Section heading (optional)" @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
+                      <!-- The browser does this natively through a shared `name` on <details>, so the
+                           keyboard behaviour is its own and nothing waits on a script. -->
+                      <label class="builder-toggle">
+                        <input v-model="element.one_at_a_time" type="checkbox" />
+                        <span>Open one question at a time</span>
+                      </label>
                       <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
                         <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
                         <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
@@ -5980,7 +5986,7 @@ function newElement(type) {
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
-  if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
+  if (type === "faq") return { ...base, heading: "Frequently Asked Questions", one_at_a_time: true, items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
   // social_links has no per-page content: it reads the Site's Business Profile, so a tenant fills their
   // profiles in once rather than retyping them on every page.
@@ -6799,6 +6805,9 @@ function elementSection(element) {
       id: element.id,
       type: "faq",
       heading: formatHeadline(element.heading || "") || "Frequently Asked Questions",
+      // Written only when OFF. Absent means on, which is what lets a page gain the behaviour on its next
+      // publish rather than needing every FAQ re-edited.
+      ...(element.one_at_a_time === false ? { one_at_a_time: false } : {}),
       items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })),
     };
   }
@@ -7054,7 +7063,9 @@ function elementsFromPage(sections) {
         scroll_seconds: Number(section.scroll_seconds) || 30,
         logo_backing: section.logo_backing === "none" ? "none" : "card" });
     } else if (section.type === "faq") {
-      elements.push({ id: keepId(section), type: "faq", heading: section.heading || "Frequently Asked Questions", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
+      elements.push({ id: keepId(section), type: "faq", heading: section.heading || "Frequently Asked Questions",
+        one_at_a_time: section.one_at_a_time !== false,
+        items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
     } else if (section.type === "product_details") {
       elements.push({ id: keepId(section), type: "product_details" });
     } else if (section.type === "related_products") {

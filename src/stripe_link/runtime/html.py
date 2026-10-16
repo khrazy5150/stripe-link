@@ -5894,11 +5894,21 @@ def refund_policy_applies_to(offer: dict[str, Any], products_by_id: dict[str, di
 
 def render_faq(section: dict[str, Any]) -> str:
     items = section.get("items") or []
-    # Each question is an <h3> under the section's <h2> heading — keeps the FAQ inside the
-    # page heading outline (h1 → h2 section → h3 question) for SEO/a11y (plans/SEMANTIC_HTML.md).
+    section_id = str(section.get("id", "faq"))
+    # ONE OPEN AT A TIME, by the browser rather than by us. A shared `name` on <details> makes an exclusive
+    # accordion natively: opening one closes its siblings, the toggle still closes the open one, and the
+    # keyboard behaviour is the browser's own. A JS version would re-implement all of that and only run
+    # once the script had.
+    #
+    # Default ON, and absent counts as on, so a page republished after this gains it without being edited.
+    # A browser without exclusive <details> simply keeps today's behaviour -- every panel independent --
+    # which is a degradation nobody can be harmed by.
+    exclusive = section.get("one_at_a_time") is not False
+    # Scoped to the section so two FAQ blocks on one page could never fight over the same group.
+    name_attr = f' name="faq-{escape(section_id)}"' if exclusive else ""
     rendered = [
         "\n".join([
-            "      <details>",
+            f"      <details{name_attr}>",
             f"        <summary><h3>{render_headline_markup(item.get('question') or '')}</h3></summary>",
             f"        <p>{escape(str(item.get('answer') or ''))}</p>",
             "      </details>",
@@ -5909,7 +5919,7 @@ def render_faq(section: dict[str, Any]) -> str:
         return ""
     heading = str(section.get("heading") or "Frequently Asked Questions")
     return "\n".join([
-        f"    <section class=\"sl-faq\" data-section-id=\"{escape(str(section.get('id', 'faq')))}\" data-section-type=\"faq\">",
+        f"    <section class=\"sl-faq\" data-section-id=\"{escape(section_id)}\" data-section-type=\"faq\">",
         f"      <h2 class=\"sl-faq-heading\">{escape(heading)}</h2>",
         *rendered,
         "    </section>",

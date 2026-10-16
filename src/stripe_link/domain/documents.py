@@ -1839,6 +1839,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "enabled", "Refund policy enabled")
             optional_string(section, "heading", "Refund policy heading")
         elif section_type == "faq":
+            # Opening one question closes the others. Stored only when the tenant turns it OFF: absent
+            # means on, so a page republished after this gains the behaviour without being edited.
+            optional_bool(section, "one_at_a_time", "FAQ one_at_a_time")
             items = optional_limited_object_list(section, "items", 10, "FAQ items")
             for item in items:
                 require_string(item, "question", "FAQ question")
