@@ -3652,7 +3652,9 @@ screen renders what the API returns, so a reason cannot be added by editing the 
    reports now sit in the same table next to them.
 4. **The monitored address and a target response time.** The part no screen supplies, and the merchant is
    the one waiting now that they cannot take a review down themselves.
-5. **Prod.** None of this is in prod yet — see the deploy entry below.
+5. ~~**Prod.**~~ **SHIPPED PROD 2026-10-15** — 90 resource modifications, no adds, no removes, no
+   replacements, no table or bucket touched. Verified live: the admin site serves the Reported view, the
+   admin API reads `jb-abuse-reports-prod`, and `GET /reviews` offers the report reasons.
 
 **The tenant report path SHIPPED dev 2026-10-15** and closed what used to be item 1: `POST /reviews` with
 `action: "report"`, authenticated rather than the public `/report` the plan first suggested, because the
