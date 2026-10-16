@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -131,8 +132,14 @@ def _tenant_artifact_action(action, event, *, pages_repo=None, s3_client=None, c
                 # the ordinary path -- every repo, every rule, no second implementation of publishing that
                 # could drift from the first. It works only once the suspension is lifted, because the
                 # publish path above refuses a suspended tenant.
+                #
+                # `updated_at` is bumped so the written item DIFFERS from the stored one. Writing it back
+                # byte-identical produced no stream record at all: the restore reported "1 page" and the
+                # page stayed down (dev, 2026-10-16). A fake repository records a put either way, so only
+                # a live run could find this -- which is why the restore is verified against S3 and not
+                # against its own return value.
                 mode = "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
-                pages_repository(mode=mode).put(page)
+                pages_repository(mode=mode).put({**page, "updated_at": int(time.time())})
             touched.append(page_id)
         except Exception as exc:  # noqa: BLE001 - one bad page must not abandon the rest of a takedown
             logger.exception("Tenant %s action %s failed for page %s", tenant_id, action, page_id)

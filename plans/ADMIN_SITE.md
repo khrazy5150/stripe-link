@@ -195,6 +195,20 @@ page and the cost of wrongly refusing is a merchant who contacts support.
   how a holding message becomes a legal statement. They discover it at sign-in, which tells them the
   reason.
 
+### Shipped dev 2026-10-16, and what the live run found
+
+Verified against live dev data, end to end: suspend → the published artifact disappears from the pages
+bucket; checkout for a real offer answers **403 `tenant_suspended`**; re-writing the page document (what a
+tenant edit does) does **not** put it back, and the function's own log says
+`Skipped publish for suspended tenant`; restore → the page is re-rendered and back in the bucket, and
+checkout answers **303** to Stripe again.
+
+**The bug only a live run could find.** The restore wrote each page document back *byte-identical*, and
+DynamoDB emitted **no stream record at all** — so the restore reported "1 page" and the page stayed down.
+A fake repository records a `put` either way, so every test passed. Fixed by bumping `updated_at` so the
+write is a change, and the lesson is in the test's own docstring: **the restore is verified against S3,
+never against its own return value.**
+
 ### Open
 
 - **Reason codes shown to the tenant?** Today the sign-in refusal names the reason. An impersonation or

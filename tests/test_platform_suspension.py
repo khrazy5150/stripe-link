@@ -194,6 +194,28 @@ class TheTakedownTests(unittest.TestCase):
         page_publish.delete_page_artifacts = lambda page, **kw: (_ for _ in ()).throw(RuntimeError("no"))
         self.assertFalse(self.run_action()["ok"])
 
+    def test_a_restore_writes_a_page_that_DIFFERS_from_the_stored_one(self):
+        """A byte-identical PutItem produces no DynamoDB stream record, so the republish never runs: the
+        restore reported "1 page" and the page stayed down (found on dev, 2026-10-16). The bumped
+        `updated_at` is what makes the write a change.
+
+        This test can only check the shape of the write -- a fake repository records a put either way,
+        which is exactly why the live restore is verified against S3 rather than its own return value.
+        """
+        written = []
+        import stripe_link.repositories.documents as documents
+
+        class Repo:
+            def put(self, page):
+                written.append(page)
+        original = documents.pages_repository
+        page_publish.pages_repository = lambda **kw: Repo()
+        self.addCleanup(setattr, page_publish, "pages_repository", original)
+        self.pages.pages[0]["updated_at"] = 1
+        self.run_action(action="restore_tenant")
+        self.assertEqual(len(written), 1)
+        self.assertNotEqual(written[0]["updated_at"], 1)
+
     def test_an_unknown_action_does_nothing(self):
         result = self.run_action(action="delete_everything")
         self.assertFalse(result["ok"])
