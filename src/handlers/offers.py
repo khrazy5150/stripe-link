@@ -3,6 +3,7 @@ import re
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
+from stripe_link.domain.funnels import funnel_context_items, offer_product_ids
 from stripe_link.domain.offer_index import offer_index_entry
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
@@ -30,7 +31,115 @@ def unique_offer_slug(desired: str, *, tenant_id: str, offer_id: str, repository
     return unique_slug(desired, taken)
 
 
+# What a product's pricing context means in the funnel. Derived, never read from a stored placement
+# (plans/OFFER_MODEL_REDESIGN.md §6) -- the same rule the renderer follows, so the admin sees the roles the
+# buyer actually meets rather than what the offer once recorded.
+_FUNNEL_CONTEXTS = {
+    "order_bump": "Order bump — ticked at checkout",
+    "upsell": "Upsell — offered after paying",
+    "downsell": "Downsell — offered if the upsell is declined",
+}
+
+
+def _asset_link(product, bucket, s3_client, *, seconds=900):
+    """A short-lived link to the FILE a buyer receives.
+
+    This is the only way to answer the question the landing page cannot: a wholesome page can deliver
+    anything at all, and "a course" is whatever the file says it is. Fifteen minutes, because this is for
+    looking now, not for keeping a URL that outlives the review.
+    """
+    asset = (product or {}).get("digital_asset")
+    if not isinstance(asset, dict) or not asset.get("bucket_key") or not bucket:
+        return {}
+    filename = str(asset.get("filename") or "download")
+    try:
+        url = (s3_client or _admin_s3()).generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": str(asset["bucket_key"]),
+                    # INLINE, not attachment: the point is to look at it, and a forced download turns
+                    # every review into a file sitting on someone's laptop.
+                    "ResponseContentDisposition": f'inline; filename="{filename}"'},
+            ExpiresIn=seconds,
+        )
+    except Exception as exc:  # noqa: BLE001 - a missing file must not fail the whole catalog
+        return {"filename": filename, "error": str(exc)}
+    return {"filename": filename, "url": url, "size": asset.get("size_bytes") or asset.get("size")}
+
+
+def _admin_s3():
+    import boto3
+
+    return boto3.client("s3")
+
+
+def _product_card(product, roles, bucket, s3_client):
+    prices = [{
+        "price_id": p.get("price_id"), "context": p.get("context") or "standard",
+        "label": p.get("label") or "", "unit_amount": p.get("unit_amount"),
+        "currency": p.get("currency") or "usd", "recurring": bool(p.get("recurring")),
+    } for p in (product.get("prices") or [])]
+    return {
+        "product_id": product.get("product_id"),
+        "name": product.get("name") or "(unnamed)",
+        # The DESCRIPTION is review material, not decoration: it is what the tenant tells a buyer they are
+        # getting, and a mismatch with the file is the clearest signal there is.
+        "description": product.get("description") or "",
+        "product_type": product.get("product_type") or product.get("type") or "",
+        "roles": roles,
+        "prices": prices,
+        "images": [i for i in (product.get("images") or []) if i][:4],
+        "asset": _asset_link(product, bucket, s3_client),
+    }
+
+
+def _tenant_catalog(event, repository=None, products_repo=None, s3_client=None):
+    """Everything a tenant actually sells, both Stripe modes, with links to the files.
+
+    plans/ADMIN_SITE.md §1c. Reviewing the landing page reviews the MARKETING; this reviews the goods.
+    """
+    tenant_id = str((event or {}).get("tenant_id") or "").strip()
+    if not tenant_id:
+        return {"ok": False, "error": "tenant_id is required."}
+    bucket = os.environ.get("MEDIA_BUCKET", "")
+    out = []
+    for mode in ("live", "test"):
+        try:
+            offers = (repository or offers_repository(mode=mode)).list_for_tenant(tenant_id)
+            products = (products_repo or products_repository(mode=mode)).list_for_tenant(tenant_id)
+        except RepositoryError:
+            continue
+        by_id = {str(p.get("product_id")): p for p in products}
+        for offer in offers:
+            roles_by_product: dict[str, list[str]] = {}
+            for ctx, label in _FUNNEL_CONTEXTS.items():
+                for item in funnel_context_items(offer, by_id, ctx):
+                    roles_by_product.setdefault(str(item["product_id"]), []).append(label)
+            cards = []
+            for product_id in offer_product_ids(offer):
+                product = by_id.get(product_id)
+                if not product:
+                    # A referenced product that no longer exists. Said out loud rather than skipped: a gap
+                    # in the catalog is itself worth seeing.
+                    cards.append({"product_id": product_id, "name": "(missing product)", "roles": [],
+                                  "prices": [], "images": [], "asset": {}})
+                    continue
+                roles = roles_by_product.get(product_id) or ["Sold on the landing page"]
+                cards.append(_product_card(product, roles, bucket, s3_client))
+            out.append({
+                "offer_id": offer.get("offer_id"),
+                "name": offer.get("name") or offer.get("label") or "(unnamed offer)",
+                "stripe_mode": mode,
+                "products": cards,
+            })
+    return {"ok": True, "tenant_id": tenant_id, "offers": out}
+
+
 def handler(event, context, repository=None, products_repo=None, services_repo=None):
+    # INTERNAL invocation from the admin site -- not an API request (plans/ADMIN_SITE.md §1c). Reachable
+    # only by a principal granted lambda:InvokeFunction on this function, which is the admin API alone,
+    # and it checks its own allow-list before it gets here.
+    if str((event or {}).get("internal_admin") or "").strip() == "tenant_catalog":
+        return _tenant_catalog(event, repository, products_repo)
     # Stripe-mode scoping: offers + the products they reference are read/written in the request's mode so a
     # test-mode dashboard only ever sees test records (plans/STRIPE_MODE_DECOUPLING.md P2).
     mode = resolve_stripe_mode(event)

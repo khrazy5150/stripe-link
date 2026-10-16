@@ -1465,6 +1465,16 @@ Resources:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
+        # Read the media bucket so the admin catalog can hand out a short-lived link to the FILE a buyer
+        # receives (plans/ADMIN_SITE.md §1c). A presigned URL signed by a role without this permission is
+        # a link that 403s when clicked, so the grant is what makes the review possible at all.
+        #
+        # GetObject only. This function must never be able to alter a tenant's media.
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${MediaBucket}/*"
       Events:
         OffersList:
           Type: Api
