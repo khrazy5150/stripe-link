@@ -1005,6 +1005,13 @@
                         <label class="offer-field"><span>Review count</span><input v-model.number="element.count" type="number" min="0" /></label>
                       </div>
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
+                      <!-- NOT the reviews system, and the renamed label is only half of saying so. This is
+                           an external rating the tenant cites; the Customer reviews element is the one
+                           that carries real reviews and the star markup (plans/REVIEWS.md Phase 2.5). -->
+                      <p class="element-empty">
+                        A rating you are quoting from somewhere else, shown as text. It carries no search
+                        markup — for stars in search results, add <strong>Customer reviews</strong>.
+                      </p>
                     </template>
 
                     <template v-else-if="element.type === 'page_ribbon'">
@@ -1556,6 +1563,16 @@
                         <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
                       </div>
                       <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'reviews'">
+                      <input :value="element.heading" type="text" placeholder="Customer reviews"
+                             @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
+                      <p class="element-empty">
+                        Shows every approved review of this page's product, newest first, with the star
+                        rating search engines read. Remove this section and the stars go with it — the
+                        rating has to describe reviews a reader can actually see.
+                      </p>
                     </template>
 
                     <template v-else-if="element.type === 'product_details'">
@@ -6016,6 +6033,10 @@ function newElement(type) {
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", one_at_a_time: true, items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
+  // The reviews are the tenant's customers' words, not content typed here. The element exists so the block
+  // can be MOVED, RETITLED and REMOVED -- it was appended after the body, below the footer, with no way to
+  // touch it (plans/REVIEWS.md Phase 2.5).
+  if (type === "reviews") return { ...base, heading: "" };
   // social_links has no per-page content: it reads the Site's Business Profile, so a tenant fills their
   // profiles in once rather than retyping them on every page.
   // Starts with NO items, which means "inherit the Site's profiles" -- the behaviour every page had before
@@ -6990,6 +7011,9 @@ function elementSection(element) {
         : {}),
       expires_at: element.expires_at || undefined };
   }
+  if (element.type === "reviews") {
+    return { id: element.id, type: "reviews", heading: element.heading || undefined };
+  }
   if (element.type === "related_products") {
     return { id: element.id, type: "related_products", heading: element.heading || undefined };  // cards resolved at publish
   }
@@ -7095,6 +7119,8 @@ function elementsFromPage(sections) {
         image_source: section.image_source === "hero" || section.image_source === "upload"
           ? section.image_source : "none",
         image_url: section.image_url || "", image_crop: section.image_crop || null });
+    } else if (section.type === "reviews") {
+      elements.push({ id: keepId(section), type: "reviews", heading: section.heading || "" });
     } else if (section.type === "rating") {
       elements.push({ id: keepId(section), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
     } else if (section.type === "client_marquee") {

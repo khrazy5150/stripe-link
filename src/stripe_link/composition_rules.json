@@ -283,7 +283,7 @@
     },
     "rating": {
       "placement": "free",
-      "label": "Rating",
+      "label": "Star-rating badge",
       "ui": "add",
       "kind": "capability",
       "channel": "body",
@@ -656,6 +656,40 @@
       ],
       "slot": "announce",
       "rank": 20,
+      "order_mode": "ordered"
+    },
+    "reviews": {
+      "placement": "free",
+      "label": "Customer reviews",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "card",
+        "content_border",
+        "content_text"
+      ],
+      "slot": "proof",
+      "rank": 15,
+      "order_mode": "ordered"
+    },
+    "business_reviews": {
+      "placement": "free",
+      "label": "What customers say about us",
+      "ui": "internal",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "card",
+        "content_border",
+        "content_text"
+      ],
+      "slot": "after",
+      "rank": 50,
       "order_mode": "ordered"
     }
   },

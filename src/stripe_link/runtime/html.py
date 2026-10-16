@@ -16,7 +16,7 @@ from stripe_link.domain.coupon_grants import grant_prefix
 from stripe_link.domain.composition import (
     compose_page, composition_key, default_cta_label, element_channel, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
-from stripe_link.domain.documents import PRODUCT_CONDITIONS
+from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page
 from stripe_link.domain.page_views import link_id as link_click_id
 from stripe_link.domain.social_links import display_entries as display_social_entries
 from stripe_link.domain.social_links import section_link_entries as social_section_entries
@@ -2587,6 +2587,12 @@ def _render_page_body(
     # Each element declares a channel (plans/LANDING_PAGE_GOAL_COMPOSITION.md): "body" paints markup, "head"
     # emits meta/JSON-LD, "sidecar" writes its own artifact. Route by it rather than assuming everything is
     # body — a head section rendered into <main> would be visible junk, and vice versa.
+    # HIDING THE REVIEWS MUST DROP THE MARKUP TOO. Leaving `AggregateRating` in the head while the visible
+    # reviews are gone is exactly the mismatch Google's guidelines forbid, and it is the one way the
+    # Phase 2.5 element could do real harm (plans/REVIEWS.md). Decided ONCE, here, from the composed set,
+    # so the head and the body cannot reach different answers depending on which renders first.
+    _RENDER_STATE["reviews_visible"] = "yes" if any(
+        str(s.get("type") or "") == "reviews" for s in composed_sections) else ""
     body_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "body"]
     head_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "head"]
     # Storefront chrome from the Site's menus (SEO-13): a header (brand → store root + primary nav) and a
@@ -2651,8 +2657,7 @@ def _render_page_body(
         for section in body_sections
     )
     # First-party reviews render after the page's sections (visible content matching the Product review JSON-LD).
-    reviews_block = render_reviews_block(offer, products_by_id)
-    business_reviews_block = render_business_reviews_block()
+    business_reviews_block = render_business_reviews_block(page)
     head_extras = "\n".join(part for part in (
         render_head_section(section, page, offer, products_by_id, services_by_id, composed_sections)
         for section in head_sections
@@ -2693,7 +2698,6 @@ def _render_page_body(
         site_header,
         breadcrumb,
         body,
-        reviews_block,
         business_reviews_block,
         footer_nav,
         legal_footer,
@@ -2913,6 +2917,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2) — emitted by synthesize_thank_you_page only.
     "celebration": {"render": lambda c: render_celebration(c.section), "version": 1},
     "shipping_eta": {"render": lambda c: render_shipping_eta(c.section), "version": 1},
+    "reviews": {"render": lambda c: render_reviews_section(c.section, c.offer, c.products_by_id), "version": 1},
     "digital_download": {"render": lambda c: render_digital_download(c.section), "version": 1},
     "next_steps": {"render": lambda c: render_next_steps(c.section), "version": 1},
     "thank_you_footer": {"render": lambda c: render_thank_you_footer(c.section), "version": 1},
@@ -5267,7 +5272,22 @@ def _review_li(review: dict[str, Any]) -> str:
     )
 
 
-def render_reviews_block(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
+def render_reviews_section(section: dict[str, Any], offer: dict[str, Any],
+                           products_by_id: dict[str, dict[str, Any]]) -> str:
+    """The reviews block AS A SECTION, so the composer orders it with everything else.
+
+    It used to be appended after the whole body, which is why it rendered BELOW the footer: `legal_footer`
+    is a `pinned_bottom` element *inside* the body (reported 2026-10-15). Being a section is the fix, and
+    it is also what lets a tenant move it and retitle it (plans/REVIEWS.md Phase 2.5).
+
+    Visibility is the composer's business, not this function's -- `compose_page` has already decided
+    whether this section is on the page by the time a renderer is called for it.
+    """
+    return render_reviews_block(offer, products_by_id, heading=str(section.get("heading") or ""))
+
+
+def render_reviews_block(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]],
+                         heading: str = "") -> str:
     """The VISIBLE product reviews section — Google requires the review text + author in the initial HTML,
     matching the Product review/aggregateRating JSON-LD exactly. All approved reviews render, low ratings
     included (no cherry-picking). Empty string when the page's product has none."""
@@ -5284,17 +5304,26 @@ def render_reviews_block(offer: dict[str, Any], products_by_id: dict[str, dict[s
     items = "".join(_review_li(review) for review in reviews)
     return (
         '    <section class="sl-reviews" data-section-type="reviews">\n'
-        '      <h2 class="sl-section-heading">Customer reviews</h2>\n'
+        f'      <h2 class="sl-section-heading">{escape(heading or "Customer reviews")}</h2>\n'
         f'{summary}\n'
         f'      <ul class="sl-reviews-list">{items}</ul>\n'
         '    </section>'
     )
 
 
-def render_business_reviews_block() -> str:
+def render_business_reviews_block(page: dict[str, Any] | None = None) -> str:
     """VISIBLE business-target reviews (what customers say about the store) — trust content only, NO
     AggregateRating markup (self-serving business ratings are suppressed by Google; plans/REVIEWS.md). Renders
     on any page of the business's Site. All approved render; no cherry-picking. Empty when there are none."""
+    # NON-TRANSACTIONAL SURFACES ONLY (plans/REVIEWS.md "Where each kind of review surfaces"). These are
+    # reviews of the FIRM, which carry no markup -- the self-serving rule -- so on a checkout page they sit
+    # beside the one review set that can earn a snippet and compete with it for the same attention.
+    #
+    # Decided on the page being offerless, which is the question that actually separates the two kinds of
+    # surface, rather than on offer_type: a storefront or profile page has no meaningful offer_type and
+    # would fall back to `single`, withholding them from the one place they belong.
+    if not is_offerless_page(page or {}):
+        return ""
     reviews = markup_eligible(_RENDER_BUSINESS_REVIEWS)
     if not reviews:
         return ""
@@ -5368,7 +5397,10 @@ def product_json_ld(
     # First-party reviews (plans/REVIEWS.md): aggregateRating + individual Review nodes, from the product's
     # approved, non-GBP reviews only. Never a hand-typed number — this is the honest AggregateRating the
     # renderer previously refused to emit. The visible reviews block renders the same data on-page.
-    product_reviews = markup_eligible(_RENDER_REVIEWS.get(str(product.get("product_id") or "")) or [])
+    # Only when the visible block is on the page: the markup is a claim about text a reader can check, so
+    # it goes when the text goes.
+    product_reviews = (markup_eligible(_RENDER_REVIEWS.get(str(product.get("product_id") or "")) or [])
+                       if _RENDER_STATE.get("reviews_visible") else [])
     aggregate = aggregate_reviews(product_reviews)
     if aggregate:
         payload["aggregateRating"] = {

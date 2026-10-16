@@ -230,8 +230,12 @@ work needs reviving, not re-planning.
   `AggregateRating` hook the renderer intentionally left dark. (Slices: entity+API, render, dashboard.)
 - **Phase 2: post-purchase verified-review invitation + public submission** — the two are one flow (below).
   Also: business-target reviews for on-page trust + `social_proof` wiring.
-- **Phase 2.5 (builder integration):** a **"Reviews" builder element** that *controls* the auto-rendered
-  reviews block (heading / placement / show-hide) instead of it silently auto-appending.
+- **Phase 2.5 (builder integration) — SHIPPED dev 2026-10-15.** A **"Reviews" element**: the block is a
+  real section now, so the composer orders it (slot `proof`, pinned next to `rating`), the tenant can
+  retitle and move it, and removing it removes the markup with it. That also fixed the two defects it
+  caused by being appended after the whole body — it rendered BELOW the footer, and business reviews
+  appeared on transactional pages. `rating` is renamed **"Star-rating badge"** and its editor says what it
+  is not.
   **"Hide" must drop the markup too** — leaving `AggregateRating` in the head while removing the visible
   reviews is exactly the mismatch Google's guidelines forbid, and it is the one way this element could do
   real harm. Placement is free; visibility and markup move together. And **re-label the

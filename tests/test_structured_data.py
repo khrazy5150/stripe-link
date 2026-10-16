@@ -462,12 +462,20 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
     }
     ORIGIN = "https://axel-mart.jbay.uk"
 
-    def _render(self, site=None, canonical_url="https://axel-mart.jbay.uk/p/creatine", reviews=None):
+    def _render(self, site=None, canonical_url="https://axel-mart.jbay.uk/p/creatine", reviews=None,
+                show_reviews=True, page_sections=None):
         offer = load_fixture("offer-creatine-standard.json")
         product = load_fixture("product-creatine-gummies.json")
         page = load_fixture("page-creatine-standard.json")
         page["goal"] = "search_seo"
         page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        # The reviews block became a SECTION (plans/REVIEWS.md Phase 2.5): it used to be appended after the
+        # whole body, which is how it rendered below the footer. A page that shows reviews now says so, and
+        # that same section is what carries the AggregateRating.
+        if show_reviews:
+            page["sections"].append({"id": "reviews", "type": "reviews"})
+        if page_sections:
+            page["sections"].extend(page_sections)
         return render_page(page, offer, {product["product_id"]: product},
                            canonical_url=canonical_url, site=site, reviews=reviews)
 
@@ -540,14 +548,39 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         self.assertNotIn("aggregateRating", node)
         self.assertNotIn('<section class="sl-reviews"', html)
 
+    BUSINESS_REVIEWS = [{"target": {"type": "business", "id": "site_x"}, "rating": 5, "author": "Sam",
+                         "body": "Great service.", "status": "approved", "source": "manual"}]
+
     def test_business_reviews_render_visibly_but_never_as_aggregate_rating(self):
-        # Business (self-serving) reviews are trust content only — Google suppresses their AggregateRating.
-        reviews = [{"target": {"type": "business", "id": "site_x"}, "rating": 5, "author": "Sam", "body": "Great service.", "status": "approved", "source": "manual"}]
-        html = self._render(reviews=reviews)
+        """Trust content only — Google suppresses AggregateRating for a business reviewing itself.
+
+        Shown on the NON-TRANSACTIONAL surfaces (plans/REVIEWS.md "Where each kind of review surfaces"),
+        which is what `seller_profile` makes this page.
+        """
+        html = self._render(reviews=self.BUSINESS_REVIEWS,
+                            page_sections=[{"id": "sp", "type": "seller_profile"}])
         self.assertIn("sl-business-reviews", html)
         self.assertIn("Great service.", html)
         for block in ld_blocks(html):
             self.assertNotIn("AggregateRating", json.dumps(block))
+
+    def test_business_reviews_stay_off_a_transactional_page(self):
+        """On a checkout page they sit beside the one review set that CAN earn a snippet and compete with
+        it for the same attention."""
+        html = self._render(reviews=self.BUSINESS_REVIEWS)
+        self.assertNotIn("sl-business-reviews", html)
+
+    def test_hiding_the_reviews_section_drops_the_markup_too(self):
+        """The one way the Phase 2.5 element could do real harm: AggregateRating left in the head while the
+        visible reviews are gone is exactly the mismatch Google's guidelines forbid."""
+        pid = self._product_id()
+        reviews = [{"target": {"type": "product", "id": pid}, "rating": 5, "author": "Jane",
+                    "body": "Excellent gummies.", "status": "approved", "source": "manual"}]
+        html = self._render(reviews=reviews, show_reviews=False)
+        self.assertNotIn('<section class="sl-reviews"', html)
+        node = self._node(html, "Product")
+        self.assertNotIn("aggregateRating", node)
+        self.assertNotIn("review", node)
 
     def test_website_node_publishes_organization(self):
         website = self._node(self._render(site={"organization": self.ORG}), "WebSite")

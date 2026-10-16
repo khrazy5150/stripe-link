@@ -176,6 +176,11 @@ def synthesize_upsell_page(
         "compare_at_amount": int(price.get("compare_at_unit_amount") or price.get("compare_at_amount") or 0),
         "show_savings": bool(scaffold.get("savings_badge")),
     })
+    # The upsell product's own reviews (plans/REVIEWS.md Phase 1b). Emitted as a SECTION now that the
+    # reviews block is one -- it used to be appended after the whole body, which is also how it ended up
+    # below the footer on a landing page. After the price and before the ask: it is the last piece of
+    # proof a visitor gets, and this page has exactly one decision on it.
+    sections.append({"id": "reviews", "type": "reviews"})
     sections.append(checkout_section)
 
     theme = deepcopy(source_page.get("theme") or {})
