@@ -18,6 +18,12 @@ export const useReviewsStore = defineStore("reviews", {
     error: "",
     message: "",
     filterStatus: "all",
+    // Offered by the server with the list, so the form can never show a reason the validator refuses --
+    // and so "low rating" cannot appear on a screen a merchant reads.
+    reportReasons: [],
+    // Reviews reported in THIS session. The review document carries no mark, deliberately: a report must
+    // not change the review in any way a buyer could see.
+    reportedIds: [],
   }),
   getters: {
     filteredReviews(state) {
@@ -39,6 +45,7 @@ export const useReviewsStore = defineStore("reviews", {
       try {
         const body = await apiRequest("/reviews");
         this.reviews = Array.isArray(body.reviews) ? body.reviews : [];
+        this.reportReasons = Array.isArray(body.report_reasons) ? body.report_reasons : [];
         this.loaded = true;
       } catch (error) {
         this.error = error.message || "Failed to load reviews.";
@@ -69,6 +76,28 @@ export const useReviewsStore = defineStore("reviews", {
     // ones would make the star rating a claim about a set they chose (plans/REVIEWS.md "Review
     // integrity"). Only a real buyer can write one, every one publishes, and removal belongs to the
     // author -- through the link in their own confirmation -- or to the platform.
+    //
+    // `report` is the one lever that remains, and it is not a disguised version of those: it writes a
+    // report into the platform's queue and leaves the review exactly where it is.
+    async report(reviewId, { reason, detail = "" }) {
+      this.saving = true;
+      this.error = "";
+      try {
+        await apiRequest("/reviews", {
+          method: "POST",
+          body: { action: "report", review_id: reviewId, reason, detail },
+        });
+        if (!this.reportedIds.includes(reviewId)) this.reportedIds = [...this.reportedIds, reviewId];
+        // Says what did NOT happen, because that is the part a merchant will otherwise assume wrongly.
+        this.message = "Reported. The review stays published while the platform looks at it.";
+        return true;
+      } catch (error) {
+        this.error = error.message || "Failed to send the report.";
+        return false;
+      } finally {
+        this.saving = false;
+      }
+    },
 
   },
 });

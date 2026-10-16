@@ -105,8 +105,47 @@
                  ones would make the star rating a claim about a set they chose, and that is the claim
                  this system exists to make honest (plans/REVIEWS.md "Review integrity"). Only a real
                  buyer can write one, every one publishes, and removal belongs to the author or to the
-                 platform. A verified review you dislike is still true. -->
-            <div v-if="review.verified_purchase" class="review-verified">✓ Verified purchase</div>
+                 platform. A verified review you dislike is still true.
+                 Reporting is the one lever that remains, and it changes nothing about the review. -->
+            <div class="review-card-foot">
+              <span v-if="review.verified_purchase" class="review-verified">✓ Verified purchase</span>
+              <span v-if="store.reportedIds.includes(review.review_id)" class="review-reported">
+                Reported — still published while the platform looks at it
+              </span>
+              <button
+                v-else-if="reportingId !== review.review_id"
+                class="link-muted"
+                type="button"
+                @click="openReport(review)"
+              >
+                Report a problem
+              </button>
+            </div>
+
+            <div v-if="reportingId === review.review_id" class="review-report-form">
+              <p class="field-note">
+                Tell us what is wrong with this review. <strong>It stays published</strong> while the
+                platform looks at it — reporting is not a way to take a review down, and a review you
+                simply disagree with is not a problem we can act on.
+              </p>
+              <label class="offer-field">
+                <span>Reason</span>
+                <select v-model="reportForm.reason">
+                  <option value="">Choose a reason…</option>
+                  <option v-for="r in store.reportReasons" :key="r.value" :value="r.value">{{ r.label }}</option>
+                </select>
+              </label>
+              <label class="offer-field">
+                <span>What is wrong{{ reportForm.reason === "other" ? "" : " (optional)" }}</span>
+                <textarea v-model.trim="reportForm.detail" rows="2" placeholder="Anything that helps us judge it…" />
+              </label>
+              <div class="button-row">
+                <button class="primary-action" type="button" :disabled="!canReport || store.saving" @click="sendReport">
+                  {{ store.saving ? "Sending…" : "Send report" }}
+                </button>
+                <button class="secondary-action" type="button" @click="closeReport">Cancel</button>
+              </div>
+            </div>
           </article>
         </div>
       </div>
@@ -128,6 +167,26 @@ const products = ref([]);
 const form = reactive({ target_type: "product", product_id: "", site_id: "", rating: 5, author: "", title: "", body: "", review_date: "", status: "approved" });
 const canSubmit = computed(() =>
   !!form.author && !!form.body && (form.target_type === "business" ? !!form.site_id : !!form.product_id));
+
+const reportingId = ref("");
+const reportForm = reactive({ reason: "", detail: "" });
+const canReport = computed(() =>
+  !!reportForm.reason && (reportForm.reason !== "other" || !!reportForm.detail));
+
+function openReport(review) {
+  reportingId.value = review.review_id;
+  Object.assign(reportForm, { reason: "", detail: "" });
+}
+
+function closeReport() {
+  reportingId.value = "";
+}
+
+async function sendReport() {
+  if (!canReport.value) return;
+  const sent = await store.report(reportingId.value, { ...reportForm });
+  if (sent) closeReport();
+}
 
 function productName(review) {
   const id = review.target?.id;
@@ -181,4 +240,11 @@ onMounted(async () => {
 .review-body { margin: 0.4rem 0 0.9rem; line-height: 1.5; }
 .link-danger { background: none; border: none; color: #dc2626; cursor: pointer; font: inherit; }
 .link-danger:hover { text-decoration: underline; }
+.review-card-foot { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.review-reported { color: var(--muted); font-size: 1.3rem; }
+/* Muted, not red. Reporting is a legitimate action with a dull outcome, and a danger-coloured button
+   would read as the delete button this screen deliberately no longer has. */
+.link-muted { background: none; border: none; color: var(--muted); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.link-muted:hover { color: var(--text); }
+.review-report-form { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 </style>

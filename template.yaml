@@ -907,6 +907,9 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           REVIEWS_TABLE: !Ref ReviewsTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          # A tenant reporting a review writes into the SAME queue as a reported page, so §1 and §1b of
+          # plans/ADMIN_SITE.md are one screen rather than two.
+          ABUSE_REPORTS_TABLE: !Ref AbuseReportsTable
       FunctionName: !Sub "${ProjectPrefix}-reviews-api-${Environment}"
       CodeUri: src/
       Handler: handlers.reviews.handler
@@ -917,6 +920,13 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        # WRITE ONLY, deliberately. This function files reports; reading and resolving the queue belongs to
+        # the admin site, which is a different stack with a different audience.
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AbuseReportsTable}"
       Events:
         ReviewsCreate:
           Type: Api
