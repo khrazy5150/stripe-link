@@ -95,11 +95,18 @@ class TheThemeIsFollowedTests(unittest.TestCase):
         self.assertIn("--sl-coupon-accent:#e0402c", rule)
         self.assertIn("--sl-coupon-bg:#fff", rule)
 
-    def test_the_other_three_pin_nothing(self):
+    def test_the_other_three_pin_no_LITERAL_colour(self):
+        """The distinction that matters is literal vs derived, not whether a property is set. `bold` does
+        set --sl-coupon-bg -- to `var(--sl-text)`, the page's own ink -- so it still moves with the preset.
+        `dark` and `minimalist` name hex values and deliberately do not."""
         for style in ("modern", "bold", "ribbon"):
             with self.subTest(style=style):
                 rule = re.search(r"\.sl-coupon\[data-coupon-style='" + style + r"'\]\{([^}]*)\}", CSS)
-                self.assertNotIn("--sl-coupon-bg:", rule.group(1) if rule else "")
+                body = rule.group(1) if rule else ""
+                for declaration in body.split(";"):
+                    if declaration.startswith("--sl-coupon-"):
+                        self.assertIn("var(--sl-", declaration,
+                                      f"{style} pins a literal colour and would stop following the preset")
 
 
 class TheStoredSectionTests(unittest.TestCase):
@@ -165,28 +172,39 @@ class BoldIsRibbonWithAHandmadeFinishTests(unittest.TestCase):
                 self.assertIn("grid-template-columns:minmax(0,1fr)",
                               self.rule(f".sl-coupon[data-coupon-style='{style}']"))
 
-    def test_the_ticket_is_outlined(self):
-        """A masked notch was invisible on a cream ticket against a cream page, and could never be fixed
-        with a border: a mask clips the border too, so the arcs had no outline and nor did the straight
-        edges (reported 2026-10-15)."""
+    def test_the_ticket_inverts_the_page(self):
+        """Contrast is what makes the perforation visible. Two earlier attempts failed because nothing
+        separated the ticket from the page: a mask was invisible on a cream ticket against a cream page,
+        and outlining the painted discs drew a continuous ring, so the bite read as a bubble stuck to the
+        side rather than a hole."""
         card = self.rule(".sl-coupon[data-coupon-style='bold']")
-        self.assertIn("border:1px solid var(--sl-coupon-edge)", card)
-        self.assertNotIn("mask", card, "the notch is painted now, not masked")
+        self.assertIn("--sl-coupon-bg:var(--sl-text)", card)
+        self.assertIn("--sl-coupon-text:var(--sl-background)", card)
 
-    def test_the_edge_colour_is_derived_not_branched(self):
-        """Near-black on a light ticket, light grey on a dark one, without asking which preset is on."""
+    def test_it_uses_a_pair_the_preset_designed_together(self):
+        """`(background, text)` is a designed pair — the same one `.sl-tone-contrast` inverts. Pairing one
+        pair's surface with another pair's ink is what flips when the preset does, and is the bug that
+        rule exists to prevent."""
         card = self.rule(".sl-coupon[data-coupon-style='bold']")
-        self.assertIn("--sl-coupon-edge:color-mix(in srgb,var(--sl-coupon-text", card)
+        self.assertNotIn("--sl-coupon-bg:var(--sl-card)", card)
+        self.assertIn(".sl-tone-contrast{--sl-section-bg:var(--sl-text);--sl-section-ink:var(--sl-background)",
+                      CSS, "the pair this borrows from must still exist")
 
-    def test_the_notches_are_painted_and_carry_the_same_outline(self):
-        notch = self.rule(".sl-coupon[data-coupon-style='bold']::before,"
-                          ".sl-coupon[data-coupon-style='bold']::after")
-        self.assertIn("border-radius:50%", notch)
-        self.assertIn("background:var(--sl-background", notch)
-        self.assertIn("border:1px solid var(--sl-coupon-edge)", notch)
+    def test_nothing_is_outlined(self):
+        """An outline cannot describe a bite: the ring is continuous, so it reads as a bubble."""
+        self.assertIn("border:0", self.rule(".sl-coupon[data-coupon-style='bold']"))
+        disc = self.rule(".sl-coupon[data-coupon-style='bold']::before,"
+                         ".sl-coupon[data-coupon-style='bold']::after")
+        self.assertNotIn("border:", disc)
+
+    def test_the_notch_is_the_pages_own_ground(self):
+        """Which is what makes it read as a hole once the ticket contrasts with it."""
+        disc = self.rule(".sl-coupon[data-coupon-style='bold']::before,"
+                         ".sl-coupon[data-coupon-style='bold']::after")
+        self.assertIn("background:var(--sl-background", disc)
+        self.assertIn("border-radius:50%", disc)
 
     def test_each_notch_shows_only_the_half_over_the_ticket(self):
-        """The outer half would draw a stray arc on the page."""
         # Asserted on the whole declaration rather than through `rule()`: the shared block names both
         # pseudos, so looking up "::after" alone finds that one and proves nothing about the side.
         self.assertIn("left:calc(var(--sl-notch) * -1);clip-path:inset(0 0 0 50%)", CSS)
@@ -195,11 +213,12 @@ class BoldIsRibbonWithAHandmadeFinishTests(unittest.TestCase):
     def test_the_card_stops_clipping_so_the_notches_can_sit_on_its_edge(self):
         self.assertIn("overflow:visible", self.rule(".sl-coupon[data-coupon-style='bold']"))
 
-    def test_only_bold_is_outlined(self):
-        """The outline exists to make the perforation legible. No other style has one to explain."""
+    def test_only_bold_inverts(self):
+        """Inverting is how the perforation is made legible. No other style has one to explain, and an
+        inverted ticket nobody asked for would be a surprise."""
         for style in ("modern", "minimalist", "ribbon", "dark"):
             with self.subTest(style=style):
-                self.assertNotIn("--sl-coupon-edge",
+                self.assertNotIn("--sl-coupon-bg:var(--sl-text)",
                                  self.rule(f".sl-coupon[data-coupon-style='{style}']"))
 
     def test_the_photograph_is_framed_and_tilted(self):

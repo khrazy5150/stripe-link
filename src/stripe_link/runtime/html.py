@@ -1286,23 +1286,27 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "clip-path:polygon(0 0,100% 0,calc(100% - 1.2rem) 50%,100% 100%,0 100%)}",
     # BOLD is RIBBON with a handmade finish (author, 2026-10-15): same torn ticket and same picture on the
     # right, plus perforated edges, a framed photograph and a drawn arrow at the redeem line.
-    # The ticket is OUTLINED, and the perforation is PAINTED rather than masked. Masking was invisible on
-    # a cream ticket against a cream page (reported 2026-10-15) and could never be fixed with a border: a
-    # mask clips the border too, so the notch arcs had no outline at all and the straight edges had none
-    # either. Two half-discs in the page's own colour, each carrying the same hairline, bite the sides and
-    # continue the outline around the curve -- which is what makes a paper ticket read as torn.
+    # The ticket INVERTS THE PAGE, and the perforation is painted rather than masked.
     #
-    # The edge colour is DERIVED from the ticket's ink, so it is near-black on a light ticket and a light
-    # grey on a dark one without branching on the preset.
+    # Two earlier attempts failed for the same reason: nothing separated the ticket from the page. A mask
+    # was invisible on a cream ticket against a cream page, and an outline could not rescue it -- a mask
+    # clips the border too. Outlining the painted discs was worse: the ring is continuous, so the bite read
+    # as a bubble stuck to the side rather than a hole (author, 2026-10-15: "that's awful").
+    #
+    # Contrast is the actual answer. The ticket takes the page's INK as its ground and the page's ground as
+    # its ink -- dark on a light preset, light on a dark one -- so a notch in the page's own colour reads as
+    # a hole with no outline at all. (background, text) is a pair the preset DESIGNED together, which is the
+    # rule `.sl-tone-contrast` follows for exactly this inversion; pairing one pair's surface with another
+    # pair's ink is what inverts when the preset does.
     "    .sl-coupon[data-coupon-style='bold']{grid-template-columns:minmax(0,1fr) minmax(10rem,40%);"
-    "--sl-notch:1.15rem;--sl-coupon-edge:color-mix(in srgb,var(--sl-coupon-text,#16181d) 65%,transparent);"
-    "border:1px solid var(--sl-coupon-edge);border-radius:1.2rem;padding:1.4rem 1.8rem;"
+    "--sl-notch:1.15rem;--sl-coupon-bg:var(--sl-text);--sl-coupon-text:var(--sl-background);"
+    "border:0;border-radius:1.2rem;padding:1.4rem 1.8rem;"
     "position:relative;overflow:visible;box-shadow:0 1.4rem 3.4rem rgba(0,0,0,0.16)}",
-    # Clipped to the half that overlaps the ticket: the outer half would draw a stray arc on the page.
+    # The bite itself: the page's own ground, no border. Clipped to the half over the ticket so it never
+    # paints outside its footprint.
     "    .sl-coupon[data-coupon-style='bold']::before,.sl-coupon[data-coupon-style='bold']::after{"
     "content:'';position:absolute;top:50%;width:calc(var(--sl-notch) * 2);height:calc(var(--sl-notch) * 2);"
-    "border-radius:50%;background:var(--sl-background,#fff);border:1px solid var(--sl-coupon-edge);"
-    "transform:translateY(-50%);z-index:1}",
+    "border-radius:50%;background:var(--sl-background,#fff);transform:translateY(-50%);z-index:1}",
     "    .sl-coupon[data-coupon-style='bold']::before{left:calc(var(--sl-notch) * -1);"
     "clip-path:inset(0 0 0 50%)}",
     "    .sl-coupon[data-coupon-style='bold']::after{right:calc(var(--sl-notch) * -1);"
