@@ -1453,10 +1453,10 @@
                         <span>Style</span>
                         <select v-model="element.style">
                           <option value="modern">Modern — clean card, pill button</option>
-                          <option value="bold">Bold — marker type, tilted photo</option>
+                          <option value="bold">Bold — perforated ticket, framed photo</option>
                           <option value="ribbon">Ribbon — flag banner, photo on the right</option>
                           <option value="dark">Dark — fixed navy and gold</option>
-                          <option value="original">Original — the first design</option>
+                          <option value="minimalist">Minimalist — plain ticket, red accent</option>
                         </select>
                       </label>
                       <!-- The tenant SAYS which picture. It used to fall back image_url -> product photo

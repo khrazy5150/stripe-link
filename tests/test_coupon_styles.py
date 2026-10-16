@@ -1,7 +1,7 @@
 """Five coupon looks over one markup shape.
 
-Author, 2026-10-15, with four reference designs and "you can keep the original too": Modern (default),
-Bold, Ribbon, Dark, Original. *"The coupon color schemes should follow the current theme's color scheme,
+Author, 2026-10-15, with four reference designs and a fifth kept alongside them: Modern (default), Bold,
+Ribbon, Dark, Minimalist. *"The coupon color schemes should follow the current theme's color scheme,
 but the dark option may remain fixed as is."*
 
 One markup shape and five stylesheets, so a style is a CSS question and the renderer stays a renderer.
@@ -88,10 +88,10 @@ class TheThemeIsFollowedTests(unittest.TestCase):
         for prop in ("--sl-coupon-bg:", "--sl-coupon-text:", "--sl-coupon-accent:"):
             self.assertIn(prop, rule)
 
-    def test_original_pins_the_colours_that_used_to_be_fallbacks(self):
+    def test_minimalist_pins_its_own_colours(self):
         """They were hardcoded defaults nothing ever overrode. Now that the ticket follows the preset,
-        "original" has to state them or it would quietly become a theme-following style."""
-        rule = re.search(r"\.sl-coupon\[data-coupon-style='original'\]\{([^}]*)\}", CSS).group(1)
+        this style has to state them or it would quietly become a theme-following one."""
+        rule = re.search(r"\.sl-coupon\[data-coupon-style='minimalist'\]\{([^}]*)\}", CSS).group(1)
         self.assertIn("--sl-coupon-accent:#e0402c", rule)
         self.assertIn("--sl-coupon-bg:#fff", rule)
 
@@ -144,3 +144,55 @@ class TheBuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoldIsRibbonWithAHandmadeFinishTests(unittest.TestCase):
+    """Author, 2026-10-15: *"The 'bold' style is basically the same as the 'ribbon' style except with the
+    details I mentioned."* Picture on the right, perforated edges, a framed photograph, a drawn arrow."""
+
+    def rule(self, selector):
+        found = re.search(re.escape(selector) + r"\{([^}]*)\}", CSS)
+        return found.group(1) if found else ""
+
+    def test_the_picture_moves_to_the_right_like_ribbon(self):
+        self.assertIn("order:2", self.rule(".sl-coupon[data-coupon-style='bold'] .sl-coupon-media"))
+        self.assertIn("order:1", self.rule(".sl-coupon[data-coupon-style='bold'] .sl-coupon-body"))
+
+    def test_both_put_the_picture_in_the_same_column(self):
+        """The one structural thing that makes them "basically the same"."""
+        for style in ("ribbon", "bold"):
+            with self.subTest(style=style):
+                self.assertIn("grid-template-columns:minmax(0,1fr)",
+                              self.rule(f".sl-coupon[data-coupon-style='{style}']"))
+
+    def test_the_edges_are_perforated(self):
+        card = self.rule(".sl-coupon[data-coupon-style='bold']")
+        self.assertIn("mask-composite", card)
+        self.assertIn("radial-gradient", card)
+
+    def test_the_photograph_is_framed_and_tilted(self):
+        img = self.rule(".sl-coupon[data-coupon-style='bold'] .sl-coupon-media img")
+        self.assertIn("border:0.8rem solid #fff", img)
+        self.assertIn("rotate(", img)
+        self.assertIn("box-shadow", img)
+
+    def test_the_redeem_line_has_a_drawn_arrow(self):
+        before = self.rule(".sl-coupon[data-coupon-style='bold'] .sl-coupon-cta::before")
+        self.assertIn("var(--sl-coupon-arrow)", before)
+        self.assertIn("background:currentColor", before, "the arrow takes the line's colour, not its own")
+        self.assertIn("--sl-coupon-arrow:url(", CSS)
+
+    def test_the_redeem_line_uses_the_accent_family(self):
+        """`--sl-font-accent` rather than a family named in the stylesheet: a third webfont is a third
+        download on a page tuned for LCP, and the accent role exists for exactly this."""
+        cta = self.rule(".sl-coupon[data-coupon-style='bold'] .sl-coupon-cta")
+        self.assertIn("font-family:var(--sl-font-accent,var(--sl-font-heading))", cta)
+        self.assertIn("font-style:italic", cta)
+
+    def test_no_font_family_is_hardcoded_into_a_coupon_style(self):
+        """If one ever is, a page gained a download nobody chose."""
+        for style in ("modern", "minimalist", "ribbon", "bold", "dark"):
+            with self.subTest(style=style):
+                for line in CSS.splitlines():
+                    if f"data-coupon-style='{style}'" in line and "font-family:" in line:
+                        self.assertIn("var(--sl-font", line)

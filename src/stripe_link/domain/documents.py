@@ -1846,7 +1846,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             # Which of the five looks. Absent means `modern`; a typo would silently mean it too, and the
             # tenant would pick a style and watch the page ignore them.
             if section.get("style") is not None:
-                require_enum(section, "style", {"modern", "original", "ribbon", "bold", "dark"},
+                require_enum(section, "style", {"modern", "minimalist", "ribbon", "bold", "dark"},
                              "Coupon style")
         elif section_type == "faq":
             # Opening one question closes the others. Stored only when the tenant turns it OFF: absent

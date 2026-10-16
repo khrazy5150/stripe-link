@@ -1258,11 +1258,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # it is a style, not a palette, and a dark ticket whose colours moved with the theme would stop being
     # the thing the tenant picked.
     #
-    # ORIGINAL is the design that shipped first, kept because a tenant who likes it should not be moved off
-    # it. It PINS the three properties back to the values that used to be hardcoded fallbacks: now that the
-    # ticket follows the preset, "original" has to say so rather than rely on a fallback that never fires.
-    # The dashed ticket edging it uses is the base, so there is nothing else to restate.
-    "    .sl-coupon[data-coupon-style='original']{--sl-coupon-accent:#e0402c;--sl-coupon-bg:#fff;"
+    # MINIMALIST: a plain white ticket with a red accent, pinned rather than themed. It PINS the three
+    # properties to the values that used to be hardcoded fallbacks -- now that the base follows the preset,
+    # this style has to state them or it would quietly become a theme-following one. The dashed ticket
+    # edging it uses is the base, so there is nothing else to restate.
+    "    .sl-coupon[data-coupon-style='minimalist']{--sl-coupon-accent:#e0402c;--sl-coupon-bg:#fff;"
     "--sl-coupon-text:#16181d;--sl-coupon-cta-ink:#fff}",
     # MODERN is the default and paints a plain card: no dashed ticket edging, the eyebrow small in the
     # accent, and the redeem line a filled pill rather than a line of coloured text.
@@ -1284,20 +1284,49 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-coupon[data-coupon-style='ribbon'] .sl-coupon-brand{background:var(--sl-coupon-accent,#e0402c);"
     "color:var(--sl-coupon-cta-ink,#fff);padding:0.7rem 2.4rem 0.7rem 1.2rem;margin:0 0 0.6rem -2.9rem;"
     "clip-path:polygon(0 0,100% 0,calc(100% - 1.2rem) 50%,100% 100%,0 100%)}",
-    # BOLD is the marker-pen one: a highlighter behind the eyebrow, a thick swipe under the value, and the
-    # picture tilted like a photograph dropped on the page.
-    "    .sl-coupon[data-coupon-style='bold']{border:0;border-radius:1.2rem;"
-    "box-shadow:0 1.4rem 3.4rem rgba(0,0,0,0.16)}",
-    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-media{border-right:0;background:transparent;padding:1.6rem}",
-    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-media img{border-radius:0.4rem;transform:rotate(2deg);"
-    "box-shadow:0 0.6rem 1.8rem rgba(0,0,0,0.22);border:0.7rem solid var(--sl-coupon-bg,#fff)}",
+    # BOLD is RIBBON with a handmade finish (author, 2026-10-15): same torn ticket and same picture on the
+    # right, plus perforated edges, a framed photograph and a drawn arrow at the redeem line.
+    "    .sl-coupon[data-coupon-style='bold']{grid-template-columns:minmax(0,1fr) minmax(10rem,40%);"
+    "border:0;border-radius:1.2rem;padding:1.4rem 1.8rem;box-shadow:0 1.4rem 3.4rem rgba(0,0,0,0.16);"
+    # The perforation. Two half-circles bitten out of the sides, composited so the card keeps one shape --
+    # a browser without mask support simply gets straight edges, which is the card it had before.
+    "--sl-notch:1.1rem;"
+    "-webkit-mask:radial-gradient(circle var(--sl-notch) at left 50%,transparent 98%,#000 100%),"
+    "radial-gradient(circle var(--sl-notch) at right 50%,transparent 98%,#000 100%);"
+    "mask:radial-gradient(circle var(--sl-notch) at left 50%,transparent 98%,#000 100%),"
+    "radial-gradient(circle var(--sl-notch) at right 50%,transparent 98%,#000 100%);"
+    "-webkit-mask-composite:source-in;mask-composite:intersect}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-body{order:1;padding:1.2rem 1.4rem}",
+    # The photograph: a thick white mount, a shadow and a slight tilt, so it reads as a print dropped on
+    # the ticket rather than a panel built into it.
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-media{order:2;border-right:0;background:transparent;"
+    "display:grid;align-content:center;padding:1rem}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-media img{border-radius:0.2rem;transform:rotate(2.5deg);"
+    "border:0.8rem solid #fff;border-bottom-width:2.6rem;box-shadow:0 0.8rem 2rem rgba(0,0,0,0.28);min-height:0}",
+    # A highlighter swipe behind the eyebrow and a thick one under the value -- drawn with the accent, so
+    # they follow the preset like the rest of the ticket.
     "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-brand{display:inline;color:var(--sl-coupon-text,#16181d);"
-    "background:color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent);"
-    "box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:0.25rem 0.6rem}",
+    "background:color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 55%,transparent);"
+    "box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:0.3rem 0.7rem;border-radius:0.2rem}",
     "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-value{display:inline-block;font-size:clamp(3.6rem,10vw,5.4rem);"
-    "box-shadow:inset 0 -0.5em 0 color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent)}",
-    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-code{border:2px dashed color-mix(in srgb,var(--sl-coupon-text,#16181d) 35%,transparent);"
-    "background:transparent}",
+    "text-transform:uppercase;box-shadow:inset 0 -0.22em 0 color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 55%,transparent)}",
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-code{border:2px dashed color-mix(in srgb,var(--sl-coupon-text,#16181d) 40%,transparent);"
+    "background:transparent;padding:0.6rem 1.1rem}",
+    # The redeem line is the hand-written one in the reference. `--sl-font-accent` rather than a family
+    # named here: a third webfont is a third download on a page tuned for LCP (domain/fonts.py), and the
+    # accent role already exists for exactly this -- a tenant who wants Karla sets it once and every
+    # accent-typed thing on the page follows.
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-cta{display:inline-flex;align-items:center;gap:0.8rem;"
+    "margin-top:1rem;font-family:var(--sl-font-accent,var(--sl-font-heading));font-style:italic;"
+    "font-size:1.6rem;line-height:1.2;color:var(--sl-coupon-text,#16181d)}",
+    # The drawn arrow, as a mask so it takes the line's own colour instead of shipping a coloured asset.
+    "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-cta::before{content:'';flex:0 0 auto;"
+    "width:2.6rem;height:2.6rem;background:currentColor;"
+    "-webkit-mask:var(--sl-coupon-arrow) center/contain no-repeat;mask:var(--sl-coupon-arrow) center/contain no-repeat}",
+    "    .sl-coupon[data-coupon-style='bold']{--sl-coupon-arrow:url(\"data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' "
+    "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E"
+    "%3Cpath d='M3 4c7 0 12 5 13 13'/%3E%3Cpath d='M11 15l5 3 2-5'/%3E%3C/svg%3E\")}",
     # DARK is FIXED. Every other style tracks the preset; this one is chosen for its own look, so its three
     # custom properties are set here rather than inherited.
     "    .sl-coupon[data-coupon-style='dark']{--sl-coupon-bg:#111827;--sl-coupon-text:#f8fafc;"
@@ -6523,9 +6552,8 @@ def coupon_is_live(section: dict[str, Any], now: int | None = None) -> bool:
     return int(now if now is not None else time.time()) < expires_at
 
 
-# The five coupon looks. `original` is the design that shipped first, kept so a tenant who likes it is not
-# forced off it; `modern` is the default for new and unstated sections.
-COUPON_STYLES = ("modern", "original", "ribbon", "bold", "dark")
+# The five coupon looks. `modern` is the default for new and unstated sections.
+COUPON_STYLES = ("modern", "minimalist", "ribbon", "bold", "dark")
 
 
 def render_coupon(
