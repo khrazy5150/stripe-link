@@ -1286,16 +1286,27 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "clip-path:polygon(0 0,100% 0,calc(100% - 1.2rem) 50%,100% 100%,0 100%)}",
     # BOLD is RIBBON with a handmade finish (author, 2026-10-15): same torn ticket and same picture on the
     # right, plus perforated edges, a framed photograph and a drawn arrow at the redeem line.
+    # The ticket is OUTLINED, and the perforation is PAINTED rather than masked. Masking was invisible on
+    # a cream ticket against a cream page (reported 2026-10-15) and could never be fixed with a border: a
+    # mask clips the border too, so the notch arcs had no outline at all and the straight edges had none
+    # either. Two half-discs in the page's own colour, each carrying the same hairline, bite the sides and
+    # continue the outline around the curve -- which is what makes a paper ticket read as torn.
+    #
+    # The edge colour is DERIVED from the ticket's ink, so it is near-black on a light ticket and a light
+    # grey on a dark one without branching on the preset.
     "    .sl-coupon[data-coupon-style='bold']{grid-template-columns:minmax(0,1fr) minmax(10rem,40%);"
-    "border:0;border-radius:1.2rem;padding:1.4rem 1.8rem;box-shadow:0 1.4rem 3.4rem rgba(0,0,0,0.16);"
-    # The perforation. Two half-circles bitten out of the sides, composited so the card keeps one shape --
-    # a browser without mask support simply gets straight edges, which is the card it had before.
-    "--sl-notch:1.1rem;"
-    "-webkit-mask:radial-gradient(circle var(--sl-notch) at left 50%,transparent 98%,#000 100%),"
-    "radial-gradient(circle var(--sl-notch) at right 50%,transparent 98%,#000 100%);"
-    "mask:radial-gradient(circle var(--sl-notch) at left 50%,transparent 98%,#000 100%),"
-    "radial-gradient(circle var(--sl-notch) at right 50%,transparent 98%,#000 100%);"
-    "-webkit-mask-composite:source-in;mask-composite:intersect}",
+    "--sl-notch:1.15rem;--sl-coupon-edge:color-mix(in srgb,var(--sl-coupon-text,#16181d) 65%,transparent);"
+    "border:1px solid var(--sl-coupon-edge);border-radius:1.2rem;padding:1.4rem 1.8rem;"
+    "position:relative;overflow:visible;box-shadow:0 1.4rem 3.4rem rgba(0,0,0,0.16)}",
+    # Clipped to the half that overlaps the ticket: the outer half would draw a stray arc on the page.
+    "    .sl-coupon[data-coupon-style='bold']::before,.sl-coupon[data-coupon-style='bold']::after{"
+    "content:'';position:absolute;top:50%;width:calc(var(--sl-notch) * 2);height:calc(var(--sl-notch) * 2);"
+    "border-radius:50%;background:var(--sl-background,#fff);border:1px solid var(--sl-coupon-edge);"
+    "transform:translateY(-50%);z-index:1}",
+    "    .sl-coupon[data-coupon-style='bold']::before{left:calc(var(--sl-notch) * -1);"
+    "clip-path:inset(0 0 0 50%)}",
+    "    .sl-coupon[data-coupon-style='bold']::after{right:calc(var(--sl-notch) * -1);"
+    "clip-path:inset(0 50% 0 0)}",
     "    .sl-coupon[data-coupon-style='bold'] .sl-coupon-body{order:1;padding:1.2rem 1.4rem}",
     # The photograph: a thick white mount, a shadow and a slight tilt, so it reads as a print dropped on
     # the ticket rather than a panel built into it.

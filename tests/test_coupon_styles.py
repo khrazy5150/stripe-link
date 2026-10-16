@@ -165,10 +165,42 @@ class BoldIsRibbonWithAHandmadeFinishTests(unittest.TestCase):
                 self.assertIn("grid-template-columns:minmax(0,1fr)",
                               self.rule(f".sl-coupon[data-coupon-style='{style}']"))
 
-    def test_the_edges_are_perforated(self):
+    def test_the_ticket_is_outlined(self):
+        """A masked notch was invisible on a cream ticket against a cream page, and could never be fixed
+        with a border: a mask clips the border too, so the arcs had no outline and nor did the straight
+        edges (reported 2026-10-15)."""
         card = self.rule(".sl-coupon[data-coupon-style='bold']")
-        self.assertIn("mask-composite", card)
-        self.assertIn("radial-gradient", card)
+        self.assertIn("border:1px solid var(--sl-coupon-edge)", card)
+        self.assertNotIn("mask", card, "the notch is painted now, not masked")
+
+    def test_the_edge_colour_is_derived_not_branched(self):
+        """Near-black on a light ticket, light grey on a dark one, without asking which preset is on."""
+        card = self.rule(".sl-coupon[data-coupon-style='bold']")
+        self.assertIn("--sl-coupon-edge:color-mix(in srgb,var(--sl-coupon-text", card)
+
+    def test_the_notches_are_painted_and_carry_the_same_outline(self):
+        notch = self.rule(".sl-coupon[data-coupon-style='bold']::before,"
+                          ".sl-coupon[data-coupon-style='bold']::after")
+        self.assertIn("border-radius:50%", notch)
+        self.assertIn("background:var(--sl-background", notch)
+        self.assertIn("border:1px solid var(--sl-coupon-edge)", notch)
+
+    def test_each_notch_shows_only_the_half_over_the_ticket(self):
+        """The outer half would draw a stray arc on the page."""
+        # Asserted on the whole declaration rather than through `rule()`: the shared block names both
+        # pseudos, so looking up "::after" alone finds that one and proves nothing about the side.
+        self.assertIn("left:calc(var(--sl-notch) * -1);clip-path:inset(0 0 0 50%)", CSS)
+        self.assertIn("right:calc(var(--sl-notch) * -1);clip-path:inset(0 50% 0 0)", CSS)
+
+    def test_the_card_stops_clipping_so_the_notches_can_sit_on_its_edge(self):
+        self.assertIn("overflow:visible", self.rule(".sl-coupon[data-coupon-style='bold']"))
+
+    def test_only_bold_is_outlined(self):
+        """The outline exists to make the perforation legible. No other style has one to explain."""
+        for style in ("modern", "minimalist", "ribbon", "dark"):
+            with self.subTest(style=style):
+                self.assertNotIn("--sl-coupon-edge",
+                                 self.rule(f".sl-coupon[data-coupon-style='{style}']"))
 
     def test_the_photograph_is_framed_and_tilted(self):
         img = self.rule(".sl-coupon[data-coupon-style='bold'] .sl-coupon-media img")
