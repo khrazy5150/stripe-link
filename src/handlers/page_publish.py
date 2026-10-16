@@ -5,7 +5,9 @@ from typing import Any
 
 from boto3.dynamodb.types import TypeDeserializer
 
+from stripe_link.domain.platform_suspension import is_suspended
 from stripe_link.repositories.documents import (
+    RepositoryError,
     custom_domains_index_repository,
     collections_repository,
     experiments_repository,
@@ -60,6 +62,88 @@ def normalize_dynamodb_value(value: Any) -> Any:
     return value
 
 
+def _tenant_is_suspended(tenant_profiles_repo, page) -> bool:
+    """Whether this page's tenant is suspended.
+
+    FAILS CLOSED on a read error: an unreadable profile stops the publish. The opposite choice would mean a
+    DynamoDB blip is all it takes to put a suspended tenant's page back on the air, and the page is the
+    thing a suspension exists to remove.
+    """
+    if tenant_profiles_repo is None:
+        return False
+    tenant_id = str((page or {}).get("tenant_id") or "").strip()
+    if not tenant_id:
+        return False
+    try:
+        return is_suspended(tenant_profiles_repo.get(tenant_id, tenant_id))
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read tenant profile for %s; refusing to publish.", tenant_id)
+        return True
+
+
+def _tenant_pages(tenant_id, pages_repo=None):
+    """Every page a tenant owns, in BOTH Stripe modes.
+
+    A test-mode page is published to a real URL and is just as capable of carrying illegal content as a
+    live one, so a takedown that only swept `live` would leave half the account up.
+    """
+    if pages_repo is not None:
+        return pages_repo.list_for_tenant(tenant_id)
+    found = []
+    for mode in ("live", "test"):
+        try:
+            found.extend(pages_repository(mode=mode).list_for_tenant(tenant_id))
+        except RepositoryError:
+            continue
+    return found
+
+
+def _tenant_artifact_action(action, event, *, pages_repo=None, s3_client=None, cloudfront_client=None):
+    """Take a tenant's published pages off the air, or put them back.
+
+    **Artifacts only — page documents are not modified by a suspension.** Flipping each page to `archived`
+    would also run `detach_page_from_sites` and `deregister_page_route`, which a restore would not undo:
+    the tenant would come back to pages missing from their Site's route map. Deleting artifacts changes
+    nothing a republish does not rebuild.
+    """
+    tenant_id = str((event or {}).get("tenant_id") or "").strip()
+    if not tenant_id:
+        return {"ok": False, "error": "tenant_id is required."}
+    if action not in {"suspend_tenant", "restore_tenant"}:
+        return {"ok": False, "error": f"Unknown action '{action}'."}
+
+    pages = [p for p in _tenant_pages(tenant_id, pages_repo) if p.get("status") == "published"]
+    touched, failed = [], []
+    for page in pages:
+        page_id = str(page.get("page_id") or "")
+        try:
+            if action == "suspend_tenant":
+                delete_page_artifacts(
+                    page,
+                    s3_client=s3_client,
+                    pages_bucket=os.environ.get("PAGES_BUCKET", ""),
+                    preview_bucket=os.environ.get("PAGES_PREVIEW_BUCKET", ""),
+                    cloudfront_client=cloudfront_client,
+                    pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
+                )
+            else:
+                # Restore by RE-WRITING the document, which fires this same stream and republishes through
+                # the ordinary path -- every repo, every rule, no second implementation of publishing that
+                # could drift from the first. It works only once the suspension is lifted, because the
+                # publish path above refuses a suspended tenant.
+                mode = "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
+                pages_repository(mode=mode).put(page)
+            touched.append(page_id)
+        except Exception as exc:  # noqa: BLE001 - one bad page must not abandon the rest of a takedown
+            logger.exception("Tenant %s action %s failed for page %s", tenant_id, action, page_id)
+            failed.append({"page_id": page_id, "error": str(exc)})
+
+    logger.info("Tenant %s: %s touched %d page(s), %d failed", tenant_id, action, len(touched), len(failed))
+    # `ok` is False when ANY page failed. A takedown that half worked must not report success -- the admin
+    # has to know which pages are still up.
+    return {"ok": not failed, "action": action, "tenant_id": tenant_id,
+            "pages": touched, "page_count": len(touched), "failed": failed}
+
 def should_publish_record(record: dict[str, Any]) -> bool:
     if record.get("eventName") not in {"INSERT", "MODIFY", "REMOVE"}:
         return False
@@ -97,6 +181,23 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
         if cloudfront_client is None:
             cloudfront_client = boto3.client("cloudfront")
 
+    # An INTERNAL invocation from the admin site, not a stream batch (plans/ADMIN_SITE.md §1c).
+    #
+    # Folded onto this function rather than given one of its own because this is where the pages bucket,
+    # the distribution id, the IAM to use them, and `delete_page_artifacts` already live. A second home for
+    # artifact-path knowledge is how two places start disagreeing about where a page is.
+    #
+    # It carries no identity of its own: Lambda-to-Lambda invoke is reachable only by a principal that was
+    # granted it, and the only such principal is the admin API, which checks its own allow-list first.
+    internal = str((event or {}).get("internal_admin") or "").strip()
+    if internal:
+        return _tenant_artifact_action(
+            internal, event,
+            pages_repo=_injected["pages"],
+            s3_client=s3_client,
+            cloudfront_client=cloudfront_client,
+        )
+
     failures = []
     for record in (event or {}).get("Records", []):
         item_identifier = record.get("eventID") or record.get("eventId") or ""
@@ -123,6 +224,13 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
             # A/B: a variant artifact must carry the TESTED page's canonical and robots, because the edge
             # serves it behind that page's URL (plans/AB_TESTING.md A2). Mode-scoped like the rest.
             experiments_repo = _injected["experiments"] or (experiments_repository(mode=page_mode) if os.environ.get("EXPERIMENTS_TABLE") else None)
+            # A suspended tenant's page is never published, by ANY path that touches a page document --
+            # including the tenant's own edit, a backfill, or a restore that ran before the suspension was
+            # lifted. Deleting the artifact without this would be a takedown with a one-edit undo.
+            if _tenant_is_suspended(tenant_profiles_repo, page):
+                logger.info("Skipped publish for suspended tenant: %s", page.get("tenant_id"))
+                continue
+
             if record.get("eventName") == "REMOVE" or page.get("status") == "archived":
                 result = delete_page_artifacts(
                     page,

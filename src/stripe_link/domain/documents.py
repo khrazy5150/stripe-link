@@ -2045,6 +2045,18 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Tenant profile billing_status is invalid.")
     if "billing_exempt" in document and not isinstance(document.get("billing_exempt"), bool):
         raise DocumentValidationError("Tenant profile billing_exempt must be a boolean.")
+    # PLATFORM SUSPENSION (plans/ADMIN_SITE.md §1c) -- abuse, not billing, and deliberately NOT folded into
+    # billing_status above for the same reason as the beta grants below: that field is written wholesale by
+    # the subscription webhook, so a suspension stored there is lifted by the tenant's next Stripe event.
+    #
+    # Validated so a typo cannot silently mean "active". `suspeded` would read as an unrecognised value,
+    # `is_suspended` would answer False, and the account would be quietly live again.
+    platform_status = document.get("platform_status")
+    if platform_status is not None and platform_status not in {"active", "suspended"}:
+        raise DocumentValidationError("Tenant profile platform_status is invalid.")
+    optional_string(document, "suspended_reason", "Tenant profile suspended_reason", max_length=64)
+    optional_string(document, "suspended_by", "Tenant profile suspended_by", max_length=254)
+    optional_string(document, "suspension_note", "Tenant profile suspension_note", max_length=2000)
     # BETA GRANTS: capabilities this tenant may use before they ship (plans/MONEY_ACROSS_SILOS.md P1).
     # Its own field, never folded into `entitlements`, because the subscription webhook overwrites that
     # one wholesale -- a grant stored there is wiped by the tenant's next Stripe event.

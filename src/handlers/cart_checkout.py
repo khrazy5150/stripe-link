@@ -18,6 +18,7 @@ from handlers.checkout import (
 )
 from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.tax_status import calculates as tax_calculates
@@ -99,7 +100,11 @@ def handler(
     opener = opener or urlopen
 
     try:
-        assert_billing_in_good_standing(tenant_repo.get(tenant_id, tenant_id))
+        # One read, two questions: is this tenant paid up, and have we shut them down?
+        # (plans/ADMIN_SITE.md §1c -- a suspension must stop links already in the wild.)
+        _profile = tenant_repo.get(tenant_id, tenant_id)
+        assert_billing_in_good_standing(_profile)
+        assert_not_suspended(_profile)
 
         # Transactions are only allowed from a published page (same guard as the single-offer checkout): a draft
         # or unknown page_id cannot start a cart checkout even if the API is called directly.
@@ -208,6 +213,11 @@ def handler(
         return error_response(str(exc), code="invalid_cart")
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SuspendedError as exc:
+        # 403, not 402: this is not a bill the merchant can settle, and a shopper must not be invited to
+        # retry. The message is the reason the platform recorded, so support is not guessing either.
+        return error_response(
+            "This store is not currently able to take orders.", status_code=403, code="tenant_suspended")
     except PricingError as exc:
         return error_response(str(exc), code="checkout_error")
     except Exception as exc:  # noqa: BLE001 - surface a clean error, never a 500 stack to the shopper

@@ -120,6 +120,89 @@ review and has its own screen still to design.
 screen (§1's own queue, still unread), and the monitored address with a target response time — the part no
 screen supplies, and now a paying merchant is the one waiting.
 
+## 1c. Tenant suspension — "shut them down immediately" (added 2026-10-16)
+
+**The gap this closes.** §1 can suspend a *Site*; nothing can suspend a *tenant*. A tenant found selling
+illegal products has pages on the platform host, pages on their own custom domain, live checkout links in
+the wild, and the ability to publish more while anyone is reading a report. The author's words: *"If a
+tenant is found offering illegal products, I should be able to shut them down immediately."* This should
+have been in §1 from the start — an abuse intake whose only remedy is per-Site is an intake that cannot
+answer for the account.
+
+### The field: its own, NOT `billing_status`
+
+`TenantProfile.billing_status` already has a `suspended` value and it is the wrong one to reuse, for a
+reason that would not show up in testing: **it is webhook-driven.** `platform_subscription_sync` writes it
+from Stripe subscription events, so a `customer.subscription.updated` arriving after an abuse suspension
+would overwrite it with `active` and silently un-block the tenant. Nobody would be watching, and the
+evidence would be a page that came back.
+
+So: **`TenantProfile.platform_status`**, `"active"` (absent means active) or `"suspended"`, with
+`suspended_reason` from a fixed list, `suspended_by` (the admin's verified email), `suspended_at`, and a
+free-text `suspension_note`. Billing and abuse are different questions about a tenant and get different
+fields.
+
+### What a suspension does, in the order it matters
+
+1. **The pages come off the air.** Published artifacts are deleted from the pages bucket and the paths
+   invalidated at CloudFront. This is the part that actually answers an illegal-products report, and it
+   takes seconds rather than a deploy.
+2. **Checkout refuses.** Three call sites already load the tenant profile to assert billing standing
+   (`checkout`, `cart_checkout`, `upsell`); the suspension check sits beside each, on the profile already
+   in hand. Links already in the wild stop taking money.
+3. **The dashboard locks.** Enforced at **sign-in and refresh**, which is one place rather than seventy:
+   no token, no API. An open session dies within the hour when its access token expires, and meanwhile
+   publish and checkout refuse it anyway.
+4. **Publishing refuses**, so a suspended tenant's page cannot be put back by any path that touches a page
+   document.
+
+### Artifacts, not documents — so it is reversible
+
+The takedown deletes **published artifacts** and leaves every page document untouched. The tempting
+alternative — flipping each page to `archived` — also runs `detach_page_from_sites` and
+`deregister_page_route`, which un-suspending would not restore: the tenant would come back to pages that
+are no longer in any Site's route map. Deleting artifacts changes nothing that a republish does not
+rebuild, so **restore is just publishing them again**.
+
+### Where the takedown runs: folded onto `page_publish`
+
+`TenantProfilesTable` has no stream, so the suspension cannot propagate by itself. The admin site writes
+`platform_status` and then **invokes `{prefix}-page-publish-{env}` directly** with an internal payload —
+no API route, which matters because the stack is at the 1MB transform limit.
+
+That function is the right host and not an arbitrary one: it already holds the pages bucket, the
+CloudFront distribution id and the IAM to use them, and it already contains `delete_page_artifacts` and
+`publish_page_document` — the two halves of suspend and restore. Putting this anywhere else would copy
+artifact-path knowledge into a second place.
+
+The invocation is synchronous and **returns what it took down**, so the admin sees "7 pages removed"
+rather than trusting that something happened.
+
+### Fail closed, deliberately unlike the gate next to it
+
+`entitlement_gate.require_capability` fails OPEN on any lookup error, and says why: *"a cross-cutting gate
+must never itself 500 a tenant action."* That is right for a plan feature and wrong here. A suspension
+check that cannot read the profile must refuse, because the cost of wrongly allowing is a live illegal
+page and the cost of wrongly refusing is a merchant who contacts support.
+
+### What it deliberately does not do
+
+- **It does not delete anything of the tenant's.** Documents, orders, products and media stay. A
+  suspension is a stop, not a purge, and the evidence has to survive for whoever asks next.
+- **It does not touch Stripe.** Refunds, payouts and disputes on money already taken are Stripe's to
+  settle and a platform block must not strand a buyer's refund.
+- **It does not notify the tenant.** No email exists for this yet, and inventing one at suspension time is
+  how a holding message becomes a legal statement. They discover it at sign-in, which tells them the
+  reason.
+
+### Open
+
+- **Reason codes shown to the tenant?** Today the sign-in refusal names the reason. An impersonation or
+  fraud case may warrant less detail; revisit with the first real one.
+- **Custom domains stay pointed at the platform** and will serve 404 once artifacts are gone. Removing the
+  DNS/Cloudflare route on suspension is a separate, slower action and is not part of this.
+- **No bulk or automated suspension.** One tenant, one admin, one reason, every time.
+
 ## 2. Candidates, unagreed
 
 Collected so they are not lost. None of these is a commitment, and several may belong elsewhere.

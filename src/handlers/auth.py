@@ -3,8 +3,10 @@ import time
 import uuid
 from typing import Any
 
+from stripe_link.api_auth import caller_tenant, claims_from_token
 from stripe_link.common import error_response, json_response, parse_json_body
 from stripe_link.domain.billing_status import TRIAL_PERIOD_SECONDS
+from stripe_link.domain.platform_suspension import SUSPENSION_REASONS, is_suspended
 from stripe_link.domain.documents import (
     DocumentValidationError,
     validate_tenant_profile,
@@ -52,7 +54,7 @@ def handler(
         if path.endswith("/auth/login"):
             return login(event, cognito, tenant_repository, user_repository)
         if path.endswith("/auth/refresh"):
-            return refresh_session(event, cognito)
+            return refresh_session(event, cognito, tenant_repository)
         if path.endswith("/auth/forgot"):
             return forgot_password(event, cognito)
         if path.endswith("/auth/reset"):
@@ -182,10 +184,16 @@ def login(event, cognito, tenant_repository, user_repository):
     if not tenant:
         tenant = _rebuilt_tenant_profile(session, now)
         tenant_repository.put(tenant)
+    # A suspended tenant is refused HERE, which locks the whole dashboard from one place rather than
+    # seventy: no session, no token, no API (plans/ADMIN_SITE.md §1c). Deliberately AFTER the profile
+    # self-heal above, so a suspension cannot be escaped by arriving without a profile.
+    suspended = _suspension_refusal(tenant)
+    if suspended:
+        return suspended
     return json_response({"session": session, "tenant": tenant})
 
 
-def refresh_session(event, cognito):
+def refresh_session(event, cognito, tenant_repository=None):
     """Mint a new access token from the refresh token the session already holds.
 
     Until now NOTHING refreshed. `session_from_cognito_user` has always returned `refresh_token` and
@@ -226,6 +234,12 @@ def refresh_session(event, cognito):
         return error_response(
             "Your session could not be renewed. Please sign in again.",
             status_code=401, code="refresh_incomplete")
+    # An open dashboard renews about once an hour, so this is where a live session dies after a suspension.
+    # The tenant is read from the id token COGNITO JUST MINTED -- our own output, not the caller's word,
+    # which is why this does not break the "we do not look a user up on its word" rule above.
+    refreshed = _suspension_refusal_for_token(auth.get("IdToken"), tenant_repository)
+    if refreshed:
+        return refreshed
     return json_response({"session": {
         "access_token": auth.get("AccessToken"),
         "id_token": auth.get("IdToken"),
@@ -237,6 +251,40 @@ def refresh_session(event, cognito):
         "refreshed_at": epoch(),
     }})
 
+
+def _suspension_refusal(tenant):
+    """403 when the platform has suspended this tenant, else None.
+
+    Names the reason. A merchant who cannot sign in and is told nothing opens a support ticket that starts
+    from zero; one who is told "Selling illegal or prohibited products" knows what the conversation is.
+    """
+    if not is_suspended(tenant):
+        return None
+    reason = SUSPENSION_REASONS.get(
+        str((tenant or {}).get("suspended_reason") or "other"), SUSPENSION_REASONS["other"])
+    return error_response(
+        f"This account has been suspended: {reason}. Contact support if you believe this is a mistake.",
+        status_code=403, code="tenant_suspended")
+
+
+def _suspension_refusal_for_token(id_token, tenant_repository):
+    """The same refusal, for a refresh -- whose only identity is the token just minted.
+
+    FAILS CLOSED on an unreadable profile, unlike the entitlement gate next door: wrongly allowing here
+    means a suspended merchant keeps a working dashboard, and wrongly refusing means a sign-in.
+    """
+    if tenant_repository is None:
+        return None
+    tenant_id = caller_tenant(claims_from_token(id_token))
+    if not tenant_id:
+        return None
+    try:
+        tenant = tenant_repository.get(tenant_id, tenant_id)
+    except Exception:  # noqa: BLE001
+        return error_response(
+            "Your session could not be renewed. Please sign in again.",
+            status_code=401, code="refresh_incomplete")
+    return _suspension_refusal(tenant)
 
 def _rebuilt_user_profile(session, now):
     return user_profile_document(

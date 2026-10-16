@@ -5,6 +5,7 @@ from urllib.request import urlopen
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, stripe_mode_from_session_id, tenant_id_from_event
 from stripe_link.silo import current_silo
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.pricing import (
@@ -505,7 +506,11 @@ def process_upsell(
         return error_response("customer_id is required.", code="missing_customer")
 
     try:
-        assert_billing_in_good_standing(tenant_repo.get(tenant_id, tenant_id))
+        # One read, two questions: is this tenant paid up, and have we shut them down?
+        # (plans/ADMIN_SITE.md §1c -- a suspension must stop links already in the wild.)
+        _profile = tenant_repo.get(tenant_id, tenant_id)
+        assert_billing_in_good_standing(_profile)
+        assert_not_suspended(_profile)
 
         offer = offers_repo.get(tenant_id, offer_id)
         if not offer:
@@ -562,6 +567,11 @@ def process_upsell(
         )
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SuspendedError as exc:
+        # 403, not 402: this is not a bill the merchant can settle, and a shopper must not be invited to
+        # retry. The message is the reason the platform recorded, so support is not guessing either.
+        return error_response(
+            "This store is not currently able to take orders.", status_code=403, code="tenant_suspended")
     except PricingError as exc:
         return error_response(str(exc), code="upsell_error")
     except UpsellError as exc:

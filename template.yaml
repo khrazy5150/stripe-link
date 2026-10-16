@@ -2766,6 +2766,22 @@ Resources:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
+        # The PagesTable itself, which this function could NOT read until now -- it only ever consumed the
+        # stream. A tenant takedown has to list a tenant's pages, and a restore re-writes each one so the
+        # stream republishes it through the ordinary path (plans/ADMIN_SITE.md §1c).
+        #
+        # No DeleteItem, spelled out rather than taken from DynamoDBCrudPolicy: a suspension removes
+        # ARTIFACTS and never a tenant's documents, and the grant should say so.
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:Query
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PagesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PagesTable}/index/*"
         # Publishing a funnel entry page attaches its funnel pages to the Site and refreshes the domain-index
         # route table so the whole funnel routes on the custom domain (plans/SITE_OBJECT.md §2.6) — needs write.
         - DynamoDBCrudPolicy:

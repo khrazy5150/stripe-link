@@ -188,6 +188,27 @@ def note_capability_decision(event: dict[str, Any], *, capability: str, tenant_i
         pass
 
 
+def claims_from_token(token: str) -> dict[str, Any]:
+    """A JWT's payload, decoded without checking its signature.
+
+    Safe where the caller MINTED the token itself moments earlier -- `auth.refresh_session` reads the claims
+    of the token Cognito just handed it, which is reading its own output, not trusting a stranger's. Anywhere
+    a token arrives from outside, verify it; `unverified_claims` below exists only to MEASURE that gap.
+    """
+    import base64
+    import json
+
+    parts = str(token or "").split(".")
+    if len(parts) != 3:
+        return {}
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload).decode("utf-8")) or {}
+    except Exception:  # noqa: BLE001 - an undecodable token is simply no claims
+        return {}
+
+
 def unverified_claims(event: dict[str, Any]) -> dict[str, Any]:
     """The token's payload, decoded WITHOUT checking its signature.
 
