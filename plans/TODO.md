@@ -3644,10 +3644,15 @@ plans/VIRALSPY_INTEGRATION.md. A metered gateway in front of a third-party API: 
 add the master key, forward. Its own stack (stripe-link is at the 1MB transform limit AND ~441/500
 CloudFormation resources).
 
-**Blocked on Phase 0, which is not code:** the vendor could not be identified from two searches, so the
-upstream pricing unit, rate limits, cacheability and — above all — **whether the ToS permits multi-tenant
-resale** are all unknown. If sublicensing is forbidden, the master-key model is dead and this becomes a
-BYO-key product instead.
+**BLOCKED ON THE VENDOR.** `viralspy.ai` checked 2026-10-16: it has **no API at all**, and its terms say
+*"Accounts are for a single user. Do not share or resell access."* (§3) and *"Do not scrape, resell, or
+redistribute ViralSpy data or outputs"* plus *"Do not attempt to bypass usage limits, authentication, or
+rate limiting"* (§6). A shared master key is a shared single-seat account; metering tokens against it is
+reselling; and with no API the only way to call it is to drive their web app, which is the bypass clause.
+
+Not a technicality and not fixable in code. Either get a partner agreement in writing, or pick a vendor
+that sells API access (Virlo, Zyla, licensed providers) — **the gateway design applies unchanged**, it was
+written against "a metered REST API behind a master key", not against this vendor.
 
 The three things the original sketch left out: the debit and the upstream call are a distributed
 transaction (debit first, refund on anything not 2xx, idempotent by request id); a token is not a unit

@@ -1,6 +1,9 @@
 # ViralSpy integration — a metered gateway in front of someone else's API
 
-Status: **design, nothing built.** Written 2026-10-16 from the author's sketch:
+Status: **BLOCKED on the vendor, 2026-10-16.** The architecture below is sound and vendor-agnostic; the
+vendor it was written for cannot legally be used this way. **Read §0 first.**
+
+Written 2026-10-16 from the author's sketch:
 
 ```
 [ User Action in SaaS ] → [ SaaS Backend Gateway ] → [ ViralSpy REST API ]
@@ -16,17 +19,47 @@ call is the one not made**.
 
 ---
 
-## 0. What is NOT known yet
+## 0. The vendor question, answered — and it stops the sketch
 
-Two searches found no product called "ViralSpy", so **every vendor-specific number below is a placeholder
-and must be confirmed before anything is built**. The architecture does not depend on them; the economics
-entirely do.
+The original draft listed "does the ToS permit multi-tenant resale?" as the unknown to check first,
+because it could invalidate everything. **It did.** `viralspy.ai`, checked 2026-10-16:
+
+| Finding | Source |
+|---|---|
+| **There is no API.** No endpoints, no developer access, nothing about programmatic use — not on the product page, not in the terms. | viralspy.ai, viralspy.ai/terms |
+| **"Accounts are for a single user. Do not share or resell access."** | terms §3 |
+| **"Do not scrape, resell, or redistribute ViralSpy data or outputs as a competing product."** | terms §6 |
+| **"Do not attempt to bypass usage limits, authentication, or rate limiting."** | terms §6 |
+| It is a **$47/month single-seat consumer SaaS** — TikTok trend discovery plus AI script and filming directions, 14-day trial. | viralspy.ai |
+
+The sketched design does three forbidden things at once, and not on a technicality:
+
+1. **One master key serving every tenant** is one account shared by many users — §3.
+2. **Debiting tokens to make the call** is reselling access — §3 and §6.
+3. **With no API, the only way to make the call at all** is to drive their web app programmatically, which
+   is bypassing authentication and rate limiting — §6.
+
+So this is not "needs care". As published, the product cannot be integrated this way, and **no amount of
+engineering makes a shared single-seat account a licensed multi-tenant one.**
+
+### What is actually available
+
+- **Ask them.** A partner or reseller agreement, or an unpublished API, is a commercial conversation and
+  the only route that makes this exact vendor work. Everything below becomes valid the day something is
+  signed. Worth one email; they are small and a volume deal may interest them.
+- **Pick a vendor that sells API access.** Several exist for the same data — Virlo's cross-platform viral
+  search, Zyla's TikTok insights APIs, and the licensed-data providers. They have API terms *because*
+  programmatic resale is what they are for. **The rest of this plan applies unchanged**: it was written
+  against "a metered REST API behind a master key", not against ViralSpy specifically.
+- **Go to the source.** TikTok's own Display and Research APIs are licensed, with terms that say what is
+  permitted. Slower and more restricted, and the one path nobody can withdraw.
+
+### What remains unknown, for whichever vendor is chosen
 
 | Unknown | Why it changes the design |
 |---|---|
 | **Upstream pricing unit** — per call? per result? per credit, with endpoints costing different amounts? | Decides whether "1 action = 1 token" is honest or quietly loss-making. See §3. |
 | **Upstream rate limits**, and whether they are per-key | A shared master key means one tenant's burst is every tenant's outage. See §4. |
-| **Whether the ToS permits resale / multi-tenant use** | If it forbids sublicensing, the master-key model is not available and this becomes BYO-key. **Check this first — it can invalidate the whole design.** |
 | **Response freshness / whether results are cacheable** | The single biggest cost lever. See §5. |
 | **Whether responses carry personal data** | Decides whether this is a GDPR processing activity with a retention policy. See §8. |
 
@@ -163,8 +196,9 @@ A short-TTL cache keyed on the normalized query, shared across tenants. Two thin
 
 ## 7. Phasing
 
-- **Phase 0 — confirm §0 before writing code.** Especially the ToS question: if multi-tenant resale is not
-  permitted, the master-key model is dead and this becomes BYO-key, which is a different product.
+- **Phase 0 — RESOLVED for ViralSpy, and the answer is no (§0).** Pick a vendor whose terms permit
+  programmatic multi-tenant use, or get an agreement from ViralSpy in writing. Nothing below should be
+  built until one of those exists — the gateway is worthless without an upstream it may legally call.
 - **Phase 1 — the gateway, one action.** Its own stack; Secrets-Manager key; `consume_if_available`-style
   atomic debit; ledger rows; refund-on-failure; the three gates; suspension check. One upstream endpoint,
   end to end, so the economics are measured rather than modelled.
