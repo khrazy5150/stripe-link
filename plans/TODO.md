@@ -3638,6 +3638,22 @@ path. Nothing of the tenant's is deleted.
 4. **Resolving an abuse report** still has no screen — a suspension does not close the report that
    prompted it.
 
+### ⭐ NEW — ViralSpy integration: plan written 2026-10-16, nothing built
+
+plans/VIRALSPY_INTEGRATION.md. A metered gateway in front of a third-party API: check balance, debit,
+add the master key, forward. Its own stack (stripe-link is at the 1MB transform limit AND ~441/500
+CloudFormation resources).
+
+**Blocked on Phase 0, which is not code:** the vendor could not be identified from two searches, so the
+upstream pricing unit, rate limits, cacheability and — above all — **whether the ToS permits multi-tenant
+resale** are all unknown. If sublicensing is forbidden, the master-key model is dead and this becomes a
+BYO-key product instead.
+
+The three things the original sketch left out: the debit and the upstream call are a distributed
+transaction (debit first, refund on anything not 2xx, idempotent by request id); a token is not a unit
+until a per-action cost table exists AS DATA; and the master key spends the PLATFORM's money, so the
+controls protect us rather than the tenant.
+
 ## Business Profile & Reviews
 
 ### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)
