@@ -166,6 +166,45 @@ class TheAttackThisExistsToCatchTests(unittest.TestCase):
         self.assertIn("signed=1", by_name["Bonus Guide"]["asset"]["url"])
 
 
+class NothingIsSilentlyDroppedTests(unittest.TestCase):
+    """The catalog's job is "see every sale opportunity", so it must fail loudly, never quietly."""
+
+    def test_a_service_backed_opportunity_still_appears(self):
+        """`offer_product_ids` collects product_id only, so building the list from it dropped a
+        service-backed bump in silence -- a sale opportunity the screen would not show and nobody would
+        know was missing. Services are not Offer inputs yet; this is here so the day they are, a
+        service-backed bump is visible rather than invisible until someone notices."""
+        o = {"offer_id": "offer_1", "name": "Clinic",
+             "items": [{"product_id": "prod_1"}],
+             "funnel": {"order_bumps": [{"service_id": "svc_1"}]}}
+        out = catalog([product("prod_1")], [o])
+        rows = out["offers"][0]["products"]
+        self.assertEqual(len(rows), 2)
+        self.assertIn("Order bump", " ".join(rows[1]["roles"]))
+
+    def test_an_opportunity_for_a_deleted_product_is_shown_as_missing(self):
+        o = {"offer_id": "offer_1", "items": [{"product_id": "gone"}]}
+        rows = catalog([], [o])["offers"][0]["products"]
+        self.assertEqual(rows[0]["name"], "(missing product)")
+        self.assertIn("landing page", rows[0]["roles"][0])
+
+    def test_a_missing_opportunity_still_says_WHERE_a_buyer_meets_it(self):
+        """Knowing an unresolvable row is an upsell is most of what makes it worth chasing."""
+        o = {"offer_id": "offer_1", "items": [{"product_id": "prod_1"}],
+             "funnel": {"upsells": [{"product_id": "gone"}]}}
+        rows = catalog([product("prod_1")], [o])["offers"][0]["products"]
+        self.assertIn("Upsell", rows[1]["roles"][0])
+
+    def test_every_funnel_position_produces_exactly_one_row(self):
+        o = {"offer_id": "offer_1", "items": [{"product_id": "p1"}],
+             "funnel": {"order_bumps": [{"product_id": "p2"}], "upsells": [{"product_id": "p3"}],
+                        "downsells": [{"product_id": "p4"}]}}
+        products = [product(f"p{i}") for i in range(1, 5)]
+        rows = catalog(products, [o])["offers"][0]["products"]
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(len({r["product_id"] for r in rows}), 4)
+
+
 class WhatIsReturnedTests(unittest.TestCase):
     def test_the_description_comes_through_whole(self):
         """What the tenant TELLS a buyer they are getting; a mismatch with the file is the clearest signal
@@ -190,3 +229,44 @@ class WhatIsReturnedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PageOwnedFilesTests(unittest.TestCase):
+    """A file attached to a PAGE, not to any product — the "free guide" a visitor gets for an email.
+
+    No purchase sits behind it, so the offer catalog would never show it, and it is as capable of
+    carrying something illegal as anything someone pays for.
+    """
+
+    def sign(self, keys, tenant="t1", s3=None):
+        return offers_handler._sign_tenant_assets(
+            {"tenant_id": tenant, "keys": keys}, s3 or FakeS3())
+
+    def test_a_page_asset_is_signed(self):
+        out = self.sign(["downloads/t1/page/page_1/asset_1/guide.pdf"])
+        self.assertTrue(out["ok"])
+        self.assertEqual(len(out["assets"]), 1)
+
+    def test_a_key_outside_the_tenants_own_prefix_is_REFUSED(self):
+        """The keys come from the caller, so they are constrained rather than trusted. Without this,
+        anything that reached this function could have had any object in the media bucket signed by
+        naming it — a far larger power than looking at the account under review."""
+        out = self.sign(["downloads/someone_else/page/p/a/secret.pdf"])
+        self.assertEqual(out["assets"], {})
+        self.assertEqual(len(out["refused"]), 1)
+
+    def test_traversal_out_of_the_prefix_is_refused(self):
+        out = self.sign(["../downloads/t2/x.pdf", "downloads/t11/x.pdf"])
+        self.assertEqual(out["assets"], {})
+
+    def test_a_mixed_batch_signs_only_what_it_may(self):
+        out = self.sign(["downloads/t1/ok.pdf", "downloads/t2/no.pdf"])
+        self.assertEqual(list(out["assets"]), ["downloads/t1/ok.pdf"])
+        self.assertEqual(out["refused"], ["downloads/t2/no.pdf"])
+
+    def test_a_batch_is_bounded(self):
+        out = self.sign([f"downloads/t1/{i}.pdf" for i in range(80)])
+        self.assertLessEqual(len(out["assets"]), 50)
+
+    def test_no_tenant_signs_nothing(self):
+        self.assertFalse(offers_handler._sign_tenant_assets({"keys": ["downloads/t1/x.pdf"]})["ok"])

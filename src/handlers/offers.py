@@ -3,9 +3,9 @@ import re
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
-from stripe_link.domain.funnels import funnel_context_items, offer_product_ids
+from stripe_link.domain.funnels import funnel_context_items
 from stripe_link.domain.offer_index import offer_index_entry
-from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
+from stripe_link.domain.opportunities import STAGE_LANDING, opportunities_from_offer, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
 from stripe_link.domain.semantic import analyze_offer, label_from_model, slug_from_model
 from stripe_link.domain.slugs import sanitize_slug, unique_slug
@@ -72,6 +72,39 @@ def _admin_s3():
     return boto3.client("s3")
 
 
+_SURFACE_LABELS = {
+    "primary": "Sold on the landing page",
+    "order_bump": "Order bump — ticked at checkout",
+    "upsell": "Upsell — offered after paying",
+    "downsell": "Downsell — offered if the upsell is declined",
+}
+
+
+def _surface_label(surface):
+    return _SURFACE_LABELS.get(str(surface or ""), "Sold on the landing page")
+
+
+def _service_card(service, service_id, role):
+    """A service sold through an offer. No file to inspect -- the description and the price are the whole
+    of the evidence, which is worth knowing when deciding how much a clean-looking row is worth."""
+    s = service or {}
+    return {
+        "service_id": service_id,
+        "product_id": "",
+        "name": s.get("name") or "(missing service)",
+        "description": s.get("description") or "",
+        "product_type": "service",
+        "roles": [role],
+        "prices": [{"price_id": (s.get("price") or {}).get("price_id"),
+                    "context": "standard", "label": "",
+                    "unit_amount": (s.get("price") or {}).get("unit_amount"),
+                    "currency": (s.get("price") or {}).get("currency") or "usd",
+                    "recurring": False}] if s.get("price") else [],
+        "images": [i for i in (s.get("images") or []) if i][:4],
+        "asset": {},
+    }
+
+
 def _product_card(product, roles, bucket, s3_client):
     prices = [{
         "price_id": p.get("price_id"), "context": p.get("context") or "standard",
@@ -109,22 +142,46 @@ def _tenant_catalog(event, repository=None, products_repo=None, s3_client=None):
         except RepositoryError:
             continue
         by_id = {str(p.get("product_id")): p for p in products}
+        # Services are not Offer inputs yet (plans/SERVICES_IN_OFFERS.md, designed and unbuilt), but the
+        # opportunity shape already carries `service_id`. Reading them now means the day that ships, a
+        # service-backed bump appears here instead of being invisible until someone notices.
+        try:
+            services_by_id = {str(x.get("service_id")): x
+                              for x in (services_repository(mode=mode).list_for_tenant(tenant_id))}
+        except (RepositoryError, Exception):  # noqa: BLE001 - no services table is not a failure
+            services_by_id = {}
         for offer in offers:
             roles_by_product: dict[str, list[str]] = {}
             for ctx, label in _FUNNEL_CONTEXTS.items():
                 for item in funnel_context_items(offer, by_id, ctx):
                     roles_by_product.setdefault(str(item["product_id"]), []).append(label)
-            cards = []
-            for product_id in offer_product_ids(offer):
-                product = by_id.get(product_id)
-                if not product:
+            # EVERY opportunity produces a row, built from the normalized opportunity list rather than
+            # from `offer_product_ids`. That helper collects `product_id` only, so an opportunity carrying
+            # a `service_id` was dropped in silence -- a sale opportunity the screen would not have shown
+            # and nobody would have known was missing. A catalog whose job is "see everything" must fail
+            # loudly, never quietly, so an unresolvable row is still a row.
+            cards, seen = [], set()
+            for opp in opportunities_from_offer(offer):
+                product_id = str(opp.get("product_id") or "")
+                service_id = str(opp.get("service_id") or "")
+                key = product_id or service_id or str(opp.get("opportunity_id") or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                surface = str((opp.get("placement") or {}).get("surface") or "")
+                if product_id and product_id in by_id:
+                    roles = roles_by_product.get(product_id) or [_surface_label(surface)]
+                    cards.append(_product_card(by_id[product_id], roles, bucket, s3_client))
+                elif service_id:
+                    service = services_by_id.get(service_id)
+                    cards.append(_service_card(service, service_id, _surface_label(surface)))
+                else:
                     # A referenced product that no longer exists. Said out loud rather than skipped: a gap
                     # in the catalog is itself worth seeing.
-                    cards.append({"product_id": product_id, "name": "(missing product)", "roles": [],
-                                  "prices": [], "images": [], "asset": {}})
-                    continue
-                roles = roles_by_product.get(product_id) or ["Sold on the landing page"]
-                cards.append(_product_card(product, roles, bucket, s3_client))
+                    cards.append({"product_id": product_id, "service_id": service_id,
+                                  "name": "(missing product)", "description": "",
+                                  "roles": [_surface_label(surface)], "prices": [], "images": [],
+                                  "asset": {}})
             out.append({
                 "offer_id": offer.get("offer_id"),
                 "name": offer.get("name") or offer.get("label") or "(unnamed offer)",
@@ -134,12 +191,51 @@ def _tenant_catalog(event, repository=None, products_repo=None, s3_client=None):
     return {"ok": True, "tenant_id": tenant_id, "offers": out}
 
 
+def _sign_tenant_assets(event, s3_client=None):
+    """Short-lived links for files the ADMIN already found in a tenant's page documents.
+
+    A page can carry a downloadable file that belongs to no offer at all -- a Page Ribbon lead magnet, the
+    "free guide" a visitor gets for an email. It is a delivery vector with no purchase behind it, so
+    nothing in the offer catalog would ever show it.
+
+    **The keys are supplied by the caller, so they are constrained here rather than trusted.** Only keys
+    under this tenant's own `downloads/{tenant_id}/` prefix are signed; anything else is refused. Without
+    that, an admin -- or anything that reached this function -- could have had any object in the media
+    bucket signed by naming it, which is a far larger power than "look at the account you are reviewing".
+    """
+    tenant_id = str((event or {}).get("tenant_id") or "").strip()
+    keys = [str(k) for k in ((event or {}).get("keys") or []) if k]
+    bucket = os.environ.get("MEDIA_BUCKET", "")
+    if not tenant_id or not bucket:
+        return {"ok": False, "error": "tenant_id is required.", "assets": {}}
+    allowed_prefix = f"downloads/{tenant_id}/"
+    signed, refused = {}, []
+    client = s3_client or _admin_s3()
+    for key in keys[:50]:
+        if not key.startswith(allowed_prefix):
+            refused.append(key)
+            continue
+        try:
+            signed[key] = client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key,
+                        "ResponseContentDisposition": "inline"},
+                ExpiresIn=900,
+            )
+        except Exception as exc:  # noqa: BLE001
+            refused.append(f"{key}: {exc}")
+    return {"ok": True, "tenant_id": tenant_id, "assets": signed, "refused": refused}
+
+
 def handler(event, context, repository=None, products_repo=None, services_repo=None):
     # INTERNAL invocation from the admin site -- not an API request (plans/ADMIN_SITE.md §1c). Reachable
     # only by a principal granted lambda:InvokeFunction on this function, which is the admin API alone,
     # and it checks its own allow-list before it gets here.
-    if str((event or {}).get("internal_admin") or "").strip() == "tenant_catalog":
+    _internal = str((event or {}).get("internal_admin") or "").strip()
+    if _internal == "tenant_catalog":
         return _tenant_catalog(event, repository, products_repo)
+    if _internal == "sign_assets":
+        return _sign_tenant_assets(event)
     # Stripe-mode scoping: offers + the products they reference are read/written in the request's mode so a
     # test-mode dashboard only ever sees test records (plans/STRIPE_MODE_DECOUPLING.md P2).
     mode = resolve_stripe_mode(event)
