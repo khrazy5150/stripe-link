@@ -120,6 +120,52 @@ class TheFunnelTests(unittest.TestCase):
         self.assertEqual(out["offers"][0]["products"][0]["name"], "(missing product)")
 
 
+class TheAttackThisExistsToCatchTests(unittest.TestCase):
+    """A legitimate physical product on the landing page, something illegal on the bump.
+
+    The buyer's card statement shows ONE charge, because an order bump rides the same Checkout Session as
+    the primary item. So the money trail does not separate them either, and the only place the second
+    product is visible is here (author, 2026-10-16).
+    """
+
+    def setUp(self):
+        self.offer = {
+            "offer_id": "offer_1", "name": "Protein Powder",
+            # The real shape: the bump lives on offer.funnel.order_bumps, NOT in items[]. A catalog that
+            # read only items[] would show the wholesome product and nothing else -- which is precisely
+            # the hole the attack walks through.
+            "items": [{"product_id": "prod_clean"}],
+            "funnel": {"order_bumps": [{"product_id": "prod_hidden"}],
+                       "upsells": [{"product_id": "prod_upsell"}]},
+        }
+        self.products = [
+            product("prod_clean", name="Protein Powder", product_type="physical", asset=False),
+            product("prod_hidden", name="Bonus Guide", context="order_bump"),
+            product("prod_upsell", name="Masterclass", context="upsell"),
+        ]
+
+    def test_the_bump_product_is_in_the_catalog(self):
+        names = [p["name"] for p in catalog(self.products, [self.offer])["offers"][0]["products"]]
+        self.assertIn("Bonus Guide", names)
+
+    def test_the_upsell_product_is_too(self):
+        names = [p["name"] for p in catalog(self.products, [self.offer])["offers"][0]["products"]]
+        self.assertIn("Masterclass", names)
+
+    def test_each_hidden_product_is_LABELLED_as_what_it_is(self):
+        """Seeing it is half the job; knowing a buyer meets it at checkout rather than on the page is the
+        other half."""
+        by_name = {p["name"]: p for p in catalog(self.products, [self.offer])["offers"][0]["products"]}
+        self.assertIn("Order bump", " ".join(by_name["Bonus Guide"]["roles"]))
+        self.assertIn("Upsell", " ".join(by_name["Masterclass"]["roles"]))
+
+    def test_the_hidden_products_FILE_is_linked(self):
+        """The physical product has nothing to inspect; the digital bump is the one carrying the payload."""
+        by_name = {p["name"]: p for p in catalog(self.products, [self.offer])["offers"][0]["products"]}
+        self.assertEqual(by_name["Protein Powder"]["asset"], {})
+        self.assertIn("signed=1", by_name["Bonus Guide"]["asset"]["url"])
+
+
 class WhatIsReturnedTests(unittest.TestCase):
     def test_the_description_comes_through_whole(self):
         """What the tenant TELLS a buyer they are getting; a mismatch with the file is the clearest signal
