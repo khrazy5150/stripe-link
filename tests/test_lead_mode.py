@@ -72,3 +72,26 @@ class TheListIsScopedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EventRegistrationsBelongToBothTests(unittest.TestCase):
+    """An event is mode-agnostic, so a registration for one is too — and the reminder sweep emails every
+    registrant without a mode filter. If the screen hid some of them, a tenant would plan a webinar
+    around a smaller number than the software is about to contact."""
+
+    def test_a_registration_is_shown_in_both_modes(self):
+        rows = [lead("reg", stripe_mode="test", event_id="ev_1", occurrence_id="occ_1")]
+        self.assertEqual(listed(rows, "live"), ["reg"])
+        self.assertEqual(listed(rows, "test"), ["reg"])
+
+    def test_it_has_no_mode_of_its_own(self):
+        self.assertEqual(lead_mode(lead(stripe_mode="test", event_id="ev_1")), "")
+
+    def test_an_ORDINARY_lead_is_still_scoped(self):
+        """The exemption is for registrations, not a quiet undoing of the filter."""
+        rows = [lead("plain", stripe_mode="test")]
+        self.assertEqual(listed(rows, "test"), ["plain"])
+        self.assertEqual(listed(rows, "live"), [])
+
+    def test_an_empty_event_id_is_not_a_registration(self):
+        self.assertEqual(lead_mode(lead(stripe_mode="test", event_id="  ")), "test")

@@ -271,12 +271,23 @@ def _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode="test
 
 
 def lead_mode(lead):
-    """Which books a lead came from, or "" when it predates the mode being recorded.
+    """Which books a lead came from, or "" when it belongs to both.
 
-    No derivation is possible: a lead's page_id and offer_id are the same in both modes by design, so
-    an older record simply cannot be placed. Those are shown in both modes rather than hidden -- a lead
-    is a person who asked to be contacted, and losing one is worse than showing it twice.
+    No derivation is possible for an older record: a lead's page_id and offer_id are the same in both
+    modes by design, so one captured before the mode was recorded simply cannot be placed. Those are
+    shown in both modes rather than hidden -- a lead is a person who asked to be contacted, and losing
+    one is worse than showing it twice.
+
+    **An EVENT REGISTRATION belongs to both modes, whatever mode it was captured in**, and that is not a
+    concession -- it is what keeps the screen honest. An event is deliberately mode-agnostic (a free
+    session is not money, see repositories/documents.events_repository), so the session a test-mode
+    registrant signed up for is a real one that will really happen. The reminder sweep emails them
+    accordingly, with no mode filter. Hiding them from the live Leads screen would therefore show a
+    tenant FEWER registrants than are about to be contacted -- a count they would plan a webinar around.
+    What is displayed has to match what the software will do.
     """
+    if str((lead or {}).get("event_id") or "").strip():
+        return ""
     stored = str((lead or {}).get("stripe_mode") or "").strip().lower()
     return stored if stored in ("live", "test") else ""
 

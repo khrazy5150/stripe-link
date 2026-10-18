@@ -1679,7 +1679,16 @@ def events_repository(table: Any | None = None) -> DynamoDocumentRepository:
 
     NOT mode-scoped, unlike services and appointments. A webinar carries no Stripe state and is not a
     transaction -- registration is free, and a tenant flipping between test and live should not find their
-    sessions have vanished. The registrations themselves are leads, which are not mode-scoped either.
+    sessions have vanished.
+
+    The original note added "the registrations themselves are leads, which are not mode-scoped either".
+    That stopped being true on 2026-10-18: leads now record the mode they were captured in and the Leads
+    screen filters on it (handlers/leads.py). The CONCLUSION stands -- a free session is not money, and
+    the event itself still belongs to both modes -- but it no longer rests on that, and a reason left
+    standing after it stops being true is how the next person makes a wrong call confidently.
+
+    What the change does mean: a test-mode registration is now distinguishable from a real one. The
+    reminder sweep (handlers/event_reminders.py) does not yet act on that, and emails both.
     """
     return DynamoDocumentRepository(
         os.environ.get("EVENTS_TABLE", ""),
