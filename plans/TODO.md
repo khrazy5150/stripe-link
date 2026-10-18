@@ -3659,6 +3659,41 @@ transaction (debit first, refund on anything not 2xx, idempotent by request id);
 until a per-action cost table exists AS DATA; and the master key spends the PLATFORM's money, so the
 controls protect us rather than the tenant.
 
+### ⭐⭐ HIGH — mode-decoupling sweep (2026-10-18): one fixed, one real leak found
+
+**Delete Test Data — FIXED, shipped dev.** It was broken in both directions at once. It deleted too much:
+document tables share one partition per tenant (`PK=TENANT#{id}`, mode only in the sort key) and it
+deleted the partition — survivable while the action was dev-only, a live-data wipe the moment a tenant
+can be in test mode on a backend holding their live documents. And it deleted too little, silently: money
+tables key on `TENANT#{id}#{mode}` now, it queried `tenant_id`, DynamoDB refused, the broad `except`
+swallowed it, and it reported 0. Now deletes only what PROVES it is test, refuses live mode outright, and
+reports `kept_not_mode_scoped`. The button also stopped being offered on the prod backend, where the
+function does not exist (`Condition: IsNonProd`).
+
+**Checked and CORRECT** — these already resolve mode per request: A/B testing (`experiments_resolve` uses
+the experiment's own stored mode for the artifact path), services + appointments (mode-scoped; scheduling
+config deliberately is not), carts, invoices, pages, offers, products, coupons, sites. No handler builds a
+mode-scoped repository without a mode — the repository refuses rather than tolerating it, and that guard
+is doing its job.
+
+**THE LEAK: reviews carry no mode at all.** `reviews_repository()` is not mode-scoped and review documents
+have no `stripe_mode` — verified in prod and dev. Two consequences:
+
+1. **A review written from a TEST purchase renders on the LIVE page and feeds its star rating.** The
+   invite is mode-scoped (fixed 2026-09-23, because the sweep emails real customers) but the review it
+   produces is not. A tenant testing their own checkout can put a review in front of real buyers.
+2. **Delete Test Data cannot remove test reviews**, because nothing distinguishes them — they come back in
+   `kept_not_mode_scoped`.
+
+Fixing it means making reviews mode-scoped, which is a migration: existing review documents have no mode
+and would need one backfilled (live is the safe assumption — they are already public). Not done, because
+it is a data migration on the one entity whose integrity is a public claim, and it deserves its own slice.
+
+**Judgement calls, not bugs:** leads are deliberately mode-agnostic CRM records ("a lead is a person, not
+a transaction") — a test form submission does land in the real list; `refund_requests` are not mode-scoped
+though the orders they reference are, so a test refund request would show on the live Refunds screen.
+Both are defensible; both are worth a decision rather than a discovery.
+
 ## Business Profile & Reviews
 
 ### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)
