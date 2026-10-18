@@ -124,6 +124,15 @@
               </template>
             </div>
 
+            <!-- Products the saved document has nowhere to put. Shown as soon as one is selected, so a
+                 tenant learns it before pressing Update rather than by watching the chip disappear. -->
+            <div v-if="unplaceableProducts.length" class="keys-status-banner warning offer-unplaceable">
+              <p v-for="item in unplaceableProducts" :key="item.id">
+                <strong>{{ item.name }}</strong> will not appear anywhere in this offer — it {{ item.reason }}
+              </p>
+              <p>Set its prices in Products, or remove it from the items above.</p>
+            </div>
+
             <div v-if="landingProducts.length" class="offer-field">
               <span>Detected Offer Type</span>
               <div class="offer-type-row">

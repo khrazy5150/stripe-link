@@ -178,6 +178,13 @@ products**; the downsell rides along automatically.
 The old design would have surfaced it on a standalone downsell page; we accept the gap for the simpler model.
 Downsells only exist as the fallback of a chosen upsell product.
 
+**The gap is now SAID OUT LOUD (2026-10-18).** Accepting it is fine; hiding it was not. The item panel
+invites a tenant to pick "any order-bump / upsell / downsell products", and the save then dropped a
+downsell-only product without a word — the author hit this on a live offer and reported it as a bug
+against work he had locked himself three months earlier. The editor now names any selected product the
+document has nowhere to put, and why, as soon as it is selected. The behaviour is unchanged; only the
+silence is.
+
 ---
 
 ## 7. Offer naming — "brainless by default, override anytime"

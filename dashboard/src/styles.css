@@ -8246,3 +8246,13 @@ a.orders-place { text-decoration: underline; }
   --statement-total-bg: rgba(79, 70, 181, 0.18);
 }
 
+
+/* One line per product that cannot be placed, plus the fix. Tighter than a default banner because there
+   may be several, and each is a sentence rather than a heading. */
+.offer-unplaceable p {
+  margin: 0 0 0.4rem;
+}
+.offer-unplaceable p:last-child {
+  margin-bottom: 0;
+  opacity: 0.85;
+}
