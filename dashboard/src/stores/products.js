@@ -349,7 +349,17 @@ export const useProductsStore = defineStore("products", {
         });
         const saved = body.product || product;
         this.upsertProduct(saved);
-        this.loaded = true;
+        // NOT `this.loaded = true`. That claimed a store holding ONE product was the whole catalogue, and
+        // every `if (!loaded) load()` in the app then short-circuited for the rest of the session. A
+        // tenant who created a product without first visiting the Products screen got an Offers item
+        // picker listing exactly that one product -- and applying the selection then dropped every other
+        // product already on the offer (found 2026-10-18 on a live 5-product offer).
+        //
+        // Fetch the real catalogue instead. The product just saved is in `products` already, so nothing
+        // disappears while this runs.
+        // Awaited, because `load()` sets `message` too -- fired and forgotten, its "7 of 7 products shown"
+        // would land a moment later and replace the confirmation the tenant is waiting to read.
+        if (!this.loaded) await this.load();
         this.message = `${product.name} was saved to the products database.`;
         // Payment-enabled products push to Stripe automatically. On a price edit this creates a
         // new Stripe price and archives the old one behind the scenes (Stripe prices are immutable).

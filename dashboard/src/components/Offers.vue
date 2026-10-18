@@ -1292,11 +1292,20 @@ function applyProductSelection() {
     selectorError.value = "An offer cannot mix transaction items with lead generation items.";
     return;
   }
-  // Split the selection back into products and services (services use their default price).
+  // Split the selection back into products and services, by asking which ids ARE services.
+  //
+  // This used to split on absence -- anything not in the loaded product list was taken to be a service --
+  // which turns a short catalogue into silent data loss twice over: the offer's other products vanish
+  // from the selection, AND they are written into `form.services` as services that do not exist. An id
+  // we cannot currently see is an id we know nothing about, which is not the same as a service.
+  //
+  // So: services are the ids present in the SERVICES list; everything else stays a product, including
+  // ids this page could not resolve. A product the user never touched is never removed by opening a
+  // picker and pressing Apply.
   const selectedIds = [...draftSelectedProductIds.value];
-  const productIdSet = new Set(activeProducts.value.map((product) => productId(product)));
-  selectedProductIds.value = selectedIds.filter((id) => productIdSet.has(id));
-  const serviceIds = selectedIds.filter((id) => !productIdSet.has(id));
+  const serviceIdSet = new Set(activeServices.value.map((service) => service.service_id).filter(Boolean));
+  selectedProductIds.value = selectedIds.filter((id) => !serviceIdSet.has(id));
+  const serviceIds = selectedIds.filter((id) => serviceIdSet.has(id));
   form.services = serviceIds.length
     ? serviceIds.map((serviceId) => {
         const existing = (form.services || []).find((row) => row.service_id === serviceId);
