@@ -487,6 +487,12 @@ def _request_refund(order, tenant_id, business, reason, *, mode="test", refunds_
         {**order, "tenant_id": tenant_id}, reason=reason, now=now,
         request_id=f"rr_{generate_id()}",
     )
+    # Stamp the books this belongs to. The listing can already DERIVE it from `order_cs_live_...`, so
+    # this is not load-bearing today -- it is here because the other writer of this document
+    # (`notifications.save_refund_request`) stamps it, and two writers of one type that disagree about
+    # whether a field is set is how the derivation quietly becomes the only path and then gets removed as
+    # dead code. The mode is already resolved from the buyer's token, right there in the signature.
+    document["stripe_mode"] = mode
     try:
         saved = (refunds_repo or refund_requests_repository()).put(document)
     except RepositoryError:

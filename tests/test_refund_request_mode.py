@@ -10,6 +10,7 @@ carries no mode. The order id carries it instead: `order_cs_live_...`.
 """
 import json
 import os
+import pathlib
 import unittest
 from unittest.mock import patch
 
@@ -131,3 +132,26 @@ class TheAlertGoesIntoTheSameBooksTests(unittest.TestCase):
         from handlers.notifications import _notifications_for
         repo = self.Repo("test")
         self.assertIs(_notifications_for(repo, {}), repo)
+
+
+class BothWritersAgreeTests(unittest.TestCase):
+    """Two paths create a refund request: the buyer's receipt link and the API. A field that only one of
+    them sets is how a derivation becomes the sole path and is then removed as dead code."""
+
+    def test_the_buyer_path_stamps_the_mode(self):
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "handlers" / "purchase_manage.py").read_text(encoding="utf-8")
+        request_refund = source[source.index("def _request_refund("):]
+        self.assertIn('document["stripe_mode"] = mode', request_refund)
+
+    def test_the_api_path_stamps_it_too(self):
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "handlers" / "notifications.py").read_text(encoding="utf-8")
+        save = source[source.index("def save_refund_request("):]
+        self.assertIn('document.setdefault("stripe_mode"', save)
+
+    def test_a_buyer_request_is_placeable_even_unstamped(self):
+        """The derivation stays the safety net for every request written before today."""
+        self.assertEqual(lead_or_order_mode := refund_request_mode(
+            {"refund_request_id": "rr_old", "order_id": "order_cs_live_zzz"}), "live")
+        self.assertEqual(lead_or_order_mode, "live")
