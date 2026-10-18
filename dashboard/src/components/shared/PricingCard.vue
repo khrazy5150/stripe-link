@@ -132,6 +132,7 @@
         </select>
       </label>
       <small v-if="redundancyWarning(price, index)" class="price-context-warning">⚠ {{ redundancyWarning(price, index) }}</small>
+      <small v-if="orphanDownsellWarning(price)" class="price-context-warning">⚠ {{ orphanDownsellWarning(price) }}</small>
 
       <!-- POSTAGE FOR A BUMP, which cannot be charged as shipping. An order bump is ticked on Stripe's own
            checkout page, after the shipping options for that session are already fixed, so the bump's size
@@ -249,6 +250,21 @@ function previewFor(price) {
 // Only the FIRST price in a non-standard context is used per product. Standard may have many (quantity tiers);
 // Sale/Flash pair to those tiers so they're one-PER-QUANTITY; funnel contexts are one per product. Flag the
 // redundant (ignored) extras — the earlier duplicate wins.
+// A downsell that can never be shown. plans/OFFER_MODEL_REDESIGN.md, author-locked 2026-07-27: a downsell
+// is the SAME product at a lower price -- the second chance after this product's own upsell is declined.
+// It cannot live on its own, so a downsell price with no upsell price beside it is configuration that will
+// never reach a customer.
+//
+// Warned HERE, where the price is set, rather than only in the offer editor. The tenant who sets a lone
+// downsell learns it at the moment they do it, instead of selecting the product into an offer weeks later
+// and watching it disappear on save (which is how this was found, 2026-10-18).
+function orphanDownsellWarning(price) {
+  if ((price.context || "standard") !== "downsell") return "";
+  const hasUpsell = (props.prices || []).some((other) => (other.context || "standard") === "upsell");
+  if (hasUpsell) return "";
+  return "A downsell is this product at a lower price, offered when its upsell is declined — so it needs an Upsell price here too. On its own it is never shown.";
+}
+
 function redundancyWarning(price, index) {
   const context = price.context || "standard";
   if (context === "standard") return "";
