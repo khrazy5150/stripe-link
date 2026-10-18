@@ -242,6 +242,24 @@ def stripe_mode_from_session_id(session_id: Any) -> str:
     return ""
 
 
+def stripe_mode_from_reference(value: Any) -> str:
+    """The mode an id DECLARES when the session id is embedded in it, or "" when nothing is declared.
+
+    `order_cs_live_...` and `refund_cs_test_...` carry their books the same way a bare session id does,
+    just behind a prefix. `stripe_mode_from_session_id` is deliberately strict about the start of the
+    string -- it answers "is this a session id for mode X" -- so this is its sibling for the records that
+    are NAMED after a session rather than being one.
+
+    Useful precisely where a document predates `stripe_mode` being stored: the id already says which books
+    it belongs to, so the mode is recoverable without a migration.
+    """
+    raw = str(value or "").strip()
+    for mode in ("live", "test"):
+        if f"cs_{mode}_" in raw:
+            return mode
+    return ""
+
+
 def resolve_stripe_mode(event: dict[str, Any], body: dict[str, Any] | None = None, *, default: str = "test") -> str:
     """The canonical per-request Stripe mode (test/live) for the decoupled model: read it from the REQUEST — body
     `mode`, `?mode=`, or the `X-Stripe-Mode` header — instead of inferring it from the deployment environment

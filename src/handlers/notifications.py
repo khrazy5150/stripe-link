@@ -1,7 +1,10 @@
 import time
 from typing import Callable
 
-from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.common import (
+    error_response, json_response, parse_json_body, query_params, resolve_stripe_mode,
+    stripe_mode_from_reference, tenant_id_from_event,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_notification, validate_refund_request
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -70,6 +73,10 @@ def save_notification(event, repository):
 def save_refund_request(event, repository, notifications_repo=None, now=0):
     try:
         document = parse_json_body(event)
+        # Record the mode on the way in, so future records do not depend on the derivation above. The
+        # order id is still the authority when both are present -- it cannot be wrong about its own books.
+        document.setdefault("stripe_mode", stripe_mode_from_reference(document.get("order_id"))
+                            or resolve_stripe_mode(event))
         validate_refund_request(document)
         saved = repository.put(document)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
@@ -137,12 +144,35 @@ def list_notifications(event, repository):
     return json_response({"notifications": notifications})
 
 
+def refund_request_mode(request):
+    """Which books a refund request belongs to.
+
+    The stored `stripe_mode` when there is one; otherwise DERIVED from the order id, which embeds the
+    checkout session (`order_cs_live_...`). Records written before the mode was stored are therefore
+    judged correctly without a migration -- the id has always said so.
+
+    An unreadable one returns "", and the caller shows it in BOTH modes rather than hiding it: a refund
+    request is a customer waiting for their money, and the failure mode of hiding it is worse than the
+    failure mode of showing it twice.
+    """
+    stored = str((request or {}).get("stripe_mode") or "").strip().lower()
+    if stored in ("live", "test"):
+        return stored
+    return stripe_mode_from_reference((request or {}).get("order_id"))
+
+
 def list_refund_requests(event, repository):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     params = query_params(event)
     requests = repository.list_for_tenant(tenant_id)
+    # Mode-scoped at READ time, for the same reason the notification bell above is: one endpoint serves
+    # both modes, so a tenant working in live must not be shown test-mode refund requests. The repository
+    # itself is not mode-scoped and changing that would orphan every existing record, whose sort key
+    # carries no mode.
+    mode = resolve_stripe_mode(event)
+    requests = [r for r in requests if refund_request_mode(r) in (mode, "")]
     requests = filter_refund_requests(requests, params)
     requests.sort(key=lambda item: item.get("created_at", 0), reverse=True)
     return json_response({"refund_requests": requests, "count": len(requests)})
