@@ -6,6 +6,9 @@
 // in the source mode and re-POSTs each document to the target mode, bottom-up (products -> offers -> pages
 // -> Site) so references resolve as they land. IDs are preserved across modes.
 import { apiRequest } from "../api/client";
+// The one normalizer the dashboard has for "which catalog items does this offer reference". Explicit .js:
+// Vite resolves extensionless, raw node (which runs the parity tests) does not.
+import { offerEntries } from "./purchaseFlow.js";
 
 // "live"/"test" — the Stripe mode + Site.environment value for the target.
 export const targetMode = (env) => (env === "live" ? "live" : "test");
@@ -102,6 +105,23 @@ export async function resolvePageDoc(pageId, cache = []) {
     || apiRequest(`/pages/${encodeURIComponent(pageId)}`).then((b) => b.page).catch(() => null);
 }
 
+// Every service an offer references, wherever the document keeps them: normalized opportunities, the
+// legacy items[], or the funnel blocks. Services are deliberately NOT copied across modes -- they carry
+// scheduling setup that the target mode must own -- so the copy flags them instead of moving them.
+function serviceIdsInOffer(offer) {
+  const ids = [];
+  const collect = (entries) => {
+    for (const entry of entries || []) if (entry?.service_id) ids.push(String(entry.service_id));
+  };
+  collect(offer?.purchase_opportunities);
+  collect(offer?.items);
+  const funnel = offer?.funnel || {};
+  collect(funnel.order_bumps);
+  collect(funnel.upsells);
+  collect(funnel.downsells);
+  return ids;
+}
+
 // Resolve a page's full catalog dependency graph (its offers + their products). `hasServices` flags that the
 // offer(s) reference services, which are NOT copied (surfaced to the user).
 export async function resolvePageDeps(page, { offerCache = [], productCache = [] } = {}) {
@@ -109,9 +129,23 @@ export async function resolvePageDeps(page, { offerCache = [], productCache = []
   const productIds = new Set();
   let hasServices = false;
   for (const offer of offerDocs) {
-    for (const item of offer.items || []) {
-      if (item.product_id) productIds.add(item.product_id);
-      if (item.service_id) hasServices = true;
+    // EVERY opportunity, not just `items[]`. The offer document carries its order bumps, upsells and
+    // downsells in `funnel.*` (or, normalized, in `purchase_opportunities`) -- reading `items` alone
+    // resolved the landing product and nothing else, so a copy carried the offer's whole funnel
+    // definition to the target mode while leaving every bump and upsell product behind. The copied offer
+    // then referenced products that did not exist there, and the funnel was simply missing with no error
+    // (found 2026-10-18 on a 5-product offer: 1 item, 2 bumps, 2 upsells).
+    //
+    // `offerEntries` is the same normalizer the offer card and the flow diagram read, so this cannot
+    // drift from what the tenant was shown.
+    // `offerEntries` collapses product_id and service_id into one `id`, so the service ids are collected
+    // from the raw document and subtracted -- classifying by an id PREFIX would be a guess about a naming
+    // convention, and the wrong guess here copies a service as if it were a product.
+    const serviceIds = new Set(serviceIdsInOffer(offer));
+    if (serviceIds.size) hasServices = true;
+    for (const entry of offerEntries(offer)) {
+      const id = String(entry?.id || "");
+      if (id && !serviceIds.has(id)) productIds.add(id);
     }
   }
   const productDocs = (await Promise.all([...productIds].map((id) => resolveProductDoc(id, productCache)))).filter(Boolean);
