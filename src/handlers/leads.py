@@ -197,6 +197,13 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
         event_id=event_id,
         occurrence_id=occurrence_id,
     )
+    # WHICH BOOKS THIS CAME FROM. Leads are a CRM record rather than a transaction, so the repository is
+    # not mode-scoped -- but a tenant testing their own form still gets a fake person in the list beside
+    # their real ones, and `delete test data` cannot tell them apart. Unlike a refund request, a lead
+    # carries no id that reveals the mode: page_id and offer_id are deliberately IDENTICAL across modes
+    # (the cross-mode copy preserves ids), so there is nothing to derive it from later. It has to be
+    # recorded at capture or it is lost.
+    lead["stripe_mode"] = mode
     try:
         validate_lead_submission(lead)
         leads_repo.put(lead)
@@ -263,11 +270,26 @@ def _emit_lead_notification(notifications_repo, lead, tenant_id, now, mode="test
         pass
 
 
+def lead_mode(lead):
+    """Which books a lead came from, or "" when it predates the mode being recorded.
+
+    No derivation is possible: a lead's page_id and offer_id are the same in both modes by design, so
+    an older record simply cannot be placed. Those are shown in both modes rather than hidden -- a lead
+    is a person who asked to be contacted, and losing one is worse than showing it twice.
+    """
+    stored = str((lead or {}).get("stripe_mode") or "").strip().lower()
+    return stored if stored in ("live", "test") else ""
+
+
 def list_leads(event, leads_repo):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     leads = leads_repo.list_for_tenant(tenant_id)
+    # Mode-scoped at read time, matching the bell: `_emit_lead_notification` already scopes the
+    # NOTIFICATION about a lead, while the lead itself appeared in both lists. One of those was wrong.
+    mode = resolve_stripe_mode(event)
+    leads = [lead for lead in leads if lead_mode(lead) in (mode, "")]
     params = query_params(event)
     offer_id = str(params.get("offer_id") or "").strip()
     status = str(params.get("status") or "").strip()
