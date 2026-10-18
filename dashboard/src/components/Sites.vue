@@ -497,6 +497,7 @@
         </template>
         <template v-if="copyPlan.subdomainConflict"><br><strong class="copy-replace-warning">⚠ The subdomain “{{ copyPlan.label }}” is already taken in {{ targetEnvLabel }} by another Site. Rename this Site's store address before copying.</strong></template>
         <template v-if="copyPlan.hasServices"><br>Note: offers that include services aren't fully copied — set services up in {{ targetEnvLabel }}.</template>
+        <template v-if="copyPlan.collectionIds?.length"><br>Note: {{ copyPlan.collectionIds.length }} collection{{ copyPlan.collectionIds.length === 1 ? "" : "s" }} shown on these pages {{ copyPlan.collectionIds.length === 1 ? "is" : "are" }} not copied — those grids fall back to their inline cards in {{ targetEnvLabel }}.</template>
         <template v-if="copyError"><br><strong class="copy-replace-warning">{{ copyError }}</strong></template>
       </template>
     </ConfirmDialog>
@@ -551,7 +552,7 @@ const targetEnv = computed(() => getOtherEnvironment());
 const targetEnvLabel = computed(() => (targetEnv.value === "live" ? "Live" : "Test"));
 const copyBusy = ref(false);
 const copyError = ref("");
-const copyPlan = ref(null);  // { site, pages:[{page,existingTarget}], offerDocs, productDocs, existingSite, hasServices }
+const copyPlan = ref(null);  // { site, pages, offerDocs, productDocs, existingSite, hasServices, collectionIds }
 
 async function copySiteToEnvironment(site) {
   copyError.value = "";
@@ -564,12 +565,14 @@ async function copySiteToEnvironment(site) {
     const offerById = new Map();
     const productById = new Map();
     let hasServices = false;
+    const collectionIds = new Set();
     const pages = [];
     for (const page of pageDocs) {
       const deps = await resolvePageDeps(page);
       deps.offerDocs.forEach((o) => offerById.set(o.offer_id, o));
       deps.productDocs.forEach((p) => productById.set(p.product_id, p));
       hasServices = hasServices || deps.hasServices;
+      (deps.collectionIds || []).forEach((id) => collectionIds.add(id));
       // Per-page pre-flight so each page keeps the draft-vs-published rule on the target.
       const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { mode: env })
         .then((b) => b.page).catch(() => null);
@@ -590,7 +593,7 @@ async function copySiteToEnvironment(site) {
       subdomainConflict = !!check && check.available === false;
     }
     copyPlan.value = {
-      site, pages, existingSite, hasServices, label, subdomainConflict,
+      site, pages, existingSite, hasServices, collectionIds: [...collectionIds], label, subdomainConflict,
       offerDocs: [...offerById.values()], productDocs: [...productById.values()],
     };
   } catch (err) {

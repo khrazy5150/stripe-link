@@ -5,7 +5,9 @@
 // SAME backend (post-decoupling both modes live in one deployment) — the browser resolves the dependency graph
 // in the source mode and re-POSTs each document to the target mode, bottom-up (products -> offers -> pages
 // -> Site) so references resolve as they land. IDs are preserved across modes.
-import { apiRequest } from "../api/client";
+// Explicit .js for the same reason purchaseFlow.js gives: Vite resolves extensionless, raw
+// node — which runs the parity tests — does not.
+import { apiRequest } from "../api/client.js";
 // The one normalizer the dashboard has for "which catalog items does this offer reference". Explicit .js:
 // Vite resolves extensionless, raw node (which runs the parity tests) does not.
 import { offerEntries } from "./purchaseFlow.js";
@@ -76,6 +78,19 @@ export function siteForTarget(site, existingTarget, env) {
 // The label of a platform hostname ("axel-mart" from "axel-mart.jbay.be").
 function subdomainLabel(hostname) {
   return String(hostname || "").split(".")[0] || "";
+}
+
+// Collections a page EMBEDS. A catalog_grid may be fed by a Collection instead of inline items, and at
+// publish `load_page_collections` resolves it — "best-effort: a missing collection just leaves that grid
+// to its inline config". So a page copied without its Collection renders a different grid, or an empty
+// one, with no error anywhere. Surfaced rather than copied: a Collection is a list of PAGE ids, and
+// copying it alone would land a list pointing at pages the target mode does not have.
+export function collectionIdsForPage(page) {
+  const ids = new Set();
+  for (const section of page?.sections || []) {
+    if (section && section.type === "catalog_grid" && section.collection_id) ids.add(String(section.collection_id));
+  }
+  return [...ids];
 }
 
 // Every offer a page references — its primary offer plus any catalog-grid items.
@@ -149,7 +164,8 @@ export async function resolvePageDeps(page, { offerCache = [], productCache = []
     }
   }
   const productDocs = (await Promise.all([...productIds].map((id) => resolveProductDoc(id, productCache)))).filter(Boolean);
-  return { offerDocs, productDocs, hasServices };
+  const collectionIds = collectionIdsForPage(page);
+  return { offerDocs, productDocs, hasServices, collectionIds, hasCollections: collectionIds.length > 0 };
 }
 
 // Write a catalog (products then offers) to the target env — the shared bottom-up prefix of every copy.

@@ -118,6 +118,48 @@ class CopyCarriesTheWholeFunnelTests(unittest.TestCase):
         self.assertIn("landing", out["products"])
 
 
+PAGE_WITH_COLLECTION = {
+    "page_id": "page_1",
+    "offer_id": "offer_1",
+    "sections": [
+        {"type": "catalog_grid", "collection_id": "col_1", "items": [{"offer_id": "offer_2"}]},
+        {"type": "catalog_grid", "collection_id": "col_1"},   # the same collection twice
+        {"type": "catalog_grid"},                             # inline only, nothing to carry
+        {"type": "hero"},
+    ],
+}
+
+
+def collections_for(page):
+    return _node(f"""
+    import {{ collectionIdsForPage }} from {json.dumps(str(COPY))};
+    console.log(JSON.stringify(collectionIdsForPage({json.dumps(page)})));
+    """)
+
+
+class EmbeddedCollectionsAreSurfacedTests(unittest.TestCase):
+    """A catalog_grid can be fed by a Collection. At publish, `load_page_collections` is best-effort: a
+    missing collection "just leaves that grid to its inline config" — so a page copied without it renders
+    a different grid, or an empty one, and nothing reports that."""
+
+    def setUp(self):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+
+    def test_an_embedded_collection_is_found(self):
+        self.assertEqual(collections_for(PAGE_WITH_COLLECTION), ["col_1"])
+
+    def test_the_same_collection_twice_is_one(self):
+        self.assertEqual(len(collections_for(PAGE_WITH_COLLECTION)), 1)
+
+    def test_a_page_with_no_collection_grid_reports_none(self):
+        self.assertEqual(collections_for({"page_id": "p", "sections": [{"type": "hero"}]}), [])
+
+    def test_a_grid_with_only_inline_items_is_not_a_collection(self):
+        page = {"sections": [{"type": "catalog_grid", "items": [{"offer_id": "o1"}]}]}
+        self.assertEqual(collections_for(page), [])
+
+
 class TheCopyUsesTheSharedNormalizerTests(unittest.TestCase):
     def test_it_does_not_read_offer_items_directly(self):
         """A guard against the exact edit that caused this: resolving deps from `offer.items` again would

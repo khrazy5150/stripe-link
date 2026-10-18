@@ -2656,6 +2656,10 @@
         </template>
         <template v-else> It lands as a new draft in {{ targetEnvLabel }}, unattached to any Site.</template>
         <template v-if="copyPlan.hasServices"> Note: this offer includes services, which aren't copied — set them up in {{ targetEnvLabel }}.</template>
+        <template v-if="copyPlan.collectionIds?.length">
+          <br><strong class="copy-replace-warning">⚠ This page shows a collection, which isn't copied.</strong>
+          In {{ targetEnvLabel }} that grid falls back to whatever it has inline — often nothing. A collection is a list of pages, so it only means something once those pages exist there too.
+        </template>
         <template v-if="copyError"><br><span class="field-error">{{ copyError }}</span></template>
       </template>
     </ConfirmDialog>
@@ -7317,7 +7321,7 @@ const targetEnv = computed(() => getOtherEnvironment());
 const targetEnvLabel = computed(() => (targetEnv.value === "live" ? "Live" : "Test"));
 const copyBusy = ref(false);
 const copyError = ref("");
-const copyPlan = ref(null);  // { page, offerDocs, productDocs, existingTarget, hasServices } while the confirm is open
+const copyPlan = ref(null);  // { page, offerDocs, productDocs, existingTarget, hasServices, collectionIds }
 
 async function copyPageToEnvironment(page) {
   openMenuId.value = "";
@@ -7325,11 +7329,11 @@ async function copyPageToEnvironment(page) {
   copyBusy.value = true;
   try {
     await ensureCatalogLoaded().catch(() => {});
-    const { offerDocs, productDocs, hasServices } = await resolvePageDeps(page, { offerCache: offers.value, productCache: products.value });
+    const { offerDocs, productDocs, hasServices, collectionIds } = await resolvePageDeps(page, { offerCache: offers.value, productCache: products.value });
     // Pre-flight the target PAGE (drives the draft-vs-keep-published rule + overwrite messaging).
     const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { mode: targetEnv.value })
       .then((b) => b.page).catch(() => null);
-    copyPlan.value = { page, offerDocs, productDocs, existingTarget, hasServices };
+    copyPlan.value = { page, offerDocs, productDocs, existingTarget, hasServices, collectionIds };
   } catch (err) {
     copyError.value = err.message || "Couldn't prepare the copy.";
   } finally {
