@@ -3337,7 +3337,10 @@ button:disabled {
 
 .funnel-extra-warning,
 .price-context-warning {
-  color: #92400e;
+  /* amber-900 rather than amber-800: this is small text (1.2rem) carrying an instruction, and it has to
+     be read, not merely noticed. */
+  color: #7c2d12;
+  font-weight: 500;
   font-size: 1.2rem;
   line-height: 1.45;
   max-width: 30rem;
@@ -3348,10 +3351,14 @@ button:disabled {
   margin-top: 0.3rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  .funnel-extra-warning,
-  .price-context-warning { color: #fcd34d; }
-}
+/* NO `prefers-color-scheme: dark` override here any more. It set these to #fcd34d — amber-300, a colour
+   chosen to sit on a dark ground — but this dashboard has no dark theme: nothing in the app ever sets
+   `data-theme`, and every panel is light whatever the OS says. So on a machine in dark mode the rule
+   painted pale yellow text onto a white card, which is how a warning written to be read ended up barely
+   legible (reported 2026-10-18).
+
+   The light-mode colour below is amber-800 and reads cleanly on the panel it actually renders on. When a
+   real dark theme arrives, these belong with it, guarded by the theme the app sets — not by the OS. */
 
 .offer-hint {
   color: var(--muted);
