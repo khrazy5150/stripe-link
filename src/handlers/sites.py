@@ -446,6 +446,21 @@ def create_site(event, repository, registry=None, mode="test"):
         if not _SITE_ID_RE.match(str(document.get("site_id") or "")):
             document["site_id"] = generate_site_id()
         document["document_type"] = "site"
+        # SERVER-OWNED, like document_type and updated_at above it, and for a sharper reason.
+        #
+        # A Site says which books it belongs to TWICE: `stripe_mode`, stamped by the mode-scoped
+        # repository, and `environment`, which arrived in the payload. `_reject_non_live_site` reads
+        # `environment` -- deliberately, because the Site's own axis is the one that matters there -- so a
+        # document sent with environment="live" while the request is in test mode would land in the TEST
+        # partition and still pass the live-only gate. That is the reputational harm that gate exists to
+        # prevent ("a test Site serving a real domain would present sandbox pages as a real business"),
+        # reached by a different door, and its own docstring already says why the door matters: client-side
+        # gates are not access control.
+        #
+        # Setting it from the request's mode makes the two fields agree by construction rather than by
+        # the client being well-behaved. Checked before changing: all three Sites in dev and prod already
+        # agree, so nothing is being reclassified.
+        document["environment"] = "live" if mode == "live" else "test"
         document.setdefault("schema_version", SITE_SCHEMA_VERSION)
         document.setdefault("tenant_id", tenant_id_from_event(event, document))
         now = int(time.time())
