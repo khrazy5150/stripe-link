@@ -81,8 +81,37 @@ def save_refund_request(event, repository, notifications_repo=None, now=0):
         saved = repository.put(document)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_refund_request")
-    _emit_refund_notification(notifications_repo, saved, now)
+    # The bell entry goes into the SAME books as the request it announces.
+    #
+    # The repository handed in was built from the REQUEST's mode; the request's own mode is derived from
+    # its order id, which cannot be wrong about which books it belongs to. When a buyer's submission
+    # arrives without a mode it falls back to "test", and the tenant would then have had a live refund
+    # request sitting in their live list with its alert filed under test -- visible in neither place they
+    # would look. Notifications are stamped on write, so handing the right repository is the whole fix.
+    _emit_refund_notification(
+        _notifications_for(notifications_repo, saved), saved, now)
     return json_response({"refund_request": saved}, status_code=201)
+
+
+def _notifications_for(repo, refund_request):
+    """The notifications repository for a refund request's OWN mode.
+
+    The handler always builds one from the request's mode before we get here, so "rebuild only when the
+    caller passed nothing" would have been a no-op -- it is never None in production. The test is a
+    MISMATCH instead: rebuild only when the repository we hold is stamping a different mode than the
+    refund belongs to.
+
+    A fake without `notification_mode` (a test's stub) reports no mismatch and is left exactly as it was,
+    so injecting one still works.
+    """
+    mode = str((refund_request or {}).get("stripe_mode") or "").strip().lower()
+    if repo is None or mode not in ("live", "test"):
+        return repo
+    if getattr(repo, "notification_mode", mode) == mode:
+        return repo
+    import os
+
+    return notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else repo
 
 
 def refund_request_notification(refund_request, now):

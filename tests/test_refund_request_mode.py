@@ -9,7 +9,9 @@ The repository is not mode-scoped and making it so would orphan every existing r
 carries no mode. The order id carries it instead: `order_cs_live_...`.
 """
 import json
+import os
 import unittest
+from unittest.mock import patch
 
 from handlers.notifications import list_refund_requests, refund_request_mode
 from stripe_link.common import stripe_mode_from_reference
@@ -76,3 +78,56 @@ class TheListIsScopedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheAlertGoesIntoTheSameBooksTests(unittest.TestCase):
+    """A live refund request whose alert is filed under test is visible in neither place a tenant looks."""
+
+    class Repo:
+        def __init__(self, mode):
+            self.notification_mode = mode
+            self.puts = []
+
+        def get(self, *a):
+            return None
+
+        def put(self, doc):
+            self.puts.append(doc)
+            return doc
+
+    def test_a_matching_repository_is_used_as_is(self):
+        from handlers.notifications import _notifications_for
+        repo = self.Repo("live")
+        self.assertIs(_notifications_for(repo, {"stripe_mode": "live"}), repo)
+
+    def test_a_MISMATCHED_repository_is_not_used(self):
+        """The handler builds the repo from the REQUEST's mode; the refund's own order id is the
+        authority. When a submission arrives with no mode it falls back to test, and a live refund's
+        alert would land in the test bell."""
+        from handlers.notifications import _notifications_for
+        repo = self.Repo("test")
+        with patch.dict(os.environ, {"NOTIFICATIONS_TABLE": "jb-notifications-test"}):
+            rebuilt = _notifications_for(repo, {"stripe_mode": "live"})
+        self.assertIsNot(rebuilt, repo)
+        self.assertEqual(rebuilt.notification_mode, "live")
+
+    def test_without_a_table_it_keeps_what_it_had_rather_than_returning_nothing(self):
+        """Degrading to the wrong bell is bad; degrading to NO alert is worse."""
+        from handlers.notifications import _notifications_for
+        repo = self.Repo("test")
+        with patch.dict(os.environ, {"NOTIFICATIONS_TABLE": ""}):
+            self.assertIs(_notifications_for(repo, {"stripe_mode": "live"}), repo)
+
+    def test_a_stub_without_a_mode_is_left_alone(self):
+        """Rebuilding here would quietly discard an injected fake and the test would stop testing."""
+        from handlers.notifications import _notifications_for
+
+        class Stub:
+            pass
+        stub = Stub()
+        self.assertIs(_notifications_for(stub, {"stripe_mode": "live"}), stub)
+
+    def test_an_unplaceable_request_keeps_whatever_it_had(self):
+        from handlers.notifications import _notifications_for
+        repo = self.Repo("test")
+        self.assertIs(_notifications_for(repo, {}), repo)
