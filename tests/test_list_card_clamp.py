@@ -40,16 +40,40 @@ class DescriptionClampTests(unittest.TestCase):
 
 
 class TitleTruncationTests(unittest.TestCase):
-    def test_title_is_one_line_with_an_ellipsis(self):
+    def test_title_wraps_to_two_lines_then_clamps(self):
+        """Changed from one nowrap line (author, 2026-10-18): a 95-character offer name cut to a single
+        line is indistinguishable from the next one. Two lines, then clamp — bounded, so cards stay the
+        same height, which is the point of this whole file."""
         body = rule(".product-card-heading h3")
-        self.assertIn("text-overflow: ellipsis", body)
-        self.assertIn("white-space: nowrap", body)
+        self.assertIn("-webkit-line-clamp: 2", body)
+        self.assertIn("-webkit-box-orient: vertical", body)
+        self.assertIn("display: -webkit-box", body)
         self.assertIn("overflow: hidden", body)
+
+    def test_the_title_still_cannot_be_widened_by_one_long_token(self):
+        # Wrapping handles spaces; a pasted URL or a slug has no break opportunity and would still escape.
+        self.assertIn("overflow-wrap: anywhere", rule(".product-card-heading h3"))
 
     def test_title_has_min_width_zero(self):
         # Without it a flex item's automatic minimum size is its content, so a long title pushes the
         # status badge out of the card instead of truncating. Same trap as the settings accordion.
         self.assertIn("min-width: 0", rule(".product-card-heading h3"))
+
+    def test_the_heading_ITSELF_has_min_width_zero(self):
+        """The half that was missing, and why a title escaped its card anyway: the heading is a GRID ITEM
+        of .product-card-body, so its automatic minimum size is its content too. min-width:0 on the h3
+        alone leaves the chain broken one level up (found 2026-10-18)."""
+        self.assertIn("min-width: 0", rule(".product-card-heading"))
+
+
+class WarningLegibilityTests(unittest.TestCase):
+    def test_no_os_dark_mode_override_repaints_the_price_warning(self):
+        """There is no dark theme in this dashboard — nothing ever sets `data-theme` and every panel is
+        light. An unguarded `prefers-color-scheme: dark` rule therefore painted amber-300 onto a white
+        card: 1.44:1, for text carrying an instruction (found 2026-10-18)."""
+        dark_blocks = re.findall(r"@media \(prefers-color-scheme: dark\)\s*\{(.*?)\n\}", CSS, re.S)
+        for block in dark_blocks:
+            self.assertNotIn("price-context-warning", block)
 
 
 class FullTextRemainsReachableTests(unittest.TestCase):
