@@ -12,7 +12,9 @@
 
     <div class="product-card-body">
       <div class="product-card-heading">
-        <!-- title carries the full text: clamping hides characters, it must not hide information. -->
+        <!-- title carries the full text: clamping hides characters, it must not hide information.
+             The heading wraps to two lines before it clamps, so this is a fallback for the rare very
+             long name rather than the normal way to read one. -->
         <h3 :title="title">{{ title || "Untitled" }}</h3>
         <slot name="badge">
           <span v-if="statusLabel" class="product-status" :class="statusTone">{{ statusLabel }}</span>
