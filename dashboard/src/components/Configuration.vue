@@ -350,7 +350,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { apiRequest, getApiBase, getStripeMode, getTenantId } from "../api/client";
+import { apiRequest, getApiBase, getStripeMode, getTenantId, hostnameReleaseChannel } from "../api/client";
 import { showIconPicker } from "../icon-picker.js";
 import { useRefundPolicyStore } from "../stores/refundPolicy";
 import PhoneInput from "./PhoneInput.vue";
@@ -401,7 +401,12 @@ const form = reactive(defaultForm());
 const apiBase = computed(() => getApiBase());
 const environmentLabel = computed(() => (getStripeMode() === "live" ? "Live mode" : "Test mode"));
 // Danger Zone (Test-only) — delete all of this tenant's test data.
-const isTestEnv = computed(() => getStripeMode() !== "live");
+// Two conditions, not one. Being in TEST MODE says the data is deletable; being on a NON-PROD BACKEND
+// says the endpoint exists at all -- the function carries `Condition: IsNonProd`, so on the prod stack
+// there is no route behind this button. Those used to be the same question and stopped being one when
+// Stripe mode was decoupled from the deployment environment: a tenant in test mode on the prod backend
+// saw the button and got a 404 from it (reported 2026-10-18).
+const isTestEnv = computed(() => getStripeMode() !== "live" && hostnameReleaseChannel() !== "prod");
 const showDeleteModal = ref(false);
 const deleting = ref(false);
 const deleteError = ref("");

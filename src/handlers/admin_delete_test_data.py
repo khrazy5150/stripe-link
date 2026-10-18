@@ -27,7 +27,7 @@ purge orphaned HTML).
 import logging
 import os
 
-from stripe_link.common import error_response, json_response, tenant_id_from_event
+from stripe_link.common import error_response, json_response, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import stripe_keys_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
@@ -72,19 +72,36 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
 
+    # THE MODE IS PART OF THE PERMISSION, not just part of the query. Since Stripe mode was decoupled from
+    # the deployment environment, a tenant can be in test mode on a backend that also holds their live
+    # data -- so "which environment is this" no longer answers "is it safe to delete". A caller in live
+    # mode is refused outright rather than quietly scoped down to test.
+    mode = resolve_stripe_mode(event)
+    if mode != "test":
+        return error_response(
+            "Switch to test mode before deleting test data.", status_code=400, code="live_mode")
+
     if dynamodb is None:
         import boto3
         dynamodb = boto3.resource("dynamodb")
 
-    deleted = {}
+    deleted, kept = {}, {}
     for env_name in _PK_TABLES:
-        deleted[_label(env_name)] = _delete_partition(dynamodb, os.environ.get(env_name, ""), "PK", f"TENANT#{tenant_id}")
+        counts = _delete_test_items(dynamodb, os.environ.get(env_name, ""), f"TENANT#{tenant_id}")
+        deleted[_label(env_name)], kept[_label(env_name)] = counts["deleted"], counts["kept"]
     for env_name in _TENANT_ID_TABLES:
-        deleted[_label(env_name)] = _delete_partition(dynamodb, os.environ.get(env_name, ""), "tenant_id", tenant_id)
+        # Money tables partition on TENANT#{id}#{mode} (plans/STRIPE_MODE_DECOUPLING.md), so the test slice
+        # is a partition of its own and the whole thing can go. This used to query `tenant_id`, which is
+        # not a key attribute on these tables any more: DynamoDB refused it, the broad except swallowed the
+        # refusal, and the action reported 0 deleted while deleting nothing at all.
+        deleted[_label(env_name)] = _delete_partition(
+            dynamodb, os.environ.get(env_name, ""), "PK", f"TENANT#{tenant_id}#{mode}")
     for env_name in _SCAN_TENANT_TABLES:
-        deleted[_label(env_name)] = _delete_scan_tenant(dynamodb, os.environ.get(env_name, ""), tenant_id)
+        deleted[_label(env_name)] = _delete_scan_tenant(dynamodb, os.environ.get(env_name, ""), tenant_id, mode)
     for env_name, sk_prefix, label in _PK_PREFIX_TABLES:
-        deleted[label] = _delete_partition(dynamodb, os.environ.get(env_name, ""), "PK", f"TENANT#{tenant_id}", sk_prefix=sk_prefix)
+        counts = _delete_test_items(
+            dynamodb, os.environ.get(env_name, ""), f"TENANT#{tenant_id}", sk_prefix=sk_prefix)
+        deleted[label], kept[label] = counts["deleted"], counts["kept"]
 
     try:
         stripe_results = _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener)
@@ -92,7 +109,11 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
         logger.warning("Stripe test-data cleanup failed for %s: %s", tenant_id, exc)
         stripe_results = {"error": str(exc)}
 
-    return json_response({"success": True, "tenant_id": tenant_id, "deleted": deleted, "stripe": stripe_results})
+    # `kept` is reported, not hidden: leads, reviews and notifications are NOT mode-scoped, so nothing can
+    # tell a test one from a live one and they are left alone. Saying so is the difference between a known
+    # limit and a tenant wondering why their sandbox still has reviews in it.
+    return json_response({"success": True, "tenant_id": tenant_id, "mode": mode,
+                          "deleted": deleted, "kept_not_mode_scoped": kept, "stripe": stripe_results})
 
 
 def _delete_by_key(table, key_attrs, items):
@@ -100,6 +121,56 @@ def _delete_by_key(table, key_attrs, items):
         for item in items:
             batch.delete_item(Key={attr: item[attr] for attr in key_attrs})
 
+
+def _is_test_item(item):
+    """Whether this document PROVABLY belongs to test mode.
+
+    Two ways to be sure, because the two storage shapes differ: mode-scoped documents carry
+    `stripe_mode` (written by the repository on every put) and their sort key reads `TYPE#test#id`.
+    Anything that proves neither is NOT deleted -- the whole point of this function is that an unprovable
+    document is left alone rather than guessed at. Under the old code the guess was "delete it".
+    """
+    if str(item.get("stripe_mode") or "").strip().lower() == "test":
+        return True
+    return "#test#" in str(item.get("SK") or "")
+
+
+def _delete_test_items(dynamodb, table_name, pk_value, *, sk_prefix=""):
+    """Delete only the TEST documents in a tenant's partition, and count what was left behind.
+
+    This used to delete the partition outright. That was survivable while the action existed only on the
+    dev stack, and became a live-data wipe the moment a tenant could be in test mode on a backend holding
+    their live documents -- which is exactly what decoupling Stripe mode from the environment did
+    (plans/STRIPE_MODE_DECOUPLING.md). The partition is shared by both modes; only the sort key separates
+    them.
+    """
+    if not table_name:
+        return {"deleted": 0, "kept": 0}
+    from boto3.dynamodb.conditions import Key
+
+    try:
+        table = dynamodb.Table(table_name)
+        key_attrs = [k["AttributeName"] for k in table.key_schema]
+        condition = Key(key_attrs[0]).eq(pk_value)
+        if sk_prefix and len(key_attrs) > 1:
+            condition = condition & Key(key_attrs[1]).begins_with(sk_prefix)
+        kwargs = {"KeyConditionExpression": condition}
+        deleted = kept = 0
+        while True:
+            resp = table.query(**kwargs)
+            batch = [i for i in resp.get("Items", []) if _is_test_item(i)]
+            kept += len(resp.get("Items", [])) - len(batch)
+            if batch:
+                _delete_by_key(table, key_attrs, batch)
+                deleted += len(batch)
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                break
+            kwargs["ExclusiveStartKey"] = last
+        return {"deleted": deleted, "kept": kept}
+    except Exception as exc:  # noqa: BLE001 - one table's failure must not abort the rest
+        logger.warning("Failed clearing %s: %s", table_name, exc)
+        return {"deleted": 0, "kept": 0}
 
 def _delete_partition(dynamodb, table_name, pk_name, pk_value, *, sk_prefix=""):
     """Delete items in a partition — the tenant's whole slice of the table, or (when sk_prefix is given) only
@@ -136,8 +207,22 @@ def _delete_partition(dynamodb, table_name, pk_name, pk_value, *, sk_prefix=""):
         return 0
 
 
-def _delete_scan_tenant(dynamodb, table_name, tenant_id):
-    """For tables not partitioned by tenant — scan and filter on tenant_id."""
+def _is_test_session(item, mode):
+    """A checkout session belonging to `mode`. The session id carries it (`cs_test_`/`cs_live_`), and the
+    stored `stripe_mode` carries it too; either proof is enough, neither being present means no."""
+    if str(item.get("stripe_mode") or "").strip().lower() == mode:
+        return True
+    for value in item.values():
+        if isinstance(value, str) and value.startswith(f"cs_{mode}_"):
+            return True
+    return False
+
+def _delete_scan_tenant(dynamodb, table_name, tenant_id, mode="test"):
+    """For tables not partitioned by tenant — scan and filter on tenant_id AND mode.
+
+    A checkout session records which books it belongs to, and `cs_live_...` / `cs_test_...` says so in the
+    id itself. Filtering on the tenant alone would have taken the live sessions with the test ones.
+    """
     if not table_name:
         return 0
     from boto3.dynamodb.conditions import Attr
@@ -145,6 +230,9 @@ def _delete_scan_tenant(dynamodb, table_name, tenant_id):
         table = dynamodb.Table(table_name)
         key_attrs = [k["AttributeName"] for k in table.key_schema]
         names = {f"#k{i}": attr for i, attr in enumerate(key_attrs)}
+        # The projection must carry what the mode test reads, or every row looks unprovable and nothing is
+        # deleted -- the quiet failure this whole fix exists to remove.
+        names["#mode"] = "stripe_mode"
         kwargs = {
             "FilterExpression": Attr("tenant_id").eq(tenant_id),
             "ProjectionExpression": ", ".join(names.keys()),
@@ -153,7 +241,7 @@ def _delete_scan_tenant(dynamodb, table_name, tenant_id):
         deleted = 0
         while True:
             resp = table.scan(**kwargs)
-            items = resp.get("Items", [])
+            items = [i for i in resp.get("Items", []) if _is_test_session(i, mode)]
             if items:
                 _delete_by_key(table, key_attrs, items)
                 deleted += len(items)
