@@ -287,9 +287,10 @@
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>System</h2></header>
       <div class="dashboard-card-body">
-        <p class="field-note">Read-only. Managed by the platform for the active environment.</p>
+        <p class="field-note">Read-only. The Stripe mode you are working in, and the backend serving it.
+          They are independent: a test-mode workspace runs on the same backend as your live one.</p>
         <dl class="product-details-grid">
-          <div><dt>Environment</dt><dd>{{ environmentLabel }}</dd></div>
+          <div><dt>Stripe mode</dt><dd>{{ stripeModeLabel }}</dd></div>
           <div><dt>API Endpoint</dt><dd class="font-mono">{{ apiBase || "—" }}</dd></div>
         </dl>
       </div>
@@ -404,7 +405,9 @@ function refundSourceNote(cls) {
 const form = reactive(defaultForm());
 
 const apiBase = computed(() => getApiBase());
-const environmentLabel = computed(() => (getStripeMode() === "live" ? "Live mode" : "Test mode"));
+// Named for the axis it actually reports. It was "environment", which is the other axis entirely --
+// the one this panel shows beside it as the API endpoint.
+const stripeModeLabel = computed(() => (getStripeMode() === "live" ? "Live" : "Test"));
 // Danger Zone (Test-only) — delete all of this tenant's test data.
 // Two conditions, not one. Being in TEST MODE says the data is deletable; being on a NON-PROD BACKEND
 // says the endpoint exists at all -- the function carries `Condition: IsNonProd`, so on the prod stack

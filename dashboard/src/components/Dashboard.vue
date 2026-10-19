@@ -166,7 +166,7 @@
         <div class="onboarding-body">
           <div v-if="wizardStep === 1" class="onboarding-step">
             <p>
-              Continue to Stripe to authorize Junior Bay for the {{ environmentLabel.toLowerCase() }} environment.
+              Continue to Stripe to authorize Junior Bay for {{ environmentLabel.toLowerCase() }} mode.
               No API keys need to be copied or pasted.
             </p>
             <div class="keys-status-banner info">
