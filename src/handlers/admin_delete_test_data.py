@@ -117,7 +117,10 @@ _SCAN_TENANT_TABLES = ["CHECKOUT_SESSIONS_TABLE"]
 # action again continues where it stopped. So the budget is spent on the database and whatever is left
 # goes to Stripe, which stops cleanly and says it is unfinished.
 _API_GATEWAY_LIMIT_SECONDS = 29
-_RESPONSE_MARGIN_SECONDS = 6
+# Measured, not guessed: a real run with 54 prices to archive returned at 24s against a 23s budget, which
+# is far too close to a limit whose breach is indistinguishable from a crash. The cost of a wider margin is
+# one more click, and the dialog already asks for it.
+_RESPONSE_MARGIN_SECONDS = 11
 
 
 def _label(env_name):
