@@ -476,6 +476,13 @@ async function awaitDeleteJob(jobId) {
   }
 }
 
+// The labels are table names, so they arrive plural: "1 offers", "1 pages". Singular counts are the
+// common case on a small sandbox, which is where the receipt is read most carefully.
+function countOf(n, name) {
+  const label = name.replace(/_/g, " ");
+  return `${n} ${Number(n) === 1 ? label.replace(/s$/, "") : label}`;
+}
+
 function summariseDelete(result) {
   // The receipt is the inventory. Built from what the server actually did, so unlike a list in the
   // dialog it cannot fall behind the handler.
@@ -490,7 +497,7 @@ function summariseDelete(result) {
   if (stripe.coupons_deleted != null) parts.push(`${stripe.coupons_deleted} coupons`);
   const detail = Object.entries(deleted).filter(([, n]) => Number(n) > 0)
     .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`);
+    .map(([name, n]) => countOf(n, name));
   const keptPairs = Object.entries(result.kept_not_mode_scoped || {}).filter(([, n]) => Number(n) > 0);
   const kept = keptPairs.reduce((sum, [, n]) => sum + Number(n), 0);
   const failed = Object.keys(result.errors || {});
@@ -499,7 +506,7 @@ function summariseDelete(result) {
     parts.length ? `Stripe: ${parts.join(", ")}.` : "",
     // Reported, not hidden: a tenant who still sees reviews in their sandbox deserves to know why.
     kept ? `Kept ${kept} record${kept === 1 ? "" : "s"} with no mode recorded (${
-      keptPairs.map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`).join(", ")}).` : "",
+      keptPairs.map(([name, n]) => countOf(n, name)).join(", ")}).` : "",
     // A table that refused its delete once read as "0 deleted", indistinguishable from an empty one.
     failed.length ? `${failed.length} could not be cleared: ${failed.join(", ")}.` : "",
     stripe.incomplete ? "Stripe cleanup ran out of time — run this again to finish it." : "",
