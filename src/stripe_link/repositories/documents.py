@@ -501,6 +501,40 @@ class SubdomainRegistry:
             return None
         return {"site_id": item.get("site_id") or "", "tenant_id": item.get("tenant_id") or ""}
 
+    def release(self, label: str, *, site_id: str) -> bool:
+        """Free `label`, but ONLY if `site_id` still owns it. True when it was freed.
+
+        The guard is not paranoia. A site_id is preserved across Stripe modes, so a tenant's live Site and
+        its test counterpart share one -- and each reserves its OWN label (`shop` and `shop-test`). The
+        label is therefore the only thing that distinguishes them, and releasing "every reservation owned
+        by this site_id" would hand back a live hostname when a test Site is deleted. Checked against real
+        data: both reservations in prod carry the same site_id.
+
+        The conditional delete also means a label reassigned to another Site since is never taken from it.
+
+        **Deliberately narrow.** Retired usernames are kept forever on purpose -- a handle is an identity,
+        and `record_hosting_history` says so: "the name is retired, not freed". Retired hostnames stay
+        reserved too, because the tenant's own old links still point at them and freeing one would let a
+        stranger receive that traffic. Only a Site's CURRENT platform subdomain is released here.
+        """
+        from botocore.exceptions import ClientError
+
+        label = str(label or "").strip().lower()
+        if not label or not site_id:
+            return False
+        try:
+            self.table.delete_item(
+                Key=self._key(label),
+                ConditionExpression="#sid = :sid",
+                ExpressionAttributeNames={"#sid": "site_id"},
+                ExpressionAttributeValues={":sid": site_id},
+            )
+            return True
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return False
+            raise RepositoryError(str(exc)) from exc
+
     def reserve(self, label: str, *, site_id: str, tenant_id: str, now: int) -> bool:
         """Claim `label` for `site_id`. Return True on success, False if another Site already owns it.
         Idempotent: re-reserving a label this same Site already owns succeeds."""

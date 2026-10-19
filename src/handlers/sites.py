@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import secrets
@@ -33,6 +34,8 @@ from stripe_link.domain.custom_domains import (
     normalize_route_path,
     retrigger_ssl_validation,
 )
+
+logger = logging.getLogger(__name__)
 from stripe_link.domain.documents import DocumentValidationError, validate_site
 from stripe_link.domain.social_links import (
     preserve_verification,
@@ -230,7 +233,7 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
             return get_site(event, repository, site_id)
         return list_sites(event, repository)
     if method == "DELETE" and site_id:
-        return delete_site(event, repository, site_id)
+        return delete_site(event, repository, site_id, registry=registry, mode=mode)
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -633,14 +636,59 @@ def update_site_status(event, repository, site_id, mode="test"):
     return json_response({"site": saved})
 
 
-def delete_site(event, repository, site_id):
+def delete_site(event, repository, site_id, *, registry=None, other_mode_repo=None, mode="live"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     deleted = repository.delete(tenant_id, site_id)
     if not deleted:
         return error_response("Site not found.", status_code=404, code="not_found")
-    return json_response({"site": deleted})
+    # Deleted FIRST, released after. The other order frees the name while the Site still answers on it,
+    # and another tenant could claim a live address out from under it.
+    released = _release_subdomain_if_gone(
+        deleted, tenant_id, site_id, mode=mode, registry=registry, other_mode_repo=other_mode_repo)
+    return json_response({"site": deleted, "released_subdomains": released})
+
+
+def _release_subdomain_if_gone(site, tenant_id, site_id, *, mode, registry=None, other_mode_repo=None):
+    """Free the Site's platform names, but only once the Site is gone from BOTH modes.
+
+    A reservation is NOT per mode. `_reserve_subdomain` claims `{label}` and `{label}-test` together and
+    says why: "`{label}-test` is itself a legal label, so without this a second tenant could claim
+    `maria-test` and take over the first tenant's test-mode host." They are one claim in two rows, owned
+    by one site_id -- and because a site_id survives a cross-mode copy, the live Site and its test
+    counterpart share it.
+
+    So releasing on a single-mode delete would be wrong twice over: it would hand back a name the Site in
+    the other mode is still answering on, and it would reopen exactly the hijack hole that pairing closes.
+    The Site row IS mode-scoped, so deleting the test one leaves the live one untouched -- which is
+    precisely why "is it gone?" has to be asked of both.
+
+    Best-effort: a release that fails leaves the reservation in place, which is the state this code was
+    written to improve on and never worse than it.
+    """
+    hosting = site.get("hosting") if isinstance(site.get("hosting"), dict) else {}
+    if hosting.get("type") == "custom":
+        return []
+    label = platform_label(hosting.get("platform_hostname"))
+    if not label:
+        return []
+    other = "test" if str(mode) == "live" else "live"
+    try:
+        repo = other_mode_repo if other_mode_repo is not None else sites_repository(mode=other)
+        if repo.get(tenant_id, site_id):
+            return []          # still live in the other mode: the claim is still in use
+    except Exception:  # noqa: BLE001 - an unreadable sibling means we cannot prove it is gone, so keep it
+        return []
+    registry = registry or subdomain_registry()
+    released = []
+    for name in (label, f"{label}{TEST_HOST_SUFFIX}"):
+        try:
+            if registry.release(name, site_id=site_id):
+                released.append(name)
+        except Exception:  # noqa: BLE001 - the Site is already deleted; a stuck name must not 500
+            logger.warning("Could not release subdomain %s for site %s", name, site_id)
+    return released
 
 
 # ---------------------------------------------------------------------------------------------------------
