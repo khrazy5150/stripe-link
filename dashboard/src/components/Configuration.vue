@@ -295,11 +295,12 @@
       </div>
     </section>
 
-    <section v-if="isTestEnv" class="dashboard-card danger-zone">
+    <section v-if="isTestMode" class="dashboard-card danger-zone">
       <header class="dashboard-card-header"><h2>Danger Zone</h2></header>
       <div class="dashboard-card-body">
         <p class="field-note">Permanently delete all of this workspace's <strong>test</strong> data from
-          Stripe and the database. This cannot be undone. Available in the Test environment only.</p>
+          Stripe and the database. This cannot be undone. Your live data is never touched: it lives under a
+          different key and this action cannot reach it.</p>
         <button class="danger-action" type="button" :disabled="deleting" @click="openDeleteModal">
           {{ deleting ? "Deleting…" : "Delete Test Data" }}
         </button>
@@ -323,10 +324,14 @@
           <p class="danger-text"><strong>Warning: this action cannot be undone.</strong></p>
           <p><strong>Database</strong> — permanently deletes this workspace's:</p>
           <ul class="delete-scope">
-            <li>Products, offers, coupons, landing pages</li>
-            <li>Orders, checkout sessions, invoices, refunds, ledger entries</li>
+            <li>Products, offers, coupons (with their grants and redemptions)</li>
+            <li>Landing pages, collections, A/B tests</li>
+            <li>Orders, checkout sessions, invoices, refunds, ledger entries, shipments</li>
             <li>Customers, leads, reviews, carts, notifications</li>
+            <li>Appointments and booking credits</li>
           </ul>
+          <p class="field-note">Kept: your sites, services, fulfillers and availability — that is setup, not
+            test data.</p>
           <p><strong>Stripe (test mode)</strong> — best effort:</p>
           <ul class="delete-scope">
             <li>Customers &amp; coupons (deleted)</li>
@@ -334,7 +339,7 @@
             <li>Prices (archived — Stripe cannot delete them)</li>
           </ul>
           <p class="field-note">Not touched: Stripe keys, your profile &amp; preferences, custom domains
-            (Sites), and services/bookings.</p>
+            (Sites), and your services, fulfillers &amp; availability.</p>
           <p v-if="deleteError" class="field-error">{{ deleteError }}</p>
         </div>
         <footer class="config-save-bar">
@@ -350,7 +355,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { apiRequest, getApiBase, getStripeMode, getTenantId, hostnameReleaseChannel } from "../api/client";
+import { apiRequest, getApiBase, getStripeMode, getTenantId } from "../api/client";
 import { showIconPicker } from "../icon-picker.js";
 import { useRefundPolicyStore } from "../stores/refundPolicy";
 import PhoneInput from "./PhoneInput.vue";
@@ -406,7 +411,10 @@ const environmentLabel = computed(() => (getStripeMode() === "live" ? "Live mode
 // there is no route behind this button. Those used to be the same question and stopped being one when
 // Stripe mode was decoupled from the deployment environment: a tenant in test mode on the prod backend
 // saw the button and got a 404 from it (reported 2026-10-18).
-const isTestEnv = computed(() => getStripeMode() !== "live" && hostnameReleaseChannel() !== "prod");
+// Test MODE, not test deployment. This used to also require hostnameReleaseChannel() !== "prod", which hid
+// the Danger Zone from every tenant whose sandbox lives on the production backend -- which, since Stripe mode
+// was decoupled from the deployment, is all of them. The backend gates on mode for the same reason.
+const isTestMode = computed(() => getStripeMode() !== "live");
 const showDeleteModal = ref(false);
 const deleting = ref(false);
 const deleteError = ref("");
@@ -431,7 +439,11 @@ async function confirmDelete() {
       parts.push(`${(stripe.products_deleted || 0) + (stripe.products_archived || 0)} products`);
     }
     if (stripe.coupons_deleted != null) parts.push(`${stripe.coupons_deleted} coupons`);
-    deleteSummary.value = `Deleted ${total} database records${parts.length ? `; Stripe: ${parts.join(", ")}` : ""}.`;
+    // Report failures instead of folding them into a total. A table that refused its delete used to be
+    // indistinguishable from a table that had nothing in it.
+    const failed = Object.keys(res.errors || {});
+    deleteSummary.value = `Deleted ${total} database records${parts.length ? `; Stripe: ${parts.join(", ")}` : ""}.`
+      + (failed.length ? ` ${failed.length} could not be cleared: ${failed.join(", ")}.` : "");
     showDeleteModal.value = false;
   } catch (err) {
     deleteError.value = err.message || "Failed to delete test data.";

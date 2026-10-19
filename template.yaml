@@ -4475,21 +4475,28 @@ Resources:
             Path: /invoices/{invoice_id}/send
             Method: POST
 
-  # DEV/TEST ONLY — created solely in non-prod stacks so the "delete all test data" route does not exist in
-  # prod. The handler also hard-gates on ENVIRONMENT (defense in depth). Deletes only the caller's tenant.
+  # Clears the caller's TEST-MODE data, in every deployment. It is NOT gated on the environment: Stripe mode
+  # is a data axis inside each deployment, so a tenant's sandbox lives on prod alongside their live books,
+  # and an IsNonProd condition denied exactly the tenants who need this while protecting nothing (dev and
+  # prod share one connected Stripe account). The handler gates on mode == "test", and deletes through
+  # mode-scoped repositories, so live documents are unreachable rather than merely filtered out.
   DeleteTestDataFunction:
     Type: AWS::Serverless::Function
-    Condition: IsNonProd
     Properties:
       Environment:
         Variables:
           # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
+          BOOKING_CREDITS_TABLE: !Ref BookingCreditsTable
           CARTS_TABLE: !Ref CartsTable
           CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
+          COLLECTIONS_TABLE: !Ref CollectionsTable
           COUPONS_TABLE: !Ref CouponsTable
+          COUPON_GRANTS_TABLE: !Ref CouponGrantsTable
+          COUPON_REDEMPTIONS_TABLE: !Ref CouponRedemptionsTable
           CUSTOMERS_TABLE: !Ref CustomersTable
+          EXPERIMENTS_TABLE: !Ref ExperimentsTable
           INVOICES_TABLE: !Ref InvoicesTable
           LEADS_TABLE: !Ref LeadsTable
           LEDGER_TABLE: !Ref LedgerTable
@@ -4501,12 +4508,13 @@ Resources:
           REFUNDS_TABLE: !Ref RefundsTable
           REVIEWS_TABLE: !Ref ReviewsTable
           SERVICES_TABLE: !Ref ServicesTable
+          SHIPMENTS_TABLE: !Ref ShipmentsTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-delete-test-data-${Environment}"
       CodeUri: src/
       Handler: handlers.admin_delete_test_data.handler
-      Description: DEV-ONLY destructive reset of a tenant's test data (DynamoDB + best-effort Stripe).
+      Description: Destructive reset of a tenant's TEST-MODE data (DynamoDB + best-effort Stripe).
       Timeout: 120
       Policies:
         - DynamoDBCrudPolicy:
@@ -4539,6 +4547,18 @@ Resources:
             TableName: !Ref CheckoutSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CollectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExperimentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ShipmentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponGrantsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponRedemptionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BookingCreditsTable
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
         - Statement:
