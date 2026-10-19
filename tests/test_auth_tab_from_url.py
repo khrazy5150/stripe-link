@@ -7,6 +7,7 @@ they do not have -- a dead end at the exact moment they decided to try the produ
 
 Both halves are asserted here because either one alone passes while the journey is broken.
 """
+import json
 import pathlib
 import re
 import subprocess
@@ -63,6 +64,48 @@ class TheReaderUnderstandsItTests(unittest.TestCase):
         for asked in ("admin", "", "REGISTER", "../register"):
             with self.subTest(asked=asked):
                 self.assertEqual(self._tab_for(f"https://app.juniorbay.com/?tab={asked}"), "login")
+
+
+class TheTabSurvivesTheFirstRequestTests(unittest.TestCase):
+    """The tab reverted to Login about half a second after the form rendered.
+
+    On mount the dashboard makes its first authenticated request. With no stored session that reaches
+    refreshSession, which ends a session that was never started, which fired the handler that returns the
+    app to the login form. Correct for an expiry; wrong for someone who just clicked "Start for free".
+    """
+
+    def _session_ended(self, *, had_session):
+        """Run the REAL action against a state object, so this cannot pass on a comment."""
+        script = f"""
+        const fs = require("fs");
+        let src = fs.readFileSync({str(AUTH_STORE)!r}, "utf8")
+          .replace(/^import .*$/gm, "")
+          .replace("export const useAuthStore", "const useAuthStore");
+        const defineStore = (name, options) => options;
+        const options = eval(src + "; useAuthStore");
+        const state = {{
+          session: {"{ id_token: 'x' }" if had_session else "null"},
+          activeTab: "register", message: "", error: "",
+        }};
+        options.actions.sessionEnded.call(state);
+        process.stdout.write(JSON.stringify(state));
+        """
+        return json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True,
+                                         check=True).stdout)
+
+    def test_no_session_leaves_the_register_tab_alone(self):
+        state = self._session_ended(had_session=False)
+        self.assertEqual(state["activeTab"], "register")
+
+    def test_no_session_does_not_claim_one_expired(self):
+        state = self._session_ended(had_session=False)
+        self.assertEqual(state["message"], "", "told a first-time visitor their session ended")
+
+    def test_a_real_expiry_still_returns_to_login_and_says_so(self):
+        state = self._session_ended(had_session=True)
+        self.assertEqual(state["activeTab"], "login")
+        self.assertIn("session has ended", state["message"])
+        self.assertIsNone(state["session"])
 
 
 if __name__ == "__main__":

@@ -166,7 +166,16 @@ export const useAuthStore = defineStore("auth", {
      * to the login form.
      */
     sessionEnded() {
+      // "Ended" presupposes one existed. A visitor who has never signed in reaches this on the FIRST
+      // authenticated request of the page load -- refreshSession finds no refresh_token and ends a
+      // session that was never started -- and before this guard that did two wrong things to someone
+      // who had just clicked "Start for free": it stole the Register tab they asked for, about half a
+      // second after the form rendered, and it told them a session they never had has expired.
+      //
+      // The absence of a session is not an event. Only the loss of one is.
+      const hadSession = !!this.session;
       this.session = null;
+      if (!hadSession) return;
       this.error = "";
       this.message = "Your session has ended. Please sign in again.";
       this.activeTab = "login";
