@@ -2668,8 +2668,25 @@ def _render_page_body(
     # links are noise there (user request). An explicitly-authored legal_footer section still renders.
     suppress_legal_footer = str(_RENDER_STATE.get("page_type") or "") in ("funnel_step", "thank_you")
     legal_footer = "" if (has_legal_footer_section or suppress_legal_footer) else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
-    analytics_tags = render_analytics_tags(page.get("analytics") or {})
-    analytics_adapters = render_analytics_adapters(page.get("analytics") or {})
+    # A TEST page does not touch the tenant's real analytics.
+    #
+    # The adapters below send ViewContent, AddToCart, InitiateCheckout and Purchase to the tenant's own
+    # GA4 property and Meta pixel. On a test page those are purchases that never happened -- and the Meta
+    # pixel is not merely a report: its optimiser LEARNS from conversion events, and the tenant's ad spend
+    # is then optimised against signals a tenant generated while testing their own funnel. Deleting the
+    # data afterwards does not unteach it.
+    #
+    # Suppressed rather than tagged as test: GA4's debug_mode and Meta's test_event_code both need a value
+    # only the tenant has, so there is nothing honest to send. The comment below says so in view-source,
+    # because "my pixel isn't firing" is otherwise a confusing afternoon.
+    _analytics = (page.get("analytics") or {}) if _page_is_live(page) else {}
+    analytics_tags = render_analytics_tags(_analytics)
+    analytics_adapters = render_analytics_adapters(_analytics)
+    if not _page_is_live(page) and (page.get("analytics") or {}):
+        analytics_tags = (
+            "  <!-- Analytics suppressed: this is a test-mode page. Your GA4 property and Meta pixel are "
+            "left alone so test traffic cannot train your ad optimisation. Publish in live mode to fire "
+            "them. -->")
     # A listicle page gets a persistent mini-cart (client-side this phase; server-side cart is L2).
     minicart = render_minicart() if derived_offer_type(offer) == "listicle" else ""
     # Hydration contract: serialize the whole OfferView once so the conversion island updates every
@@ -8897,6 +8914,13 @@ def render_outbound_link_script(page: dict[str, Any], kind: str, api_base_url: s
         "  </script>"
     )
 
+
+def _page_is_live(page: dict[str, Any]) -> bool:
+    """Whether this page belongs to the LIVE books. Absent means live: every page written before Stripe
+    mode existed is a live one, and silently dropping a long-standing tenant's analytics would be a worse
+    surprise than the thing this guards."""
+    raw = str((page or {}).get("stripe_mode") or "").strip().lower()
+    return raw != "test"
 
 def render_analytics_tags(analytics: dict[str, Any]) -> str:
     tags: list[str] = []
