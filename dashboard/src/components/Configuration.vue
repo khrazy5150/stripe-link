@@ -459,6 +459,9 @@ async function confirmDelete() {
         keptPairs.map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`).join(", ")}).` : "",
       // A table that refused its delete once read as "0 deleted", indistinguishable from an empty one.
       failed.length ? `${failed.length} could not be cleared: ${failed.join(", ")}.` : "",
+      // Stripe cleanup is bounded by the response window and resumes where it stopped. Saying so beats
+      // letting a half-finished pass look finished.
+      stripe.incomplete ? "Stripe cleanup ran out of time — run this again to finish it." : "",
     ].filter(Boolean).join(" ");
     showDeleteModal.value = false;
   } catch (err) {

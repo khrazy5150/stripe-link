@@ -33,6 +33,7 @@ purge orphaned HTML).
 """
 import logging
 import os
+import time
 
 from stripe_link.common import error_response, json_response, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -106,6 +107,19 @@ _SCAN_TENANT_TABLES = ["CHECKOUT_SESSIONS_TABLE"]
 # see the module docstring. They are absent from the lists above on purpose; do not "fix" that.
 
 
+# API Gateway closes the connection at 29 seconds whatever the Lambda's own timeout is, so work that
+# runs past it produces "Failed to fetch" in the browser -- no status, no body, no way for the tenant to
+# tell a disaster from a success. That is exactly what happened on the first real run: the database half
+# finished, the Stripe half ran on, the function hit its 120s timeout, and the tenant was left guessing.
+#
+# The database half is irreversible and must complete. The Stripe half is best-effort by nature (Stripe
+# has no bulk test-data delete) and is RESUMABLE -- objects it already removed are gone, so running the
+# action again continues where it stopped. So the budget is spent on the database and whatever is left
+# goes to Stripe, which stops cleanly and says it is unfinished.
+_API_GATEWAY_LIMIT_SECONDS = 29
+_RESPONSE_MARGIN_SECONDS = 6
+
+
 def _label(env_name):
     return env_name.lower().replace("_table", "")
 
@@ -124,6 +138,7 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
     #
     # What makes this safe is below, and it is stronger: the mode is in the KEY. See `_SCOPED_REPOSITORIES`.
 
+    started = time.monotonic()
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -154,7 +169,9 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
         deleted[label], kept[label] = counts["deleted"], counts["kept"]
 
     try:
-        stripe_results = _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener)
+        stripe_results = _delete_stripe_test_data(
+            tenant_id, stripe_repo, secret_cipher, opener,
+            deadline=started + _API_GATEWAY_LIMIT_SECONDS - _RESPONSE_MARGIN_SECONDS)
     except Exception as exc:  # noqa: BLE001 - Stripe cleanup is best-effort; DB deletion already succeeded
         logger.warning("Stripe test-data cleanup failed for %s: %s", tenant_id, exc)
         stripe_results = {"error": str(exc)}
@@ -282,10 +299,16 @@ def _delete_scan_tenant(dynamodb, table_name, tenant_id, mode="test"):
         return 0
 
 
-def _collect_ids(path, *, api_key, stripe_account, opener, params=None):
-    """All object ids for a Stripe list endpoint (paginated up front, so we don't mutate mid-iteration)."""
+def _collect_ids(path, *, api_key, stripe_account, opener, params=None, deadline=None):
+    """All object ids for a Stripe list endpoint (paginated up front, so we don't mutate mid-iteration).
+
+    Stops paginating once the budget is spent: on an account with thousands of test objects, LISTING them
+    can consume the whole response window before a single one is deleted.
+    """
     ids, cursor = [], None
     while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         page_params = dict(params or {})
         page_params["limit"] = 100
         if cursor:
@@ -299,9 +322,15 @@ def _collect_ids(path, *, api_key, stripe_account, opener, params=None):
     return ids
 
 
-def _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener):
+def _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener, *, deadline=None):
     """Best-effort Stripe test-mode cleanup (Stripe has no API to fully delete test data): archive prices,
-    delete products (archive if they have prices), delete customers, delete coupons."""
+    delete products (archive if they have prices), delete customers, delete coupons.
+
+    Every object costs one sequential HTTPS round-trip, so this is unbounded in the tenant's object count
+    and was the half that ran the function into its timeout. It now stops at `deadline` and reports
+    `incomplete`, which is honest rather than silent: the work resumes on the next run because whatever it
+    already removed is gone.
+    """
     stripe_repo = stripe_repo or stripe_keys_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     stripe_keys = stripe_repo.get(tenant_id, mode="test") or {}
@@ -314,15 +343,29 @@ def _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener):
 
     results = {"prices_archived": 0, "products_deleted": 0, "products_archived": 0, "customers_deleted": 0, "coupons_deleted": 0}
     call = lambda method, path, **kw: stripe_request(method, path, api_key=api_key, stripe_account=stripe_account, opener=opener, **kw)
+    out_of_time = lambda: deadline is not None and time.monotonic() >= deadline
+    listing = {"api_key": api_key, "stripe_account": stripe_account, "opener": opener, "deadline": deadline}
 
-    for price_id in _collect_ids("/prices", api_key=api_key, stripe_account=stripe_account, opener=opener, params={"active": "true"}):
+    if out_of_time():
+        results["incomplete"] = True
+        return results
+    for price_id in _collect_ids("/prices", params={"active": "true"}, **listing):
+        if out_of_time():
+            results["incomplete"] = True
+            return results
         try:
             call("POST", f"/prices/{price_id}", data={"active": "false"})
             results["prices_archived"] += 1
         except StripeApiError as exc:
             logger.info("Could not archive price %s: %s", price_id, exc)
 
-    for product_id in _collect_ids("/products", api_key=api_key, stripe_account=stripe_account, opener=opener):
+    if out_of_time():
+        results["incomplete"] = True
+        return results
+    for product_id in _collect_ids("/products", **listing):
+        if out_of_time():
+            results["incomplete"] = True
+            return results
         try:
             call("DELETE", f"/products/{product_id}")
             results["products_deleted"] += 1
@@ -333,14 +376,26 @@ def _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener):
             except StripeApiError as exc:
                 logger.info("Could not delete/archive product %s: %s", product_id, exc)
 
-    for customer_id in _collect_ids("/customers", api_key=api_key, stripe_account=stripe_account, opener=opener):
+    if out_of_time():
+        results["incomplete"] = True
+        return results
+    for customer_id in _collect_ids("/customers", **listing):
+        if out_of_time():
+            results["incomplete"] = True
+            return results
         try:
             call("DELETE", f"/customers/{customer_id}")
             results["customers_deleted"] += 1
         except StripeApiError as exc:
             logger.info("Could not delete customer %s: %s", customer_id, exc)
 
-    for coupon_id in _collect_ids("/coupons", api_key=api_key, stripe_account=stripe_account, opener=opener):
+    if out_of_time():
+        results["incomplete"] = True
+        return results
+    for coupon_id in _collect_ids("/coupons", **listing):
+        if out_of_time():
+            results["incomplete"] = True
+            return results
         try:
             call("DELETE", f"/coupons/{coupon_id}")
             results["coupons_deleted"] += 1

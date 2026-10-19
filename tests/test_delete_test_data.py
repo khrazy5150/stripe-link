@@ -311,5 +311,62 @@ class WhatItClearsTests(unittest.TestCase):
         self.assertIn("AccessDenied", body["errors"]["products"])
 
 
+class TheResponseWindowTests(unittest.TestCase):
+    """API Gateway hangs up at 29s whatever the Lambda timeout says. On the first real run the database
+    half finished, the Stripe half ran on, the function hit its own 120s timeout, and the browser showed
+    "Failed to fetch" -- no status, no body, no way to tell a disaster from a success."""
+
+    def _stripe_run(self, *, deadline_offset):
+        """Drive the Stripe cleanup with a deadline already in the past or far in the future."""
+        import handlers.admin_delete_test_data as mod
+
+        calls = []
+
+        def opener(*a, **k):  # never reached if the budget stops us first
+            raise AssertionError("made a Stripe call after the deadline")
+
+        def fake_request(method, path, **kw):
+            calls.append((method, path))
+            if method == "GET":
+                return {"data": [{"id": f"obj_{n}"} for n in range(3)], "has_more": False}
+            return {}
+
+        class Repo:
+            def get(self, tenant_id, mode="test"):
+                return {}
+
+        with patch.object(mod, "stripe_request", fake_request), \
+             patch.object(mod, "checkout_credentials", lambda *a, **k: ("sk_test_x", "acct_1")):
+            return mod._delete_stripe_test_data(
+                "t1", Repo(), None, opener,
+                deadline=__import__("time").monotonic() + deadline_offset), calls
+
+    def test_an_expired_budget_stops_before_mutating_anything(self):
+        results, calls = self._stripe_run(deadline_offset=-1)
+        self.assertTrue(results["incomplete"])
+        self.assertEqual(results["prices_archived"], 0)
+        self.assertEqual([m for m, _ in calls], [], "listed or mutated after the deadline")
+
+    def test_with_budget_it_does_the_work_and_is_not_marked_incomplete(self):
+        results, calls = self._stripe_run(deadline_offset=60)
+        self.assertNotIn("incomplete", results)
+        self.assertEqual(results["prices_archived"], 3)
+        self.assertEqual(results["customers_deleted"], 3)
+        self.assertTrue(any(m == "DELETE" for m, _ in calls))
+
+    def test_a_non_test_key_is_refused_before_any_call(self):
+        """The safety check that keeps this off live objects."""
+        import handlers.admin_delete_test_data as mod
+
+        class Repo:
+            def get(self, tenant_id, mode="test"):
+                return {}
+
+        with patch.object(mod, "checkout_credentials", lambda *a, **k: ("sk_live_x", "acct_1")):
+            self.assertEqual(
+                mod._delete_stripe_test_data("t1", Repo(), None, None, deadline=None),
+                {"skipped": "not_a_test_key"})
+
+
 if __name__ == "__main__":
     unittest.main()
