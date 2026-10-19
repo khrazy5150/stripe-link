@@ -5063,6 +5063,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-app-config-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5084,6 +5092,14 @@ Resources:
       # only via !Ref, so the physical name is internal (plans/STRIPE_MODE_DECOUPLING.md P6).
       TableName: !Sub "${ProjectPrefix}-stripe-keys-v2-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       # Composite key holds BOTH Stripe modes for a tenant in this one per-deployment table
@@ -5104,6 +5120,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-platform-config-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5120,6 +5144,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-product-categories-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5134,6 +5166,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-shipping-config-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5148,6 +5188,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-ai-provider-config-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5164,6 +5212,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-ai-usage-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       TimeToLiveSpecification:
@@ -5191,6 +5247,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-ai-generation-events-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5225,6 +5289,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-jobs-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       TimeToLiveSpecification:
@@ -5246,6 +5318,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-tenant-profiles-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5277,6 +5357,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-user-preferences-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5308,6 +5396,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-user-profiles-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5339,6 +5435,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-notifications-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5370,6 +5474,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-services-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       TimeToLiveSpecification:
@@ -5404,6 +5516,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-invoices-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5435,6 +5555,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-lead-capture-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       TimeToLiveSpecification:
@@ -5469,6 +5597,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-carts-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       TimeToLiveSpecification:
@@ -5506,6 +5642,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-platform-plans-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5524,6 +5668,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-reviews-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5558,6 +5710,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-page-views-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       # The per-visitor dedupe rows expire; the per-page totals carry no ttl and are kept.
@@ -5580,6 +5740,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-collections-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5611,6 +5779,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-events-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5629,6 +5805,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-products-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5660,6 +5844,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-shipments-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5691,6 +5883,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-offers-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: &DocumentAttributeDefinitions
@@ -5722,6 +5922,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-coupons-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -5736,6 +5944,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-coupon-grants-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -5751,6 +5967,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-coupon-redemptions-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -5762,6 +5986,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-pages-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       StreamSpecification:
@@ -5775,6 +6007,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-sites-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -5786,6 +6026,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-checkout-sessions-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5804,6 +6052,14 @@ Resources:
       # still occupied, and the pre-retrofit tables are gone, so the names are plain again.
       TableName: !Sub "${ProjectPrefix}-orders${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5831,6 +6087,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-refunds${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5870,6 +6134,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-ledger${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5901,6 +6173,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-calendar-connections-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       TimeToLiveSpecification:
@@ -5935,6 +6215,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-webhook-events-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5949,6 +6237,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-customers${MoneyTableSuffix}-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5967,6 +6263,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-document-events-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -5985,6 +6289,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-routes-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -5996,6 +6308,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-experiments-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -6007,6 +6327,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-tier-policies-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -6025,6 +6353,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-media-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -6036,6 +6372,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-themes-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -6047,6 +6391,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-legal-pages-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -6060,6 +6412,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-booking-credits-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -6073,6 +6433,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-abuse-reports-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
@@ -6084,6 +6452,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectPrefix}-custom-domains-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups, restore to any second in the last 35 days.
+      # Deferred for a year as LOW on cost grounds, and the cost argument was right -- all 47 tables hold
+      # under a megabyte, so this is a fraction of a cent a month. The SEVERITY was what changed: before
+      # launch a bad delete costs a test fixture, after it costs a merchant's order history with no way
+      # back. It lives here rather than in a console toggle so a new table is covered the day it is added
+      # and a stack update cannot quietly undo it.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
