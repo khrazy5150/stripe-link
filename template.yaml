@@ -4498,6 +4498,7 @@ Resources:
           CUSTOMERS_TABLE: !Ref CustomersTable
           EXPERIMENTS_TABLE: !Ref ExperimentsTable
           INVOICES_TABLE: !Ref InvoicesTable
+          JOBS_TABLE: !Ref JobsTable
           LEADS_TABLE: !Ref LeadsTable
           LEDGER_TABLE: !Ref LedgerTable
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
@@ -4515,7 +4516,10 @@ Resources:
       CodeUri: src/
       Handler: handlers.admin_delete_test_data.handler
       Description: Destructive reset of a tenant's TEST-MODE data (DynamoDB + best-effort Stripe).
-      Timeout: 120
+      # The worker has no API Gateway waiting on it, so this is sized for the WORK: a wipe costs one
+      # sequential Stripe round-trip per price, product, customer and coupon. 120s was sized for a
+      # request path that no longer does the work.
+      Timeout: 900
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductsTable
@@ -4559,6 +4563,14 @@ Resources:
             TableName: !Ref CouponRedemptionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref BookingCreditsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        # Invoke ITSELF asynchronously: the request path queues, the event path deletes. Same code,
+        # same deploy, no second function to keep in step.
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectPrefix}-delete-test-data-${Environment}"
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
         - Statement:
@@ -4579,6 +4591,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /admin/delete-test-data
             Method: POST
+        DeleteTestDataPoll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /admin/delete-test-data
+            Method: GET
   LedgerFunction:
     Type: AWS::Serverless::Function
     Properties:

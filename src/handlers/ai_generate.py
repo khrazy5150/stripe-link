@@ -707,7 +707,9 @@ def _reap(jobs_repo, *, usage_repo=None, now: int):
     """
     try:
         usage_repo = usage_repo or ai_usage_repository()
-        candidates = jobs_repo.unfinished()
+        # Generations only. The jobs table is shared, and `_release` below gives back an AI allowance --
+        # which a test-data wipe or any other job never spent.
+        candidates = jobs_repo.unfinished(document_type="ai_generation_job")
     except Exception as exc:  # noqa: BLE001 - a reaper that crashes silently is worse than none
         return {"ok": False, "reason": f"unreadable: {exc}"}
 

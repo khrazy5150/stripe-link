@@ -305,7 +305,9 @@
         <button class="danger-action" type="button" :disabled="deleting" @click="openDeleteModal">
           {{ deleting ? "Deleting…" : "Delete Test Data" }}
         </button>
+        <p v-if="deleteProgress" class="field-note delete-summary">{{ deleteProgress }}</p>
         <p v-if="deleteSummary" class="field-note delete-summary">{{ deleteSummary }}</p>
+        <p v-if="deleteError" class="field-error">{{ deleteError }}</p>
       </div>
     </section>
 
@@ -423,6 +425,7 @@ const showDeleteModal = ref(false);
 const deleting = ref(false);
 const deleteError = ref("");
 const deleteSummary = ref("");
+const deleteProgress = ref("");
 
 function openDeleteModal() {
   deleteError.value = "";
@@ -432,44 +435,77 @@ function openDeleteModal() {
 async function confirmDelete() {
   deleting.value = true;
   deleteError.value = "";
+  deleteSummary.value = "";
   try {
-    const res = await apiRequest("/admin/delete-test-data", { method: "POST" });
-    const deleted = res.deleted || {};
-    const total = Object.values(deleted).reduce((sum, n) => sum + (Number(n) || 0), 0);
-    const stripe = res.stripe || {};
-    const parts = [];
-    if (stripe.customers_deleted != null) parts.push(`${stripe.customers_deleted} customers`);
-    if (stripe.products_deleted != null || stripe.products_archived != null) {
-      parts.push(`${(stripe.products_deleted || 0) + (stripe.products_archived || 0)} products`);
-    }
-    if (stripe.coupons_deleted != null) parts.push(`${stripe.coupons_deleted} coupons`);
-    // The receipt is the inventory. It is built from what the server actually did, so unlike a list in
-    // the dialog it cannot fall behind the handler.
-    const detail = Object.entries(deleted).filter(([, n]) => Number(n) > 0)
-      .sort((a, b) => Number(b[1]) - Number(a[1]))
-      .map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`);
-    const keptPairs = Object.entries(res.kept_not_mode_scoped || {}).filter(([, n]) => Number(n) > 0);
-    const kept = keptPairs.reduce((sum, [, n]) => sum + Number(n), 0);
-    const failed = Object.keys(res.errors || {});
-    deleteSummary.value = [
-      `Deleted ${total} record${total === 1 ? "" : "s"}${detail.length ? `: ${detail.join(", ")}` : ""}.`,
-      parts.length ? `Stripe: ${parts.join(", ")}.` : "",
-      // Reported, not hidden: a tenant who still sees reviews in their sandbox deserves to know why.
-      kept ? `Kept ${kept} record${kept === 1 ? "" : "s"} with no mode recorded (${
-        keptPairs.map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`).join(", ")}).` : "",
-      // A table that refused its delete once read as "0 deleted", indistinguishable from an empty one.
-      failed.length ? `${failed.length} could not be cleared: ${failed.join(", ")}.` : "",
-      // Stripe cleanup is bounded by the response window and resumes where it stopped. Saying so beats
-      // letting a half-finished pass look finished.
-      stripe.incomplete ? "Stripe cleanup ran out of time — run this again to finish it." : "",
-    ].filter(Boolean).join(" ");
+    // The request only QUEUES now. It used to do the work and wait, which on a big workspace ran past
+    // API Gateway's 29s ceiling and surfaced as "Failed to fetch" -- on a destructive action, an error
+    // indistinguishable from success.
+    const started = await apiRequest("/admin/delete-test-data", { method: "POST" });
+    const jobId = started?.job?.job_id;
+    if (!jobId) throw new Error("The deletion did not start. Try again shortly.");
     showDeleteModal.value = false;
+    deleteProgress.value = "Clearing your test data…";
+    const job = await awaitDeleteJob(jobId);
+    deleteProgress.value = "";
+    if (!job) return;
+    deleteSummary.value = summariseDelete(job.result || {});
   } catch (err) {
     deleteError.value = err.message || "Failed to delete test data.";
+    deleteProgress.value = "";
   } finally {
     deleting.value = false;
   }
 }
+
+async function awaitDeleteJob(jobId) {
+  // Unbounded in the tenant's object count -- one Stripe round-trip per price, product, customer and
+  // coupon -- so the ceiling is generous. A job that outlives it has almost certainly failed in a way
+  // that never reached its row, and saying so beats spinning forever.
+  const started = Date.now();
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const body = await apiRequest(`/admin/delete-test-data?job_id=${encodeURIComponent(jobId)}`);
+    const job = body.job || {};
+    if (job.status === "done" || job.status === "failed") return job;
+    deleteProgress.value = job.status === "running" ? "Clearing your test data…" : "Waiting to start…";
+    if (Date.now() - started > 900000) {
+      deleteError.value = "That is taking longer than expected. Check back shortly — it may have "
+        + "finished.";
+      return null;
+    }
+  }
+}
+
+function summariseDelete(result) {
+  // The receipt is the inventory. Built from what the server actually did, so unlike a list in the
+  // dialog it cannot fall behind the handler.
+  const deleted = result.deleted || {};
+  const stripe = result.stripe || {};
+  const total = Object.values(deleted).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  const parts = [];
+  if (stripe.customers_deleted != null) parts.push(`${stripe.customers_deleted} customers`);
+  if (stripe.products_deleted != null || stripe.products_archived != null) {
+    parts.push(`${(stripe.products_deleted || 0) + (stripe.products_archived || 0)} products`);
+  }
+  if (stripe.coupons_deleted != null) parts.push(`${stripe.coupons_deleted} coupons`);
+  const detail = Object.entries(deleted).filter(([, n]) => Number(n) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`);
+  const keptPairs = Object.entries(result.kept_not_mode_scoped || {}).filter(([, n]) => Number(n) > 0);
+  const kept = keptPairs.reduce((sum, [, n]) => sum + Number(n), 0);
+  const failed = Object.keys(result.errors || {});
+  return [
+    `Deleted ${total} record${total === 1 ? "" : "s"}${detail.length ? `: ${detail.join(", ")}` : ""}.`,
+    parts.length ? `Stripe: ${parts.join(", ")}.` : "",
+    // Reported, not hidden: a tenant who still sees reviews in their sandbox deserves to know why.
+    kept ? `Kept ${kept} record${kept === 1 ? "" : "s"} with no mode recorded (${
+      keptPairs.map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`).join(", ")}).` : "",
+    // A table that refused its delete once read as "0 deleted", indistinguishable from an empty one.
+    failed.length ? `${failed.length} could not be cleared: ${failed.join(", ")}.` : "",
+    stripe.incomplete ? "Stripe cleanup ran out of time — run this again to finish it." : "",
+  ].filter(Boolean).join(" ");
+}
+
 const priceToken = "{{ upsell_price }}";
 const acceptButtonPlaceholder = `Yes, I'll Take This Deal for ${priceToken}`;
 

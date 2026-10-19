@@ -656,14 +656,17 @@ class ReaperTests(unittest.TestCase):
         self.rows = {}
         outer = self
         class Jobs(FakeJobs):
-            def unfinished(self, limit=200):
+            def unfinished(self, limit=200, *, document_type=None):
+                # Honours the filter, because the point of the filter is what it EXCLUDES.
                 return [dict(j) for j in outer.rows.values()
-                        if j.get("status") in ("queued", "running")]
+                        if j.get("status") in ("queued", "running")
+                        and (document_type is None or j.get("document_type") == document_type)]
         self.jobs = Jobs()
         self.jobs.rows = self.rows
 
-    def job(self, job_id, *, status="queued", age):
+    def job(self, job_id, *, status="queued", age, document_type="ai_generation_job"):
         row = {"tenant_id": "t1", "job_id": job_id, "status": status, "period": "2026-09",
+               "document_type": document_type,
                "created_at": 1790500000 - age, "updated_at": 1790500000 - age}
         self.rows[("t1", job_id)] = row
         return row
@@ -697,6 +700,14 @@ class ReaperTests(unittest.TestCase):
         self.job("job_hung", status="running", age=3600)
         self.assertEqual(self.reap()["reaped"], 1)
 
+    def test_another_kind_of_job_is_not_this_reaper_s_to_claim(self):
+        """The jobs table is shared. Reaping a foreign job would mark it failed AND hand its tenant back
+        an AI generation it never spent -- compensation for work this reaper knows nothing about."""
+        self.job("job_wipe", status="running", age=3600, document_type="delete_test_data_job")
+        self.assertEqual(self.reap()["reaped"], 0)
+        self.assertEqual(self.jobs.get("t1", "job_wipe")["status"], "running")
+        self.assertEqual(self.usage.released, 0)
+
     def test_finished_jobs_are_never_touched(self):
         self.rows[("t1", "job_done")] = {"tenant_id": "t1", "job_id": "job_done", "status": "complete",
                                          "created_at": 1, "updated_at": 1}
@@ -717,7 +728,7 @@ class ReaperTests(unittest.TestCase):
     def test_an_unreadable_table_reports_rather_than_crashing(self):
         # A reaper that dies silently is worse than no reaper: nothing would ever be refunded again.
         class Broken(FakeJobs):
-            def unfinished(self, limit=200):
+            def unfinished(self, limit=200, *, document_type=None):
                 raise RuntimeError("dynamo is having a day")
         result = handler({"internal_reap": True}, None, jobs_repo=Broken(), usage_repo=self.usage,
                          now_fn=lambda: 1790500000)

@@ -932,7 +932,7 @@ class JobsRepository:
 
     def __init__(self, table_name: str, *, table: Any | None = None):
         if not table_name:
-            raise RepositoryError("AI jobs table name is required.")
+            raise RepositoryError("Jobs table name is required.")
         assert_jb_resource_name(table_name)
         self.table_name = table_name
         self._table = table
@@ -956,18 +956,29 @@ class JobsRepository:
         response = self.table.get_item(Key={"tenant_id": str(tenant_id), "job_id": str(job_id)})
         return response.get("Item")
 
-    def unfinished(self, limit: int = 200) -> list[dict[str, Any]]:
+    def unfinished(self, limit: int = 200, *, document_type: str | None = None) -> list[dict[str, Any]]:
         """Jobs that have not reached a terminal state, across all tenants.
+
+        `document_type` is NOT optional in practice: this table holds every kind of background job, and a
+        reaper that claims all of them will apply one kind's compensation to another's -- the generation
+        reaper refunds an AI allowance, which a test-data wipe never spent. Each reaper asks for its own.
 
         A SCAN, deliberately and with a cap. The alternative is a GSI on status, and this runs once
         every five minutes over a table whose rows expire after a week -- an index would cost more to
         carry than the scan costs to run. If that stops being true the scan will be slow before it is
         wrong, which is the safer way round.
         """
+        expression = "#s IN (:queued, :running)"
+        names = {"#s": "status"}
+        values = {":queued": "queued", ":running": "running"}
+        if document_type:
+            expression += " AND #d = :d"
+            names["#d"] = "document_type"
+            values[":d"] = str(document_type)
         response = self.table.scan(
-            FilterExpression="#s IN (:queued, :running)",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":queued": "queued", ":running": "running"},
+            FilterExpression=expression,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
             Limit=int(limit),
         )
         return list(response.get("Items") or [])

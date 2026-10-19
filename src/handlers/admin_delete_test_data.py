@@ -31,14 +31,18 @@ add Site deletion here.
 Published-page S3/CloudFront artifacts are NOT cleaned here (the DB records are removed; a follow-up can
 purge orphaned HTML).
 """
+import json
 import logging
 import os
+import random
 import time
 
-from stripe_link.common import error_response, json_response, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.common import (error_response, json_response, query_params,
+                                resolve_stripe_mode, tenant_id_from_event)
+from stripe_link.domain.ai_provision import new_id
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories import documents
-from stripe_link.repositories.documents import stripe_keys_repository
+from stripe_link.repositories.documents import jobs_repository, stripe_keys_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
 from stripe_link.stripe_platform_secrets import checkout_credentials
 
@@ -116,6 +120,10 @@ _SCAN_TENANT_TABLES = ["CHECKOUT_SESSIONS_TABLE"]
 # has no bulk test-data delete) and is RESUMABLE -- objects it already removed are gone, so running the
 # action again continues where it stopped. So the budget is spent on the database and whatever is left
 # goes to Stripe, which stops cleanly and says it is unfinished.
+JOB_DOCUMENT_TYPE = "delete_test_data_job"
+JOB_TTL_SECONDS = 7 * 24 * 60 * 60
+# Enough to write the job row after the sweep stops. Being killed mid-write loses the entire report.
+_WORKER_WRITEBACK_MARGIN_SECONDS = 20
 _API_GATEWAY_LIMIT_SECONDS = 29
 # Measured, not guessed: a real run with 54 prices to archive returned at 24s against a 23s budget, which
 # is far too close to a limit whose breach is indistinguishable from a crash. The cost of a wider margin is
@@ -127,12 +135,34 @@ def _label(env_name):
     return env_name.lower().replace("_table", "")
 
 
-def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=None, opener=None):
+def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=None, opener=None,
+            jobs_repo=None, invoker=None, now_fn=None):
+    """Three ways in, one function -- the same shape ai_generate uses.
+
+    The work outgrew the request path. A wipe costs one sequential Stripe round-trip per price, product,
+    customer and coupon, so it is unbounded in the tenant's object count: a real run archived 54 prices
+    and 25 products and was nowhere near done. API Gateway hangs up at 29 seconds, which on a DESTRUCTIVE
+    action is the worst possible error -- no status, no body, no way to tell a disaster from a success,
+    and every reason to click the button again.
+
+    So the request path only queues, and answers in milliseconds. The worker runs on an async self-invoke
+    where no gateway is waiting, and writes what it did to its job row. The dashboard polls the row.
+    """
+    now = int((now_fn or time.time)())
+
+    # The EVENT path: the async self-invoke, doing the work the request path queued.
+    if (event or {}).get("internal_job"):
+        return _run_job(event, context, jobs_repo=jobs_repo or jobs_repository(), dynamodb=dynamodb,
+                        stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener, now=now)
+
     method = (event or {}).get("httpMethod", "").upper()
+    # Before any repository: a CORS preflight must not need a table to answer.
     if method == "OPTIONS":
         return json_response({})
-    if method != "POST":
+    if method not in ("GET", "POST"):
         return error_response("Method not allowed.", status_code=405, code="method_not_allowed")
+    if method == "GET":
+        return _read_job(event, jobs_repo or jobs_repository())
     # There is deliberately NO environment gate here. One used to refuse this action whenever ENVIRONMENT
     # was prod, and the route itself was Condition: IsNonProd. Both guarded the DEPLOYMENT, which is the
     # wrong axis and was never the safety property: dev and prod hold the SAME tenant's live Stripe
@@ -155,6 +185,79 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
         return error_response(
             "Switch to test mode before deleting test data.", status_code=400, code="live_mode")
 
+    # Only now: a rejected request should not need the table to be refused.
+    jobs_repo = jobs_repo or jobs_repository()
+    job = {
+        "schema_version": "2026-10-18", "document_type": JOB_DOCUMENT_TYPE,
+        "tenant_id": tenant_id, "job_id": new_id("job", random.SystemRandom().choice),
+        "status": "queued", "mode": mode, "created_at": now, "updated_at": now,
+        # A finished job is of no interest a week later -- same reasoning as the generation jobs beside it.
+        "expires_at": now + JOB_TTL_SECONDS,
+    }
+    jobs_repo.put(job)
+    try:
+        _enqueue(job, invoker)
+    except Exception as exc:  # noqa: BLE001 - the tenant must be told we never started
+        jobs_repo.put({**job, "status": "failed", "updated_at": now,
+                       "error": {"code": "enqueue_failed", "message": str(exc)}})
+        return error_response("Could not start the deletion. Try again shortly.",
+                              status_code=502, code="enqueue_failed")
+    # 202: accepted, not done. The body carries the id the dashboard polls.
+    return json_response({"success": True, "job": _public(job)}, status_code=202)
+
+
+def _public(job):
+    return dict(job or {})
+
+
+def _read_job(event, jobs_repo):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    job_id = (query_params(event) or {}).get("job_id", "")
+    if not job_id:
+        return error_response("job_id is required.", code="missing_job")
+    job = jobs_repo.get(tenant_id, job_id)
+    # Scoped to the caller's own tenant by the key, not by a check we could forget.
+    if not job or str(job.get("document_type")) != JOB_DOCUMENT_TYPE:
+        return error_response("That job was not found.", status_code=404, code="not_found")
+    return json_response({"success": True, "job": _public(job)})
+
+
+def _enqueue(job, invoker=None):
+    """Hand the job to ourselves, asynchronously.
+
+    InvocationType Event returns as soon as Lambda accepts it, so the request path answers in
+    milliseconds however long the wipe takes. Lambda holds async invocations for up to six hours and
+    retries them, which is the durable queue this needs -- an SQS queue in front would be a second rail
+    for a capability we already have.
+    """
+    if invoker is not None:
+        invoker(job)
+        return
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+    if not function_name:
+        raise RuntimeError("No function name to invoke; the deletion cannot be queued.")
+    import boto3
+
+    boto3.client("lambda").invoke(
+        FunctionName=function_name,
+        InvocationType="Event",
+        Payload=json.dumps({"internal_job": True, "tenant_id": job["tenant_id"],
+                            "job_id": job["job_id"], "mode": job["mode"]}).encode("utf-8"),
+    )
+
+
+def _run_job(event, context, *, jobs_repo, dynamodb, stripe_repo, secret_cipher, opener, now):
+    tenant_id = str(event.get("tenant_id") or "")
+    job_id = str(event.get("job_id") or "")
+    job = jobs_repo.get(tenant_id, job_id) or {}
+    if job.get("status") not in ("queued", None):
+        # Lambda retries an async invoke; doing the work twice is harmless but reporting it twice is not.
+        return {"ok": True, "skipped": "not_queued"}
+    mode = str(event.get("mode") or job.get("mode") or "test")
+    jobs_repo.put({**job, "status": "running", "updated_at": now})
+
     if dynamodb is None:
         import boto3
         dynamodb = boto3.resource("dynamodb")
@@ -173,21 +276,36 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
 
     try:
         stripe_results = _delete_stripe_test_data(
-            tenant_id, stripe_repo, secret_cipher, opener,
-            deadline=started + _API_GATEWAY_LIMIT_SECONDS - _RESPONSE_MARGIN_SECONDS)
+            tenant_id, stripe_repo, secret_cipher, opener, deadline=_worker_deadline(context))
     except Exception as exc:  # noqa: BLE001 - Stripe cleanup is best-effort; DB deletion already succeeded
         logger.warning("Stripe test-data cleanup failed for %s: %s", tenant_id, exc)
         stripe_results = {"error": str(exc)}
 
+    # The job row IS the response. Everything the request path used to return is written here instead,
+    # and the dashboard reads it from the poll.
+    #
     # `kept` is reported, not hidden: leads, reviews and notifications are NOT mode-scoped, so nothing can
     # tell a test one from a live one and they are left alone. Saying so is the difference between a known
     # limit and a tenant wondering why their sandbox still has reviews in it.
     # `errors` is reported, never swallowed. A previous version caught a DynamoDB refusal and returned
     # "0 deleted", which is indistinguishable from "nothing was there" -- the action looked like it worked
     # for as long as nobody counted.
-    return json_response({"success": not errors, "tenant_id": tenant_id, "mode": mode,
-                          "deleted": deleted, "kept_not_mode_scoped": kept,
-                          "errors": errors, "stripe": stripe_results})
+    result = {"deleted": deleted, "kept_not_mode_scoped": kept, "errors": errors, "stripe": stripe_results}
+    jobs_repo.put({**job, "status": "failed" if errors else "done",
+                   "updated_at": int(time.time()), "result": result})
+    return {"ok": not errors, **result}
+
+
+def _worker_deadline(context):
+    """Stop the Stripe sweep before Lambda stops us.
+
+    No API Gateway is waiting on the worker, so the only clock is the function's own timeout -- and being
+    killed by it loses the job row update, which is the whole report. Leave a margin to write it.
+    """
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    if not callable(remaining):
+        return None
+    return time.monotonic() + max(0.0, (remaining() / 1000.0) - _WORKER_WRITEBACK_MARGIN_SECONDS)
 
 
 def _clear_repository(factory, tenant_id, mode, dynamodb, errors, label):
