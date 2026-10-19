@@ -6081,6 +6081,24 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: KEYS_ONLY
+        # Find an order by its number alone, across every tenant and both modes. A buyer contacting
+        # support has the number from their receipt and nothing else -- not the store, not the mode --
+        # and the table's own key starts with the tenant, so without this there is no lookup at all,
+        # only a scan of every order ever placed.
+        #
+        # Indexed on SK rather than the `order_id` ATTRIBUTE: they hold the same value, but SK is the
+        # table's range key and therefore present on every item by definition, while an attribute can be
+        # missing from a row and silently drop it out of the index -- for a support tool, a lookup that
+        # finds nothing is indistinguishable from an order that does not exist.
+        #
+        # KEYS_ONLY like its neighbour: the hit carries PK and SK, which is the full key, so the order
+        # itself is one get_item away and every order write pays for as little index as possible.
+        - IndexName: OrderIdIndex
+          KeySchema:
+            - AttributeName: SK
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
 
   RefundsTable:
     Type: AWS::DynamoDB::Table
