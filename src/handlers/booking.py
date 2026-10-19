@@ -375,8 +375,37 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
 RESCHEDULABLE_STATUSES = {"reserved", "booked", "paid"}
 
 
-def _authorized_appointment(appointments_repo, appointment_id, manage_token):
+def _other_mode_appointments(appointments_repo):
+    """An appointments repository for the mode the given one is NOT bound to."""
+    current = getattr(appointments_repo, "mode", None)
+    if current not in ("live", "test"):
+        return None
+    return appointments_repository(mode="test" if current == "live" else "live")
+
+def _authorized_appointment(appointments_repo, appointment_id, manage_token, *, other_mode_repo=None):
+    """The appointment this token opens, looked for in BOTH Stripe modes.
+
+    These manage routes are PUBLIC -- a buyer arrives from a link in their own confirmation, carrying no
+    session and no dashboard toggle. `resolve_stripe_mode` therefore falls back to "test", and
+    `find_by_id` is mode-scoped (its GSI1PK carries the mode), so a LIVE appointment would answer
+    "Appointment not found" to the person who booked it.
+
+    Nothing links here yet, which is exactly why this is worth doing now: the same mistake has already
+    been made twice on links that WERE live -- the download link in a receipt and the review invite --
+    and whoever builds the customer-facing link later has no reason to know the mode must ride along.
+    `purchase_manage._resolve` solved it the same way.
+
+    Searching both modes grants nothing: the opaque `customer_manage_token` below is the control, and it
+    is checked against whichever record is found. The mode was never the security boundary.
+    """
     appointment = appointments_repo.find_by_id(appointment_id) if appointment_id else None
+    if appointment is None and appointment_id:
+        try:
+            fallback = other_mode_repo if other_mode_repo is not None else _other_mode_appointments(
+                appointments_repo)
+            appointment = fallback.find_by_id(appointment_id) if fallback is not None else None
+        except Exception:  # noqa: BLE001 - the other mode is a fallback, never a reason to fail the first
+            appointment = None
     if not appointment:
         return None, error_response("Appointment not found.", status_code=404, code="not_found")
     if not manage_token or str(appointment.get("customer_manage_token") or "") != manage_token:
