@@ -3676,7 +3676,14 @@ config deliberately is not), carts, invoices, pages, offers, products, coupons, 
 mode-scoped repository without a mode — the repository refuses rather than tolerating it, and that guard
 is doing its job.
 
-**THE LEAK: reviews carry no mode at all.** `reviews_repository()` is not mode-scoped and review documents
+**THE LEAK — CLOSED 2026-10-18 (dev).** Reviews are stamped with `stripe_mode` at submission, placed from
+their `order_id` when they predate the stamp (no backfill: the id always said so), and filtered strictly
+on a published page but leniently in the tenant's own list. `delete test data` can now identify them too.
+The census's `KNOWN_GAP` is empty.
+
+Original finding, kept because it is the clearest statement of why it mattered:
+
+**reviews carry no mode at all.** `reviews_repository()` is not mode-scoped and review documents
 have no `stripe_mode` — verified in prod and dev. Two consequences:
 
 1. **A review written from a TEST purchase renders on the LIVE page and feeds its star rating.** The

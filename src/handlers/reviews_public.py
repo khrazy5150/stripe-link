@@ -229,6 +229,11 @@ def submit_review(event, values, product, mode, reviews_repo, invites_repo=None)
     if invite:
         review["verified_purchase"] = True
         review["order_id"] = str(invite.get("order_id") or "")
+    # WHICH BOOKS THIS REVIEW IS ABOUT. Reviews are not mode-scoped in storage, so without this a review
+    # written from a TEST purchase rendered on the LIVE page and was counted in its star rating. The
+    # order id already says so (`order_cs_live_...`) and the renderer can derive it, but a manually
+    # entered review has no order -- so it is recorded here, where the mode is known for certain.
+    review["stripe_mode"] = "live" if str(mode or "").strip().lower() == "live" else "test"
     try:
         validate_review(review)
         reviews_repo.put(review)

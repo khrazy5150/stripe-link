@@ -276,6 +276,18 @@ work needs reviving, not re-planning.
     It sits **before** the entitlement gate: a tenant whose plan no longer includes reviews still has live
     reviews on live pages, and a billing tier is the wrong reason to remove someone's only way to flag a
     published phone number.
+  - **Mode scoping — SHIPPED dev 2026-10-18.** A review belongs to the books its purchase was made in.
+    Until now one written from a TEST purchase rendered on the LIVE page and was counted in its
+    `AggregateRating` — a star rating in the markup Google reads, made partly of purchases that never
+    happened, which is the exact claim this phase exists to make honest.
+    **No backfill was needed**: a verified review carries `order_id`, and that id names its checkout
+    session (`order_cs_live_...`), so the mode was always in the data and nothing was reading it. New
+    reviews are stamped with `stripe_mode` at submission, which also covers a hand-entered one that has
+    no order behind it.
+    The two surfaces make **opposite** choices, deliberately: a published page shows only reviews that
+    can PROVE their mode, because a rating shown to a shopper must not include one that cannot; the
+    tenant's own list shows unplaceable reviews in both modes, because hiding a review they typed in
+    themselves is a bug report waiting to happen. `domain/reviews.in_mode` holds both.
   **Still open from this phase:** `verified_purchase` on the page and in the JSON-LD (it is in the
   dashboard only), and the monitored address with a target response time — the part no screen supplies,
   and the merchant is the one waiting now.

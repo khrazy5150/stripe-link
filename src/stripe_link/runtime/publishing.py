@@ -51,6 +51,7 @@ from stripe_link.domain.documents import (
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.bnpl import messaging_method_types
 from stripe_link.domain.composition import composition_forbids_indexing, composition_key
+from stripe_link.domain.reviews import in_mode as reviews_in_mode
 from stripe_link.domain.sites import find_site_for_page
 from stripe_link.domain.social_links import section_own_links
 from stripe_link.domain.tips import stamp_tip_jar
@@ -673,16 +674,23 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
     return {"published": published, "site_changed": site_changed}
 
 
-def load_page_reviews(reviews_repository: Any | None, tenant_id: str, products_by_id: dict[str, Any], site_id: str = "") -> list[dict[str, Any]]:
+def load_page_reviews(reviews_repository: Any | None, tenant_id: str, products_by_id: dict[str, Any], site_id: str = "", mode: str = "live") -> list[dict[str, Any]]:
     """Approved, first-party reviews for this page (plans/REVIEWS.md): product-target reviews for the page's
     products (→ Product aggregateRating/review markup + visible block) AND business-target reviews for the
-    owning Site (→ a visible trust block, NO self-serving AggregateRating). Best-effort."""
+    owning Site (→ a visible trust block, NO self-serving AggregateRating). Best-effort.
+
+    **Scoped to the page's own Stripe mode.** Reviews are not mode-scoped in storage, so until now a review
+    written from a TEST purchase rendered on the LIVE page and was counted in its AggregateRating -- a
+    fabricated-looking star rating in the markup Google reads, which is the one thing this system exists
+    not to do. A review that cannot prove its mode is withheld rather than shown: see `reviews.in_mode`.
+    """
     if not reviews_repository or not tenant_id:
         return []
     try:
         reviews = reviews_repository.list_for_tenant(tenant_id)
     except Exception:  # noqa: BLE001 — reviews are an enhancement; never fail a publish on them
         return []
+    reviews = reviews_in_mode(reviews, mode, include_unplaceable=False)
     out = []
     for r in reviews:
         if not isinstance(r, dict) or r.get("status") != "approved" or r.get("source") == "gbp":
@@ -1361,7 +1369,8 @@ def publish_page_document(
     site_archived = (site or {}).get("status") == "archived"
     seo_enabled = site_seo_enabled(site)  # Site-level "discover in search" switch; off → force noindex + no crawl
 
-    page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id, str((site or {}).get("site_id") or ""))
+    page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id,
+                                     str((site or {}).get("site_id") or ""), mode=_page_mode(page))
 
     bnpl_messaging = _bnpl_messaging_config(stripe_keys_repository, tenant_id, offer)
 

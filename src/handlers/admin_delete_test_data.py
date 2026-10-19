@@ -132,7 +132,15 @@ def _is_test_item(item):
     """
     if str(item.get("stripe_mode") or "").strip().lower() == "test":
         return True
-    return "#test#" in str(item.get("SK") or "")
+    if "#test#" in str(item.get("SK") or ""):
+        return True
+    # A record NAMED after a test checkout session is a test record. Reviews and refund requests are not
+    # mode-scoped, so before reviews were stamped (2026-10-18) their only proof was the order they came
+    # from -- `order_cs_test_...`. Without this they came back in `kept_not_mode_scoped` forever and a
+    # sandbox could never be cleared of them.
+    from stripe_link.common import stripe_mode_from_reference
+
+    return stripe_mode_from_reference(item.get("order_id")) == "test"
 
 
 def _delete_test_items(dynamodb, table_name, pk_value, *, sk_prefix=""):

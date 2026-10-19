@@ -403,16 +403,45 @@ class PagePublishingTests(unittest.TestCase):
 
         class Repo:
             def list_for_tenant(self, tenant_id):
+                # Every review now says which books it came from; `stripe_mode` is stamped at submission.
                 return [
-                    {"target": {"type": "product", "id": "p1"}, "status": "approved", "source": "manual", "rating": 5},
-                    {"target": {"type": "business", "id": "site_x"}, "status": "approved", "source": "manual", "rating": 5},
-                    {"target": {"type": "business", "id": "other"}, "status": "approved", "source": "manual", "rating": 1},
-                    {"target": {"type": "product", "id": "p1"}, "status": "pending", "source": "manual", "rating": 1},
-                    {"target": {"type": "business", "id": "site_x"}, "status": "approved", "source": "gbp", "rating": 1},
+                    {"target": {"type": "product", "id": "p1"}, "status": "approved", "source": "manual", "rating": 5, "stripe_mode": "live"},
+                    {"target": {"type": "business", "id": "site_x"}, "status": "approved", "source": "manual", "rating": 5, "stripe_mode": "live"},
+                    {"target": {"type": "business", "id": "other"}, "status": "approved", "source": "manual", "rating": 1, "stripe_mode": "live"},
+                    {"target": {"type": "product", "id": "p1"}, "status": "pending", "source": "manual", "rating": 1, "stripe_mode": "live"},
+                    {"target": {"type": "business", "id": "site_x"}, "status": "approved", "source": "gbp", "rating": 1, "stripe_mode": "live"},
                 ]
-        out = load_page_reviews(Repo(), "t1", {"p1": {}}, site_id="site_x")
+        out = load_page_reviews(Repo(), "t1", {"p1": {}}, site_id="site_x", mode="live")
         self.assertEqual(sorted((r["target"]["type"], r["target"]["id"]) for r in out),
                          [("business", "site_x"), ("product", "p1")])  # other-site, pending, gbp all excluded
+
+    def test_load_page_reviews_excludes_other_modes_and_unplaceable(self):
+        """A test-mode review must never reach a live page: it would be counted in AggregateRating, in the
+        markup Google reads. One that cannot prove its mode is withheld for the same reason."""
+        from stripe_link.runtime.publishing import load_page_reviews
+
+        class Repo:
+            def list_for_tenant(self, tenant_id):
+                return [
+                    {"target": {"type": "product", "id": "p1"}, "status": "approved", "source": "manual", "rating": 5, "stripe_mode": "live"},
+                    {"target": {"type": "product", "id": "p1"}, "status": "approved", "source": "manual", "rating": 1, "stripe_mode": "test"},
+                    {"target": {"type": "product", "id": "p1"}, "status": "approved", "source": "manual", "rating": 1},
+                ]
+        live = load_page_reviews(Repo(), "t1", {"p1": {}}, site_id="site_x", mode="live")
+        self.assertEqual([r["rating"] for r in live], [5])
+        test = load_page_reviews(Repo(), "t1", {"p1": {}}, site_id="site_x", mode="test")
+        self.assertEqual([r["rating"] for r in test], [1])
+
+    def test_load_page_reviews_derives_the_mode_from_the_order_id(self):
+        """Reviews written before the stamp carry `order_cs_live_...`, so they place themselves."""
+        from stripe_link.runtime.publishing import load_page_reviews
+
+        class Repo:
+            def list_for_tenant(self, tenant_id):
+                return [{"target": {"type": "product", "id": "p1"}, "status": "approved",
+                         "source": "manual", "rating": 4, "order_id": "order_cs_live_abc"}]
+        self.assertEqual(len(load_page_reviews(Repo(), "t1", {"p1": {}}, mode="live")), 1)
+        self.assertEqual(len(load_page_reviews(Repo(), "t1", {"p1": {}}, mode="test")), 0)
 
     def test_detach_page_from_sites_removes_from_route_map(self):
         site = self._valid_site({"/": {"page_id": "page_home", "page_type": "homepage"},

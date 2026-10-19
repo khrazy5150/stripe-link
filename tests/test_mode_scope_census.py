@@ -40,14 +40,14 @@ SETUP_AND_IDENTITY = {
 SCOPED_AT_READ_TIME = {
     "refund_requests_repository": ("handlers/notifications.py", "refund_request_mode"),
     "leads_repository": ("handlers/leads.py", "lead_mode"),
+    # Scoped in TWO places with different strictness on purpose: strict on a published page, lenient in
+    # the tenant's own list. domain/reviews.in_mode holds both and says why.
+    "reviews_repository": ("handlers/reviews.py", "list_reviews"),
 }
 
-# Mode-agnostic and KNOWN WRONG — a test record is indistinguishable from a live one, and the fix needs a
-# backfill rather than a read filter. Listed so it cannot be forgotten, and so this test fails loudly if
-# somebody "fixes" it without removing it from here.
-KNOWN_GAP = {
-    "reviews_repository",  # plans/TODO.md: a test review renders on the live page and feeds its rating
-}
+# Mode-agnostic and KNOWN WRONG. Empty since 2026-10-18, when reviews were scoped — and kept, because an
+# empty set here is a claim worth making: every repository without a mode has been decided about.
+KNOWN_GAP: set[str] = set()
 
 
 def mode_agnostic_repositories():

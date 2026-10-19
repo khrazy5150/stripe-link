@@ -205,6 +205,17 @@ class LiveDataSurvivesTests(unittest.TestCase):
         self.assertEqual(body["deleted"]["products"], 1)
         self.assertEqual([k["SK"] for k in table.deleted], ["PRODUCT#test#t"])
 
+    def test_a_record_named_after_a_test_session_is_deleted(self):
+        """Reviews and refund requests are not mode-scoped; their proof is the order they came from."""
+        _, table, body = self._run([{"PK": "TENANT#t1", "SK": "REVIEW#r1", "_match": True,
+                                     "order_id": "order_cs_test_abc"}])
+        self.assertEqual(body["deleted"]["products"], 1)
+
+    def test_and_one_named_after_a_LIVE_session_is_not(self):
+        _, table, body = self._run([{"PK": "TENANT#t1", "SK": "REVIEW#r1", "_match": True,
+                                     "order_id": "order_cs_live_abc"}])
+        self.assertEqual(table.deleted, [])
+
     def test_a_document_that_proves_nothing_is_KEPT_and_counted(self):
         """Leads, reviews and notifications are not mode-scoped. Nothing on them says which books they
         belong to, so they are left alone — and said out loud rather than silently skipped."""

@@ -4,13 +4,17 @@ reviews render / feed AggregateRating markup — enforced at the render layer, n
 import secrets
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import (
+    error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode,
+    tenant_id_from_event,
+)
 from stripe_link.domain.abuse_reports import (
     REVIEW_REPORT_REASONS,
     ReportValidationError,
     build_review_report,
 )
 from stripe_link.domain.documents import DocumentValidationError, REVIEW_STATUSES, validate_review
+from stripe_link.domain.reviews import in_mode as reviews_in_mode
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -71,6 +75,9 @@ def create_review(event, repository, document=None):
         if not str(document.get("review_id") or "").strip():
             document["review_id"] = _new_review_id()
         document.setdefault("source", "manual")
+        # A hand-entered review has no order to derive a mode from, so the request's mode is the only
+        # thing that knows. Without it the review is unplaceable and never reaches a published page.
+        document.setdefault("stripe_mode", resolve_stripe_mode(event))
         document.setdefault("status", "pending")
         now = int(time.time())
         document.setdefault("created_at", now)
@@ -177,6 +184,10 @@ def list_reviews(event, repository):
         reviews = [r for r in reviews if str((r.get("target") or {}).get("id") or "") == target_id]
     if status:
         reviews = [r for r in reviews if r.get("status") == status]
+    # Scoped to the dashboard's mode, but LENIENTLY: a review nobody can place still shows in both, so a
+    # tenant never loses sight of one they typed in themselves. The published page makes the opposite
+    # choice on purpose -- see domain/reviews.in_mode.
+    reviews = reviews_in_mode(reviews, resolve_stripe_mode(event), include_unplaceable=True)
     # The report reasons ride along on the list the screen already fetches, rather than on a route of their
     # own -- the stack has no transform budget for one. The screen therefore offers exactly the reasons the
     # validator accepts, which is how "low rating" stays off a form a tenant reads.
