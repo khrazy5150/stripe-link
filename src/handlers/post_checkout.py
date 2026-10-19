@@ -3,7 +3,10 @@ import os
 import re
 from urllib.parse import urlencode
 
-from stripe_link.common import error_response, json_response, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.common import (
+    error_response, json_response, path_params, query_params, resolve_stripe_mode,
+    stripe_mode_from_session_id, tenant_id_from_event,
+)
 from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.funnels import FunnelError, post_purchase_plan, resolve_funnel_transition
 from stripe_link.domain.opportunities import STAGE_POST_PURCHASE, stage_opportunities
@@ -169,7 +172,15 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
     if method != "GET":
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
-    mode = resolve_stripe_mode(event)
+    # The SESSION ID decides the mode when it is present, and the page that built this URL sets `mode` as
+    # well. Both are carried deliberately -- the comment in runtime/html.py records the day only `mode`
+    # was there and a forgetful URL sent a live buyer's funnel looking for PAGE#test#... ("A test purchase
+    # matched the default and worked, so only live buyers ever saw it").
+    #
+    # Preferring the session id removes the dependency on remembering: `cs_live_...` is not a test session
+    # whatever a query string says, and a URL that drops `mode` now still resolves. Falls back to the
+    # request when Stripe's {CHECKOUT_SESSION_ID} placeholder was never substituted.
+    mode = stripe_mode_from_session_id(query_params(event).get("session_id")) or resolve_stripe_mode(event)
     repository = repository or pages_repository(mode=mode)
     sites_repo = sites_repo or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
     offers_repo = offers_repo or (offers_repository(mode=mode) if os.environ.get("OFFERS_TABLE") else None)
