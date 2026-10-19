@@ -3964,7 +3964,22 @@ Stripe does NOT notify unenrolled accounts.
 
 ## Production setup
 
-### LOW — no backups and no log retention; neither is a cost problem (noted 2026-09-29)
+### ✅ PITR SHIPPED dev+prod 2026-10-19 — log retention still open (noted 2026-09-29)
+
+**Point-in-time recovery is ON for all 48 tables in both environments**, verified by describing every one
+rather than trusting the deploy. Declared in `template.yaml` on every `AWS::DynamoDB::Table` (not a console
+toggle) so a new table is covered the day it is added and no stack update undoes it;
+`tests/test_table_backups.py` fails if any table lacks it, checked by removing one and watching it fail.
+Changeset was 47 table modifies + 1 incidental stream mapping, **zero replacements**. Cost in transform
+budget: 3,478 bytes.
+
+The cost framing below was right and the priority was wrong. Severity moved, not price: before launch an
+accidental delete costs a test fixture, after it costs a merchant's order history. The same day a
+destructive action shipped to production was the day this stopped being LOW.
+
+**STILL OPEN: log retention.** 140 Lambda log groups still never expire, and that one *reduces* the bill.
+
+### LOW — the original entry (noted 2026-09-29)
 
 **Measured 2026-09-29:** point-in-time recovery is **disabled on all 90 `jb-` DynamoDB tables**, prod orders,
 customers, refunds and ledger included. All **140 Lambda log groups never expire**.
