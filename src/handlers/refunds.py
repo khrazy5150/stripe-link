@@ -127,13 +127,18 @@ def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=
     policy that may have changed in the meantime.
     """
     products = []
+    unreadable = False
     try:
         # The MODE matters here: an unmoded read used to find nothing, the snapshot concluded "no
         # return required", and every refund skipped its gate. That is why the repository now refuses it.
         repo_products = products_repo or products_repository(mode=mode)
         products = repo_products.list_for_tenant(tenant_id) or []
     except Exception:  # noqa: BLE001 - an unreadable catalogue must not block a refund decision
-        products = []
+        # ...but it must not be mistaken for an EMPTY one either. Swallowing the error and carrying on
+        # with [] is what defeated the repository's refusal above: the snapshot then reads "no return
+        # required" off an absence and the gate opens. Recorded instead, and the snapshot requires the
+        # return (domain/returns.policy_snapshot).
+        products, unreadable = [], True
     by_id = {str(p.get("product_id") or ""): p for p in products if p.get("product_id")}
 
     order = None
@@ -141,12 +146,17 @@ def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=
         order = orders_repo.get(tenant_id, str(request.get("order_id") or ""))
     except Exception:  # noqa: BLE001
         order = None
+    # No order means no lines, and no lines means nothing requires a return -- the same confident answer
+    # from an absence. An order we were told exists but cannot read is unreadable, not empty.
+    if order is None and str(request.get("order_id") or "").strip():
+        unreadable = True
     lines = resolve_order_lines(order or {}, product_index(products))
 
     snapshot = policy_snapshot(
         lines, by_id,
         order_total=int((order or {}).get("amount_total") or request.get("amount") or 0),
-        keep_it_below=_keep_it_below(by_id, lines))
+        keep_it_below=_keep_it_below(by_id, lines),
+        policy_unreadable=unreadable)
     request["policy_snapshot"] = {**(request.get("policy_snapshot") or {}), **snapshot}
     status = next_status_after_approval(snapshot)
     if status == RETURN_PENDING:

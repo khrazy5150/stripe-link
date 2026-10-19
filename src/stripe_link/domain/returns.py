@@ -82,13 +82,34 @@ def return_requirement(lines: list[dict[str, Any]], products_by_id: dict[str, di
 
 def policy_snapshot(lines: list[dict[str, Any]], products_by_id: dict[str, dict[str, Any]],
                     *, order_total: int = 0, keep_it_below: int | None = None,
-                    window_days: int = DEFAULT_RETURN_WINDOW_DAYS) -> dict[str, Any]:
+                    window_days: int = DEFAULT_RETURN_WINDOW_DAYS,
+                    policy_unreadable: bool = False) -> dict[str, Any]:
     """The terms as they stood WHEN THE BUYER ASKED.
 
     `RefundRequest.policy_snapshot` already exists for exactly this reason: a tenant editing their policy
     must not retroactively change the terms of a return already in flight. The buyer agreed to what was
     written at the time.
+
+    `policy_unreadable` says the catalogue or the order could NOT be read, which is not the same as a
+    catalogue containing nothing. `return_requirement` skips a line whose product it cannot find, so an
+    empty index produces "no return required" -- a confident answer derived from an absence. That is how
+    a mode bug emptied the index in September and every refund skipped its gate; the repository was made
+    to refuse loudly, and the handler's catch-all then swallowed the refusal.
+
+    So an unreadable policy requires the return. A return wrongly required is a parcel the tenant can
+    waive with one click; a return wrongly skipped is goods AND money gone, and nothing to click.
     """
+    if policy_unreadable:
+        return {
+            "return_required": True,
+            "keep_it": False,
+            "reason": "This order's products could not be read, so the return policy could not be "
+                      "confirmed. Approve the return, or waive it if you know the goods need not come back.",
+            "products": [],
+            "return_window_days": int(window_days),
+            "keep_it_below": int(keep_it_below) if keep_it_below else None,
+            "policy_unreadable": True,
+        }
     requirement = return_requirement(lines, products_by_id, order_total=order_total,
                                      keep_it_below=keep_it_below)
     return {

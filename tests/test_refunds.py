@@ -59,9 +59,18 @@ class RefundHandlerTests(unittest.TestCase):
         }
         if body is not None:
             event["body"] = json.dumps(body)
+        class FakeProducts:
+            """A readable catalogue that is empty — distinct from one that cannot be read. Without it the
+            handler builds a real repository, finds no PRODUCTS_TABLE here, and correctly reports the
+            return policy as unconfirmable."""
+
+            def list_for_tenant(self, _tenant):
+                return []
+
         return handler(
             event, None,
             requests_repo=self.requests, orders_repo=self.orders, refunds_repo=self.refunds, stripe_repo=FakeKeys(),
+            products_repo=FakeProducts(),
             secret_cipher=None, caller=stripe or FakeStripe(), credentials_fn=creds, now_fn=lambda: 1781230000,
         )
 

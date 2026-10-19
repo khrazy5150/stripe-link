@@ -81,8 +81,18 @@ def call(order=ORDER, body=None, stripe=None):
     if body is not None:
         event["body"] = json.dumps(body)
     requests_repo, refunds_repo = FakeRequests(), FakeRefunds()
+
+    class FakeProducts:
+        """A READABLE catalogue that happens to be empty — which is not the same as one that could not be
+        read. Without this the handler builds a real repository, finds no PRODUCTS_TABLE in the test
+        environment, and correctly reports the policy as unreadable."""
+
+        def list_for_tenant(self, _tenant):
+            return []
+
     response = refund_order(
         event, FakeOrders(order), "ord_1", "live", now_fn=lambda: 1781230000,
+        products_repo=FakeProducts(),
         requests_repo=requests_repo, refunds_repo=refunds_repo, stripe_repo=FakeKeys(),
         secret_cipher=None,
         caller=stripe or (lambda *a, **k: {"id": "re_1", "amount": 145, "status": "succeeded",
