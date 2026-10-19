@@ -497,6 +497,7 @@
         </template>
         <template v-if="copyPlan.subdomainConflict"><br><strong class="copy-replace-warning">⚠ The subdomain “{{ copyPlan.label }}” is already taken in {{ targetEnvLabel }} by another Site. Rename this Site's store address before copying.</strong></template>
         <template v-if="copyPlan.hasServices"><br>Note: offers that include services aren't fully copied — set services up in {{ targetEnvLabel }}.</template>
+        <template v-if="copyPlan.couponIds?.length"><br>Note: {{ copyPlan.couponIds.length }} coupon{{ copyPlan.couponIds.length === 1 ? "" : "s" }} promised by these offers {{ copyPlan.couponIds.length === 1 ? "is" : "are" }} not copied — coupons live in one mode's Stripe account. Until you create them in {{ targetEnvLabel }}, those checkouts refuse.</template>
         <template v-if="copyPlan.collectionIds?.length"><br>Note: {{ copyPlan.collectionIds.length }} collection{{ copyPlan.collectionIds.length === 1 ? "" : "s" }} shown on these pages {{ copyPlan.collectionIds.length === 1 ? "is" : "are" }} not copied — those grids fall back to their inline cards in {{ targetEnvLabel }}.</template>
         <template v-if="copyError"><br><strong class="copy-replace-warning">{{ copyError }}</strong></template>
       </template>
@@ -566,6 +567,7 @@ async function copySiteToEnvironment(site) {
     const productById = new Map();
     let hasServices = false;
     const collectionIds = new Set();
+    const couponIds = new Set();
     const pages = [];
     for (const page of pageDocs) {
       const deps = await resolvePageDeps(page);
@@ -573,6 +575,7 @@ async function copySiteToEnvironment(site) {
       deps.productDocs.forEach((p) => productById.set(p.product_id, p));
       hasServices = hasServices || deps.hasServices;
       (deps.collectionIds || []).forEach((id) => collectionIds.add(id));
+      (deps.couponIds || []).forEach((id) => couponIds.add(id));
       // Per-page pre-flight so each page keeps the draft-vs-published rule on the target.
       const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { mode: env })
         .then((b) => b.page).catch(() => null);
@@ -593,7 +596,8 @@ async function copySiteToEnvironment(site) {
       subdomainConflict = !!check && check.available === false;
     }
     copyPlan.value = {
-      site, pages, existingSite, hasServices, collectionIds: [...collectionIds], label, subdomainConflict,
+      site, pages, existingSite, hasServices, collectionIds: [...collectionIds],
+      couponIds: [...couponIds], label, subdomainConflict,
       offerDocs: [...offerById.values()], productDocs: [...productById.values()],
     };
   } catch (err) {

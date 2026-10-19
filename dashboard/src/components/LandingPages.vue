@@ -2656,6 +2656,10 @@
         </template>
         <template v-else> It lands as a new draft in {{ targetEnvLabel }}, unattached to any Site.</template>
         <template v-if="copyPlan.hasServices"> Note: this offer includes services, which aren't copied — set them up in {{ targetEnvLabel }}.</template>
+        <template v-if="copyPlan.couponIds?.length">
+          <br><strong class="copy-replace-warning">⚠ This offer promises a coupon, which isn't copied.</strong>
+          Coupons live in one mode's Stripe account, so the copy can't bring them. Create it in {{ targetEnvLabel }} first — until you do, that offer's checkout refuses rather than charging full price.
+        </template>
         <template v-if="copyPlan.collectionIds?.length">
           <br><strong class="copy-replace-warning">⚠ This page shows a collection, which isn't copied.</strong>
           In {{ targetEnvLabel }} that grid falls back to whatever it has inline — often nothing. A collection is a list of pages, so it only means something once those pages exist there too.
@@ -7329,11 +7333,11 @@ async function copyPageToEnvironment(page) {
   copyBusy.value = true;
   try {
     await ensureCatalogLoaded().catch(() => {});
-    const { offerDocs, productDocs, hasServices, collectionIds } = await resolvePageDeps(page, { offerCache: offers.value, productCache: products.value });
+    const { offerDocs, productDocs, hasServices, collectionIds, couponIds } = await resolvePageDeps(page, { offerCache: offers.value, productCache: products.value });
     // Pre-flight the target PAGE (drives the draft-vs-keep-published rule + overwrite messaging).
     const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { mode: targetEnv.value })
       .then((b) => b.page).catch(() => null);
-    copyPlan.value = { page, offerDocs, productDocs, existingTarget, hasServices, collectionIds };
+    copyPlan.value = { page, offerDocs, productDocs, existingTarget, hasServices, collectionIds, couponIds };
   } catch (err) {
     copyError.value = err.message || "Couldn't prepare the copy.";
   } finally {

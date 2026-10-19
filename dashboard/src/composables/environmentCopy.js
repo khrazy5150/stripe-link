@@ -80,6 +80,26 @@ function subdomainLabel(hostname) {
   return String(hostname || "").split(".")[0] || "";
 }
 
+// Coupons an offer promises. NOT copied, and unlike a collection that is not a scoping choice: a
+// Stripe-backed coupon's document REQUIRES stripe_coupon_id and stripe_promo_code_id
+// (domain/documents.validate_coupon_document), and those name objects in the SOURCE mode's Stripe
+// account. Stripping them the way productForTarget strips stripe_product_id would make the document
+// invalid; carrying them over would point the target mode at coupons its own key cannot see. A real copy
+// would have to create new Stripe objects with the target's key, which a browser-orchestrated copy
+// cannot do.
+//
+// Left dangling it is at least LOUD: checkout raises CouponUnavailable and answers 410 rather than
+// quietly charging full price -- "charging the full price to someone who arrived from a ticket saying
+// otherwise is worse". Worth saying before the copy, not after the first refused checkout.
+export function couponIdsForOffers(offerDocs) {
+  const ids = new Set();
+  for (const offer of offerDocs || []) {
+    const id = offer?.discount?.coupon_id;
+    if (id) ids.add(String(id));
+  }
+  return [...ids];
+}
+
 // Collections a page EMBEDS. A catalog_grid may be fed by a Collection instead of inline items, and at
 // publish `load_page_collections` resolves it — "best-effort: a missing collection just leaves that grid
 // to its inline config". So a page copied without its Collection renders a different grid, or an empty
@@ -165,7 +185,9 @@ export async function resolvePageDeps(page, { offerCache = [], productCache = []
   }
   const productDocs = (await Promise.all([...productIds].map((id) => resolveProductDoc(id, productCache)))).filter(Boolean);
   const collectionIds = collectionIdsForPage(page);
-  return { offerDocs, productDocs, hasServices, collectionIds, hasCollections: collectionIds.length > 0 };
+  const couponIds = couponIdsForOffers(offerDocs);
+  return { offerDocs, productDocs, hasServices, collectionIds, couponIds,
+           hasCollections: collectionIds.length > 0 };
 }
 
 // Write a catalog (products then offers) to the target env — the shared bottom-up prefix of every copy.

@@ -160,6 +160,33 @@ class EmbeddedCollectionsAreSurfacedTests(unittest.TestCase):
         self.assertEqual(collections_for(page), [])
 
 
+class PromisedCouponsAreSurfacedTests(unittest.TestCase):
+    """A coupon cannot be copied the way a product can. Its document REQUIRES stripe_coupon_id and
+    stripe_promo_code_id, which name objects in the SOURCE mode's Stripe account — so stripping them
+    makes it invalid and keeping them points the target at coupons its key cannot see. A real copy needs
+    new Stripe objects, which a browser-orchestrated copy cannot create."""
+
+    def setUp(self):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+
+    def coupons(self, offers):
+        return _node(f"""
+        import {{ couponIdsForOffers }} from {json.dumps(str(COPY))};
+        console.log(JSON.stringify(couponIdsForOffers({json.dumps(offers)})));
+        """)
+
+    def test_a_promised_coupon_is_found(self):
+        self.assertEqual(self.coupons([{"offer_id": "o1", "discount": {"coupon_id": "cpn_1"}}]), ["cpn_1"])
+
+    def test_offers_with_no_discount_report_none(self):
+        self.assertEqual(self.coupons([{"offer_id": "o1"}, {"offer_id": "o2", "discount": {}}]), [])
+
+    def test_the_same_coupon_on_two_offers_is_one(self):
+        offers = [{"discount": {"coupon_id": "cpn_1"}}, {"discount": {"coupon_id": "cpn_1"}}]
+        self.assertEqual(self.coupons(offers), ["cpn_1"])
+
+
 class TheCopyUsesTheSharedNormalizerTests(unittest.TestCase):
     def test_it_does_not_read_offer_items_directly(self):
         """A guard against the exact edit that caused this: resolving deps from `offer.items` again would
