@@ -323,24 +323,25 @@
         </header>
         <div class="dashboard-card-body">
           <p class="danger-text"><strong>Warning: this action cannot be undone.</strong></p>
-          <p><strong>Database</strong> — permanently deletes this workspace's:</p>
-          <ul class="delete-scope">
-            <li>Products, offers, coupons (with their grants and redemptions)</li>
-            <li>Landing pages, collections, A/B tests</li>
-            <li>Orders, checkout sessions, invoices, refunds, ledger entries, shipments</li>
-            <li>Customers, leads, reviews, carts, notifications</li>
-            <li>Appointments and booking credits</li>
-          </ul>
-          <p class="field-note">Kept: your sites, services, fulfillers and availability — that is setup, not
-            test data.</p>
+          <!-- States the RULE, not an inventory. The handler used to keep its own list of tables and it fell
+               seven behind the schema; an inventory repeated here would drift from the handler the same way.
+               What gets deleted is reported afterwards, from the server, where it cannot be out of date. -->
+          <p><strong>Database</strong> — deletes everything in this workspace that belongs to
+            <strong>test mode</strong>: your test catalog and pages, and every transaction recorded
+            against them.</p>
+          <p class="field-note">Kept: your setup — sites, services, fulfillers and availability. Also kept:
+            anything that cannot prove which mode it belongs to. Some older leads, reviews and
+            notifications were stored before a mode was recorded on them, so they are left alone rather
+            than guessed at, and counted in the result.</p>
+          <p class="field-note"><strong>Your live data is never touched.</strong> It is stored under a
+            different key, and this action cannot reach it.</p>
           <p><strong>Stripe (test mode)</strong> — best effort:</p>
           <ul class="delete-scope">
             <li>Customers &amp; coupons (deleted)</li>
             <li>Products without prices (deleted); with prices (archived)</li>
             <li>Prices (archived — Stripe cannot delete them)</li>
           </ul>
-          <p class="field-note">Not touched: Stripe keys, your profile &amp; preferences, custom domains
-            (Sites), and your services, fulfillers &amp; availability.</p>
+          <p class="field-note">Not touched in Stripe: your keys, and anything in live mode.</p>
           <p v-if="deleteError" class="field-error">{{ deleteError }}</p>
         </div>
         <footer class="config-save-bar">
@@ -442,11 +443,23 @@ async function confirmDelete() {
       parts.push(`${(stripe.products_deleted || 0) + (stripe.products_archived || 0)} products`);
     }
     if (stripe.coupons_deleted != null) parts.push(`${stripe.coupons_deleted} coupons`);
-    // Report failures instead of folding them into a total. A table that refused its delete used to be
-    // indistinguishable from a table that had nothing in it.
+    // The receipt is the inventory. It is built from what the server actually did, so unlike a list in
+    // the dialog it cannot fall behind the handler.
+    const detail = Object.entries(deleted).filter(([, n]) => Number(n) > 0)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`);
+    const keptPairs = Object.entries(res.kept_not_mode_scoped || {}).filter(([, n]) => Number(n) > 0);
+    const kept = keptPairs.reduce((sum, [, n]) => sum + Number(n), 0);
     const failed = Object.keys(res.errors || {});
-    deleteSummary.value = `Deleted ${total} database records${parts.length ? `; Stripe: ${parts.join(", ")}` : ""}.`
-      + (failed.length ? ` ${failed.length} could not be cleared: ${failed.join(", ")}.` : "");
+    deleteSummary.value = [
+      `Deleted ${total} record${total === 1 ? "" : "s"}${detail.length ? `: ${detail.join(", ")}` : ""}.`,
+      parts.length ? `Stripe: ${parts.join(", ")}.` : "",
+      // Reported, not hidden: a tenant who still sees reviews in their sandbox deserves to know why.
+      kept ? `Kept ${kept} record${kept === 1 ? "" : "s"} with no mode recorded (${
+        keptPairs.map(([name, n]) => `${n} ${name.replace(/_/g, " ")}`).join(", ")}).` : "",
+      // A table that refused its delete once read as "0 deleted", indistinguishable from an empty one.
+      failed.length ? `${failed.length} could not be cleared: ${failed.join(", ")}.` : "",
+    ].filter(Boolean).join(" ");
     showDeleteModal.value = false;
   } catch (err) {
     deleteError.value = err.message || "Failed to delete test data.";
