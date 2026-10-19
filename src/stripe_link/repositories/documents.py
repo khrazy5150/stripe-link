@@ -90,6 +90,92 @@ def _query_all_pages(table: Any, **query: Any) -> list[dict[str, Any]]:
         request["ExclusiveStartKey"] = last_evaluated_key
 
 
+def _delete_partition_items(table: Any, pk_value: str, *, sk_prefix: str = "") -> int:
+    """Delete every item under one partition key, optionally narrowed to a sort-key prefix.
+
+    Projects the keys only: a delete needs the key and nothing else, and a test partition can be large.
+    """
+    from boto3.dynamodb.conditions import Key
+
+    condition = Key(KEY_PARTITION).eq(pk_value)
+    if sk_prefix:
+        condition = condition & Key(KEY_SORT).begins_with(sk_prefix)
+    items = _query_all_pages(
+        table,
+        KeyConditionExpression=condition,
+        ProjectionExpression=f"{KEY_PARTITION}, {KEY_SORT}",
+    )
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={KEY_PARTITION: item[KEY_PARTITION], KEY_SORT: item[KEY_SORT]})
+    return len(items)
+
+
+def delete_proven_items(table: Any, tenant_id: str, *, sk_prefix: str,
+                        predicate: Any) -> dict[str, int]:
+    """Delete a tenant's items under one sort-key prefix that `predicate` can PROVE belong to the mode.
+
+    The counterpart to `delete_all_for_tenant`, for the handful of document types that are deliberately NOT
+    mode-scoped -- leads, reviews, notifications, refund requests, slot locks. Their key says nothing about
+    mode, so there is no key that reaches only the test ones and a predicate has to decide.
+
+    It lives HERE, beside the repositories, for one reason: so that no handler needs to spell `TENANT#` to
+    do it. Whatever cannot be addressed should at least be built in the one module that owns keys.
+
+    Returns {deleted, kept}. `kept` is not a rounding error -- it is the count of documents that proved
+    nothing, and reporting it is the difference between a known limit and a tenant wondering why their
+    sandbox still has reviews in it.
+    """
+    from boto3.dynamodb.conditions import Key
+
+    condition = Key(KEY_PARTITION).eq(f"TENANT#{tenant_id}")
+    if sk_prefix:
+        condition = condition & Key(KEY_SORT).begins_with(sk_prefix)
+    items = _query_all_pages(table, KeyConditionExpression=condition)
+    doomed = [item for item in items if predicate(item)]
+    if doomed:
+        with table.batch_writer() as batch:
+            for item in doomed:
+                batch.delete_item(Key={KEY_PARTITION: item[KEY_PARTITION], KEY_SORT: item[KEY_SORT]})
+    return {"deleted": len(doomed), "kept": len(items) - len(doomed)}
+
+
+def delete_all_for_tenant(repository: Any, tenant_id: str) -> int:
+    """Delete every document this repository can see for one tenant. THE MODE IS THE REPOSITORY'S.
+
+    This exists so that nothing outside this module ever hand-builds a tenant key again. The delete-test-data
+    action used to assemble `TENANT#{id}` itself, query the whole partition and decide per item whether the
+    item looked like test data. That predicate was the only thing standing between the action and live
+    documents -- correct, but correct by vigilance, and it drifted: the hand-kept table list silently missed
+    seven mode-scoped tables (shipments, coupon grants and redemptions, booking credits, collections,
+    experiments, sites), so a tenant could clear their sandbox and still have a test coupon count against its
+    own usage limit.
+
+    Here the mode is in the KEY, so a live document is not filtered out -- it is unreachable:
+
+      - key-scoped documents are read as `SK begins_with TYPE#{mode}#`;
+      - money documents are read from the partition `TENANT#{id}#{mode}` (plans/STRIPE_MODE_STORAGE.md).
+
+    Both shapes refuse to be built without a mode, so there is no third path where this answers for both
+    sets of books at once.
+    """
+    if isinstance(repository, DynamoDocumentRepository):
+        # A key-scoped repository without a mode reads `TYPE#` -- which is a PREFIX of `TYPE#test#id` AND
+        # of `TYPE#live#id`. Harmless on a list; on a bulk delete it is the whole accident this module
+        # exists to prevent, so it is refused here as well as in the constructor.
+        if repository.mode is None:
+            raise RepositoryError(
+                f"Refusing to bulk-delete '{repository.document_type}' without a Stripe mode: the "
+                "mode-less sort prefix spans test AND live documents.")
+        return _delete_partition_items(
+            repository.table, f"TENANT#{tenant_id}", sk_prefix=repository._list_prefix())
+    if isinstance(repository, (TenantRangeRepository, RefundsRepository, LedgerRepository)):
+        # These refuse a missing mode in their constructor, so `repository.mode` is always set here.
+        return _delete_partition_items(repository.table, tenant_mode_pk(tenant_id, repository.mode))
+    raise RepositoryError(
+        f"{type(repository).__name__} stores no tenant partition; it cannot be cleared this way.")
+
+
 def dynamo_safe(value: Any) -> Any:
     """Convert floats to Decimal, recursively, on the way into DynamoDB.
 

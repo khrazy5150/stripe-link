@@ -1,15 +1,23 @@
-"""DEV-only delete-all-test-data admin handler (parity with stripe-cart)."""
+"""The delete-all-test-data admin handler.
+
+Two things are asserted here, and the second is the one that matters:
+
+  1. It clears the caller's TEST documents.
+  2. It cannot reach their LIVE ones -- because the mode is in the KEY, not in a predicate. The fake table
+     below therefore honors real key conditions (PK equality, SK begins_with) instead of a tag, so a test
+     that passes proves the query was actually scoped rather than that the fixture cooperated.
+"""
 import json
 import os
 import unittest
 from unittest.mock import patch
 
 from handlers.admin_delete_test_data import handler
+from stripe_link.repositories import documents
 
 
 def _condition_strings(condition):
-    """Collect the literal string operands from a boto3 KeyConditionExpression tree (so the fake can honor an
-    SK begins_with without a real DynamoDB)."""
+    """The literal string operands of a boto3 KeyConditionExpression tree."""
     values = []
     get_expression = getattr(condition, "get_expression", None)
     if not get_expression:
@@ -23,29 +31,33 @@ def _condition_strings(condition):
 
 
 class FakeTable:
-    def __init__(self, name, key_attrs, items, partition_style):
+    """A table that answers key conditions the way DynamoDB does.
+
+    It deliberately does NOT understand "which rows the test meant" -- only PK equality and SK prefix. That
+    is the whole point: if the handler queried the wrong key space, these tests fail.
+    """
+
+    def __init__(self, name, key_attrs, items):
         self.name = name
         self.key_schema = [{"AttributeName": key_attrs[0], "KeyType": "HASH"}]
         if len(key_attrs) > 1:
             self.key_schema.append({"AttributeName": key_attrs[1], "KeyType": "RANGE"})
-        self.items = items  # list of dicts
-        self.partition_style = partition_style  # "pk" | "tenant_id" | "session"
+        self.items = items
         self.deleted = []
 
     def query(self, **kwargs):
-        # Items are pre-tagged with _match. Honor an SK begins_with by matching the item's _sk_prefix tag so a
-        # prefix-scoped delete only hits its own document type in a shared table.
         strings = _condition_strings(kwargs.get("KeyConditionExpression"))
-        prefixes = [s for s in strings if s.endswith("#") and s not in ("TENANT#",) and not s.startswith("TENANT#")]
-        items = [i for i in self.items if i.get("_match")]
+        pk = next((s for s in strings if s.startswith("TENANT#")), None)
+        prefixes = [s for s in strings if s != pk]
+        items = self.items
+        if pk is not None:
+            items = [i for i in items if i.get("PK") == pk]
         if prefixes:
-            items = [i for i in items if i.get("_sk_prefix") in prefixes]
-        else:
-            items = [i for i in items if "_sk_prefix" not in i]  # whole-partition query skips prefix-only rows
+            items = [i for i in items if any(str(i.get("SK") or "").startswith(p) for p in prefixes)]
         return {"Items": items}
 
     def scan(self, **kwargs):
-        return {"Items": [i for i in self.items if i.get("_match")]}
+        return {"Items": list(self.items)}
 
     def batch_writer(self):
         table = self
@@ -68,176 +80,235 @@ class FakeDynamo:
         self.tables = tables
 
     def Table(self, name):
+        if name not in self.tables:
+            self.tables[name] = FakeTable(name, ["PK", "SK"], [])
         return self.tables[name]
 
 
-def _pk_item(match=True, mode="test", pid="p1"):
+def _product(mode="test", pid="p1"):
     """A mode-scoped document as the repository writes it: the mode is in the SK AND on the row."""
-    return {"PK": "TENANT#t1", "SK": f"PRODUCT#{mode}#{pid}", "stripe_mode": mode, "_match": match}
+    return {"PK": "TENANT#t1", "SK": f"PRODUCT#{mode}#{pid}", "stripe_mode": mode}
 
 
-def _unmoded_item(sk="REVIEW#r1"):
-    """A document from a type that is NOT mode-scoped (reviews, leads, notifications). Nothing on it says
-    which books it belongs to, so nothing may assume."""
-    return {"PK": "TENANT#t1", "SK": sk, "_match": True}
+def _unmoded(sk="REVIEW#r1", **extra):
+    """A document from a type that is NOT mode-scoped. Nothing on it says which books it belongs to."""
+    return {"PK": "TENANT#t1", "SK": sk, **extra}
 
 
-class DeleteTestDataTests(unittest.TestCase):
-    def _event(self, method="POST"):
-        return {"httpMethod": method, "requestContext": {}, "headers": {"X-Tenant-Id": "t1"},
-                "body": json.dumps({"tenant_id": "t1"})}
+class NoKeyStripeRepo:
+    def get(self, tenant_id, mode="test"):
+        return {}
 
-    def test_blocked_in_prod(self):
-        with patch.dict(os.environ, {"ENVIRONMENT": "prod"}):
-            resp = handler(self._event(), None)
-        self.assertEqual(resp["statusCode"], 403)
 
+class Cipher:
+    def decrypt(self, *a, **k):
+        return ""
+
+
+ALL_TABLE_ENVS = [
+    "PRODUCTS_TABLE", "OFFERS_TABLE", "COUPONS_TABLE", "COUPON_GRANTS_TABLE",
+    "COUPON_REDEMPTIONS_TABLE", "PAGES_TABLE", "COLLECTIONS_TABLE", "EXPERIMENTS_TABLE",
+    "LEADS_TABLE", "REVIEWS_TABLE", "CARTS_TABLE", "SHIPMENTS_TABLE", "INVOICES_TABLE",
+    "NOTIFICATIONS_TABLE", "BOOKING_CREDITS_TABLE", "CUSTOMERS_TABLE", "ORDERS_TABLE",
+    "REFUNDS_TABLE", "LEDGER_TABLE", "CHECKOUT_SESSIONS_TABLE", "SERVICES_TABLE",
+]
+
+
+def _table_name(env_name):
+    """What the deployed stack calls it. The repository layer refuses any resource not named `jb-...`,
+    so the fixtures have to look real."""
+    return "jb-" + env_name.lower().replace("_table", "")
+
+
+def _env_for(tables):
+    env = {"ENVIRONMENT": "dev"}
+    for name in ALL_TABLE_ENVS:
+        env[name] = _table_name(name)
+        tables.setdefault(_table_name(name), FakeTable(name, ["PK", "SK"], []))
+    return env
+
+
+def _event(method="POST", mode=None):
+    body = {"tenant_id": "t1"}
+    if mode:
+        body["mode"] = mode
+    return {"httpMethod": method, "requestContext": {}, "headers": {"X-Tenant-Id": "t1"},
+            "body": json.dumps(body)}
+
+
+def _run(tables, *, mode=None):
+    env = _env_for(tables)
+    with patch.dict(os.environ, env, clear=False):
+        resp = handler(_event(mode=mode), None, dynamodb=FakeDynamo(tables),
+                       stripe_repo=NoKeyStripeRepo(), secret_cipher=Cipher())
+    return resp, json.loads(resp["body"])
+
+
+class TheGateTests(unittest.TestCase):
     def test_options_ok(self):
-        resp = handler(self._event("OPTIONS"), None)
-        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(handler(_event("OPTIONS"), None)["statusCode"], 200)
 
     def test_requires_tenant(self):
         with patch.dict(os.environ, {"ENVIRONMENT": "dev"}):
             resp = handler({"httpMethod": "POST", "requestContext": {}, "headers": {}, "body": "{}"}, None)
         self.assertEqual(resp["statusCode"], 400)
 
-    def test_deletes_tenant_partition_and_skips_stripe_without_key(self):
-        # Env maps each *_TABLE to a fake table name; only PRODUCTS has a matching item to delete.
-        env = {"ENVIRONMENT": "dev"}
-        table_envs = ["PRODUCTS_TABLE", "OFFERS_TABLE", "COUPONS_TABLE", "PAGES_TABLE", "LEADS_TABLE",
-                      "REVIEWS_TABLE", "CARTS_TABLE", "INVOICES_TABLE", "NOTIFICATIONS_TABLE",
-                      "CUSTOMERS_TABLE", "ORDERS_TABLE", "REFUNDS_TABLE", "LEDGER_TABLE",
-                      "CHECKOUT_SESSIONS_TABLE", "SERVICES_TABLE"]
-        tables = {}
-        for name in table_envs:
-            env[name] = name.lower()
-            if name == "PRODUCTS_TABLE":
-                tables[name.lower()] = FakeTable(name, ["PK", "SK"], [
-                    _pk_item(mode="test", pid="p1"), _pk_item(mode="test", pid="p2"),
-                    _pk_item(mode="live", pid="p3"),   # the tenant's real product, in the same partition
-                ], "pk")
-            elif name == "CHECKOUT_SESSIONS_TABLE":
-                # Real session ids carry their books: cs_test_… / cs_live_…
-                tables[name.lower()] = FakeTable(name, ["session_id", "tenant_id"], [
-                    {"session_id": "cs_test_1", "tenant_id": "t1", "_match": True},
-                    {"session_id": "cs_live_2", "tenant_id": "t1", "_match": True},
-                ], "session")
-            elif name == "SERVICES_TABLE":
-                # A shared table: appointment + slot_lock are DATA (delete by prefix); service is SETUP (keep).
-                tables[name.lower()] = FakeTable(name, ["PK", "SK"], [
-                    {"PK": "TENANT#t1", "SK": "APPOINTMENT#test#a1", "stripe_mode": "test",
-                     "_match": True, "_sk_prefix": "APPOINTMENT#"},
-                    {"PK": "TENANT#t1", "SK": "SLOTLOCK#test#f#2026", "stripe_mode": "test",
-                     "_match": True, "_sk_prefix": "SLOTLOCK#"},
-                    {"PK": "TENANT#t1", "SK": "SERVICE#s1", "_match": True},  # setup — no prefix tag → never returned
-                ], "pk")
-            elif name in ("CUSTOMERS_TABLE", "ORDERS_TABLE", "REFUNDS_TABLE", "LEDGER_TABLE"):
-                # Money tables key on PK=TENANT#{id}#{mode} since the decoupling — not on `tenant_id`.
-                tables[name.lower()] = FakeTable(name, ["PK", "SK"], [
-                    {"PK": "TENANT#t1#test", "SK": "order_cs_test_1", "_match": True},
-                ], "pk")
-            else:
-                tables[name.lower()] = FakeTable(name, ["PK", "SK"], [], "pk")
-
-        class NoKeyStripeRepo:
-            def get(self, tenant_id, mode="test"):
-                return {}
-
-        class Cipher:
-            def decrypt(self, *a, **k):
-                return ""
-
+    def test_prod_is_NOT_a_gate_because_the_gate_is_the_mode(self):
+        """The old guard refused whenever ENVIRONMENT was prod. That protected nothing -- dev and prod hold
+        the same tenant's live Stripe credentials -- while denying the action to every tenant whose sandbox
+        lives on the production backend. Mode is the gate now, in every deployment."""
+        tables = {"jb-products": FakeTable("PRODUCTS_TABLE", ["PK", "SK"], [_product(pid="p1")])}
+        env = _env_for(tables)
+        env["ENVIRONMENT"] = "prod"
         with patch.dict(os.environ, env, clear=False):
-            resp = handler(self._event(), None, dynamodb=FakeDynamo(tables),
+            resp = handler(_event(), None, dynamodb=FakeDynamo(tables),
                            stripe_repo=NoKeyStripeRepo(), secret_cipher=Cipher())
         body = json.loads(resp["body"])
         self.assertEqual(resp["statusCode"], 200)
-        self.assertTrue(body["success"])
-        self.assertEqual(body["deleted"]["products"], 2)
-        self.assertEqual(body["deleted"]["orders"], 1)  # money tables query PK=TENANT#t1#test
-        self.assertEqual(body["deleted"]["checkout_sessions"], 1)  # the live session survives
-        self.assertEqual(body["deleted"]["offers"], 0)
-        # Booking DATA deleted by SK prefix; the SERVICES row (setup) in the same table is left alone.
-        self.assertEqual(body["deleted"]["appointments"], 1)
-        self.assertEqual(body["deleted"]["slot_locks"], 1)
-        services_deleted = tables["services_table"].deleted
-        self.assertTrue(all(k["SK"] != "SERVICE#s1" for k in services_deleted))
-        self.assertEqual(len(services_deleted), 2)  # appointment + slot_lock, not the service
-        # No test key configured → Stripe cleanup skipped, not attempted.
-        self.assertEqual(body["stripe"], {"skipped": "no_test_key"})
+        self.assertEqual(body["deleted"]["products"], 1)
 
+    def test_live_mode_is_refused_outright(self):
+        """Not scoped down to test behind the caller's back -- refused, so the mistake is visible."""
+        tables = {"jb-products": FakeTable("PRODUCTS_TABLE", ["PK", "SK"], [_product()])}
+        resp, body = _run(tables, mode="live")
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertEqual(body["error"], "live_mode")
+        self.assertEqual(tables["jb-products"].deleted, [])
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_the_response_names_the_mode_it_acted_on(self):
+        _, body = _run({})
+        self.assertEqual(body["mode"], "test")
 
 
 class LiveDataSurvivesTests(unittest.TestCase):
-    """What this action must NEVER do, now that a tenant can be in test mode on a backend holding their
-    live documents (plans/STRIPE_MODE_DECOUPLING.md). Before this, it deleted the whole partition."""
+    """What this action must NEVER do, now that a tenant's sandbox shares a deployment with their live
+    books. The protection is the key, not a predicate."""
 
-    def _run(self, items, *, mode="test", key_attrs=("PK", "SK")):
-        env = {"ENVIRONMENT": "dev", "PRODUCTS_TABLE": "products_table"}
-        table = FakeTable("PRODUCTS_TABLE", list(key_attrs), items, "pk")
-        event = {"httpMethod": "POST", "requestContext": {}, "headers": {"X-Tenant-Id": "t1"},
-                 "body": json.dumps({"tenant_id": "t1", "mode": mode})}
-
-        class NoKeyStripeRepo:
-            def get(self, tenant_id, mode="test"):
-                return {}
-
-        class Cipher:
-            def decrypt(self, *a, **k):
-                return ""
-
-        with patch.dict(os.environ, env, clear=False):
-            resp = handler(event, None, dynamodb=FakeDynamo({"products_table": table}),
-                           stripe_repo=NoKeyStripeRepo(), secret_cipher=Cipher())
-        return resp, table, json.loads(resp["body"])
-
-    def test_a_live_document_in_the_same_partition_is_not_deleted(self):
-        """THE regression this guards. Both modes share PK=TENANT#{id}; only the sort key separates them."""
-        _, table, body = self._run([_pk_item(mode="live", pid="real")])
+    def test_a_live_document_is_not_merely_filtered_out_it_is_UNREACHABLE(self):
+        """THE regression this guards. Both modes share PK=TENANT#{id}; only the sort key separates them.
+        The query asks for `PRODUCT#test#`, so the live row is never even returned."""
+        table = FakeTable("PRODUCTS_TABLE", ["PK", "SK"], [_product(mode="live", pid="real")])
+        _, body = _run({"jb-products": table})
         self.assertEqual(table.deleted, [])
         self.assertEqual(body["deleted"]["products"], 0)
 
     def test_test_and_live_side_by_side(self):
-        _, table, body = self._run([_pk_item(mode="test", pid="t"), _pk_item(mode="live", pid="l")])
+        table = FakeTable("PRODUCTS_TABLE", ["PK", "SK"],
+                          [_product(mode="test", pid="t"), _product(mode="live", pid="l")])
+        _, body = _run({"jb-products": table})
         self.assertEqual(body["deleted"]["products"], 1)
         self.assertEqual([k["SK"] for k in table.deleted], ["PRODUCT#test#t"])
 
+    def test_another_tenants_partition_is_untouched(self):
+        table = FakeTable("PRODUCTS_TABLE", ["PK", "SK"],
+                          [_product(), {"PK": "TENANT#other", "SK": "PRODUCT#test#x"}])
+        _, body = _run({"jb-products": table})
+        self.assertEqual([k["PK"] for k in table.deleted], ["TENANT#t1"])
+
+    def test_the_repository_refuses_a_bulk_delete_with_no_mode(self):
+        """The one way this could still reach both sets of books: `TYPE#` is a prefix of BOTH `TYPE#test#`
+        and `TYPE#live#`. Refused at the repository, not just at the handler."""
+        with patch.dict(os.environ, {"PRODUCTS_TABLE": "jb-products"}, clear=False):
+            repo = documents.products_repository(FakeTable("P", ["PK", "SK"], []), mode="test")
+        repo.mode = None  # the state a careless caller would produce
+        with self.assertRaises(documents.RepositoryError):
+            documents.delete_all_for_tenant(repo, "t1")
+
+
+class ModeAgnosticDocumentsTests(unittest.TestCase):
+    """Reviews, leads, notifications and refund requests carry no mode in their key. These are the only
+    documents a predicate still decides, and it errs toward keeping."""
+
     def test_a_record_named_after_a_test_session_is_deleted(self):
-        """Reviews and refund requests are not mode-scoped; their proof is the order they came from."""
-        _, table, body = self._run([{"PK": "TENANT#t1", "SK": "REVIEW#r1", "_match": True,
-                                     "order_id": "order_cs_test_abc"}])
-        self.assertEqual(body["deleted"]["products"], 1)
+        table = FakeTable("REVIEWS_TABLE", ["PK", "SK"], [_unmoded(order_id="order_cs_test_abc")])
+        _, body = _run({"jb-reviews": table})
+        self.assertEqual(body["deleted"]["reviews"], 1)
 
     def test_and_one_named_after_a_LIVE_session_is_not(self):
-        _, table, body = self._run([{"PK": "TENANT#t1", "SK": "REVIEW#r1", "_match": True,
-                                     "order_id": "order_cs_live_abc"}])
+        table = FakeTable("REVIEWS_TABLE", ["PK", "SK"], [_unmoded(order_id="order_cs_live_abc")])
+        _, body = _run({"jb-reviews": table})
         self.assertEqual(table.deleted, [])
 
     def test_a_document_that_proves_nothing_is_KEPT_and_counted(self):
-        """Leads, reviews and notifications are not mode-scoped. Nothing on them says which books they
-        belong to, so they are left alone — and said out loud rather than silently skipped."""
-        _, table, body = self._run([_unmoded_item()])
+        """Left alone -- and said out loud rather than silently skipped."""
+        table = FakeTable("REVIEWS_TABLE", ["PK", "SK"], [_unmoded()])
+        _, body = _run({"jb-reviews": table})
         self.assertEqual(table.deleted, [])
-        self.assertEqual(body["kept_not_mode_scoped"]["products"], 1)
+        self.assertEqual(body["kept_not_mode_scoped"]["reviews"], 1)
 
-    def test_the_sort_key_alone_is_proof_enough(self):
-        """A document written before `stripe_mode` was stored still reads TYPE#test#id."""
-        _, table, body = self._run([{"PK": "TENANT#t1", "SK": "PRODUCT#test#old", "_match": True}])
-        self.assertEqual(body["deleted"]["products"], 1)
+    def test_the_stripe_mode_stamp_is_proof_enough(self):
+        table = FakeTable("REVIEWS_TABLE", ["PK", "SK"], [_unmoded(stripe_mode="test")])
+        _, body = _run({"jb-reviews": table})
+        self.assertEqual(body["deleted"]["reviews"], 1)
 
-    def test_live_mode_is_refused_outright(self):
-        """Not scoped down to test behind the caller's back — refused, so the mistake is visible."""
-        resp, table, body = self._run([_pk_item(mode="test")], mode="live")
-        self.assertEqual(resp["statusCode"], 400)
-        self.assertEqual(body["error"], "live_mode")
-        self.assertEqual(table.deleted, [])
 
-    def test_the_response_names_the_mode_it_acted_on(self):
-        _, _, body = self._run([_pk_item()])
-        self.assertEqual(body["mode"], "test")
+class WhatItClearsTests(unittest.TestCase):
+    def test_clears_every_shape_and_skips_stripe_without_a_key(self):
+        tables = {
+            "jb-products": FakeTable("PRODUCTS_TABLE", ["PK", "SK"],
+                                        [_product(pid="p1"), _product(pid="p2"), _product(mode="live", pid="p3")]),
+            # Money documents live in a partition of their own per mode.
+            "jb-orders": FakeTable("ORDERS_TABLE", ["PK", "SK"],
+                                      [{"PK": "TENANT#t1#test", "SK": "order_cs_test_1"},
+                                       {"PK": "TENANT#t1#live", "SK": "order_cs_live_9"}]),
+            # Session ids carry their own books.
+            "jb-checkout_sessions": FakeTable("CHECKOUT_SESSIONS_TABLE", ["session_id", "tenant_id"],
+                                                 [{"session_id": "cs_test_1", "tenant_id": "t1"},
+                                                  {"session_id": "cs_live_2", "tenant_id": "t1"}]),
+            # A shared table: appointment is mode-scoped DATA, service is SETUP and stays.
+            "jb-services": FakeTable("SERVICES_TABLE", ["PK", "SK"], [
+                {"PK": "TENANT#t1", "SK": "APPOINTMENT#test#a1", "stripe_mode": "test"},
+                {"PK": "TENANT#t1", "SK": "SLOTLOCK#test#f#2026", "stripe_mode": "test"},
+                {"PK": "TENANT#t1", "SK": "SERVICE#test#s1", "stripe_mode": "test"},
+            ]),
+        }
+        resp, body = _run(tables)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertTrue(body["success"])
+        self.assertEqual(body["errors"], {})
+        self.assertEqual(body["deleted"]["products"], 2)
+        self.assertEqual(body["deleted"]["orders"], 1)         # the live partition is a different key
+        self.assertEqual(body["deleted"]["checkout_sessions"], 1)
+        self.assertEqual(body["deleted"]["offers"], 0)
+        self.assertEqual(body["deleted"]["appointments"], 1)
+        self.assertEqual(body["deleted"]["slot_locks"], 1)
+        # Booking SETUP in the same table is never addressed.
+        self.assertTrue(all(k["SK"] != "SERVICE#test#s1" for k in tables["jb-services"].deleted))
+        self.assertEqual(len(tables["jb-services"].deleted), 2)
+        self.assertEqual(body["stripe"], {"skipped": "no_test_key"})
+
+    def test_it_clears_the_tables_the_old_hand_kept_list_forgot(self):
+        """Shipments, coupon grants and redemptions, booking credits, collections and A/B tests were all
+        mode-scoped and none of them were cleared -- a sandbox reset left redemptions that still counted
+        against a coupon's usage limit."""
+        forgotten = {
+            "shipments": ("jb-shipments", "SHIPMENT"),
+            "coupon_grants": ("jb-coupon_grants", "COUPON_GRANT"),
+            "coupon_redemptions": ("jb-coupon_redemptions", "COUPON_REDEMPTION"),
+            # The table is BOOKING_CREDITS; the documents in it are service entitlements.
+            "booking_credits": ("jb-booking_credits", "SERVICE_ENTITLEMENT"),
+            "collections": ("jb-collections", "COLLECTION"),
+            "experiments": ("jb-experiments", "EXPERIMENT"),
+        }
+        tables = {tbl: FakeTable(tbl, ["PK", "SK"],
+                                 [{"PK": "TENANT#t1", "SK": f"{prefix}#test#x", "stripe_mode": "test"}])
+                  for tbl, prefix in forgotten.values()}
+        _, body = _run(tables)
+        for label in forgotten:
+            with self.subTest(label=label):
+                self.assertEqual(body["deleted"][label], 1)
+
+    def test_a_table_that_refuses_is_reported_not_counted_as_empty(self):
+        """A DynamoDB refusal once read as '0 deleted', which is indistinguishable from 'nothing there'."""
+        class Exploding(FakeTable):
+            def query(self, **kwargs):
+                raise RuntimeError("AccessDeniedException")
+
+        tables = {"jb-products": Exploding("PRODUCTS_TABLE", ["PK", "SK"], [])}
+        resp, body = _run(tables)
+        self.assertFalse(body["success"])
+        self.assertIn("products", body["errors"])
+        self.assertIn("AccessDenied", body["errors"]["products"])
 
 
 if __name__ == "__main__":
