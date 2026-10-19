@@ -3,7 +3,7 @@
     <section class="auth-card">
       <header class="auth-header">
         <img v-if="logoUrl" :src="logoUrl" alt="" />
-        <h1>{{ store.activeTab === 'register' ? 'Start your free trial'
+        <h1>{{ store.activeTab === 'register' ? 'Start for free'
           : store.activeTab === 'forgot' ? 'Forgot Password'
           : 'User Login' }}</h1>
         <p>

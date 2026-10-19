@@ -1,10 +1,27 @@
 import { defineStore } from "pinia";
 import { SESSION_ENDED_EVENT, apiRequest, clearAuthSession, getAuthSession, setAuthSession } from "../api/client";
 
+// Which tab a visitor lands on. The homepage's "Start for free" sends people here to SIGN UP, and
+// landing them on Login asks them to do the one thing they cannot yet do. Read from the URL rather than
+// held in the homepage's own state, because the two are separate deployments and the link is the only
+// thing that crosses between them.
+//
+// Anything unrecognised falls back to login: the tab is a hint from a URL, and a URL is not trusted
+// input. "register" and "forgot" are the only other screens that exist.
+function tabFromUrl() {
+  try {
+    const asked = new URLSearchParams(window.location.search).get("tab")
+      || String(window.location.hash || "").replace(/^#/, "");
+    return ["register", "forgot"].includes(asked) ? asked : "login";
+  } catch {
+    return "login";   // no window, or a URL the browser will not parse
+  }
+}
+
 export const useAuthStore = defineStore("auth", {
   state: () => ({
     session: getAuthSession(),
-    activeTab: "login",
+    activeTab: tabFromUrl(),
     loading: false,
     _sessionEndBound: false,
     message: "",
