@@ -483,7 +483,11 @@ def _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener, *, d
     if out_of_time():
         results["incomplete"] = True
         return results
-    for product_id in _collect_ids("/products", **listing):
+    # ACTIVE only, like prices above. A product with prices cannot be deleted, only archived -- and an
+    # archived product is still returned by an unfiltered list, so without this filter every run
+    # re-archives the same products and the cleanup never converges. It reported 78 archived twice over
+    # before this, with nothing left to do either time.
+    for product_id in _collect_ids("/products", params={"active": "true"}, **listing):
         if out_of_time():
             results["incomplete"] = True
             return results

@@ -400,6 +400,35 @@ class TheResponseWindowTests(unittest.TestCase):
         self.assertEqual(results["customers_deleted"], 3)
         self.assertTrue(any(m == "DELETE" for m, _ in calls))
 
+    def test_every_listing_is_filtered_to_what_still_needs_doing(self):
+        """Otherwise the cleanup never converges. Archiving a product leaves it in the product list, so an
+        unfiltered listing hands it back on the next run and the job re-archives the same set forever."""
+        import handlers.admin_delete_test_data as mod
+
+        listed = []
+
+        def fake_request(method, path, **kw):
+            if method == "GET":
+                listed.append((path, (kw.get("params") or {}).get("active")))
+                return {"data": [], "has_more": False}
+            return {}
+
+        class Repo:
+            def get(self, tenant_id, mode="test"):
+                return {}
+
+        with patch.object(mod, "stripe_request", fake_request), \
+             patch.object(mod, "checkout_credentials", lambda *a, **k: ("sk_test_x", "acct_1")):
+            mod._delete_stripe_test_data("t1", Repo(), None, None, deadline=None)
+
+        by_path = dict(listed)
+        # Prices and products are ARCHIVED, never removed, so they must be filtered or they recur.
+        self.assertEqual(by_path.get("/prices"), "true")
+        self.assertEqual(by_path.get("/products"), "true")
+        # Customers and coupons are deleted outright, so an unfiltered list converges on its own.
+        self.assertIn("/customers", by_path)
+        self.assertIn("/coupons", by_path)
+
     def test_a_non_test_key_is_refused_before_any_call(self):
         """The safety check that keeps this off live objects."""
         import handlers.admin_delete_test_data as mod
