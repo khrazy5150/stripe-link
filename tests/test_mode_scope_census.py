@@ -16,7 +16,14 @@ import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SOURCE = (ROOT / "src" / "stripe_link" / "repositories" / "documents.py").read_text(encoding="utf-8")
+REPOSITORIES = ROOT / "src" / "stripe_link" / "repositories"
+SOURCE = (REPOSITORIES / "documents.py").read_text(encoding="utf-8")
+
+# Code that may build a tenant key by hand. Everything else must go through a repository, which puts the
+# mode in the key for it. Add to this only with a reason: a hand-built `TENANT#{id}` spans BOTH modes.
+KEY_BUILDERS_ALLOWED = {
+    "src/stripe_link/repositories/documents.py",
+}
 
 # Mode-agnostic AND correct: the same record serves both sets of books.
 SETUP_AND_IDENTITY = {
@@ -99,3 +106,42 @@ class TheReadTimeScopingIsRealTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NobodyBuildsATenantKeyByHandTests(unittest.TestCase):
+    """The rule the mode sweep ended on: every query carries the mode.
+
+    When isolation lived in separate physical tables it was structural -- a dev Lambda could not reach live
+    data because the table name pointed elsewhere. Moving the boundary into the KEY made it behavioural
+    instead: a query that forgets the mode does not fail, it answers for the wrong books. The only way to
+    get the old guarantee back is for the data layer to own key construction, so this asserts that it does.
+
+    delete-test-data was the last holdout. It assembled `TENANT#{id}`, read the whole partition and decided
+    per item whether a row looked like test data -- and its hand-kept table list had silently fallen seven
+    tables behind the schema.
+    """
+
+    def test_no_handler_or_domain_module_builds_a_tenant_partition_key(self):
+        offenders = {}
+        for path in sorted((ROOT / "src").rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            if relative in KEY_BUILDERS_ALLOWED:
+                continue
+            # Only CONSTRUCTION counts: a quote immediately before `TENANT#` means a key is being built
+            # here. Prose that names the key shape -- docstrings, comments explaining a partition -- is
+            # describing the design, not bypassing it.
+            built = re.compile(r"""[frb]*["']TENANT#""")
+            lines = [f"{n}: {line.strip()}"
+                     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                     if built.search(line)]
+            if lines:
+                offenders[relative] = lines
+        self.assertEqual(
+            offenders, {},
+            "These build a DynamoDB tenant key outside the repository layer, where nothing guarantees the "
+            f"Stripe mode is in it: {offenders}. Use a mode-scoped repository instead.")
+
+    def test_the_allow_list_does_not_name_files_that_no_longer_exist(self):
+        for relative in KEY_BUILDERS_ALLOWED:
+            with self.subTest(relative=relative):
+                self.assertTrue((ROOT / relative).exists(), f"{relative} is gone; drop it from the allow-list.")

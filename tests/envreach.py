@@ -138,7 +138,7 @@ def called_names(path: pathlib.Path) -> set[str]:
     """Every name this file CALLS, by bare name or as an attribute.
 
     `orders_repository(...)` and `documents.orders_repository(...)` are the same reach, and this codebase
-    writes both.
+    writes both. See `referenced_names` for factories handed around as values instead of called.
     """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -153,6 +153,43 @@ def called_names(path: pathlib.Path) -> set[str]:
             out.add(func.id)
         elif isinstance(func, ast.Attribute):
             out.add(func.attr)
+    return out
+
+
+def referenced_names(path: pathlib.Path) -> set[str]:
+    """Every name this file mentions, whether or not it is in call position.
+
+    `called_names` misses a factory handed around as a VALUE, and a module that keeps a table of them --
+
+        _SCOPED_REPOSITORIES = [("orders", documents.orders_repository), ...]
+        for label, factory in _SCOPED_REPOSITORIES: factory(mode=mode)
+
+    -- calls nothing by name; the only name in call position is `factory`. delete-test-data's reach fell
+    from 20 tables to 6 the moment it was rewritten this way, and a table missing from that set is a
+    RUNTIME failure in a Lambda, never a deploy failure.
+
+    Deliberately NOT applied to `repositories/` itself: a factory named inside documents.py belongs to
+    whoever calls it, and attributing it to documents.py would hand all 39 table variables to all 72
+    modules that import it -- the collapse `factory_envs` exists to prevent.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:  # pragma: no cover
+        return set()
+    # A bare name counts only if this module IMPORTED it. Half the codebase names an injected dependency
+    # after its factory -- `def backfill_page_collections(pages_repository, ...)` -- and counting those
+    # parameters handed six tables to every importer of runtime/publishing.
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                imported.add(alias.asname or alias.name.split(".")[-1])
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in imported:
+            out.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            out.add(node.attr)   # `documents.products_repository` -- the module qualifies it
     return out
 
 
@@ -210,7 +247,10 @@ def reach() -> dict[str, set[str]]:
     own: dict[str, set[str]] = {}
     for name, path in modules.items():
         envs = direct_envs(path, factories=factories)
-        for called in called_names(path):
+        reaching = called_names(path)
+        if REPOSITORIES not in path.parents:
+            reaching |= referenced_names(path)
+        for called in reaching:
             envs |= factories.get(called, set())
         own[name] = envs
     edges = {name: imported_modules(path, known) for name, path in modules.items()}

@@ -186,8 +186,9 @@ class IndirectReadsAreSeen(unittest.TestCase):
         cls.declared = envreach.declared_env_names(cls.template)
 
     def test_a_name_taken_from_a_module_level_list(self):
-        """`for env_name in _PK_TABLES: os.environ.get(env_name, "")` — the dev-only wipe tool. Strip
-        these and it silently deletes nothing, reporting success."""
+        """The delete-test-data tool reaches its tables through repository FACTORIES held in a list --
+        `[("orders", documents.orders_repository), ...]` -- so no table name is a literal in the handler
+        at all. Strip these and it silently deletes nothing, reporting success."""
         reached = self.reachable["handlers.admin_delete_test_data"]
         for name in ("ORDERS_TABLE", "PAGES_TABLE", "PRODUCTS_TABLE"):
             self.assertIn(name, reached, name)
