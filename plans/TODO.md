@@ -3701,6 +3701,35 @@ a transaction") — a test form submission does land in the real list; `refund_r
 though the orders they reference are, so a test refund request would show on the live Refunds screen.
 Both are defensible; both are worth a decision rather than a discovery.
 
+### ⭐ WATCH — platform billing webhook: one endpoint per deployment, and it must stay that way
+
+Checked 2026-10-18 during the mode sweep. `platform_billing_webhook` picks its signing secret from the
+EVENT's livemode — the pattern that was WRONG for the Connect webhook and cost prod 0/36 of its own
+events (plans/TODO.md, the duplicate-signer incident). It is correct here only because of configuration:
+each deployment holds exactly one platform-billing secret, in its own mode —
+
+    dev:  whsec_platform_billing_test   (no _live)
+    prod: whsec_platform_billing_live   (no _test)
+
+— whereas the Connect webhooks hold BOTH in each environment, which is what let an endpoint receive
+events of the other mode.
+
+**If a second mode's platform-billing endpoint is ever registered on the same URL**, this needs the
+Connect webhook's fix: try the other mode's cached secret on `secret_mismatch` only, and log
+`webhook_secret_cross_mode`. Until then the failure would be loud rather than silent — an unconfigured
+mode returns 500, Stripe retries, and eventually disables the endpoint, which is how the October
+incident was noticed.
+
+Not fixed now, deliberately: the fallback cannot be exercised in this configuration, and an untested code
+path on the money webhook is its own risk.
+
+**Billing is otherwise clean.** The two axes are properly separate: PLATFORM billing mode (deploy
+parameter / event livemode) chooses the plan rows and the platform Stripe account; the TENANT's Stripe
+toggle never reaches it — neither billing handler calls `resolve_stripe_mode`, and the subscription sync
+writes only to the tenant profile, which is not mode-scoped. A tenant flipping to test mode cannot change
+whether they are subscribed. Prod has no subscribers yet (all three tenants `trial`); dev has two real
+subscriptions, so the path has been exercised.
+
 ## Business Profile & Reviews
 
 ### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)
