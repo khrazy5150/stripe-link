@@ -8,13 +8,13 @@ fix is a test that touches the thing the fakes stand in for.
 import os
 import unittest
 
-from stripe_link.repositories.documents import (RepositoryError, ai_jobs_repository,
+from stripe_link.repositories.documents import (RepositoryError, jobs_repository,
                                                 ai_provider_config_repository, ai_usage_repository)
 
 FACTORIES = {
     "AI_PROVIDER_CONFIG_TABLE": ai_provider_config_repository,
     "AI_USAGE_TABLE": ai_usage_repository,
-    "AI_JOBS_TABLE": ai_jobs_repository,
+    "JOBS_TABLE": jobs_repository,
 }
 
 
@@ -38,7 +38,7 @@ class FactoryTests(unittest.TestCase):
                     factory()
 
     def test_the_jobs_repository_round_trips_on_its_real_key(self):
-        os.environ["AI_JOBS_TABLE"] = "jb-probe-dev"
+        os.environ["JOBS_TABLE"] = "jb-probe-dev"
         try:
             rows = {}
             class FakeTable:
@@ -47,23 +47,23 @@ class FactoryTests(unittest.TestCase):
                 def get_item(self, Key):  # noqa: N803
                     found = rows.get((Key["tenant_id"], Key["job_id"]))
                     return {"Item": found} if found else {}
-            repository = ai_jobs_repository(table=FakeTable())
+            repository = jobs_repository(table=FakeTable())
             repository.put({"tenant_id": "t1", "job_id": "job_1", "status": "queued"})
             self.assertEqual(repository.get("t1", "job_1")["status"], "queued")
             self.assertIsNone(repository.get("t1", "missing"))
         finally:
-            os.environ.pop("AI_JOBS_TABLE", None)
+            os.environ.pop("JOBS_TABLE", None)
 
     def test_a_job_without_its_keys_is_refused(self):
-        os.environ["AI_JOBS_TABLE"] = "jb-probe-dev"
+        os.environ["JOBS_TABLE"] = "jb-probe-dev"
         try:
-            repository = ai_jobs_repository(table=object())
+            repository = jobs_repository(table=object())
             for bad in ({"job_id": "j"}, {"tenant_id": "t"}, {}):
                 with self.subTest(bad=bad):
                     with self.assertRaises(RepositoryError):
                         repository.put(bad)
         finally:
-            os.environ.pop("AI_JOBS_TABLE", None)
+            os.environ.pop("JOBS_TABLE", None)
 
 
 class ConcurrencyGuardTests(unittest.TestCase):

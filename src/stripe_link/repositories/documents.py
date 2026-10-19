@@ -917,8 +917,12 @@ class AiGenerationEventsRepository:
         return list(response.get("Items") or [])
 
 
-class AiJobsRepository:
-    """Generation jobs (PK=`tenant_id`, SK=`job_id`).
+class JobsRepository:
+    """Background jobs (PK=`tenant_id`, SK=`job_id`).
+
+    Not AI-specific, and never really was -- the name was. Any work too slow for the request path lands
+    here: a generation, a test-data wipe, whatever comes next. `job_type` says which, so one reaper and
+    one polling endpoint serve all of them rather than each new job growing its own rail.
 
     Plain attribute keys rather than `DynamoDocumentRepository`'s PK/SK, matching `AiUsageRepository`
     beside it: these two tables are operational records, not tenant documents, and neither needs the
@@ -1526,8 +1530,8 @@ def ai_usage_repository(table: Any | None = None) -> AiUsageRepository:
     return AiUsageRepository(os.environ.get("AI_USAGE_TABLE", ""), table=table)
 
 
-def ai_jobs_repository(table: Any | None = None) -> AiJobsRepository:
-    return AiJobsRepository(os.environ.get("AI_JOBS_TABLE", ""), table=table)
+def jobs_repository(table: Any | None = None) -> JobsRepository:
+    return JobsRepository(os.environ.get("JOBS_TABLE", ""), table=table)
 
 
 def customers_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:

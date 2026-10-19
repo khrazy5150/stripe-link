@@ -2564,13 +2564,13 @@ Resources:
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           AI_PROVIDER_CONFIG_TABLE: !Ref AiProviderConfigTable
           AI_USAGE_TABLE: !Ref AiUsageTable
-          AI_JOBS_TABLE: !Ref AiJobsTable
+          JOBS_TABLE: !Ref JobsTable
           AI_GENERATION_EVENTS_TABLE: !Ref AiGenerationEventsTable
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AiProviderConfigTable
         - DynamoDBCrudPolicy:
-            TableName: !Ref AiJobsTable
+            TableName: !Ref JobsTable
         # The permanent ledger: written when a slot is spent, updated with tokens and cost when the call
         # returns. Crud rather than Write because the outcome is merged onto the row the request created.
         - DynamoDBCrudPolicy:
@@ -5198,10 +5198,14 @@ Resources:
       QueueName: !Sub "${ProjectPrefix}-ai-generate-dlq-${Environment}"
       MessageRetentionPeriod: 1209600
 
-  AiJobsTable:
+  # Renamed from AiJobsTable: background work is not an AI concept. A rename is a CloudFormation
+  # REPLACEMENT, which is affordable exactly here -- rows are TTL'd and a job lasts seconds, so the only
+  # loss is whatever is in flight at cutover. Paid once, before there are real tenants, so the next slow
+  # job reuses this rail instead of building a parallel one.
+  JobsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${ProjectPrefix}-ai-jobs-${Environment}"
+      TableName: !Sub "${ProjectPrefix}-jobs-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true

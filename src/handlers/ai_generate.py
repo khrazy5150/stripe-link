@@ -67,7 +67,7 @@ from stripe_link.domain.product_brief import brief_from_product
 from stripe_link.domain.page_brief import BriefError, grounding_text, validate as validate_brief
 from stripe_link.domain.page_brief import withheld
 from stripe_link.repositories.documents import (RepositoryError,
-                                                ai_generation_events_repository, ai_jobs_repository,
+                                                ai_generation_events_repository, jobs_repository,
                                                 ai_provider_config_repository, ai_usage_repository,
                                                 offers_repository, pages_repository,
                                                 platform_config_repository, products_repository,
@@ -95,7 +95,7 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     now = int((now_fn or time.time)())
     pick = randomiser or random.SystemRandom().choice
     try:
-        jobs_repo = jobs_repo or ai_jobs_repository()
+        jobs_repo = jobs_repo or jobs_repository()
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
 
