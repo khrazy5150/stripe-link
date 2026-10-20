@@ -166,6 +166,27 @@ next deploy fails. The handlers keep their `if method == "OPTIONS"` branch: SAM'
 MOCK integration that never reaches a Lambda, so the branch is unused, but it costs nothing and is the
 difference between a 500 and an empty 200 if a route is ever invoked that way.
 
+## ⭐ NEW — AI Image Generator: plan written 2026-10-20, nothing built
+
+Plan: **plans/AI_IMAGE_GENERATOR.md**. A tenant types a prompt, gets 1-4 images on the CDN.
+
+Two findings that reshaped the ask, both worth knowing before anyone picks this up:
+
+- **DALL·E is gone.** `dall-e-2`/`dall-e-3` were removed from the OpenAI API on 2026-05-12. The GPT
+  Image family replaces them; `n` accepts 1-10, so 1-4 images is one request. ~$0.17 per four medium
+  images, which is what drives the BYOK-vs-platform-paid decision.
+- **We already own the storage half.** `image-processing` has the buckets, the CDN, the variant pipeline
+  and `POST /upload/from-url` — which takes a URL, stores it and processes it. A generator's output IS a
+  URL. No new bucket, no new CDN (docs/EXTERNAL_SERVICES.md exists because this nearly happened with
+  video).
+
+**Open decision: where it lives.** Asked for as a separate microservice; the plan recommends building it
+in stripe-link instead, because everything around the one API call already exists here (JobsTable,
+ai_provider with `openai` already a BYOK provider, AiUsageRepository, plan gating, the authorizer) and
+the storage belongs to image-processing. A third repo would own neither.
+
+P1 is BYOK-only so it can ship before the pricing question is answered.
+
 ## ✅ DECIDED 2026-10-19 — stay on `2026-05-27.preview`; do NOT migrate to GA
 
 **The decision, and the reasoning, so this is not re-opened from scratch.** Raised because "preview"
