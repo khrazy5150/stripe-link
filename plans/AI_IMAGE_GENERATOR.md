@@ -36,64 +36,73 @@ because this has nearly happened before, with video.
 
 ---
 
-## DECISION REQUIRED: where this lives
+## DECIDED 2026-10-20: its own repo, `../sam/ai-image-generator`
 
-The request says "separate microservice". Three options, with the trade honestly stated.
+Asked for as a separate service; I argued for building it in `stripe-link` and was wrong. The author's
+three reasons, which are better than my objection:
 
-### A. In `stripe-link`, delegating storage to `image-processing` — RECOMMENDED
+**1. The transform budget is a scarce shared resource, and it is for core commerce.** Measured the day
+this was decided: **902,362 / 1,000,000 bytes, 219 Api events, and the guard trips at 240** — about 21
+routes left for the Site object, collections, business profile, reviews elements, ads, GBP and ViralSpy.
+This stack has already failed a deploy on that ceiling once (`plans/TRANSFORM_BUDGET.md`). Spending 3-4
+of the remaining routes on a nice-to-have is a trade the core features would lose.
 
-Generation is one outbound API call. Everything *around* it already exists here:
+**2. Portability.** An image generator coupled to nothing but a UUID is reusable by whatever gets built
+next. One built inside `stripe-link` is a stripe-link feature forever.
 
-| need | already built |
+**3. A UUID owner id is the whole decoupling** — and it answers the objection I raised. My case for
+keeping it here was that a separate service would have to re-implement auth, plans and metering. It does
+not, because **those are policy and they stay here.** `stripe-link` decides whether this user may
+generate; the service only generates. It never learns what a tenant, a plan or an allowance is.
+
+### The split that makes that true
+
+| | owns |
 |---|---|
-| async job + polling + reaper | `JobsTable` (renamed from AiJobsTable 2026-10-19 precisely so it is not AI-specific) |
-| provider config, BYOK | `domain/ai_provider.py` — `openai` is already a BYOK provider |
-| usage metering, allowances | `AiUsageRepository.consume_if_available` |
-| plan gating | tier/entitlement plumbing |
-| auth | the Cognito authorizer |
-| storage + CDN | `image-processing` `/upload/from-url` |
+| **stripe-link** | who may generate, how many they have left, the builder UI, inserting the returned URL into a `photo` element |
+| **ai-image-generator** | prompt → images → durable URLs, foldered by `owner_id` |
+| **image-processing** | the bytes, the CDN, the variants |
 
-Cost: two API routes and one worker mode on an existing function. Transform headroom is ~98KB, so this
-fits comfortably.
+The contract is deliberately thin: `{owner_id, prompt, count, size, quality}` in, `{job_id}` back, CDN
+URLs on poll. **No Cognito** — the caller is a service, so service-to-service auth (shared secret in
+Secrets Manager, or SigV4) rather than an end-user identity. **No tenant table, no plan table, no Stripe
+anything.** If a second app ever calls it, it calls it the same way with a different UUID.
 
-### B. A third repo
+Storage still delegates to `image-processing` rather than minting a bucket: that service is already the
+media layer for the family, and duplicating the CDN and variant pipeline would give a tenant's media two
+homes. The chain `app → ai-image-generator → image-processing` is two generic services doing their own
+jobs.
 
-Honest case for it: image COGS is a different risk profile from page generation, and a blast radius of
-its own is worth something on a service that spends money per click.
+### What this costs
 
-Honest case against: it would own neither the storage (that is `image-processing`) nor the rails
-(metering, plans, auth, jobs — all here). It would have to re-implement auth and metering, or call back
-into `stripe-link` for both. That is a service defined by what it delegates.
-
-### C. In `image-processing`
-
-It owns storage and already fetches remote URLs. But it has no concept of a tenant, a plan, an
-allowance, or a Cognito identity, and `sharp` makes that stack hazardous to deploy (see
-`docs/EXTERNAL_SERVICES.md` — a Mac `sam build` took the whole image service down once).
-
-**Recommendation: A.** The thing being added is small; what makes it feel like a service is the
-machinery around it, and that machinery is already written.
-
----
+Its own repo, stack, deploy script and CI; service-to-service auth; a second place to look when an image
+is missing. Accepted deliberately in exchange for the three reasons above — and for keeping
+`stripe-link`'s remaining routes available to the things that earn money.
 
 ## Flow
 
 ```
-POST /ai/images            {prompt, count: 1..4, size, quality}
-  → validate + check allowance (refuse BEFORE spending money)
-  → write job {document_type: "image_generation_job", status: queued}
-  → self-invoke (InvocationType: Event)   ← no gateway waiting
-  → 202 {job_id}
+stripe-link (policy)                 ai-image-generator (capability)
+─────────────────────                ───────────────────────────────
+tenant clicks Generate
+  gate: plan + allowance        →    POST /generate  {owner_id, prompt, count, size, quality}
+  (refuse BEFORE spending)             → write job {owner_id, status: queued}
+                                       → self-invoke (Event)  ← no gateway waiting
+                                  ←    202 {job_id}
+  poll                          →    GET /jobs/{job_id}
+                                  ←    {status, images:[{url, variants}]}
+  insert URL into a photo element
 
-worker
-  → provider call (n = count) → N image URLs or b64
-  → for each: POST image-processing /upload/from-url {basePrefix: "ai/<tenant_id>"}
-  → poll /upload/status/{id} until complete
-  → job.result = [{cdn_url, variants, prompt, model, cost_cents}]
-
-GET /ai/images?job_id=...  → poll, same shape as /ai/jobs
-GET /ai/images/library     → the tenant's past generations
+                                     worker
+                                       → provider, n = count → N images
+                                       → image-processing POST /upload/from-url
+                                           {basePrefix: "ai/<owner_id>"}
+                                       → poll /upload/status/{id}
+                                       → job.result = [{cdn_url, variants, model, cost_cents}]
 ```
+
+`basePrefix: "ai/<owner_id>"` is the foldering: a UUID per owner, no other structure, so the service
+never needs to know what an owner IS.
 
 The async shape is not optional. Image generation runs 10–30s and API Gateway hangs up at 29 — the same
 wall that produced "Failed to fetch" on delete-test-data and, before that, on page generation. The
@@ -104,13 +113,15 @@ polls the job row.
 
 ## Decisions already made by existing architecture
 
-- **The job row is the result.** `JobsTable`, `document_type: "image_generation_job"` — distinct, so the
-  generation reaper does not claim it and refund an AI allowance it never spent (the hazard found
-  2026-10-19 when that table became shared).
+- **The job row is the result**, and the pattern is worth copying wholesale from `ai_generate.py`:
+  request path queues, worker runs on an async self-invoke where no gateway waits, caller polls, a reaper
+  fails jobs Lambda dropped. Its own table in its own stack, so none of the shared-table hazards apply —
+  but note the one that bit us on 2026-10-19 anyway: if a jobs table is ever shared, a reaper must claim
+  only its own `document_type` or it applies one job kind's compensation to another.
 - **Storage is delegated.** stripe-link stores no media. The handler proxies, as `upload.py` already does.
-- **BYOK is the default for cost.** `openai` is already a BYOK provider; a tenant's own key makes the
-  COGS theirs. Platform-paid generation is a plan entitlement with an allowance, metered through
-  `AiUsageRepository` — the same rail page generation uses.
+- **BYOK is the default for cost.** The key travels with the request, so the service holds no credential
+  of its own and the COGS belongs to whoever owns the key. Platform-paid is a `stripe-link` decision:
+  it gates on plan and allowance, then calls with the platform key. The service does not know which it is.
 
 ## Decisions that need making
 
@@ -143,9 +154,12 @@ Lower stakes than page generation — an image makes no commercial promise — b
 
 ## Phases
 
-**P1 — BYOK, one model, no platform spend.** Routes, job, worker, `/upload/from-url` delegation, a
-builder picker that inserts a CDN URL into a `photo` element. Zero COGS, so it can ship without the
-pricing decision being made.
+**P0 — the repo.** Stack, deploy script, service-to-service auth, one health route. Small, and it is the
+part that makes every later phase cheap.
+
+**P1 — BYOK, one model, no platform spend.** Generate + job + poll, `/upload/from-url` delegation, and in
+`stripe-link` a builder picker that inserts the returned CDN URL into a `photo` element. Zero COGS, so it
+ships without the pricing decision being made.
 
 **P2 — Library + reuse.** `GET /ai/images/library`, re-run a prompt, delete. Needs the retention
 decision.

@@ -180,10 +180,16 @@ Two findings that reshaped the ask, both worth knowing before anyone picks this 
   URL. No new bucket, no new CDN (docs/EXTERNAL_SERVICES.md exists because this nearly happened with
   video).
 
-**Open decision: where it lives.** Asked for as a separate microservice; the plan recommends building it
-in stripe-link instead, because everything around the one API call already exists here (JobsTable,
-ai_provider with `openai` already a BYOK provider, AiUsageRepository, plan gating, the authorizer) and
-the storage belongs to image-processing. A third repo would own neither.
+**DECIDED 2026-10-20: its own repo, `../sam/ai-image-generator`.** I argued for building it in
+stripe-link and was wrong. The transform budget is the reason: **902,362 / 1,000,000 bytes, 219 Api
+events, guard trips at 240** — about 21 routes left for the Site object, collections, business profile,
+reviews elements, ads, GBP and ViralSpy, on a stack that has already failed a deploy at this ceiling. A
+nice-to-have does not get to spend them.
+
+My objection was that a separate service would re-implement auth, plans and metering. It does not,
+because those are POLICY and they stay in stripe-link: it decides who may generate and how many are
+left, then calls with a UUID. The service never learns what a tenant or a plan is — which is also what
+makes it portable to whatever gets built next.
 
 P1 is BYOK-only so it can ship before the pricing question is answered.
 
