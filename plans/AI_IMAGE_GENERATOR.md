@@ -167,11 +167,56 @@ polls the job row.
 
    Confirm the live rate and the current model in the console before setting allowances. Published
    example prices are examples, and one model in this space has already been retired this quarter.
+
+   **Leaning Titan**, and not only on price: it is a FIRST-PARTY Amazon model, so the third-party
+   subscription failure mode below does not apply to it at all. See "Bedrock model access is not a given".
 3. **Retention.** Generated images accumulate on a CDN we pay for and never expire today. A lifecycle
    rule belongs in `image-processing`, not here.
 4. ~~Bedrock as the platform-paid path.~~ **DECIDED: yes.** `PLATFORM_PAID = (BEDROCK,)` is already
    wired, the relationship exists, and it avoids a second vendor whose keys the tenant would have to
    fund themselves. What remains open is only WHICH Bedrock model (see 2).
+
+## Bedrock model access is not a given, and cannot be checked by asking
+
+AWS's own warning on third-party models: the first invocation starts a subscription in the background;
+calls **may succeed temporarily** during setup (up to 15 minutes); if a prerequisite is missing the
+subscription fails and subsequent calls return `AccessDeniedException`; after permissions are granted it
+can take another 2 minutes. *"Verify all prerequisites before invoking models in production."*
+
+This repo has already paid for half that lesson. From `domain/ai_provider.is_verified`, measured
+2026-09-27: `list-foundation-models` lists models the account cannot call, and
+`get-foundation-model-availability` returned four green flags — agreement, entitlement, authorization,
+region, all AVAILABLE — for models that then returned `AccessDenied`. **A catalogue check proves
+nothing; only a generation does.** Hence `verified_at` is set by a real invocation.
+
+The warning adds what we had not hit: a single success is not proof either, if it happened inside the
+subscription window.
+
+### What follows for this service
+
+1. **Prefer a FIRST-PARTY Amazon model.** The warning is specifically about *third-party* models. Titan
+   Image Generator is Amazon's own, so there is no third-party subscription dance to fail — and it is
+   also the cheaper option (~$0.01 vs SDXL's $0.036–$0.08). Price and operational risk point the same
+   way, which is rare enough to take. Choosing Stability or another vendor means owning this whole
+   section; choosing Titan mostly deletes it.
+
+2. **Subscribe at DEPLOY time, never on a tenant's click.** A provisioning smoke generation as part of
+   the deploy, so the 15-minute window is spent by us on a Tuesday rather than by the first tenant who
+   tries the feature. The same call sets `verified_at`.
+
+3. **One success is not verification.** Because calls can succeed mid-subscription and fail after, the
+   smoke generation must be repeated after the window — or a periodic health generation must run — before
+   the feature is advertised. "It worked once" is exactly the evidence this failure mode produces.
+
+4. **`AccessDeniedException` is a PLATFORM state, not a tenant error.** It means we are misconfigured.
+   The tenant must not see "generation failed"; an operator must see "model not subscribed". It belongs
+   in the admin site's view, not in a toast.
+
+5. **Do NOT consume the tenant's allowance on an AccessDenied.** The allowance is taken *before* the call
+   — it has to be, since the check and the increment must be one write — so a platform failure after it
+   spends an image the tenant never got. The generation path already solves this: the reaper calls
+   `_release` to give a slot back when a job dies, *"because the refund is the point."* The image path
+   needs the same release on any platform-side failure, and that includes this one.
 
 ## Safety
 
@@ -190,8 +235,11 @@ Lower stakes than page generation — an image makes no commercial promise — b
 
 ## Phases
 
-**P0 — the repo.** Stack, deploy script, service-to-service auth, one health route. Small, and it is the
-part that makes every later phase cheap.
+**P0 — the repo, and model access proven.** Stack, deploy script, service-to-service auth, one health
+route — plus the provisioning smoke generation that subscribes the model and sets `verified_at`, and a
+second one after the subscription window to prove the first was not a mid-setup false positive. Small,
+and it is the part that makes every later phase cheap. Doing it here means the 15-minute window is spent
+on a Tuesday by us rather than by the first tenant who clicks Generate.
 
 **P1 — Bedrock, platform-paid, metered.** Generate + job + poll, `/upload/from-url` delegation, and in
 `stripe-link`: the three gates, an `ai_images` allowance beside `ai_generations`, and a builder picker
