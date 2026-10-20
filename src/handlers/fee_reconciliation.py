@@ -19,7 +19,8 @@ import logging
 import os
 import time
 
-from stripe_link.domain.fee_reconciliation import _whole, drift, due, fees_of, settled
+from stripe_link.domain.fee_reconciliation import (_whole, charge_reference, drift, due, fees_of,
+                                                   settled)
 from stripe_link.domain.ledger import sale_entry_from_order
 from stripe_link.domain.orphan_charges import charge_window, orphans, summarize
 from stripe_link.silo import current_silo
@@ -305,7 +306,7 @@ def _reconcile_mode(mode, now, *, orders_repo, ledger_repo, stripe_repo, secret_
 
 
 def reconcile_order(order, *, api_key, stripe_account, now, orders_repo, ledger_repo,
-                    fetch_fees=None, true_up=None):
+                    fetch_fees=None, true_up=None, fetch_invoice_fees=None):
     """Replace ONE order's estimated Stripe fee with the real one. Returns the drift in cents, or None
     when the balance transaction still is not there.
 
@@ -316,13 +317,22 @@ def reconcile_order(order, *, api_key, stripe_account, now, orders_repo, ledger_
     The caller decides WHICH orders to offer: the sweep by age, the webhook because Stripe just said this
     charge succeeded. Neither decides what correcting means.
     """
-    from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
+    from handlers.stripe_webhook import (fetch_actual_fees, fetch_actual_fees_for_invoice,
+                                         true_up_fees)
 
     fetch_fees = fetch_fees or fetch_actual_fees
+    fetch_invoice_fees = fetch_invoice_fees or fetch_actual_fees_for_invoice
     true_up = true_up or true_up_fees
     before = fees_of(order)
-    after = true_up(before, fetch_fees(str(order.get("payment_intent_id") or ""),
-                                       api_key=api_key, stripe_account=stripe_account))
+    # The order says HOW it can be reached. A checkout order names its PaymentIntent; a subscription
+    # renewal whose invoice carried none names only the invoice, and asking Stripe for "" found nothing
+    # forever.
+    reference = charge_reference(order)
+    if reference is None:
+        return None
+    kind, value = reference
+    ask = fetch_fees if kind == "payment_intent" else fetch_invoice_fees
+    after = true_up(before, ask(value, api_key=api_key, stripe_account=stripe_account))
     if not settled(after):
         return None
     moved = drift(before, after)

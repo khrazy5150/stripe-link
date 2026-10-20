@@ -70,6 +70,32 @@ def fees_of(order: dict[str, Any] | None) -> dict[str, Any]:
     return fees if isinstance(fees, dict) else {}
 
 
+def charge_reference(order: dict[str, Any] | None) -> tuple[str, str] | None:
+    """How to reach this order's charge at Stripe: by its PaymentIntent, or by the invoice that paid it.
+
+    PaymentIntent first, because it is the direct route and every checkout order has one.
+
+    The invoice fallback is not a nicety. A subscription cycle invoice does not always carry a
+    payment_intent, and `order_record_from_invoice` OMITS the field when it is absent -- it must, since
+    that field is a GSI key and an empty string fails the entire write (setting it blindly took down
+    every renewal on prod, 2026-09-22). Requiring it here meant such an order could never be trued up:
+    its Stripe fee stayed our rounded-UP estimate forever, and once Stripe settled the charge the ledger
+    audit reported the one-cent gap every five minutes, permanently, with no action that could resolve
+    it. Found 2026-10-19 from a renewal that had been alarming since the 18th.
+
+    Returns `(kind, id)` where kind is "payment_intent" or "invoice", or None when the order names
+    neither and genuinely cannot be asked about.
+    """
+    order = order or {}
+    payment_intent = str(order.get("payment_intent_id") or "").strip()
+    if payment_intent:
+        return ("payment_intent", payment_intent)
+    invoice_id = str(order.get("invoice_id") or "").strip()
+    if invoice_id:
+        return ("invoice", invoice_id)
+    return None
+
+
 def due(order: dict[str, Any] | None, now: int, *,
         min_age_seconds: int = MIN_AGE_SECONDS,
         max_age_seconds: int = MAX_AGE_SECONDS) -> bool:
@@ -77,15 +103,16 @@ def due(order: dict[str, Any] | None, now: int, *,
 
     - It must SAY it is an estimate. An order with no `fees_source` predates the marker, and correcting
       one would be rewriting history the tenant never asked anyone to touch.
-    - It must name a charge. Without `payment_intent_id` there is nothing to look up -- which was true of
-      every upsell ever written until 2026-10-04.
+    - It must name a charge, by PaymentIntent or by invoice (see `charge_reference`). Naming neither
+      leaves nothing to look up -- which was true of every upsell ever written until 2026-10-04, and of
+      every payment-intent-less subscription renewal until 2026-10-19.
     - It must be old enough to have settled, and
     - young enough to be worth retrying.
     """
     fees = fees_of(order)
     if str(fees.get("fees_source") or "") != ESTIMATE:
         return False
-    if not str((order or {}).get("payment_intent_id") or "").strip():
+    if charge_reference(order) is None:
         return False
     age = now - _whole((order or {}).get("created_at"))
     return min_age_seconds <= age <= max_age_seconds

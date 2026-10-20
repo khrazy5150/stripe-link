@@ -2088,6 +2088,10 @@ def fetch_session_line_items(session_id: str, *, api_key: str, stripe_account: s
 
 
 STRIPE_PAYMENT_INTENT_URL = "https://api.stripe.com/v1/payment_intents/{}"
+# The invoice route to the same charge. A subscription cycle invoice does not always carry a
+# payment_intent, so an invoice-born order may have no PaymentIntent to ask about -- see
+# `fetch_actual_fees_for_invoice`.
+STRIPE_INVOICE_URL = "https://api.stripe.com/v1/invoices/{}"
 
 
 def fees_from_payment_intent(payment_intent: Any) -> dict[str, int]:
@@ -2115,6 +2119,68 @@ def fees_from_payment_intent(payment_intent: Any) -> dict[str, int]:
     return {key: value for key, value in fees.items() if key in ("stripe_fee", "net")}
 
 
+def fees_from_invoice(invoice: Any) -> dict[str, int]:
+    """`{stripe_fee, net}` off an ALREADY-EXPANDED invoice, or `{}` when it does not carry one.
+
+    The invoice's own `charge` rather than its `payment_intent`: that is the field a cycle invoice always
+    has once it is paid, and it is the whole reason this route exists.
+    """
+    if not isinstance(invoice, dict):
+        return {}
+    charge = invoice.get("charge")
+    txn = charge.get("balance_transaction") if isinstance(charge, dict) else None
+    from stripe_link.domain.fee_reconciliation import fees_from_balance_transaction
+
+    fees = fees_from_balance_transaction(txn)
+    return {key: value for key, value in fees.items() if key in ("stripe_fee", "net")}
+
+
+def _fetch_fees(url: str, *, api_key: str, stripe_account: str, opener, parse, subject: str
+                ) -> dict[str, int]:
+    """One GET, one parse. Shared so the PaymentIntent and invoice routes cannot drift on headers,
+    timeout, or on what a failure does."""
+    opener = opener or urlopen
+    headers = {
+        "Authorization": f"Basic {b64encode((api_key + ':').encode('utf-8')).decode('ascii')}",
+        # PINNED, and deliberately older than the webhook endpoint's version. These are OUR outbound
+        # reads, so the version is ours to choose, and on this one `invoice.charge` still exists -- which
+        # is what makes the invoice route work without touching the endpoint's version at all.
+        "Stripe-Version": "2024-06-20",
+    }
+    if stripe_account:
+        headers["Stripe-Account"] = stripe_account
+    try:
+        request = Request(url, headers=headers, method="GET")
+        with opener(request, timeout=15) as response:
+            return parse(json.loads(response.read().decode("utf-8")))
+    except Exception as exc:  # noqa: BLE001 - the estimate stands; a true-up is an improvement
+        # LOGGED, not merely swallowed. The estimate standing is the correct outcome either way, which is
+        # exactly why a broken call here is invisible: the order records, the ledger records, and the
+        # numbers look plausible because an estimate IS plausible. A bare `return {}` meant nobody could
+        # tell a settling delay from a 401 (2026-10-04).
+        print(f"[fees] true-up unavailable for {subject}: {type(exc).__name__}: {exc}")
+        return {}
+
+
+def fetch_actual_fees_for_invoice(invoice_id: str, *, api_key: str, stripe_account: str = "",
+                                  opener=None) -> dict[str, int]:
+    """What Stripe actually charged, reached through the INVOICE rather than a PaymentIntent.
+
+    A subscription cycle invoice does not always carry a payment_intent, and `order_record_from_invoice`
+    OMITS `payment_intent_id` when it is absent -- it must, because that field is a GSI key and an empty
+    string fails the whole write. The consequence went unnoticed until 2026-10-19: such an order could
+    never be trued up, so its fee stayed our rounded-UP estimate forever, and once Stripe settled the
+    charge the ledger audit reported the one-cent gap every five minutes with no way to resolve it.
+
+    Same contract as `fetch_actual_fees`: `{stripe_fee, net}`, or `{}` when it cannot be known.
+    """
+    if not invoice_id or not api_key:
+        return {}
+    return _fetch_fees(STRIPE_INVOICE_URL.format(invoice_id) + "?expand[]=charge.balance_transaction",
+                       api_key=api_key, stripe_account=stripe_account, opener=opener,
+                       parse=fees_from_invoice, subject=invoice_id)
+
+
 def fetch_actual_fees(payment_intent_id: str, *, api_key: str, stripe_account: str = "",
                       opener=None) -> dict[str, int]:
     """What Stripe ACTUALLY charged, off the charge's balance transaction.
@@ -2130,27 +2196,10 @@ def fetch_actual_fees(payment_intent_id: str, *, api_key: str, stripe_account: s
     """
     if not payment_intent_id or not api_key:
         return {}
-    opener = opener or urlopen
-    url = (STRIPE_PAYMENT_INTENT_URL.format(payment_intent_id)
-           + "?expand[]=latest_charge.balance_transaction")
-    headers = {
-        "Authorization": f"Basic {b64encode((api_key + ':').encode('utf-8')).decode('ascii')}",
-        "Stripe-Version": "2024-06-20",
-    }
-    if stripe_account:
-        headers["Stripe-Account"] = stripe_account
-    try:
-        request = Request(url, headers=headers, method="GET")
-        with opener(request, timeout=15) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        return fees_from_payment_intent(data)
-    except Exception as exc:  # noqa: BLE001 - the estimate stands; a true-up is an improvement
-        # LOGGED, not merely swallowed. The estimate standing is the correct outcome either way, which is
-        # exactly why a broken call here is invisible: the order records, the ledger records, and the
-        # numbers look plausible because an estimate IS plausible. A bare `return {}` meant nobody could
-        # tell a settling delay from a 401 (2026-10-04).
-        print(f"[fees] true-up unavailable for {payment_intent_id}: {type(exc).__name__}: {exc}")
-        return {}
+    return _fetch_fees(STRIPE_PAYMENT_INTENT_URL.format(payment_intent_id)
+                       + "?expand[]=latest_charge.balance_transaction",
+                       api_key=api_key, stripe_account=stripe_account, opener=opener,
+                       parse=fees_from_payment_intent, subject=payment_intent_id)
 
 
 def true_up_fees(fees: dict[str, Any], actual: dict[str, int] | None) -> dict[str, Any]:
