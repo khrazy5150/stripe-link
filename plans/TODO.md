@@ -191,7 +191,22 @@ because those are POLICY and they stay in stripe-link: it decides who may genera
 left, then calls with a UUID. The service never learns what a tenant or a plan is — which is also what
 makes it portable to whatever gets built next.
 
-P1 is BYOK-only so it can ship before the pricing question is answered.
+**DECIDED 2026-10-20: platform-paid on Bedrock, metered by tier — not BYOK.** An OpenAI API key is not
+covered by a ChatGPT subscription; the key needs its own prepaid credit balance, so BYOK means a tenant
+opens an account, attaches a card, pre-buys credits, mints a key and pastes it before generating one
+image. Double friction on a nice-to-have. Platform-paid also gives the $19 plan its SECOND reason to
+exist alongside the lower transaction fee.
+
+The rails already exist for page generation and want reusing wholesale: the three gates in
+`ai_generate.py` (plan entitlement → `consume_if_available` atomic allowance → `within_platform_budget`,
+which is the only one that sees serial-trial-signup abuse), and `_configured_allowances()` reading from a
+CONFIG row the Admin Site edits without a deploy. Images want an `ai_images` beside
+`ai_generations: 20` in docs/PLATFORM_PLANS.md.
+
+**One number to confirm before setting allowances:** Nova Canvas reached END OF LIFE 2026-09-30. Titan
+Image lists ~$0.01/image at 1024×1024; SDXL $0.036–$0.08. At $0.01 five free images cost $0.05 per tenant
+per month; at $0.08 they cost $0.40. Check the live console rate — published examples are examples, and a
+model in this space has already been retired this quarter.
 
 ## ✅ DECIDED 2026-10-19 — stay on `2026-05-27.preview`; do NOT migrate to GA
 

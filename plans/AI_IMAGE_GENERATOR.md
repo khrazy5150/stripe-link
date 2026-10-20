@@ -119,23 +119,59 @@ polls the job row.
   but note the one that bit us on 2026-10-19 anyway: if a jobs table is ever shared, a reaper must claim
   only its own `document_type` or it applies one job kind's compensation to another.
 - **Storage is delegated.** stripe-link stores no media. The handler proxies, as `upload.py` already does.
-- **BYOK is the default for cost.** The key travels with the request, so the service holds no credential
-  of its own and the COGS belongs to whoever owns the key. Platform-paid is a `stripe-link` decision:
-  it gates on plan and allowance, then calls with the platform key. The service does not know which it is.
+- **Platform-paid, and the gates already exist.** `ai_generate.py` runs three, and the image path wants
+  all three for the same reasons:
+
+  1. **plan entitlement** — is this tier allowed to generate at all;
+  2. **per-tenant allowance** — `consume_if_available`, whose check and increment are ONE conditional
+     write (two round trips produced four generations from an allowance of three, under a comment saying
+     it could not happen);
+  3. **platform budget** — `within_platform_budget`, identity-independent, and the comment says exactly
+     why it exists: *"the only control that sees abuse per-tenant caps cannot: serial trial signups, each
+     one perfectly within its own allowance."* A free image allowance is a way to spend AWS money, and
+     this is the control that bounds it.
+
+  All three live in `stripe-link`, which is consistent with the split: policy here, capability there.
+  The service never sees a plan.
+
+- **Allowances are config, not code.** `_configured_allowances()` reads them from a CONFIG row so the
+  Admin Site can change them without a deploy, and `docs/PLATFORM_PLANS.md` already carries
+  `ai_generations: 20` per plan. Images want an `ai_images` beside it — the same shape, the same table,
+  the same editing path. Tuning "5 free" to "3 free" after launch is a config edit.
+
+- **BYOK stays possible, later.** The key can travel with the request for a tenant who wants to spend
+  their own money at a higher volume. It is just not the default, and not P1.
 
 ## Decisions that need making
 
-1. **Platform-paid at all?** At ~$0.17 per four-image click, a generous free allowance is a real bill.
-   Options: BYOK-only at launch (zero COGS, zero abuse exposure); small metered allowance on the paid
-   plan; or paid add-on credits. BYOK-only is the cheapest way to ship and learn.
-2. **Which model tier is the default.** `-mini` at $0.005/image makes a free allowance plausible;
-   `gpt-image-2` does not. This is the same shape as the page-gen finding that *the cheap model is the
-   dangerous one* — except for images "dangerous" means ugly, not libellous, so the trade differs.
+1. ~~Platform-paid at all?~~ **DECIDED 2026-10-20: platform-paid on Bedrock, metered by tier.**
+   BYOK was the original P1 and is wrong for this feature. An OpenAI API key is **not** covered by a
+   ChatGPT subscription — the key needs its own prepaid credit balance. So "bring your own key" means a
+   tenant must open an OpenAI account, attach a card, pre-buy credits, mint a key and paste it, before
+   generating one image for their storefront. That is double friction on a nice-to-have, and almost
+   nobody completes it.
+
+   Platform-paid on Bedrock instead, with an allowance per tier: a few images free, more at $19. This
+   also gives the paid plan its **second** reason to exist alongside the lower transaction fee, which
+   matters because the plan had exactly one.
+
+2. **Which Bedrock model — OPEN, and the one number that must be confirmed.** Nova Canvas, the obvious
+   default, **reached end of life 2026-09-30**. Titan Image Generator lists ~**$0.01**/image at 1024×1024
+   standard; SDXL runs **$0.036–$0.08** depending on quality and step count. That 8× spread decides how
+   generous "free" can be:
+
+   | per image | 5 free images | 100 images on the $19 tier |
+   |---|---|---|
+   | $0.01 | $0.05 / tenant / month | $1.00 against $19 |
+   | $0.08 | $0.40 / tenant / month | $8.00 against $19 |
+
+   Confirm the live rate and the current model in the console before setting allowances. Published
+   example prices are examples, and one model in this space has already been retired this quarter.
 3. **Retention.** Generated images accumulate on a CDN we pay for and never expire today. A lifecycle
    rule belongs in `image-processing`, not here.
-4. **Bedrock as the platform-paid path.** Bedrock offers image models and we already hold that
-   relationship, with `PLATFORM_PAID = (BEDROCK,)` wired. Worth comparing before adding a second
-   platform-paid vendor.
+4. ~~Bedrock as the platform-paid path.~~ **DECIDED: yes.** `PLATFORM_PAID = (BEDROCK,)` is already
+   wired, the relationship exists, and it avoids a second vendor whose keys the tenant would have to
+   fund themselves. What remains open is only WHICH Bedrock model (see 2).
 
 ## Safety
 
@@ -157,15 +193,16 @@ Lower stakes than page generation — an image makes no commercial promise — b
 **P0 — the repo.** Stack, deploy script, service-to-service auth, one health route. Small, and it is the
 part that makes every later phase cheap.
 
-**P1 — BYOK, one model, no platform spend.** Generate + job + poll, `/upload/from-url` delegation, and in
-`stripe-link` a builder picker that inserts the returned CDN URL into a `photo` element. Zero COGS, so it
-ships without the pricing decision being made.
+**P1 — Bedrock, platform-paid, metered.** Generate + job + poll, `/upload/from-url` delegation, and in
+`stripe-link`: the three gates, an `ai_images` allowance beside `ai_generations`, and a builder picker
+that inserts the returned CDN URL into a `photo` element. Gated on confirming the model and its live
+per-image rate.
 
 **P2 — Library + reuse.** `GET /ai/images/library`, re-run a prompt, delete. Needs the retention
 decision.
 
-**P3 — Platform-paid.** Allowance, metering, plan gate, Bedrock-vs-OpenAI comparison. Needs decisions
-1, 2 and 4.
+**P3 — BYOK as an escape hatch.** For a tenant who wants volume beyond their tier and will pay OpenAI
+directly. Optional, and only worth building if anyone asks.
 
 **P4 — Edit.** "modify them" from the original request: the GPT Image models support edits with a mask.
 Deliberately last — it doubles the surface and P1 has to be proven first.
