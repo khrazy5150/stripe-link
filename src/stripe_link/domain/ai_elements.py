@@ -193,8 +193,15 @@ def for_prompt(elements) -> str:
         for example in (spec.get("good") or [])[:3]:
             lines.append("RIGHT: " + json.dumps(example))
         for example in (spec.get("bad") or [])[:3]:
-            why = example.pop("why", "") if isinstance(example, dict) else ""
-            lines.append("WRONG: " + json.dumps(example) + (f"  <- {why}" if why else ""))
+            # READ, never pop. `contract()` hands out the live cached rules, so popping edited the
+            # contract itself: the first call on a warm Lambda consumed every `why`, and every later
+            # generation in that container was shown a wrong example with no reason it was wrong --
+            # silently teaching less, the longer the container lived. The `why` is the whole value of a
+            # bad example; without it the model just sees a shape it is allowed to copy.
+            why = example.get("why", "") if isinstance(example, dict) else ""
+            shown = ({key: value for key, value in example.items() if key != "why"}
+                     if isinstance(example, dict) else example)
+            lines.append("WRONG: " + json.dumps(shown) + (f"  <- {why}" if why else ""))
         for other, note in (spec.get("confusable_with") or {}).items():
             lines.append(f"NOT {other}: {note}")
         for rule in spec.get("rules") or []:
