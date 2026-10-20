@@ -166,6 +166,43 @@ next deploy fails. The handlers keep their `if method == "OPTIONS"` branch: SAM'
 MOCK integration that never reaches a Lambda, so the branch is unused, but it costs nothing and is the
 difference between a 500 and an empty 200 if a route is ever invoked that way.
 
+## ✅ DECIDED 2026-10-19 — stay on `2026-05-27.preview`; do NOT migrate to GA
+
+**The decision, and the reasoning, so this is not re-opened from scratch.** Raised because "preview"
+reads as "beta, soon obsolete". It is not that.
+
+- **A pinned version does not drift.** Once a destination is pinned to `2026-05-27.preview`, Stripe
+  serves that payload shape. The risk was never silent change; it is only an eventual forced migration,
+  and **no retirement date is published for preview API versions**.
+- **Preview is a SUPERSET of GA, not an older branch.** `2026-10-07.preview` is newer than
+  `2026-09-30.endive`. There is no capability in GA that preview lacks, so an upgrade buys stability of
+  channel, not function.
+- **It would not have fixed the accounting**, which is what prompted the question. The one-cent ledger
+  gap was our own arithmetic (we ceil, Stripe rounds) plus a true-up that could not reach the charge.
+  Both fixed 2026-10-19, independent of any version.
+- **The cost is real and badly timed.** Endive carries its own breaking changes, so migrating means
+  adapting to a THIRD payload shape and re-verifying ~10 event types on the live money path, with
+  failure that is silent by construction — during launch.
+
+**The four adaptations the handler already makes for this version** (so a future migration knows its
+scope): `charge.refunds` absent from the payload; `subscription_details` moved under `parent`;
+`invoice.subscription` gone; `line.price` replaced by `line.pricing.price_details`. All are written as
+"check the current place, then the legacy ones", so they tolerate more than one shape.
+
+**Revisit when**: Stripe announces a retirement for `2026-05-27.preview`, OR a GA-only guarantee is
+needed, OR the first quiet period after launch. **Thin events** (now GA — version-independent payloads)
+are the permanent answer and should be evaluated before any version migration, since they end the
+problem rather than deferring it.
+
+**Already built for it**: `/webhook/stripe` (the stable route) exists on the same function with its own
+`whsec_stable_{mode}` secret slot and nothing pointing at it — see plans/SILO_MODEL.md. A migration is a
+parallel run on dev plus a parity test, not a rewrite.
+
+**Unrelated but adjacent, verified the same day**: the ACCOUNT default version is `2020-03-02`, which is
+inert — every outbound call pins its own version (`stripe_client.STRIPE_API_VERSION`, plus five
+hand-built requests). The fee read's pin is load-bearing and guarded by
+`tests/test_fee_read_api_version.py`: Basil (2025-03-31) removed `invoice.charge`, which that read needs.
+
 ## Stripe API version drift — HIGH
 
 **The account is on `2026-05-27.preview`, and the code is written against remembered field names.** Three

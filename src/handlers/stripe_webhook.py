@@ -2093,6 +2093,17 @@ STRIPE_PAYMENT_INTENT_URL = "https://api.stripe.com/v1/payment_intents/{}"
 # `fetch_actual_fees_for_invoice`.
 STRIPE_INVOICE_URL = "https://api.stripe.com/v1/invoices/{}"
 
+# PRE-BASIL, AND IT HAS TO BE. Stripe's Basil release (2025-03-31) removed `charge` from the Invoice
+# object -- along with `payment_intent`, which is the whole reason the invoice route exists. The invoice
+# fee read below depends on `invoice.charge`, so this pin is load-bearing, not housekeeping: bump it past
+# Basil and the expand returns nothing, the fee silently stays our rounded-up estimate, and the ledger
+# audit starts reporting a cent every five minutes again with no way to resolve it.
+#
+# `tests/test_fee_read_api_version.py` fails if this moves, so the bump is a decision someone makes on
+# purpose rather than a tidy-up. The modern replacement is /v1/invoice_payments (or expanding
+# `payments.data.payment.payment_intent`), which is the work that has to happen FIRST if this ever moves.
+FEE_READ_API_VERSION = "2024-06-20"
+
 
 def fees_from_payment_intent(payment_intent: Any) -> dict[str, int]:
     """`{stripe_fee, net}` off an ALREADY-EXPANDED PaymentIntent, or `{}` when it does not carry one.
@@ -2145,7 +2156,7 @@ def _fetch_fees(url: str, *, api_key: str, stripe_account: str, opener, parse, s
         # PINNED, and deliberately older than the webhook endpoint's version. These are OUR outbound
         # reads, so the version is ours to choose, and on this one `invoice.charge` still exists -- which
         # is what makes the invoice route work without touching the endpoint's version at all.
-        "Stripe-Version": "2024-06-20",
+        "Stripe-Version": FEE_READ_API_VERSION,
     }
     if stripe_account:
         headers["Stripe-Account"] = stripe_account
