@@ -2655,6 +2655,14 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /ai/jobs
             Method: GET
+        # Takedown. Tenant imagery reaches public pages, so removing one has to be possible from the
+        # builder rather than only by an operator.
+        AiImageDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ai/jobs/{job_id}
+            Method: DELETE
         # The reaper. Same function, a third invocation mode -- a job abandoned by a Lambda drop or a
         # worker timeout is indistinguishable from one still running, so nothing else can tell.
         AiJobReaper:

@@ -116,6 +116,8 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         return json_response({})
     if (event or {}).get("httpMethod", "").upper() == "GET":
         return _read_job(event, jobs_repo, usage_repo=usage_repo, events_repo=events_repo)
+    if (event or {}).get("httpMethod", "").upper() == "DELETE":
+        return _delete_image(event)
     body = parse_json_body(event) or {}
     tenant_id = tenant_id_from_event(event, body)
     if not tenant_id:
@@ -394,6 +396,30 @@ def _generate_image(body, *, tenant_id, event, now, pick, jobs_repo, usage_repo,
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
     return json_response({"job": _public(job)}, status_code=202)
+
+
+def _delete_image(event, *, deleter=None):
+    """Take one of this tenant's AI images down.
+
+    The id is the IMAGE SERVICE's, because that is what the library hands the picker. Passing this
+    stack's own job id instead finds nothing there and returns a perfectly truthful "nothing to take
+    down" -- the wrong kind of success to show someone who asked for a picture to come down, and a
+    mistake already made once by hand (author, 2026-10-20).
+
+    Scoped by tenant, so a job id alone cannot reach another business's images.
+    """
+    tenant_id = tenant_id_from_event(event)
+    job_id = str(((event or {}).get("pathParameters") or {}).get("job_id") or "").strip()
+    if not tenant_id or not job_id:
+        return error_response("tenant_id and job_id are required.", code="missing_job")
+    try:
+        from urllib.parse import urlencode
+
+        query = urlencode({"owner_id": tenant_id, "job_id": job_id})
+        payload = (deleter or ai_image_client.call)(f"/jobs?{query}", method="DELETE")
+    except ai_image_client.ImageServiceError as exc:
+        return error_response(str(exc), status_code=exc.status_code, code=exc.code)
+    return json_response(payload)
 
 
 def _image_library(tenant_id, *, reader=None):

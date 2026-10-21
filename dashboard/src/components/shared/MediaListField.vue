@@ -82,7 +82,14 @@
         <button v-if="allowVideoUrl" type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="openUrlEntry">
           <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>YouTube / Vimeo</span>
         </button>
+
+        <!-- Opt-in per field. The hero wants a striking image; a product gallery wants the product. -->
+        <button v-if="allowAiImage" type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="aiPickerOpen = true">
+          <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"></path><circle cx="12" cy="12" r="3"></circle></svg><span>Generate AI Image</span>
+        </button>
       </div>
+
+      <AiImagePicker v-if="aiPickerOpen" @close="aiPickerOpen = false" @picked="useGenerated" />
 
       <div v-if="urlEntryOpen" class="media-url-entry">
         <input
@@ -126,6 +133,7 @@
 // Media KIND is derived from the URL extension, never stored — mirroring the server's is_video_url()
 // in runtime/html.py. Keep VIDEO_EXTENSIONS below in sync with that list.
 import { computed, nextTick, ref } from "vue";
+import AiImagePicker from "./AiImagePicker.vue";
 import ImageCropper from "./ImageCropper.vue";
 import { cropBox, cropImage } from "../../api/uploads";
 
@@ -161,9 +169,27 @@ const props = defineProps({
   uploadVideo: { type: Function, default: null },
   allowVideoUrl: { type: Boolean, default: true },
   allowVideoUpload: { type: Boolean, default: false },
+  // OFF by default. The hero is the field that wants a generated image -- the product shots belong to
+  // the product, and offering to invent one beside them would invite replacing a photograph of a real
+  // thing with a picture of a thing that does not exist.
+  allowAiImage: { type: Boolean, default: false },
 });
 const emit = defineEmits(["update:modelValue", "crop-applied", "poster-set"]);
 
+/**
+ * A generated image enters the list exactly like an uploaded one.
+ *
+ * It CAN, because the image service stores through the same image-processing pipeline as a manual
+ * upload: the URL that comes back is the same shape, with the same variants, on the same CDN. There is
+ * no second media type and the renderer needs no special case.
+ */
+function useGenerated({ url }) {
+  aiPickerOpen.value = false;
+  if (!url || items.value.includes(url)) return;
+  emit("update:modelValue", [...items.value, url]);
+}
+
+const aiPickerOpen = ref(false);
 const imageInput = ref(null);
 const videoInput = ref(null);
 const urlInput = ref(null);

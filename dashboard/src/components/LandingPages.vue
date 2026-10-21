@@ -567,6 +567,7 @@
                     :assets="builder.image_assets || {}"
                     :posters="builder.video_posters || {}"
                     allow-video-upload
+                    allow-ai-image
                     @update:model-value="setHeroMedia"
                     @crop-applied="onHeroCropApplied"
                     @poster-set="onHeroPosterSet"
