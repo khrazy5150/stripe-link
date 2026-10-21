@@ -43,7 +43,7 @@ plans reference test-mode Stripe prices and live plans reference live-mode price
   "fee_tier": "pro",                   // ⭐ the TRANSACTION-FEE tier this plan grants (see below)
   "entitlements": { "...": true },     // ⭐ the FEATURES this plan unlocks (see below)
   "ai_generations": 20,                // ⭐ platform-paid AI page generations per calendar month
-  "ai_images": 30,                     // ⭐ platform-paid AI images per calendar month
+  "ai_images": 200,                    // ⭐ platform-paid AI images per calendar month
   "ai_image_quality": "low"            // ⭐ the BEST image quality this plan may request
 }
 ```
@@ -106,10 +106,28 @@ Platform-paid AI images per calendar month, counted on its OWN key (`images#<per
 string — and it buys two things: the plan reads as "20 page generations + 30 hero images" rather than one
 pooled number, and a tenant experimenting with images never discovers they can no longer generate a page.
 
-Set 2026-10-20 after the provider was confirmed. At **$0.063** for a landscape hero (1536×1024, medium
-quality) 30 images is **$1.89/month**, which puts image spend at about the share pages already take
-($2.10). Combined that is ~21% of a $19 subscription at the model layer — near, and deliberately not over,
-the line the ladder was tuned to avoid.
+**Raised to 200 on 2026-10-21**, when the AI stopped illustrating only the hero. Every element that
+takes an image — content_block, page_ribbon, before_after, photo, link_cards, coupon, plus the hero —
+can be AI-filled, so a fully illustrated page is about **ten** images, not one. Ten rather than seven
+because `before_after` is inherently a PAIR and a `link_cards` row is usually three or four; sizing to
+seven would mean revisiting this the first time somebody used a three-card row. Twenty pages a month
+times ten is 200.
+
+The cost is not a flat multiple, because the shapes differ (`image_ratios.json`): hero, page_ribbon and
+before_after default to landscape and carry the 1.5× non-square multiplier, while content_block, photo,
+link_cards and coupon default to square. At `low` that is **$0.011 square / $0.0165 landscape**, so a
+fully illustrated page costs **$0.09–$0.13** of imagery.
+
+| images/page | images $ | + 20 pages | % of $18.15 NET |
+|---|---|---|---|
+| 7 | $1.87 | $3.97 | 21.9% |
+| 8 | $2.20 | $4.30 | 23.7% |
+| 10 | $2.64 | $4.74 | **26.1%** |
+
+Measured against NET of a $19 plan ($18.15 after Stripe's 2.9% + 30¢), not gross. Two things make the
+real margin better than that table: the fixed 30¢ is 1.6% of $19 and dilutes on every higher rung, and
+a Premium tenant is also on the `pro` fee tier paying 2% on their transactions — so the subscription is
+the pessimistic denominator, not the whole revenue from that tenant.
 
 The trial gets **7 lifetime** images and the free tier gets **0**: images are for a paying tenant or one
 inside their 14 days, which is the same rule `ai_generations` already follows.
@@ -187,9 +205,14 @@ switch it on deliberately once the ledger shows what real spend looks like.
 spans two of them — a monthly trial allowance would be handed out twice. Trial usage is counted under the
 period key `"trial"`, which never rolls over because there is no next trial period.
 
-`ai_free_images` is 0 for the same reason, and the numbers deployed on 2026-10-20 are: trial 3 pages +
-7 images (lifetime, prod), free 0 + 0, Premium 20 pages + 30 images per month. Dev deliberately differs on
-the TRIAL numbers only (25 and 25) so the gate can be exercised without burning a real allowance.
+`ai_free_images` is 0 for the same reason. Deployed numbers as of **2026-10-21**: trial 3 pages +
+**30** images (lifetime, prod) — three complete, fully illustrated pages — free 0 + 0, Premium 20 pages
++ **200** images per month. A trial therefore costs about **$0.72 once**: 4% of a single month's net,
+and 0.3% across a year, which is acquisition cost rather than a running one.
+
+Dev differs on the TRIAL numbers only (25 pages, 50 images) so the gate can be exercised without
+burning a real allowance — and deliberately sits ABOVE prod, because a test environment that runs out
+before production does teaches the wrong lesson.
 
 `ai_free_generations` is 0 today: the free tier's taste is the trial's job now, and a free tenant who wants
 more brings their own key, which costs the platform nothing. It is editable rather than hardcoded because that

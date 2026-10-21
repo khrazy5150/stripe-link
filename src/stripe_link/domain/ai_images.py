@@ -63,9 +63,18 @@ DEFAULT_STYLE = "lifestyle"
 
 MAX_PROMPT = 2000
 MAX_IMAGES_PER_REQUEST = 4
-# One image per PAGE generation. A page becomes $0.105 + $0.0165; unbounded, one generation could order
-# four without anybody choosing to.
-MAX_IMAGES_PER_PAGE_GENERATION = 1
+# What ONE page generation may order, now that the AI is meant to illustrate a whole page rather than
+# only its hero. Ten, not seven: "one per control" undercounts, because before_after is inherently a
+# PAIR and a link_cards row is usually three or four. Sizing to seven would mean revisiting this the
+# first time somebody used a three-card row.
+#
+# Still a CAP rather than no limit. A fully illustrated page is ~$0.09-0.13 of images on top of
+# $0.105 of generation; unbounded, one generation could order any number without anybody choosing to.
+#
+# The shapes come from `image_ratios.json`, which is why the cost is not a flat multiple: hero,
+# page_ribbon and before_after default to landscape and carry the 1.5x non-square multiplier, while
+# content_block, photo, link_cards and coupon default to square.
+MAX_IMAGES_PER_PAGE_GENERATION = 10
 
 
 def rank(quality: str) -> int:
