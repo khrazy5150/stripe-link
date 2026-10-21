@@ -63,6 +63,16 @@ DEFAULT_PLAN_AI_GENERATIONS = 20
 DEFAULT_TRIAL_AI_GENERATIONS = 3
 DEFAULT_FREE_AI_GENERATIONS = 0
 
+# AI IMAGES, counted separately from pages. The fallbacks fail in opposite directions on purpose, and
+# the direction is chosen by who is harmed: a PAYING tenant whose plan row is missing `ai_images` must
+# not be told they have none (they bought something), so that falls back to the lowest paid rung the
+# same way `ai_generations` does; a missing QUALITY falls back to the cheapest, because an omission
+# must never silently buy the 15x-dearer option on our card.
+DEFAULT_PLAN_AI_IMAGES = 30
+DEFAULT_TRIAL_AI_IMAGES = 7
+DEFAULT_FREE_AI_IMAGES = 0
+DEFAULT_AI_IMAGE_QUALITY = "low"
+
 
 def _as_int(value: Any, fallback: int) -> int:
     try:
@@ -75,6 +85,40 @@ def plan_ai_generations(plan: dict[str, Any] | None) -> int:
     """The monthly AI allowance this plan grants. Denormalized onto the tenant by the billing webhook, the
     same path `entitlements` and `fee_tier` take, so the generation path never reads this table."""
     return _as_int((plan or {}).get("ai_generations"), DEFAULT_PLAN_AI_GENERATIONS)
+
+
+def plan_ai_images(plan: dict[str, Any] | None) -> int:
+    """The monthly AI image allowance this plan grants. Denormalized onto the tenant like its sibling."""
+    return _as_int((plan or {}).get("ai_images"), DEFAULT_PLAN_AI_IMAGES)
+
+
+def plan_ai_image_quality(plan: dict[str, Any] | None) -> str:
+    """The BEST image quality this plan may request -- a ceiling, not a setting.
+
+    A plan naming `high` may still ask for `low`; a plan naming `low` asking for `high` is clamped. It
+    has to be enforced where the request is built, because quality travels in the request body: a UI
+    that omits the control is not a limit, it is a suggestion.
+    """
+    return str((plan or {}).get("ai_image_quality") or DEFAULT_AI_IMAGE_QUALITY).strip().lower()
+
+
+def trial_ai_images(mode: str, repository: Any | None = None) -> int:
+    """The LIFETIME image allowance a 14-day trial carries. Not a plan field: a trial is not a plan."""
+    config = cached_platform_billing(mode, repository)["config"]
+    return _as_int(config.get("ai_trial_images"), DEFAULT_TRIAL_AI_IMAGES)
+
+
+def free_ai_images(mode: str, repository: Any | None = None) -> int:
+    """What the free tier gets. Zero -- images are for a paying tenant or one inside their 14 days."""
+    config = cached_platform_billing(mode, repository)["config"]
+    return _as_int(config.get("ai_free_images"), DEFAULT_FREE_AI_IMAGES)
+
+
+def trial_ai_image_quality(mode: str, repository: Any | None = None) -> str:
+    """The ceiling a trial generates at. `low` today: 15x cheaper than `high` and the SAME pixel
+    dimensions, so a trial hero is softer, never smaller."""
+    config = cached_platform_billing(mode, repository)["config"]
+    return str(config.get("ai_trial_image_quality") or DEFAULT_AI_IMAGE_QUALITY).strip().lower()
 
 
 def trial_ai_generations(mode: str, repository: Any | None = None) -> int:

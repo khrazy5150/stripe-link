@@ -38,6 +38,10 @@ SOURCE_EXEMPT = "exempt"
 # What the generation produced. One value today; the quota is deliberately counted in GENERATIONS rather than
 # pages so that ad copy, SEO metadata and product descriptions can share this ledger without reshaping it.
 OPERATION_PAGE_GENERATION = "page_generation"
+# The second operation, and the one the counter was shaped for. An image event carries its QUALITY as
+# well as its cost: quality is a 15x price spread, the ledger never expires, and a tier that lifts its
+# ceiling later must not make the history before it unreadable.
+OPERATION_IMAGE_GENERATION = "image_generation"
 
 STATUS_STARTED = "started"
 STATUS_SUCCEEDED = "succeeded"

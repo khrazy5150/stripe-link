@@ -2,7 +2,8 @@ import time
 from typing import Any, Callable
 
 from stripe_link.domain.entitlements import plan_entitlements
-from stripe_link.domain.platform_billing import plan_ai_generations
+from stripe_link.domain.platform_billing import (DEFAULT_AI_IMAGE_QUALITY, plan_ai_generations,
+                                                  plan_ai_image_quality, plan_ai_images)
 from stripe_link.domain.fees import normalize_tier_id
 from stripe_link.domain.platform_billing import billing_status_from_stripe, platform_plan
 
@@ -102,6 +103,11 @@ def reconcile_platform_subscription_event(
             # Drop the paid allowance with the rest of the plan. Left behind, a canceled tenant would keep
             # generating on the platform's Bedrock bill indefinitely.
             updates["ai_generations"] = 0
+            updates["ai_images"] = 0
+            # And reset the QUALITY ceiling rather than leaving it. A canceled tenant has no images, so
+            # it changes nothing today -- but a stale `high` sitting on a profile is exactly the kind of
+            # denormalized field that is still there, and still trusted, after the reason for it is gone.
+            updates["ai_image_quality"] = DEFAULT_AI_IMAGE_QUALITY
             updates["cancel_at_period_end"] = False  # the pending cancel has now happened
         else:
             updates["cancel_at_period_end"] = bool(obj.get("cancel_at_period_end"))
@@ -121,6 +127,11 @@ def reconcile_platform_subscription_event(
                 # that is the FEE tier, which every paid plan shares, so an allowance keyed there would give
                 # a $19 and a $69 plan the same number (plans/AI_AND_COMMERCE_ARCHITECTURE.md §A.8).
                 updates["ai_generations"] = plan_ai_generations(plan)
+                # Images travel the same road, and must: the generation path reads these off the
+                # profile precisely so it never touches the plans table. A quality ceiling left behind
+                # here would be read on every image request.
+                updates["ai_images"] = plan_ai_images(plan)
+                updates["ai_image_quality"] = plan_ai_image_quality(plan)
         current_period_end = obj.get("current_period_end")
         if isinstance(current_period_end, int):
             updates["current_period_end"] = current_period_end

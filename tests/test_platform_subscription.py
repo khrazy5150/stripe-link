@@ -248,6 +248,48 @@ class ReconcileWebhookTests(unittest.TestCase):
         reconcile_platform_subscription_event(
             event, mode="test", tenant_repo=tenants, plans_repository=_basic_plans_repo())
         self.assertEqual(tenants.docs["t1"]["entitlements"], ["landing_pages"])
+
+    def test_the_image_allowance_and_its_quality_ceiling_travel_with_the_plan(self):
+        """They MUST be denormalized: the generation path reads them off the profile precisely so it
+        never touches the plans table, and a ceiling left behind there would be read on every request."""
+        plan = {"plan_key": "basic", "label": "Bay Pass", "monthly_amount": 958, "price_id": "price_basic",
+                "trial_days": 0, "active": True, "sort_order": 1, "fee_tier": "basic",
+                "entitlements": {"landing_pages": True}, "ai_generations": 20,
+                "ai_images": 30, "ai_image_quality": "low"}
+        tenants = FakeTenantRepo([_tenant(billing_plan_key="basic")])
+        event = self._event("customer.subscription.updated", {
+            "id": "sub_1", "status": "active", "metadata": {"tenant_id": "t1", "plan_key": "basic"},
+        })
+        reconcile_platform_subscription_event(
+            event, mode="test", tenant_repo=tenants,
+            plans_repository=FakePlansRepo([plan], {"default_plan_key": "basic"}))
+        self.assertEqual(tenants.docs["t1"]["ai_images"], 30)
+        self.assertEqual(tenants.docs["t1"]["ai_image_quality"], "low")
+
+    def test_a_plan_row_without_image_fields_does_not_strand_a_paying_tenant(self):
+        # They bought something. A missing number gets the lowest paid rung, and a missing quality gets
+        # the cheapest -- the two fallbacks fail in opposite directions on purpose.
+        tenants = FakeTenantRepo([_tenant(billing_plan_key="basic")])
+        event = self._event("customer.subscription.updated", {
+            "id": "sub_1", "status": "active", "metadata": {"tenant_id": "t1", "plan_key": "basic"},
+        })
+        reconcile_platform_subscription_event(
+            event, mode="test", tenant_repo=tenants, plans_repository=_basic_plans_repo())
+        self.assertEqual(tenants.docs["t1"]["ai_images"], 30)
+        self.assertEqual(tenants.docs["t1"]["ai_image_quality"], "low")
+
+    def test_cancellation_drops_the_image_allowance_and_resets_the_ceiling(self):
+        """Left behind, a canceled tenant keeps generating on our bill. The stale CEILING matters too:
+        a `high` sitting on a profile is still there, and still trusted, after its reason is gone."""
+        tenants = FakeTenantRepo([_tenant(ai_images=30, ai_image_quality="high",
+                                          stripe_subscription_id="sub_1")])
+        event = self._event("customer.subscription.deleted", {
+            "id": "sub_1", "status": "canceled", "metadata": {"tenant_id": "t1"},
+        })
+        reconcile_platform_subscription_event(event, mode="test", tenant_repo=tenants)
+        self.assertEqual(tenants.docs["t1"]["ai_images"], 0)
+        self.assertEqual(tenants.docs["t1"]["ai_generations"], 0)
+        self.assertEqual(tenants.docs["t1"]["ai_image_quality"], "low")
         # Subscribing writes the PLAN's fee tier onto the tenant (this fixture plan carries fee_tier "basic").
         self.assertEqual(tenants.docs["t1"]["tier_id"], "basic")
 

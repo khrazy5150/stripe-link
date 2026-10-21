@@ -37,9 +37,29 @@ DEFAULT_PLAN_ALLOWANCE = 20      # lowest paid rung: a paying tenant is never le
 DEFAULT_TRIAL_ALLOWANCE = 3
 DEFAULT_FREE_ALLOWANCE = 0
 
+# Image fallbacks, same shape and the same reasoning. Config on the plan and CONFIG rows is the truth;
+# these apply only when it cannot be read.
+DEFAULT_PLAN_IMAGES = 30
+DEFAULT_TRIAL_IMAGES = 7
+DEFAULT_FREE_IMAGES = 0
+
 # The trial's counter is a LIFETIME one, so it does not live in a calendar period. `period_key` is the month,
 # and a trial starting 25 September spans two of them -- handing out the allowance twice.
 TRIAL_PERIOD = "trial"
+
+# IMAGES COUNT SEPARATELY, on a prefixed key in the same table. The sort key is a plain string, so this
+# costs nothing structurally and buys the thing a shared pool could not: a plan reads as "20 page
+# generations + 30 hero images", and a tenant experimenting with images never discovers they can no
+# longer generate a page.
+OPERATION_PAGE = "page"
+OPERATION_IMAGE = "image"
+IMAGE_PREFIX = "images#"
+
+
+def image_period(period: str) -> str:
+    """The image counter's key for a period. `images#2026-10`, `images#trial`."""
+    period = str(period or "")
+    return period if period.startswith(IMAGE_PREFIX) else f"{IMAGE_PREFIX}{period}"
 
 # A tenant on their own key still gets a ceiling -- not to ration their spend, which is theirs, but
 # because a generation loop hammering their provider looks like our outage and costs them real money.
@@ -107,7 +127,8 @@ def is_live_trial(tenant: dict[str, Any] | None, now: int | None = None) -> bool
 
 def entitlement_for(tenant: dict[str, Any] | None, *, provider: str = "", now: int | None = None,
                     trial_allowance: int | None = None,
-                    free_allowance: int | None = None) -> dict[str, Any]:
+                    free_allowance: int | None = None,
+                    operation: str = OPERATION_PAGE) -> dict[str, Any]:
     """What this tenant may spend, and which counter it comes out of.
 
     Returns `{"allowance", "period", "source"}`. Pure: the numbers arrive as arguments or off the tenant, so
@@ -122,6 +143,11 @@ def entitlement_for(tenant: dict[str, Any] | None, *, provider: str = "", now: i
     """
     profile = tenant or {}
     monthly = period_key(now)
+
+    if str(operation or "") == OPERATION_IMAGE:
+        return _image_entitlement(profile, now=now, monthly=monthly,
+                                  trial_allowance=trial_allowance, free_allowance=free_allowance)
+
     if profile.get("billing_exempt"):
         return {"allowance": UNLIMITED, "period": monthly, "source": "exempt"}
 
@@ -144,6 +170,47 @@ def entitlement_for(tenant: dict[str, Any] | None, *, provider: str = "", now: i
     # Free tier, or a trial that has run out. No platform-paid generations; their own key still works.
     allowance = DEFAULT_FREE_ALLOWANCE if free_allowance is None else int(free_allowance)
     return {"allowance": allowance, "period": monthly, "source": "free"}
+
+
+def _image_entitlement(profile: dict[str, Any], *, now: int | None, monthly: str,
+                       trial_allowance: int | None, free_allowance: int | None) -> dict[str, Any]:
+    """The image half, and it deliberately has NO provider branch.
+
+    Page generation asks who pays, because a tenant on their own key spends their own money and earns a
+    far higher ceiling. There is no BYO-key path for images -- the platform's account pays for every one
+    -- so reusing that branch would read a tenant's PAGE provider and hand anyone who had configured
+    their own key a 200-image ceiling on our card. The same object, answering a question it was not
+    asked.
+    """
+    if profile.get("billing_exempt"):
+        return {"allowance": UNLIMITED, "period": image_period(monthly), "source": "exempt"}
+    if is_live_trial(profile, now):
+        allowance = DEFAULT_TRIAL_IMAGES if trial_allowance is None else int(trial_allowance)
+        return {"allowance": allowance, "period": image_period(TRIAL_PERIOD), "source": "trial"}
+    if profile.get("stripe_subscription_id"):
+        # Off the tenant, put there by the billing webhook. Absent means the webhook has not run for
+        # this subscriber yet -- they are PAYING, so they get the lowest rung rather than nothing.
+        return {"allowance": _int_or(profile.get("ai_images"), DEFAULT_PLAN_IMAGES),
+                "period": image_period(monthly), "source": "plan"}
+    allowance = DEFAULT_FREE_IMAGES if free_allowance is None else int(free_allowance)
+    return {"allowance": allowance, "period": image_period(monthly), "source": "free"}
+
+
+def quality_ceiling_for(profile: dict[str, Any] | None, source: str, *, trial_quality: str = "",
+                        default: str = "low") -> str:
+    """The best image quality this tenant may request. ONE resolver, two readers.
+
+    The generator clamps with this and the config endpoint reports it, because `ai_config.py` already
+    learned what happens otherwise: *"The screen must read the SAME counter the generator will spend
+    from."* A screen promising a quality the generator refuses is that bug with a different noun.
+    """
+    profile = profile or {}
+    if source == "trial":
+        return str(trial_quality or default).strip().lower()
+    if source == "plan":
+        return str(profile.get("ai_image_quality") or default).strip().lower()
+    # exempt included: the platform pays for those too, so there is no reason to buy the dear one.
+    return str(default).strip().lower()
 
 
 def _int_or(value: Any, fallback: int) -> int:
