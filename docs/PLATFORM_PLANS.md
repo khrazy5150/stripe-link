@@ -42,7 +42,8 @@ plans reference test-mode Stripe prices and live plans reference live-mode price
   "features": [],                      // optional display-only bullet strings for the plan card
   "fee_tier": "pro",                   // ⭐ the TRANSACTION-FEE tier this plan grants (see below)
   "entitlements": { "...": true },     // ⭐ the FEATURES this plan unlocks (see below)
-  "ai_generations": 20                 // ⭐ platform-paid AI generations per calendar month
+  "ai_generations": 20,                // ⭐ platform-paid AI page generations per calendar month
+  "ai_images": 30                      // ⭐ platform-paid AI images per calendar month
 }
 ```
 
@@ -97,6 +98,21 @@ is the registry of features that exist; `plan.entitlements` decides which a tier
 management and business intelligence each need a registry entry when the feature is built — that is a feature
 needing code, not a tier needing code, and it is the right split.
 
+### `ai_images` — the AI image allowance this plan grants
+
+Platform-paid AI images per calendar month, counted on its OWN key (`images#<period>`) rather than sharing
+`ai_generations`. Separating them costs nothing structurally — the usage counter's sort key is a plain
+string — and it buys two things: the plan reads as "20 page generations + 30 hero images" rather than one
+pooled number, and a tenant experimenting with images never discovers they can no longer generate a page.
+
+Set 2026-10-20 after the provider was confirmed. At **$0.063** for a landscape hero (1536×1024, medium
+quality) 30 images is **$1.89/month**, which puts image spend at about the share pages already take
+($2.10). Combined that is ~21% of a $19 subscription at the model layer — near, and deliberately not over,
+the line the ladder was tuned to avoid.
+
+The trial gets **7 lifetime** images and the free tier gets **0**: images are for a paying tenant or one
+inside their 14 days, which is the same rule `ai_generations` already follows.
+
 ### `ai_generations` — the AI allowance this plan grants
 
 Platform-paid AI generations per calendar month. Denormalized onto the tenant as `ai_generations` by the
@@ -127,6 +143,8 @@ A trial is not a plan, so its allowance lives on the `CONFIG` item rather than a
 |---|---|---|
 | `ai_trial_generations` | **lifetime** allowance for a live 14-day trial | 3 |
 | `ai_free_generations` | allowance for the free tier / an expired trial | 0 |
+| `ai_trial_images` | **lifetime** AI image allowance for a live 14-day trial | 0 |
+| `ai_free_images` | AI image allowance for the free tier / an expired trial | 0 |
 | `ai_monthly_budget_usd` | the PLATFORM's own monthly AI ceiling, all tenants combined | 0 = no ceiling |
 
 `ai_monthly_budget_usd` is gate 3, and it is the only one that is identity-independent — per-tenant caps
@@ -139,6 +157,10 @@ switch it on deliberately once the ledger shows what real spend looks like.
 **Lifetime, not monthly.** The quota counter's period is the calendar month, and a trial starting 25 September
 spans two of them — a monthly trial allowance would be handed out twice. Trial usage is counted under the
 period key `"trial"`, which never rolls over because there is no next trial period.
+
+`ai_free_images` is 0 for the same reason, and the numbers deployed on 2026-10-20 are: trial 3 pages +
+7 images (lifetime, prod), free 0 + 0, Premium 20 pages + 30 images per month. Dev deliberately differs on
+the TRIAL numbers only (25 and 25) so the gate can be exercised without burning a real allowance.
 
 `ai_free_generations` is 0 today: the free tier's taste is the trial's job now, and a free tenant who wants
 more brings their own key, which costs the platform nothing. It is editable rather than hardcoded because that

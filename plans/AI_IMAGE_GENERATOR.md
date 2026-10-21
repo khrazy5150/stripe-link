@@ -303,6 +303,19 @@ and `DEFAULT_FREE_ALLOWANCE = 0` already means "paid or in trial, nobody else". 
 is one conditional write. `ai_generation_events` already has `started` / `succeeded` / `failed` /
 `released`, which is reserve-then-settle: a failed generation gives the credit back.
 
+**The numbers, DECIDED and already written to both config tables 2026-10-20** (before any code reads
+them, so the code's fallback can never silently apply):
+
+| | pages | images |
+|---|---|---|
+| trial (lifetime) | 3 | **7** |
+| free / expired trial | 0 | **0** |
+| Premium $19 (per month) | 20 | **30** |
+
+Dev deliberately differs on the trial row only — 25 and 25 — so the gate can be exercised without
+burning a real allowance. 30 images is $1.89/month against the $2.10 pages already cost, putting the
+model layer at ~21% of a $19 subscription.
+
 **A separate `ai_images` allowance, not a shared pool.** `ai_generation_events` says the counter is
 *"deliberately counted in GENERATIONS ... so that ad copy, SEO metadata and product descriptions can
 share this ledger without reshaping it"*, so sharing was available and was rejected on product grounds:
