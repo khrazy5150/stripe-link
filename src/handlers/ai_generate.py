@@ -351,9 +351,11 @@ def _generate_image(body, *, tenant_id, event, now, pick, jobs_repo, usage_repo,
         return error_response("Could not check your image allowance. Try again shortly.",
                               code="quota_unavailable")
     if not taken["allowed"]:
-        _, refusal = may_generate(taken["used"], allowance, entitlement["source"])
-        return error_response(refusal or "You have used your AI images.", status_code=429,
-                              code="image_quota_exhausted")
+        # The IMAGE wording, not `may_generate`'s. Its sentence ends "or connect your own AI provider
+        # key", and there is no BYO-key path for images -- that advice sends a tenant somewhere that
+        # cannot help them.
+        return error_response(ai_images.refusal(taken["used"], allowance, entitlement["source"]),
+                              status_code=429, code="image_quota_exhausted")
 
     generation_id = new_id("gen", pick)
     event_row = events.started(

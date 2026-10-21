@@ -30,12 +30,28 @@ elif [[ "${ENVIRONMENT}" == "dev" ]]; then
   DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN="${DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN:-arn:aws:acm:us-east-1:150544707159:certificate/1a72b7c6-bf14-40d2-8e07-c2d2df84c70a}"
 fi
 
+# The AI image generator's API base, per environment. It is a SEPARATE STACK in a sibling repo
+# (../sam/ai-image-generator), so its execute-api hostname cannot be derived here -- it is read off
+# that stack's ApiBase output once and pinned. Empty disables image generation cleanly: the client is
+# checked for configuration BEFORE a tenant's allowance is touched.
+#
+# THIS IS THE FILE THAT DECIDES. samconfig.toml also lists parameter_overrides, and it is NOT what a
+# deploy uses -- the array below is passed as --parameter-overrides and wins outright. A parameter set
+# only in samconfig silently takes its template Default, which is how AI_IMAGE_API_BASE first shipped
+# empty while samconfig said otherwise (2026-10-20).
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  AI_IMAGE_API_BASE="${AI_IMAGE_API_BASE:-https://gtomjryzk9.execute-api.us-west-2.amazonaws.com/prod}"
+elif [[ "${ENVIRONMENT}" == "dev" ]]; then
+  AI_IMAGE_API_BASE="${AI_IMAGE_API_BASE:-https://qlrkbhzbq7.execute-api.us-west-2.amazonaws.com/dev}"
+fi
+
 "$(dirname "$0")/validate-resource-names.sh"
 sam build
 
 PARAMETER_OVERRIDES=(
   "Environment=${ENVIRONMENT}"
   "ProjectPrefix=jb"
+  "AiImageApiBase=${AI_IMAGE_API_BASE:-}"
 )
 
 # Free-tier Site hosting domain (Zone B, always noindex): prod serves on jbay.uk, test on jbay.be — separate

@@ -199,3 +199,29 @@ class PlanRowAccessorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusalsNameAnActionThatWorksTests(unittest.TestCase):
+    """`may_generate` is page-shaped and ends "or connect your own AI provider key". There is no
+    BYO-key path for images, so that sentence sends a tenant to a screen that cannot help them."""
+
+    def test_the_free_tier_is_told_what_would_actually_get_them_images(self):
+        message = ai_images.refusal(0, 0, "free")
+        self.assertIn("Premium", message)
+        self.assertIn("trial", message)
+        self.assertNotIn("provider key", message)
+
+    def test_a_spent_trial_is_pointed_at_the_subscription(self):
+        message = ai_images.refusal(7, 7, "trial")
+        self.assertIn("7", message)
+        self.assertIn("Premium", message)
+        self.assertNotIn("provider key", message)
+
+    def test_a_subscriber_is_told_when_it_lifts(self):
+        message = ai_images.refusal(30, 30, "plan")
+        self.assertIn("30", message)
+        self.assertIn("1st", message)
+
+    def test_no_refusal_ever_mentions_a_key_the_tenant_cannot_use(self):
+        for source in ("free", "trial", "plan", "exempt"):
+            self.assertNotIn("provider key", ai_images.refusal(1, 1, source))

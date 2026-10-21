@@ -153,3 +153,24 @@ def compose_prompt(prompt: str, style: str = "", config: dict[str, Any] | None =
     fragment = style_fragment(style, config)
     composed = f"{prompt}. {fragment}" if prompt and fragment else (prompt or fragment)
     return composed[:MAX_PROMPT]
+
+
+def refusal(used: int, allowance: int, source: str) -> str:
+    """Why this tenant cannot generate an image, worded for them.
+
+    NOT `ai_quota.may_generate`, which is page-shaped and ends "or connect your own AI provider key".
+    There is no BYO-key path for images -- the platform's account pays for every one -- so that
+    sentence sends a tenant to a screen that cannot help them. A notice has to name an action that
+    works, or it is noise wearing a helpful face.
+    """
+    used, allowance = int(used or 0), int(allowance or 0)
+    if allowance <= 0:
+        if source == "free":
+            return ("AI images are part of Premium. They are also included for the rest of your "
+                    "14-day trial.")
+        return "AI images are not included on your plan."
+    if source == "trial":
+        return (f"You have used all {allowance} AI images in your trial. "
+                f"Subscribe to Premium for more.")
+    return (f"You have used your {allowance} AI images for this month. "
+            f"They reset on the 1st.")
