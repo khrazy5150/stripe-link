@@ -322,6 +322,47 @@ Dev deliberately differs on the trial row only — 25 and 25 — so the gate can
 burning a real allowance. At `low` everywhere, 30 images is $0.49/month against the $2.10 pages already
 cost: $2.60 of $19, about 14% at the model layer.
 
+### The AI Page Builder as a second caller — DECIDED 2026-10-20
+
+The builder should be able to ask for a hero image while it writes a page, which means the capability
+has to be declared in the element contracts `for_prompt()` renders. Six rules, and the first is the one
+everything else follows from.
+
+1. **The model emits INTENT, never I/O.** It writes `hero.image_request: {prompt, style}` into the page
+   JSON and the job's worker fulfils it afterwards. It does not call a tool and wait. This is the same
+   principle that already governs this generator — *emit schema-valid JSON, not HTML* — and the
+   alternative is worse in three ways at once: a 10–30s image call inside a generation that is already
+   slow, a second failure mode inside the one that produces the page, and a model holding a connection
+   open while it spends money.
+
+2. **The contract IS the budget.** The image affordance is rendered into the prompt only when the tenant
+   can afford one. A model that was never told a capability exists cannot reach for it — which is far
+   more reliable than describing it and adding "you may not", and it is the §A.7 lesson about bad
+   examples inverted: what you put in front of the model is what it will do.
+
+   **Build that view WITHOUT mutating the cache.** `contract()` hands out the live cached rules, and on
+   2026-10-20 a `.pop()` on exactly that object consumed every `why` on the first call of a warm Lambda,
+   silently teaching every later generation less. A per-tenant contract must be a copy.
+
+3. **At most ONE image per page generation, for now.** A page becomes $0.105 + $0.0165. Unbounded, a
+   single generation could order four.
+
+4. **A failed image must never fail the page.** The hero falls back to the offer's product images, which
+   is what it does today and is a perfectly good page. An image is an improvement on a working result,
+   and failing the whole generation to protect a nice-to-have would be the worst possible trade.
+
+5. **One style vocabulary, two consumers.** The presets the Hero picker offers are the fragments the AI
+   appends — read from the same config, so a style the tenant can pick is a style the AI can request and
+   the two cannot drift.
+
+6. **Scene and mood, not product photography.** The contract must say so in its `do_not_use_when`, for
+   the reason `ai_floor.py` already encodes: a photorealistic image of a product nobody photographed,
+   on a page where someone is about to pay, is the visual form of an assertion we were not given. The
+   real product is on the price card. The hero is for the feeling.
+
+Images requested this way land in the same tenant library as hand-made ones, so they appear in the Hero
+picker afterwards and can be reused, replaced or removed like any other.
+
 ### Making space for higher resolutions — binding, even though every tier is `low` today
 
 The $29 tier is not being built now. These five rules exist so that building it is a config edit plus a
