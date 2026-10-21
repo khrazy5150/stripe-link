@@ -89,7 +89,8 @@ tenant clicks Generate
   (refuse BEFORE spending)             → write job {owner_id, status: queued}
                                        → self-invoke (Event)  ← no gateway waiting
                                   ←    202 {job_id}
-  poll                          →    GET /jobs/{job_id}
+  poll                          →    GET /jobs?owner_id=&job_id=   (one route, not a path param:
+                                       the stack folds reads onto one)
                                   ←    {status, images:[{url, variants}]}
   insert URL into a photo element
 
@@ -155,7 +156,30 @@ polls the job row.
    also gives the paid plan its **second** reason to exist alongside the lower transaction fee, which
    matters because the plan had exactly one.
 
-2. **Which Bedrock model — OPEN, and the one number that must be confirmed.** Nova Canvas, the obvious
+2. ~~Which Bedrock model?~~ **SUPERSEDED 2026-10-20: no Bedrock model exists to choose.** Amazon
+   retired BOTH of its image models with no successor — Nova Canvas on 2026-09-30 and Titan Image
+   Generator on 2026-06-30 — and invoking Titan returns `ResourceNotFoundException` "this model version
+   has reached the end of its life". That removed the only first-party option, and every remaining
+   Bedrock image model is third-party, which carries the subscription failure below. **Shipped on OpenAI
+   direct** (`gpt-image-2.5-flare`), which removes that failure mode rather than managing it.
+
+   The real rates, now confirmed rather than estimated, per image at 1024×1024, ×1.5 for a non-square:
+
+   | quality | per image | landscape hero (1536×1024) |
+   |---|---|---|
+   | low | $0.011 | $0.017 |
+   | medium | $0.042 | **$0.063** |
+   | high | $0.167 | $0.250 |
+
+   A landscape hero at medium is **$0.063**, against ~$0.105 for a page generation — close enough that
+   images and pages belong on the same pricing ladder, and cheap enough that a 3-image trial costs 19
+   cents. Quality is deliberately NOT exposed in the Junior Bay UI: it is a cost dial, not a creative
+   one, and hiding it keeps one credit worth a predictable amount of money.
+
+   The superseded analysis follows, kept because the reasoning about spread still applies if the
+   provider ever changes again.
+
+   ~~**Which Bedrock model — OPEN, and the one number that must be confirmed.**~~ Nova Canvas, the obvious
    default, **reached end of life 2026-09-30**. Titan Image Generator lists ~**$0.01**/image at 1024×1024
    standard; SDXL runs **$0.036–$0.08** depending on quality and step count. That 8× spread decides how
    generous "free" can be:
@@ -235,25 +259,82 @@ Lower stakes than page generation — an image makes no commercial promise — b
 
 ## Phases
 
-**P0 — the repo, and model access proven.** Stack, deploy script, service-to-service auth, one health
+**P0 — the repo, and model access proven. SHIPPED dev + prod 2026-10-20.** Stack, deploy script, service-to-service auth, one health
 route — plus the provisioning smoke generation that subscribes the model and sets `verified_at`, and a
 second one after the subscription window to prove the first was not a mid-setup false positive. Small,
 and it is the part that makes every later phase cheap. Doing it here means the 15-minute window is spent
 on a Tuesday by us rather than by the first tenant who clicks Generate.
 
-**P1 — Bedrock, platform-paid, metered.** Generate + job + poll, `/upload/from-url` delegation, and in
-`stripe-link`: the three gates, an `ai_images` allowance beside `ai_generations`, and a builder picker
-that inserts the returned CDN URL into a `photo` element. Gated on confirming the model and its live
-per-image rate.
+**P0.5 — the console. SHIPPED dev + prod 2026-10-20, unplanned.** A browser UI on the service itself
+at `studio.juniorbay.com`, signed in with the SHARED Junior Bay Cognito pool. Not in the original plan
+because the original plan assumed only a server would ever call this. It earns its place: it makes the
+service usable and demonstrable before any Junior Bay integration exists, and it forced two things P1
+needed anyway — a per-person spend ceiling, and the discovery that a uniform 7-day job TTL would have
+quietly emptied anybody's library a week after they built it.
 
-**P2 — Library + reuse.** `GET /ai/images/library`, re-run a prompt, delete. Needs the retention
-decision.
+**P1 — platform-paid, metered, in the builder. NEXT.** The generate + job + poll and the
+`/upload/from-url` delegation are done. What remains is all in `stripe-link`: the three gates, an
+`ai_images` allowance beside `ai_generations`, and the Hero picker. See "The Junior Bay integration"
+below, where the shape is now decided.
+
+**P2 — Library + reuse.** Re-run a prompt, delete. The library READ is already done (`GET /jobs`).
+Delete still needs the retention decision, and it matters more now than when it was written: tenant-
+generated imagery goes on a public page, so a takedown has to be possible.
 
 **P3 — BYOK as an escape hatch.** For a tenant who wants volume beyond their tier and will pay OpenAI
 directly. Optional, and only worth building if anyone asks.
 
 **P4 — Edit.** "modify them" from the original request: the GPT Image models support edits with a mask.
 Deliberately last — it doubles the surface and P1 has to be proven first.
+
+## The Junior Bay integration — DECIDED 2026-10-20
+
+**First surface: the Landing Page Hero.** The hero inherits the offer's product images today, which is
+reasonable and rarely striking. The price cards already carry the product shot, so the hero is free to
+do a hero's job — convey a feeling — and that is exactly the image a tenant does not have. A fourth
+button beside Upload Image / Upload Video / YouTube·Vimeo opens a modal holding a prompt box and this
+tenant's existing AI images with the prompts that made them; picking one overrides the AUTO media.
+
+**Reuse the quota rail that already exists. Do not build a second one.** `domain/ai_quota.py` already
+encodes the exact entitlement rule this feature needs — `allowance_for()` returns a source of
+`trial` / `plan` / `free` / `byok` / `exempt`, the trial counter is a LIFETIME one (`TRIAL_PERIOD`)
+*because a 14-day trial straddles two calendar months and a monthly key hands the allowance out twice*,
+and `DEFAULT_FREE_ALLOWANCE = 0` already means "paid or in trial, nobody else". `consume_if_available`
+is one conditional write. `ai_generation_events` already has `started` / `succeeded` / `failed` /
+`released`, which is reserve-then-settle: a failed generation gives the credit back.
+
+**A separate `ai_images` allowance, not a shared pool.** `ai_generation_events` says the counter is
+*"deliberately counted in GENERATIONS ... so that ad copy, SEO metadata and product descriptions can
+share this ledger without reshaping it"*, so sharing was available and was rejected on product grounds:
+Premium should read as "20 page generations + N hero images", and a tenant experimenting with images
+must never discover they can no longer generate a page. The cost of separating is **zero** — the usage
+counter's sort key is a plain string, so it is `images#<period>` and `images#trial` beside the existing
+`<period>`, in the same table, through the same atomic write. One new admin-editable field per plan row,
+the same shape as `ai_generations`.
+
+**The library is keyed by `tenant_id`.** The images belong to the business whose landing page they are
+for, not to whoever happened to be signed in. Today `caller_tenant()` falls back to the Cognito `sub`
+and the code records that they are equal for all 6 current users — so `studio.juniorbay.com`, which
+keys on `sub`, shows the same library today. That equality is *"a property of the data, not a guarantee
+of the schema"*: if a tenant ever carries a `custom:tenant_id` that differs, the business library and
+the personal console diverge, and the console needs a business switcher at that point. Keying on the
+tenant is the choice that survives that; keying on the person would not.
+
+**Zero new API routes.** The stack is at 219 Api events against a guard that trips at 240. The image
+call folds onto `POST /ai/generate` with an operation key, and polling reuses `GET /ai/jobs/{job_id}`.
+`OPERATION_IMAGE_GENERATION` joins `OPERATION_PAGE_GENERATION` in the ledger.
+
+**Landscape by default.** `1536×1024`, because that is the hero's shape; square is what a product shot
+wants and the hero is explicitly not that.
+
+**What drops in unchanged.** The microservice stores through the same `image-processing` pipeline as a
+manual upload, so the result arrives already shaped like `custom_1600x1200_….webp` with the full variant
+set. The hero media array should take it natively — no new media type, no renderer special-casing — and
+`image_dims` should ride along for CLS, the same as any other image.
+
+**Refusals already carry blame.** A prompt the safety system rejects comes back as `blame: "tenant"`
+with the provider's own sentence, so the modal can say "try describing it differently" instead of
+"something went wrong" — and must NOT consume the credit, which is what `STATUS_RELEASED` is for.
 
 ## Explicitly not in scope
 
