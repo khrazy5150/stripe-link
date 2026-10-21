@@ -474,10 +474,18 @@ def _settle_image_job(job, *, jobs_repo, usage_repo, events_repo, now):
             status=events.STATUS_FAILED, at=now, quality=str(job.get("quality") or ""),
             error=str((remote.get("error") or {}).get("message") or "")))
     else:
-        _complete_event(events_repo, job, events.completion(
+        patch_event = events.completion(
             status=events.STATUS_SUCCEEDED, at=now, images=len(images),
             quality=str(job.get("quality") or ""),
-            estimated_usd=events.to_usd(int((remote.get("usage") or {}).get("cost_micros") or 0))))
+            estimated_usd=events.to_usd(int((remote.get("usage") or {}).get("cost_micros") or 0)))
+        # The model the service ACTUALLY used, read back rather than guessed. The started row could
+        # only write a placeholder -- this stack does not choose the image model and should not pretend
+        # to know it -- and the ledger never expires, so "image" would have been the permanent answer
+        # to "what produced this?" for every image ever made.
+        actual_model = str((remote.get("usage") or {}).get("model") or "")
+        if actual_model:
+            patch_event["model"] = actual_model
+        _complete_event(events_repo, job, patch_event)
         micros = int((remote.get("usage") or {}).get("cost_micros") or 0)
         if micros:
             _add_platform_spend(usage_repo, micros, now)
@@ -941,6 +949,15 @@ def _reap(jobs_repo, *, usage_repo=None, now: int):
     except Exception as exc:  # noqa: BLE001 - a reaper that crashes silently is worse than none
         return {"ok": False, "reason": f"unreadable: {exc}"}
 
+    # IMAGE JOBS REAP DIFFERENTLY, because "stale" means something else for them. A page job that
+    # stopped was dropped by Lambda and is simply gone. An image job's work happens in another service,
+    # so a row sitting at `queued` may mean the generation FINISHED and nobody came back to poll --
+    # closing the tab is enough. Failing and refunding that would hand back a credit for images the
+    # tenant actually has, and leave the ledger saying a succeeded generation failed.
+    #
+    # So: ask the service first. Settle what finished; refund only what genuinely did not.
+    images_settled, images_failed = _reap_images(jobs_repo, usage_repo=usage_repo, now=now)
+
     reaped = 0
     for job in candidates:
         age = now - int(job.get("updated_at") or job.get("created_at") or now)
@@ -956,4 +973,41 @@ def _reap(jobs_repo, *, usage_repo=None, now: int):
             reaped += 1
         except Exception:  # noqa: BLE001 - one unwritable row must not strand the rest
             continue
-    return {"ok": True, "reaped": reaped, "examined": len(candidates)}
+    return {"ok": True, "reaped": reaped, "examined": len(candidates),
+            "images_settled": images_settled, "images_failed": images_failed}
+
+
+def _reap_images(jobs_repo, *, usage_repo, now, events_repo=None):
+    """Settle or refund image jobs nothing is going to come back for. Returns (settled, failed)."""
+    try:
+        candidates = jobs_repo.unfinished(document_type=IMAGE_JOB)
+    except Exception as exc:  # noqa: BLE001 - one broken read must not stop the page reaper
+        print(f"[ai] image reaper could not read jobs: {exc}")
+        return 0, 0
+
+    settled, failed = 0, 0
+    for job in candidates:
+        age = now - int(job.get("updated_at") or job.get("created_at") or now)
+        if age < STALE_AFTER_SECONDS:
+            continue
+        after = _settle_image_job(job, jobs_repo=jobs_repo, usage_repo=usage_repo,
+                                  events_repo=events_repo, now=now)
+        if str(after.get("status") or "") in ("done", "failed"):
+            # The service knew. `_settle_image_job` has already refunded a failure and closed the
+            # ledger either way, so there is nothing left to decide here.
+            settled += 1
+            continue
+        # Genuinely abandoned: the service has no answer and the wait is over. Give the credit back.
+        _release(usage_repo, str(job.get("tenant_id") or ""), str(job.get("period") or ""), now)
+        _complete_event(events_repo, job, events.completion(
+            status=events.STATUS_RELEASED, at=now, quality=str(job.get("quality") or ""),
+            error="abandoned"))
+        try:
+            jobs_repo.put({**job, "status": "failed", "updated_at": now, "refunded": True, "error": {
+                "code": "abandoned", "blame": "service",
+                "message": "That image stopped unexpectedly and did not use one of your images. "
+                           "Try again."}})
+            failed += 1
+        except Exception:  # noqa: BLE001 - one unwritable row must not strand the rest
+            continue
+    return settled, failed

@@ -301,3 +301,90 @@ class TheLibraryTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(payload["jobs"], [])
         self.assertTrue(payload["unavailable"])
+
+
+class TheReaperTests(unittest.TestCase):
+    """A credit spent on an image that never arrived has to come back on its own.
+
+    Image jobs reap DIFFERENTLY from page jobs. A page job that stopped was dropped by Lambda and is
+    gone; an image job's work happens elsewhere, so a row at `queued` may mean the generation finished
+    and nobody came back to poll — closing the tab is enough.
+    """
+
+    STALE = 10_000_000
+
+    def setUp(self):
+        self.usage, self.events = FakeUsage(), FakeEvents()
+
+    def jobs_with(self, **over):
+        row = {"document_type": "ai_image_job", "tenant_id": TENANT, "job_id": "img_1",
+               "remote_job_id": "img_remote", "status": "queued", "period": "images#trial",
+               "quality": "low", "event_key": "k1", "generation_id": "gen_1",
+               "created_at": NOW - self.STALE, "updated_at": NOW - self.STALE}
+        row.update(over)
+        jobs = FakeJobs()
+        jobs.put(row)
+        jobs.unfinished = lambda document_type="": (
+            [dict(r) for r in jobs.rows.values() if r.get("document_type") == document_type])
+        return jobs
+
+    def reap(self, jobs, remote):
+        with patch.object(ai_image_client, "read", lambda **kw: remote):
+            return ai_generate._reap_images(jobs, usage_repo=self.usage, now=NOW,
+                                            events_repo=self.events)
+
+    def test_a_job_that_finished_while_nobody_watched_is_settled_not_refunded(self):
+        # The images exist and the tenant has them. Refunding here would hand back a credit for work
+        # that was really done, and tell the ledger a succeeded generation failed.
+        jobs = self.jobs_with()
+        settled, failed = self.reap(jobs, {"status": "done", "images": [{"id": "a"}],
+                                           "usage": {"cost_micros": 16500}})
+        self.assertEqual((settled, failed), (1, 0))
+        self.assertEqual(self.usage.released, 0)
+        self.assertEqual(jobs.get(TENANT, "img_1")["status"], "done")
+
+    def test_a_job_the_service_failed_is_refunded_once(self):
+        jobs = self.jobs_with()
+        settled, failed = self.reap(jobs, {"status": "failed", "error": {"message": "nope"}})
+        self.assertEqual((settled, failed), (1, 0))
+        self.assertEqual(self.usage.released, 1)
+
+    def test_a_job_nobody_can_account_for_is_refunded_and_closed(self):
+        jobs = self.jobs_with()
+        settled, failed = self.reap(jobs, {"status": "running"})
+        self.assertEqual((settled, failed), (0, 1))
+        self.assertEqual(self.usage.released, 1)
+        row = jobs.get(TENANT, "img_1")
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["error"]["code"], "abandoned")
+        self.assertTrue(row["refunded"])
+        self.assertIn("did not use one of your images", row["error"]["message"])
+
+    def test_a_fresh_job_is_left_alone(self):
+        jobs = self.jobs_with(created_at=NOW - 5, updated_at=NOW - 5)
+        settled, failed = self.reap(jobs, {"status": "running"})
+        self.assertEqual((settled, failed), (0, 0))
+        self.assertEqual(self.usage.released, 0)
+
+    def test_page_jobs_are_not_swept_by_the_image_reaper(self):
+        jobs = self.jobs_with(document_type="ai_generation_job")
+        settled, failed = self.reap(jobs, {"status": "running"})
+        self.assertEqual((settled, failed), (0, 0))
+        self.assertEqual(self.usage.released, 0)
+
+
+class TheLedgerNamesTheRealModelTests(unittest.TestCase):
+    def test_the_model_is_read_back_rather_than_guessed(self):
+        # The started row can only hold a placeholder: this stack does not choose the image model.
+        # The ledger never expires, so "image" would be the permanent answer to "what made this?".
+        jobs, usage, events = FakeJobs(), FakeUsage(), FakeEvents()
+        job = {"document_type": "ai_image_job", "tenant_id": TENANT, "job_id": "img_1",
+               "remote_job_id": "r", "status": "queued", "period": "images#trial",
+               "quality": "low", "event_key": "k1"}
+        jobs.put(job)
+        with patch.object(ai_image_client, "read", lambda **kw: {
+                "status": "done", "images": [{"id": "a"}],
+                "usage": {"cost_micros": 16500, "model": "gpt-image-2.5-flare"}}):
+            ai_generate._settle_image_job(job, jobs_repo=jobs, usage_repo=usage,
+                                          events_repo=events, now=NOW)
+        self.assertEqual(events.patches[0][2]["model"], "gpt-image-2.5-flare")
