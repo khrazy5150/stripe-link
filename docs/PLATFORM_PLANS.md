@@ -43,7 +43,8 @@ plans reference test-mode Stripe prices and live plans reference live-mode price
   "fee_tier": "pro",                   // ⭐ the TRANSACTION-FEE tier this plan grants (see below)
   "entitlements": { "...": true },     // ⭐ the FEATURES this plan unlocks (see below)
   "ai_generations": 20,                // ⭐ platform-paid AI page generations per calendar month
-  "ai_images": 30                      // ⭐ platform-paid AI images per calendar month
+  "ai_images": 30,                     // ⭐ platform-paid AI images per calendar month
+  "ai_image_quality": "low"            // ⭐ the BEST image quality this plan may request
 }
 ```
 
@@ -113,6 +114,33 @@ the line the ladder was tuned to avoid.
 The trial gets **7 lifetime** images and the free tier gets **0**: images are for a paying tenant or one
 inside their 14 days, which is the same rule `ai_generations` already follows.
 
+### `ai_image_quality` — a CEILING, enforced server-side
+
+The best quality this plan may request, clamped before the provider is called. It is a ceiling rather
+than a setting, so a plan naming `high` may still ask for `low`.
+
+**It must be enforced on the server, not by hiding a control.** The quality parameter travels in the
+request body, so a UI that merely omits the option is not a limit — it is a suggestion, and the 15×
+price spread below is what it would be suggesting.
+
+Per landscape hero (1536×1024, which is 1.5× the square rate):
+
+| quality | per image | 30 a month |
+|---|---|---|
+| `low` | $0.0165 | $0.49 |
+| `medium` | $0.063 | $1.89 |
+| `high` | $0.2505 | $7.51 |
+
+**DECIDED 2026-10-20: every tier available today is `low`** — trial and Premium $19 alike. That puts the
+whole AI layer at $2.60 of a $19 subscription, about 14%, and means no quality control is shown to
+anyone, because nobody has a choice to make. Higher resolutions become the reason to buy a **$29 tier**
+that does not exist yet.
+
+A caution for whoever builds that tier: it differentiates on a different AXIS from the ladder sketched in
+`ai_quota.py` ($19→20, $39→50, $69→100), which scales volume. Quality and volume compound — 30 `high`
+images plus 50 page generations is $12.76 against $29, 44% at the model layer — so the $29 rung needs its
+volume numbers chosen with its quality, not after it.
+
 ### `ai_generations` — the AI allowance this plan grants
 
 Platform-paid AI generations per calendar month. Denormalized onto the tenant as `ai_generations` by the
@@ -145,6 +173,7 @@ A trial is not a plan, so its allowance lives on the `CONFIG` item rather than a
 | `ai_free_generations` | allowance for the free tier / an expired trial | 0 |
 | `ai_trial_images` | **lifetime** AI image allowance for a live 14-day trial | 0 |
 | `ai_free_images` | AI image allowance for the free tier / an expired trial | 0 |
+| `ai_trial_image_quality` | the best image quality a trial may request | `low` |
 | `ai_monthly_budget_usd` | the PLATFORM's own monthly AI ceiling, all tenants combined | 0 = no ceiling |
 
 `ai_monthly_budget_usd` is gate 3, and it is the only one that is identity-independent — per-tenant caps

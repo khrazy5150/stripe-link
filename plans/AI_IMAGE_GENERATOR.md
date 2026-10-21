@@ -312,9 +312,15 @@ them, so the code's fallback can never silently apply):
 | free / expired trial | 0 | **0** |
 | Premium $19 (per month) | 20 | **30** |
 
+**Quality is `low` everywhere today, and that is a server-side CEILING** (`ai_trial_image_quality` on
+the CONFIG row, `ai_image_quality` on the plan row) — not a hidden control, because the parameter
+travels in the request body and hiding a control limits nothing. Low is 15× cheaper than high and the
+same pixel dimensions, so a trial hero is softer, never smaller. Higher resolutions become the reason to
+buy a $29 tier that does not exist yet; until it does, P1 ships with no quality selector at all.
+
 Dev deliberately differs on the trial row only — 25 and 25 — so the gate can be exercised without
-burning a real allowance. 30 images is $1.89/month against the $2.10 pages already cost, putting the
-model layer at ~21% of a $19 subscription.
+burning a real allowance. At `low` everywhere, 30 images is $0.49/month against the $2.10 pages already
+cost: $2.60 of $19, about 14% at the model layer.
 
 **A separate `ai_images` allowance, not a shared pool.** `ai_generation_events` says the counter is
 *"deliberately counted in GENERATIONS ... so that ad copy, SEO metadata and product descriptions can
