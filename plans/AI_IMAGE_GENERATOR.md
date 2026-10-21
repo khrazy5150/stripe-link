@@ -322,6 +322,45 @@ Dev deliberately differs on the trial row only — 25 and 25 — so the gate can
 burning a real allowance. At `low` everywhere, 30 images is $0.49/month against the $2.10 pages already
 cost: $2.60 of $19, about 14% at the model layer.
 
+### Making space for higher resolutions — binding, even though every tier is `low` today
+
+The $29 tier is not being built now. These five rules exist so that building it is a config edit plus a
+tier row, and never a rewrite of this feature. Each costs nothing today.
+
+1. **The ceiling is DATA and already is.** `ai_trial_image_quality` on the CONFIG row,
+   `ai_image_quality` on the plan row. Raising a tier to `medium` is an Admin Site edit on the next
+   cache TTL, with no deploy — the same path `entitlements` and `fee_tier` take. Nothing may hardcode
+   `"low"`.
+
+2. **ONE resolver, two readers.** `image_quality_ceiling()` is what the generator clamps with AND what
+   the config endpoint reports. `ai_config.py` already carries the warning this follows: *"The screen
+   must read the SAME counter the generator will spend from, period included"* — showing a tenant one
+   ceiling while the generator enforces another is that bug with a different noun.
+
+3. **The UI renders a server-supplied list, never a hardcoded one.** The config response carries
+   `qualities: [{value, label, credits}]`, built like `_catalogue()` builds the model list. It has ONE
+   entry today, and a one-entry list renders no control at all — which is why P1 has no quality
+   selector without P1 containing a decision to have no quality selector. When the $29 tier makes the
+   list three long, the control appears with no change to the modal.
+
+4. **Record the quality on the ledger event.** `ai_generation_events` never expires and answers "what
+   did it cost?", so cost history must stay truthful across a tier change. It also means a weighted
+   charge can arrive later without a migration: `consume_if_available` already takes `by=`, so a `high`
+   image costing 4 credits needs no new column and no backfill — today everything is `by=1` because
+   everything is the same price.
+
+5. **Extend `entitlement_for`, do not clone it.** It takes an operation and returns the right counter,
+   period and allowance for pages or images. A parallel `image_entitlement_for` would be two places to
+   remember the lifetime-trial rule, and the comment on the original says exactly what that costs:
+   a caller *"reaching for `period_key()` out of habit would hand a trial tenant a fresh three every
+   calendar month."*
+
+**One prerequisite this surfaces.** A subscriber's allowance is read from `tenant.ai_generations`,
+denormalized onto the profile by the billing webhook so the generation path never reads the plans
+table. `ai_images` and `ai_image_quality` must be denormalized the same way, in the same webhook — or
+the image path acquires a plans-table read on the hot path that the page path deliberately does not
+have.
+
 **A separate `ai_images` allowance, not a shared pool.** `ai_generation_events` says the counter is
 *"deliberately counted in GENERATIONS ... so that ad copy, SEO metadata and product descriptions can
 share this ledger without reshaping it"*, so sharing was available and was rejected on product grounds:
