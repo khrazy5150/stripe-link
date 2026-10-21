@@ -272,7 +272,7 @@ service usable and demonstrable before any Junior Bay integration exists, and it
 needed anyway — a per-person spend ceiling, and the discovery that a uniform 7-day job TTL would have
 quietly emptied anybody's library a week after they built it.
 
-**P1 — platform-paid, metered, in the builder. COMPLETE, shipped dev 2026-10-20.**
+**P1 — platform-paid, metered, in the builder. COMPLETE, shipped dev + PROD 2026-10-20.**
 Shipped and proven on dev 2026-10-20: the three gates, the `ai_images` allowance beside
 `ai_generations`, the server-side quality ceiling, the separate `images#` counter, the permanent
 ledger row and the release-on-failure. A live run clamped a request for `high` down to `low` because
