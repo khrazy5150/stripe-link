@@ -19,7 +19,7 @@ from stripe_link.common import error_response, json_response, parse_json_body, t
 from stripe_link.domain.ai_models import default_model, model, model_names, profile_id
 from stripe_link.domain.ai_provider import (AiConfigError, config_record, is_verified, needs_key,
                                             pays_platform, redacted, validate)
-from stripe_link.domain.ai_quota import entitlement_for, may_generate, remaining
+from stripe_link.domain.ai_quota import UNLIMITED, entitlement_for, may_generate, remaining
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (RepositoryError, ai_provider_config_repository,
                                                 ai_usage_repository, tenant_profiles_repository)
@@ -128,6 +128,54 @@ def _catalogue():
     return out
 
 
+def _image_block(tenant_id, usage_repo, tenant_repo, now):
+    """What this tenant may do with AI images, for the picker to RENDER rather than decide.
+
+    `qualities` and `styles` are lists built here, never hardcoded in the UI. That is what makes a
+    future $29 tier a config edit: the quality list is one entry long today, a one-entry list renders
+    no control, and when a ceiling lifts the control appears without the picker being touched.
+    """
+    from stripe_link.domain import ai_images
+    from stripe_link.domain.ai_quota import OPERATION_IMAGE, quality_ceiling_for
+
+    profile = _profile(tenant_id, tenant_repo)
+    allowances = _configured_image_allowances()
+    trial_quality = allowances.pop("trial_quality", "")
+    entitlement = entitlement_for(profile, now=now, operation=OPERATION_IMAGE, **allowances)
+    allowance, period = entitlement["allowance"], entitlement["period"]
+    try:
+        used = (usage_repo or ai_usage_repository()).used(tenant_id, period)
+    except Exception:  # noqa: BLE001 - a counter read must not break the screen
+        used = 0
+    ceiling = quality_ceiling_for(profile, entitlement["source"], trial_quality=trial_quality)
+    left = remaining(used, allowance)
+    return {
+        "period": period, "used": used, "allowance": allowance, "remaining": left,
+        "source": entitlement["source"],
+        "can_generate": allowance == UNLIMITED or left > 0,
+        # The refusal is worded HERE so the picker shows the same sentence the route would return,
+        # rather than inventing a cheerier one of its own.
+        "reason": "" if (allowance == UNLIMITED or left > 0)
+                  else ai_images.refusal(used, allowance, entitlement["source"]),
+        "qualities": ai_images.allowed_qualities(ceiling),
+        "styles": [{"value": s["value"], "label": s["label"]} for s in ai_images.styles()],
+        "max_per_request": ai_images.MAX_IMAGES_PER_REQUEST,
+        "default_size": ai_images.HERO_SIZE,
+    }
+
+
+def _configured_image_allowances():
+    try:
+        from stripe_link.domain.platform_billing import (free_ai_images, platform_billing_mode,
+                                                         trial_ai_image_quality, trial_ai_images)
+
+        mode = platform_billing_mode()
+        return {"trial_allowance": trial_ai_images(mode), "free_allowance": free_ai_images(mode),
+                "trial_quality": trial_ai_image_quality(mode)}
+    except Exception:  # noqa: BLE001 - fallbacks, never a blank screen
+        return {}
+
+
 def _read(tenant_id, config_repo, usage_repo, tenant_repo, now):
     try:
         config = config_repo.get(tenant_id) or {}
@@ -139,6 +187,9 @@ def _read(tenant_id, config_repo, usage_repo, tenant_repo, now):
         "usage": _usage_block(tenant_id, config, usage_repo, tenant_repo, now),
         "models": _catalogue(),
         "default_model": default_model(),
+        # IMAGES, from the same endpoint and the same resolvers the generator uses. A separate screen
+        # reading separate numbers is how a picker comes to promise a quality the generator refuses.
+        "images": _image_block(tenant_id, usage_repo, tenant_repo, now),
     })
 
 

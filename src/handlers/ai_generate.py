@@ -396,6 +396,23 @@ def _generate_image(body, *, tenant_id, event, now, pick, jobs_repo, usage_repo,
     return json_response({"job": _public(job)}, status_code=202)
 
 
+def _image_library(tenant_id, *, reader=None):
+    """This tenant's AI images, newest first, each with the prompt that made it.
+
+    Keyed by TENANT, so the images belong to the business the landing page belongs to rather than to
+    whoever happened to be signed in.
+    """
+    try:
+        payload = (reader or ai_image_client.call)("/jobs?owner_id=" + str(tenant_id), method="GET")
+    except ai_image_client.ImageServiceError as exc:
+        # An unreachable library is an empty picker, not a broken builder. The tenant can still upload.
+        print(f"[ai] image library unavailable for {tenant_id}: {exc}")
+        return json_response({"jobs": [], "unavailable": True, "message": str(exc)})
+    jobs = [j for j in (payload.get("jobs") or []) if isinstance(j, dict)]
+    jobs.sort(key=lambda j: int(j.get("created_at") or 0), reverse=True)
+    return json_response({"jobs": jobs})
+
+
 def _settle_image_job(job, *, jobs_repo, usage_repo, events_repo, now):
     """Ask the image service how it went, and close the books if it has finished.
 
@@ -791,6 +808,11 @@ def _enqueue(job: dict, invoker=None) -> None:
 def _read_job(event, jobs_repo, *, usage_repo=None, events_repo=None):
     tenant_id = tenant_id_from_event(event)
     job_id = str(((event or {}).get("pathParameters") or {}).get("job_id") or "").strip()
+    if tenant_id and not job_id:
+        # The COLLECTION route. The library lives in the image service, not here: these rows settle a
+        # ledger and the service is the system of record for what a tenant has made. Proxying keeps one
+        # source of truth, and means the library outlives this stack's own seven-day job rows.
+        return _image_library(tenant_id)
     if not tenant_id or not job_id:
         return error_response("tenant_id and job_id are required.", code="missing_job")
     try:

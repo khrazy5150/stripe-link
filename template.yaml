@@ -2647,6 +2647,14 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /ai/jobs/{job_id}
             Method: GET
+        # The COLLECTION sibling: this tenant's AI image library, proxied from the image service which
+        # is its system of record. One route, against 21 spare before the transform guard trips.
+        AiImageLibrary:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ai/jobs
+            Method: GET
         # The reaper. Same function, a third invocation mode -- a job abandoned by a Lambda drop or a
         # worker timeout is indistinguishable from one still running, so nothing else can tell.
         AiJobReaper:

@@ -260,3 +260,44 @@ class SettlingOnPollTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheLibraryTests(unittest.TestCase):
+    """The picker's contents. Keyed by TENANT, proxied from the service that owns the record."""
+
+    def _get(self, sub=TENANT):
+        return {"httpMethod": "GET", "resource": "/ai/jobs", "pathParameters": {},
+                "requestContext": {"authorizer": {"claims": {"sub": sub}}}}
+
+    def call(self, reader):
+        with patch.object(ai_image_client, "call", reader):
+            response = ai_generate.handler(self._get(), None, jobs_repo=FakeJobs(),
+                                           usage_repo=FakeUsage(), events_repo=FakeEvents(),
+                                           now_fn=lambda: NOW)
+        return response, json.loads(response["body"])
+
+    def test_it_asks_for_this_tenants_folder(self):
+        seen = {}
+
+        def reader(path, **kw):
+            seen["path"] = path
+            return {"jobs": []}
+
+        self.call(reader)
+        self.assertIn(f"owner_id={TENANT}", seen["path"])
+
+    def test_newest_first(self):
+        _, payload = self.call(lambda path, **kw: {"jobs": [
+            {"job_id": "old", "created_at": 100}, {"job_id": "new", "created_at": 900}]})
+        self.assertEqual([j["job_id"] for j in payload["jobs"]], ["new", "old"])
+
+    def test_an_unreachable_library_is_an_empty_picker_not_a_broken_builder(self):
+        # The tenant can still upload an image by hand. Failing the whole field would take away a
+        # working feature to report the absence of a new one.
+        def boom(path, **kw):
+            raise ai_image_client.ImageServiceError("down")
+
+        response, payload = self.call(boom)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(payload["jobs"], [])
+        self.assertTrue(payload["unavailable"])
