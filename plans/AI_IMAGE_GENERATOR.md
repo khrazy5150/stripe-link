@@ -272,26 +272,41 @@ service usable and demonstrable before any Junior Bay integration exists, and it
 needed anyway — a per-person spend ceiling, and the discovery that a uniform 7-day job TTL would have
 quietly emptied anybody's library a week after they built it.
 
-**P1 — platform-paid, metered, in the builder. The BACKEND is done; the picker is not.**
+**P1 — platform-paid, metered, in the builder. COMPLETE, shipped dev 2026-10-20.**
 Shipped and proven on dev 2026-10-20: the three gates, the `ai_images` allowance beside
 `ai_generations`, the server-side quality ceiling, the separate `images#` counter, the permanent
 ledger row and the release-on-failure. A live run clamped a request for `high` down to `low` because
 the account was on trial, spent `images#trial`, put a 1536×1024 hero on the CDN and recorded
 `operation=image_generation, status=succeeded, quality=low, cost=16500` micros.
 
-**What remains is the Hero picker, and it is the whole feature.** Everything above is unreachable by a
-human until it exists — no tenant can press anything.
+**The Hero picker shipped with it**: a fourth button beside Upload Image / Upload Video /
+YouTube·Vimeo, opt-in per field and on for the hero alone. Credits, styles, quality options and the
+refusal sentence all come from `/ai/config`, so the picker decides nothing a tier change could make
+wrong — the quality `<select>` renders only when the server offers more than one option, which is why
+there is no quality control today without this file having decided there would not be one.
 
-**P2 — Library + reuse. MOSTLY ABSORBED.** The library READ was always done (`GET /jobs`), and DELETE
+Two routes were spent (`GET /ai/jobs`, `DELETE /ai/jobs/{job_id}`), bringing the stack to 221 of the
+240 the transform guard allows.
+
+Verified live on dev: the library returns an image generated in the STANDALONE CONSOLE, because
+`tenant_id` equals the Cognito `sub` today and both sides key on it — the shared-pool decision paying
+off exactly as designed.
+
+**P2 — Library + reuse. COMPLETE, absorbed into P1.** Re-run a prompt and delete both shipped inside
+the picker. Original note follows.
+
+~~**P2 — Library + reuse. MOSTLY ABSORBED.**~~ The library READ was always done (`GET /jobs`), and DELETE
 shipped on 2026-10-20 as part of P1 rather than here, because a takedown had to exist before tenant
 imagery could reach a public page, not after. What is left of P2 is "re-run a prompt" — a button
 inside the picker P1 has yet to build, so there is nothing to start here independently.
 
-**The one thing blocking an honest Delete button**: `image-processing` deletes the S3 objects but does
-not invalidate the CDN, and variants carry `max-age=31536000`. The fix is written and committed in that
-repo, NOT deployed — it needs `npm install @aws-sdk/client-cloudfront` and a deploy of the stack that
-serves every image on the platform. Until then a delete removes the bytes but an edge keeps serving any
-variant somebody had already loaded, which is exactly the set worth removing.
+**The CDN purge SHIPPED 2026-10-20.** `image-processing` deleted the S3 objects and never invalidated
+the CDN, and variants carry `max-age=31536000` — so a delete removed the bytes while an edge kept
+serving any variant somebody had already loaded, which is exactly the set worth removing. Measured:
+origin 403, edge 200 from cache, `age: 47`, on an object deleted a minute earlier. Now invalidates
+`/<baseKey>*` on every delete; verified going 200 → 403 in under twelve seconds. It needed no new
+dependency — `@aws-sdk/client-cloudfront` is in the Node 20 runtime bundle — and the import is lazy so
+finding that out could not have broken every delete on the platform.
 
 **P3 — BYOK as an escape hatch.** For a tenant who wants volume beyond their tier and will pay OpenAI
 directly. Optional, and only worth building if anyone asks.
