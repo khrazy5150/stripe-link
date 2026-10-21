@@ -53,8 +53,11 @@ from stripe_link.domain.ai_provision import (chosen_badges, compose_sections, ne
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
-from stripe_link.domain.ai_quota import (PLATFORM_TENANT, entitlement_for, may_generate,
-                                          period_key, within_platform_budget)
+from stripe_link.domain.ai_quota import (OPERATION_IMAGE, PLATFORM_TENANT, entitlement_for,
+                                          may_generate, period_key, quality_ceiling_for,
+                                          within_platform_budget)
+from stripe_link.domain import ai_images
+from stripe_link import ai_image_client
 from stripe_link.api_auth import note_capability_decision
 from stripe_link.domain.entitlements import AI_BUILDER, can_use_ai_builder
 from stripe_link.domain.ai_resolvers import resolve_preset, resolve_sections, resolution_log
@@ -112,11 +115,19 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
     if (event or {}).get("httpMethod", "POST").upper() == "OPTIONS":
         return json_response({})
     if (event or {}).get("httpMethod", "").upper() == "GET":
-        return _read_job(event, jobs_repo)
+        return _read_job(event, jobs_repo, usage_repo=usage_repo, events_repo=events_repo)
     body = parse_json_body(event) or {}
     tenant_id = tenant_id_from_event(event, body)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
+
+    # THE IMAGE OPERATION, folded onto this route rather than given its own. The stack is at 219 Api
+    # events against a guard that trips at 240, and an image request is this route's question asked
+    # about a different thing: same tenant, same three gates, same counter table, same async shape.
+    if str(body.get("operation") or "").strip().lower() == OPERATION_IMAGE:
+        return _generate_image(body, tenant_id=tenant_id, event=event, now=now, pick=pick,
+                               jobs_repo=jobs_repo, usage_repo=usage_repo, tenant_repo=tenant_repo,
+                               events_repo=events_repo)
 
     # TWO SOURCES, ONE CONTRACT. `product_id` is the fork off the product wizard: the brief is PROJECTED from
     # a product the tenant already has, plus tenant config, plus the fork's one step -- so nothing the product
@@ -266,6 +277,170 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
                               status_code=502, code="enqueue_failed")
     # 202, not 201: nothing exists yet. The dashboard polls /ai/jobs/{job_id}.
     return json_response({"job": _public(job)}, status_code=202)
+
+
+IMAGE_JOB = "ai_image_job"
+
+
+def _configured_image_allowances():
+    """The image numbers, from the deployed CONFIG row. Code holds fallbacks, never the policy."""
+    try:
+        from stripe_link.domain.platform_billing import (free_ai_images, platform_billing_mode,
+                                                         trial_ai_image_quality, trial_ai_images)
+
+        mode = platform_billing_mode()
+        return {"trial_allowance": trial_ai_images(mode), "free_allowance": free_ai_images(mode),
+                "trial_quality": trial_ai_image_quality(mode)}
+    except Exception as exc:  # noqa: BLE001 - an unreadable config must not take the screen down
+        print(f"[ai] image allowances unreadable, using fallbacks: {type(exc).__name__}: {exc}")
+        return {}
+
+
+def _generate_image(body, *, tenant_id, event, now, pick, jobs_repo, usage_repo, tenant_repo,
+                    events_repo):
+    """Queue one image generation. The same three gates as a page, in the same order.
+
+    The work happens in `../sam/ai-image-generator`, which has its own job and its own worker, so there
+    is no self-invoke here -- the row written below is the LOCAL half, and it exists for two things a
+    remote row cannot do: settle this tenant's ledger, and be found by the reaper if the remote job is
+    never asked about again.
+    """
+    prompt = str(body.get("prompt") or "").strip()
+    if len(prompt) < 3:
+        return error_response("Describe the image you want.", code="missing_prompt")
+    count = max(1, min(ai_images.MAX_IMAGES_PER_REQUEST, int(body.get("count") or 1)))
+    style = str(body.get("style") or "").strip()
+    size = str(body.get("size") or ai_images.HERO_SIZE)
+
+    # BEFORE the allowance is touched. Refusing a misconfigured service after taking a credit would
+    # charge the tenant for our mistake.
+    if not ai_image_client.configured():
+        return error_response("Image generation is not available right now.", status_code=503,
+                              code="image_service_unconfigured")
+
+    profile = _profile(tenant_id, tenant_repo)
+    usage_repo = usage_repo or ai_usage_repository()
+
+    # GATE 2 -- how many, and out of which counter. NO provider argument: there is no BYO-key path for
+    # images, the platform's account pays for every one, and passing the page provider here would hand
+    # a tenant who configured their own key a 200-image ceiling billed to us.
+    allowances = _configured_image_allowances()
+    trial_quality = allowances.pop("trial_quality", "")
+    entitlement = entitlement_for(profile, now=now, operation=OPERATION_IMAGE, **allowances)
+    allowance, period = entitlement["allowance"], entitlement["period"]
+
+    # The CEILING, resolved from the same function the config screen reports from, then clamped. A
+    # request above it means a stale page, not an attack, so it is lowered rather than refused -- what
+    # must never happen is sending the dearer one.
+    ceiling = quality_ceiling_for(profile, entitlement["source"], trial_quality=trial_quality)
+    quality = ai_images.clamp_quality(body.get("quality"), ceiling)
+
+    # GATE 3 -- the platform's own ceiling. Always checked for images: unlike pages there is no BYOK
+    # case whose spend is not ours.
+    ok, why_not = within_platform_budget(_platform_spend(usage_repo, now), _platform_budget())
+    if not ok:
+        return error_response(why_not, status_code=429, code="platform_budget_exhausted")
+
+    # The WRITE decides, not a read before it -- same conditional update as the page path, for the same
+    # reason it exists there.
+    cost_credits = ai_images.credits_for(quality, count)
+    try:
+        taken = usage_repo.consume_if_available(tenant_id, period, allowance=allowance, at=now,
+                                                by=cost_credits)
+    except Exception:  # noqa: BLE001 - an unusable counter fails CLOSED
+        return error_response("Could not check your image allowance. Try again shortly.",
+                              code="quota_unavailable")
+    if not taken["allowed"]:
+        _, refusal = may_generate(taken["used"], allowance, entitlement["source"])
+        return error_response(refusal or "You have used your AI images.", status_code=429,
+                              code="image_quota_exhausted")
+
+    generation_id = new_id("gen", pick)
+    event_row = events.started(
+        generation_id=generation_id, tenant_id=tenant_id, job_id="", created_at=now,
+        source=entitlement["source"], model=os.environ.get("AI_IMAGE_MODEL", "image"),
+        provider="platform", brief={"prompt": prompt, "style": style},
+        operation=events.OPERATION_IMAGE_GENERATION, period=period)
+    _record_event(events_repo, event_row)
+
+    composed = ai_images.compose_prompt(prompt, style)
+    try:
+        remote = ai_image_client.start(owner_id=tenant_id, prompt=composed, count=count, size=size,
+                                       quality=quality, tier=str(entitlement["source"]))
+    except ai_image_client.ImageServiceError as exc:
+        # WE failed, so the credit goes back. The tenant is not billed for our outage -- the same rule
+        # the page path states, and the only difference is that here the outage can be somebody else's.
+        _release(usage_repo, tenant_id, period, now)
+        _complete_event(events_repo, {"tenant_id": tenant_id, "event_key": event_row["event_key"],
+                                      "generation_id": generation_id},
+                        events.completion(status=events.STATUS_FAILED, at=now, error=str(exc)))
+        return error_response(str(exc), status_code=exc.status_code, code=exc.code)
+
+    job = {
+        "schema_version": "2026-10-20", "document_type": IMAGE_JOB,
+        "tenant_id": tenant_id, "job_id": new_id("img", pick),
+        "remote_job_id": str(remote.get("job_id") or ""), "status": "queued",
+        "prompt": prompt, "style": style, "quality": quality, "size": size, "count": count,
+        "images": [], "period": period, "source": entitlement["source"],
+        "generation_id": generation_id, "event_key": event_row["event_key"],
+        "credits": cost_credits,
+        "usage": {"period": period, "used": taken["used"], "allowance": allowance},
+        "created_at": now, "updated_at": now,
+    }
+    try:
+        jobs_repo.put(job)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+    return json_response({"job": _public(job)}, status_code=202)
+
+
+def _settle_image_job(job, *, jobs_repo, usage_repo, events_repo, now):
+    """Ask the image service how it went, and close the books if it has finished.
+
+    Polled rather than pushed. The remote job is the truth; this row follows it. Settlement happens
+    HERE rather than on a callback because a callback is a second public surface to authenticate, and
+    the reaper already exists to catch a job nobody comes back for.
+    """
+    if str(job.get("status") or "") in ("done", "failed"):
+        return job
+    remote_id = str(job.get("remote_job_id") or "")
+    if not remote_id:
+        return job
+    try:
+        remote = ai_image_client.read(owner_id=str(job.get("tenant_id") or ""), job_id=remote_id)
+    except ai_image_client.ImageServiceError as exc:
+        # A poll that cannot reach the service is not a failed generation. Leaving the row alone keeps
+        # it pollable; the reaper decides when it has waited long enough.
+        print(f"[ai] image job {job.get('job_id')} could not be read: {exc}")
+        return job
+    status = str(remote.get("status") or "")
+    if status not in ("done", "failed"):
+        return job
+
+    images = remote.get("images") or []
+    patch = {**job, "status": status, "images": images, "updated_at": now,
+             "error": remote.get("error") or {}}
+    usage_repo = usage_repo or ai_usage_repository()
+    if status == "failed":
+        # Their failure, our refund. A tenant must not pay for an image they never got.
+        _release(usage_repo, str(job.get("tenant_id") or ""), str(job.get("period") or ""), now)
+        patch["refunded"] = True
+        _complete_event(events_repo, job, events.completion(
+            status=events.STATUS_FAILED, at=now, quality=str(job.get("quality") or ""),
+            error=str((remote.get("error") or {}).get("message") or "")))
+    else:
+        _complete_event(events_repo, job, events.completion(
+            status=events.STATUS_SUCCEEDED, at=now, images=len(images),
+            quality=str(job.get("quality") or ""),
+            estimated_usd=events.to_usd(int((remote.get("usage") or {}).get("cost_micros") or 0))))
+        micros = int((remote.get("usage") or {}).get("cost_micros") or 0)
+        if micros:
+            _add_platform_spend(usage_repo, micros, now)
+    try:
+        jobs_repo.put(patch)
+    except RepositoryError:
+        pass
+    return patch
 
 
 def _add_platform_spend(usage_repo, micros, now):
@@ -611,7 +786,7 @@ def _enqueue(job: dict, invoker=None) -> None:
     )
 
 
-def _read_job(event, jobs_repo):
+def _read_job(event, jobs_repo, *, usage_repo=None, events_repo=None):
     tenant_id = tenant_id_from_event(event)
     job_id = str(((event or {}).get("pathParameters") or {}).get("job_id") or "").strip()
     if not tenant_id or not job_id:
@@ -622,6 +797,9 @@ def _read_job(event, jobs_repo):
         return error_response(str(exc), code="repository_error")
     if not job:
         return error_response("That generation was not found.", status_code=404, code="job_not_found")
+    if str(job.get("document_type") or "") == IMAGE_JOB:
+        job = _settle_image_job(job, jobs_repo=jobs_repo, usage_repo=usage_repo,
+                                events_repo=events_repo, now=int(time.time()))
     return json_response({"job": _public(job)})
 
 

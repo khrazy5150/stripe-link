@@ -110,8 +110,14 @@ def started(*, generation_id: str, tenant_id: str, job_id: str, created_at: int,
 
 
 def completion(*, status: str, at: int, input_tokens: int = 0, output_tokens: int = 0,
-               estimated_usd: float = 0.0, rate_confidence: str = "", error: str = "") -> dict[str, Any]:
-    """The fields to merge onto the event once the call has returned (or failed)."""
+               estimated_usd: float = 0.0, rate_confidence: str = "", error: str = "",
+               images: int = 0, quality: str = "") -> dict[str, Any]:
+    """The fields to merge onto the event once the call has returned (or failed).
+
+    `images` and `quality` are the image operation's equivalent of the token counts -- a generation that
+    produced four pictures at `low` is a different charge from one that produced one at `high`, and the
+    ledger never expires, so it has to still make sense after a tier lifts its ceiling.
+    """
     patch: dict[str, Any] = {
         "status": str(status or STATUS_SUCCEEDED),
         "input_tokens": int(input_tokens or 0),
@@ -120,6 +126,10 @@ def completion(*, status: str, at: int, input_tokens: int = 0, output_tokens: in
         "rate_confidence": str(rate_confidence or ""),
         "updated_at": int(at),
     }
+    if images:
+        patch["images"] = int(images)
+    if quality:
+        patch["quality"] = str(quality)
     if error:
         patch["error"] = str(error)[:500]
     return patch

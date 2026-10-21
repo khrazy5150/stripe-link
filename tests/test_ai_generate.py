@@ -69,15 +69,20 @@ class FakeUsage:
     def consume(self, tenant_id, period, *, at, **kw):
         self.consumed += 1
         return self._used + self.consumed
-    def consume_if_available(self, tenant_id, period, *, allowance, at, **kw):
+    def consume_if_available(self, tenant_id, period, *, allowance, at, by=1, **kw):
         # Mirrors the real repository's contract: the WRITE decides. A fake that always says yes would
         # let the handler's refusal path rot untested, which is how the read-then-write race survived.
+        # `by` is honoured for the same reason -- production passes a weighted step for image quality,
+        # and a fake that ignored it would make a 4-credit request look like a 1-credit one for ever.
         if self.fail_read:
             raise RuntimeError("dynamo is having a day")
-        total = self._used + self.consumed + 1
+        step = max(1, int(by))
+        total = self._used + self.consumed + step
         if int(allowance) >= 0 and total > int(allowance):
             return {"allowed": False, "used": self._used + self.consumed}
-        self.consumed += 1
+        self.consumed += step
+        self.periods = getattr(self, "periods", [])
+        self.periods.append(period)
         return {"allowed": True, "used": total}
     def release(self, tenant_id, period, *, at):
         self.released += 1

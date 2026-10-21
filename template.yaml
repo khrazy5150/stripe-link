@@ -170,6 +170,13 @@ Parameters:
     Type: String
     Default: juniorbay.com.
     Description: Route 53 hosted zone name used for the homepage apex + www alias records.
+  AiImageApiBase:
+    Type: String
+    Default: ""
+    Description: >
+      Base URL of the ai-image-generator stack (../sam/ai-image-generator). Empty disables image
+      generation: `ai_image_client.configured()` is checked BEFORE a tenant's allowance is touched, so
+      an unset base refuses the request rather than charging for an image nobody can make.
   CognitoUserPoolId:
     Type: String
     Default: us-west-2_gBemPnEF8
@@ -2566,6 +2573,14 @@ Resources:
           AI_USAGE_TABLE: !Ref AiUsageTable
           JOBS_TABLE: !Ref JobsTable
           AI_GENERATION_EVENTS_TABLE: !Ref AiGenerationEventsTable
+          # The image generator, a SEPARATE STACK in a sibling repo. Reached over HTTP with a shared
+          # secret, because that service owns the capability and this one owns the policy -- it has no
+          # idea what a plan is, and the three gates above run here before it is ever called.
+          AI_IMAGE_API_BASE: !Ref AiImageApiBase
+          # Resolved at DEPLOY from the image stack's own generated secret, so the normal path costs no
+          # runtime call. `ai_image_client` falls back to reading the ARN at runtime, which is the seam
+          # for rotating the key without redeploying this stack.
+          AI_IMAGE_SERVICE_KEY: !Sub "{{resolve:secretsmanager:${ProjectPrefix}-image-gen-service-key-${Environment}:SecretString}}"
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AiProviderConfigTable
