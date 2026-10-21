@@ -272,14 +272,26 @@ service usable and demonstrable before any Junior Bay integration exists, and it
 needed anyway — a per-person spend ceiling, and the discovery that a uniform 7-day job TTL would have
 quietly emptied anybody's library a week after they built it.
 
-**P1 — platform-paid, metered, in the builder. NEXT.** The generate + job + poll and the
-`/upload/from-url` delegation are done. What remains is all in `stripe-link`: the three gates, an
-`ai_images` allowance beside `ai_generations`, and the Hero picker. See "The Junior Bay integration"
-below, where the shape is now decided.
+**P1 — platform-paid, metered, in the builder. The BACKEND is done; the picker is not.**
+Shipped and proven on dev 2026-10-20: the three gates, the `ai_images` allowance beside
+`ai_generations`, the server-side quality ceiling, the separate `images#` counter, the permanent
+ledger row and the release-on-failure. A live run clamped a request for `high` down to `low` because
+the account was on trial, spent `images#trial`, put a 1536×1024 hero on the CDN and recorded
+`operation=image_generation, status=succeeded, quality=low, cost=16500` micros.
 
-**P2 — Library + reuse.** Re-run a prompt, delete. The library READ is already done (`GET /jobs`).
-Delete still needs the retention decision, and it matters more now than when it was written: tenant-
-generated imagery goes on a public page, so a takedown has to be possible.
+**What remains is the Hero picker, and it is the whole feature.** Everything above is unreachable by a
+human until it exists — no tenant can press anything.
+
+**P2 — Library + reuse. MOSTLY ABSORBED.** The library READ was always done (`GET /jobs`), and DELETE
+shipped on 2026-10-20 as part of P1 rather than here, because a takedown had to exist before tenant
+imagery could reach a public page, not after. What is left of P2 is "re-run a prompt" — a button
+inside the picker P1 has yet to build, so there is nothing to start here independently.
+
+**The one thing blocking an honest Delete button**: `image-processing` deletes the S3 objects but does
+not invalidate the CDN, and variants carry `max-age=31536000`. The fix is written and committed in that
+repo, NOT deployed — it needs `npm install @aws-sdk/client-cloudfront` and a deploy of the stack that
+serves every image on the platform. Until then a delete removes the bytes but an edge keeps serving any
+variant somebody had already loaded, which is exactly the set worth removing.
 
 **P3 — BYOK as an escape hatch.** For a tenant who wants volume beyond their tier and will pay OpenAI
 directly. Optional, and only worth building if anyone asks.
