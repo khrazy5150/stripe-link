@@ -94,13 +94,25 @@ class FeeCalculationTests(unittest.TestCase):
             },
         })
 
-    def test_default_table_2026_08_26_pricing_pivot(self):
-        """Pin the decided fee ladder: free (basic) 5/6/7/5, premium (pro) 2/2/2/0."""
+    def test_default_table_2026_10_21_ladder(self):
+        """Pin the decided fee ladder.
+
+        free $0 5/6/7/5, basic $19 5/6/7/**0**, pro $29 2/2/2/0.
+
+        RENAMED 2026-10-21, and the rename is the dangerous half: `basic` used to BE the free tier.
+        An unknown or absent tier must still resolve to `free`, never to a paid table -- which is the
+        last case below, and the one that would quietly give away tip fees if it ever regressed.
+        """
         cases = [
+            ("free", "physical", "5"), ("free", "service", "6"),
+            ("free", "digital", "7"), ("free", "tip_jar", "5"),
             ("basic", "physical", "5"), ("basic", "service", "6"),
-            ("basic", "digital", "7"), ("basic", "tip_jar", "5"),
+            ("basic", "digital", "7"), ("basic", "tip_jar", "0"),
             ("pro", "physical", "2"), ("pro", "service", "2"),
             ("pro", "digital", "2"), ("pro", "tip_jar", "0"),
+            # Unknown, retired, typo'd: all free.
+            ("nonsense", "physical", "5"), ("nonsense", "tip_jar", "5"),
+            ("standard", "digital", "7"), ("starter", "tip_jar", "5"),
         ]
         for plan, product_type, percent in cases:
             with self.subTest(plan=plan, product_type=product_type):
@@ -113,8 +125,21 @@ class FeeCalculationTests(unittest.TestCase):
 
     def test_service_falls_back_to_default_when_config_lacks_the_class(self):
         # Older S3 configs predate the "service" class; the default table's 6% must apply.
-        rate = platform_fee_rate(BILLING_CONFIG, tenant_plan="basic", product_type="service")
+        rate = platform_fee_rate(BILLING_CONFIG, tenant_plan="free", product_type="service")
         self.assertEqual(rate, Decimal("6") / Decimal("100"))
+
+    def test_the_only_fee_difference_between_free_and_19_is_the_tip_jar(self):
+        """The tier's fee story in one assertion. If someone "simplifies" pro back to 2%, this fails."""
+        for product_type in ("physical", "service", "digital"):
+            free = platform_fee_rate(None, tenant_plan="free", product_type=product_type)
+            paid = platform_fee_rate(None, tenant_plan="basic", product_type=product_type)
+            self.assertEqual(free, paid, f"{product_type} must match the free tier on $19")
+        self.assertEqual(
+            platform_fee_rate(None, tenant_plan="free", product_type="tip_jar",
+                              pricing_model="customer_chooses"), Decimal("5") / Decimal("100"))
+        self.assertEqual(
+            platform_fee_rate(None, tenant_plan="basic", product_type="tip_jar",
+                              pricing_model="customer_chooses"), Decimal("0"))
 
     def test_premium_tip_jar_takes_no_platform_fee(self):
         result = calculate_price(
@@ -123,7 +148,7 @@ class FeeCalculationTests(unittest.TestCase):
             product_type="tip_jar",
             fee_handling="standard",
             pricing_model="customer_chooses",
-            tenant_plan="pro",
+            tenant_plan="basic",
         )
         self.assertEqual(result["breakdown"]["platform_fee"], 0)
 

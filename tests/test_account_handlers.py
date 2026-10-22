@@ -78,7 +78,7 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(cognito.sign_up_payload["Username"], "keith@example.com")
         self.assertNotIn({"Name": "custom:client_id", "Value": "client_demo"}, cognito.sign_up_payload["UserAttributes"])
         self.assertEqual(tenants.get("client_demo", "client_demo")["auth"]["status"], "pending_confirmation")
-        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "free")
         self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
         self.assertEqual(users.get("client_demo", "user-sub-1")["role"], "owner")
 
@@ -110,7 +110,7 @@ class AccountHandlerTests(unittest.TestCase):
             )
 
         self.assertEqual(response["statusCode"], 201)
-        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "free")
         self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
 
     def test_auth_register_defaults_client_id_to_cognito_sub(self):
@@ -255,7 +255,7 @@ class AccountHandlerTests(unittest.TestCase):
             "schema_version": "2026-05-29",
             "document_type": "tenant_profile",
             "tenant_id": "tenant_demo",
-            "tier_id": "basic",
+            "tier_id": "free",
             "billing_status": "trial",
             "owner": {"email": "owner@example.com"},
         })
@@ -273,7 +273,7 @@ class AccountHandlerTests(unittest.TestCase):
         body = json.loads(response["body"])
         card = body["stripe_connect_card"]
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(card["tier_id"], "basic")
+        self.assertEqual(card["tier_id"], "free")
         # 5%, the free-tier rate the 2026-08-26 pricing pivot decided. This asserted 10.0 until 2026-09-14 —
         # the stale rate in the deployed config fixture, which the pivot never updated. The test was pinning
         # the bug in place: see tests/test_billing_config_deployed.py.
@@ -358,7 +358,7 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(created["statusCode"], 201)
         self.assertEqual(fetched["statusCode"], 200)
         self.assertEqual(json.loads(fetched["body"])["tenant"]["business_name"], "Demo Supplements")
-        self.assertEqual(repository.get("tenant_demo", "tenant_demo")["tier_id"], "basic")
+        self.assertEqual(repository.get("tenant_demo", "tenant_demo")["tier_id"], "free")
 
     def test_stripe_keys_are_redacted_on_write_and_read(self):
         repository = FakeSimpleRepository("tenant_id")

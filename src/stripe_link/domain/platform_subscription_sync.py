@@ -99,7 +99,7 @@ def reconcile_platform_subscription_event(
             # (entitlements.tenant_entitlement_set), and tier_id=basic flips checkout to free-tier fees.
             updates["billing_status"] = "canceled"
             updates["entitlements"] = []
-            updates["tier_id"] = "basic"
+            updates["tier_id"] = "free"
             # Drop the paid allowance with the rest of the plan. Left behind, a canceled tenant would keep
             # generating on the platform's Bedrock bill indefinitely.
             updates["ai_generations"] = 0
@@ -118,10 +118,11 @@ def reconcile_platform_subscription_event(
                 updates["billing_plan_key"] = plan_key
                 plan = platform_plan(mode, plan_key, plans_repository)
                 updates["entitlements"] = plan_entitlements(plan)
-                # The plan's fee tier drives the live transaction fee (fees.build_fee_context reads tenant.tier_id):
-                # premium plans carry fee_tier "pro" (2%/0%); default to pro so a plan row without the field still
-                # grants the premium fee a subscriber is paying for.
-                updates["tier_id"] = normalize_tier_id((plan or {}).get("fee_tier") or "pro")
+                # The plan's fee tier drives the live transaction fee (fees.build_fee_context reads
+                # tenant.tier_id). The DEFAULT is the cheapest PAID tier, not the dearest: since
+                # 2026-10-21 "pro" is the $29 rung at a flat 2%, so defaulting there would hand a $19
+                # subscriber whose plan row lacks fee_tier a discount nobody paid for, on every sale.
+                updates["tier_id"] = normalize_tier_id((plan or {}).get("fee_tier") or "basic")
                 # The AI allowance travels the same way, and for the same reason: the generation path reads a
                 # number off the profile rather than the plans table. Deliberately NOT derived from tier_id --
                 # that is the FEE tier, which every paid plan shares, so an allowance keyed there would give

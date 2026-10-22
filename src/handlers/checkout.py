@@ -530,7 +530,7 @@ def apply_tip_amount(resolved, products_by_id, *, amount, source, tenant_id, rec
             if int(line.get("unit_amount") or 0) > 0:
                 continue
             raise tips.TipAmountError("Choose an amount before checking out.")
-        tenant_plan = "basic"
+        tenant_plan = "free"
         if tenant_repo is not None:
             tenant_plan = normalize_tier_id((tenant_repo.get(tenant_id, tenant_id) or {}).get("tier_id"))
 

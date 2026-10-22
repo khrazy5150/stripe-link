@@ -8,7 +8,10 @@ BILLING_CONFIG = {
     "platform_fees": {
         "unit": "percent",
         "tiers": {
-            "basic": {
+            # Named for the DEFAULT tier, which is `free` since 2026-10-21. A fixture keyed on a tier
+            # the handler no longer defaults to would fall through to the real table and quietly test
+            # a different rate than it claims to.
+            "free": {
                 "physical": 10.0,
                 "digital": 15.0,
                 "tip_jar": 5.0,

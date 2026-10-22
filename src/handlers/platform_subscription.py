@@ -99,7 +99,7 @@ def _plans(event, tenant_repository, plans_repository, mode):
                 "trial_ends_at": tenant.get("trial_ends_at"),
                 "has_subscription": bool(tenant.get("stripe_subscription_id")),
                 "entitlements": sorted(tenant_entitlement_set(tenant)),
-                # The tenant's live transaction-fee tier ("basic" free / "pro" premium) so the price-form
+                # The tenant's live transaction-fee tier ("free" / "basic" $19 / "pro" $29) so the price-form
                 # preview shows the rates this tenant actually pays.
                 "tier_id": normalize_tier_id(tenant.get("tier_id")),
                 # Pending in-app cancellation: premium runs to current_period_end, then Free.

@@ -39,7 +39,7 @@ def register_tenant(event, repositories):
     try:
         document = parse_json_body(event)
         document.pop("password", None)
-        document["tier_id"] = str(document.get("tier_id") or "basic")
+        document["tier_id"] = str(document.get("tier_id") or "free")
         document["billing_status"] = str(document.get("billing_status") or "trial")
         # Start the free platform trial clock (trial-first onboarding, plans/SAAS_BILLING_PAYWALL.md).
         if not document.get("trial_ends_at"):

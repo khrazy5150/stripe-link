@@ -54,10 +54,33 @@ On subscribe, the billing webhook writes this value onto the tenant as `tier_id`
 (`fees.build_fee_context`) to compute the application fee. Valid tiers come from the fee table
 (`fees.py DEFAULT_GLOBAL_BILLING_CONFIG` / S3 `global_billing_config.json` — see `docs/APP_CONFIG.md`):
 
-| tier | physical | service | digital | tip_jar |
-|---|---:|---:|---:|---:|
-| `basic` (free tier) | 5% | 6% | 7% | 5% |
-| `pro` (premium) | 2% | 2% | 2% | 0% |
+| tier | plan | physical | service | digital | tip_jar |
+|---|---|---|---|---|---|
+| `free` | $0 | 5% | 6% | 7% | 5% |
+| `basic` | **$19** | 5% | 6% | 7% | **0%** |
+| `pro` | **$29** | 2% | 2% | 2% | 0% |
+
+`standard` is a dormant legacy key that mirrors `free`.
+
+**RENAMED 2026-10-21, and the rename is the dangerous half.** `basic` used to BE the free tier, and it
+was hardcoded as the fallback in ten places — registration, auth, checkout, both Stripe webhook paths,
+the billing screen, cancellation, the document validator and two defaults in `fees.py`. All of them now
+fall back to `free`. An unknown, retired or typo'd tier resolves to `free` too: a tier nobody paid for
+must never be charged as though they had.
+
+Existing tenant rows were migrated **before** the code shipped, while the deployed code still read an
+unknown tier as free — so no tenant was priced wrong during the gap. There were no paying subscribers
+at the time, so nobody's rates changed under them.
+
+**$19 differs from free in exactly one cell: the tip jar.** That is deliberate. $19 has to stay an
+attractive entry price, so it cannot also give away the transaction fee — that fee is the revenue that
+scales with a tenant's success, while the AI allowances cost real money whether the tenant sells
+anything or not. Tips are the exception because a competitor charges $12 for 0% tips, and charging 5%
+while asking more per month is not a position worth defending. **A tenant taking tips clears $19 at
+$380/month of tips**, and everything else on the plan is on top of that.
+
+The 2% flat rate now lives at **$29 (`pro`)**, which is where the fee discount is worth buying: the
+upgrade costs $10/month, so it pays for itself at **$1,000/month in sales**.
 
 On cancellation (`customer.subscription.deleted`, fired at period end), `tier_id` reverts to `basic`
 automatically — the tenant keeps premium fees until their paid-through date.

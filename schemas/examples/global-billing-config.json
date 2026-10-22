@@ -1,12 +1,12 @@
 {
   "schema_version": "2026-06-04",
   "document_type": "global_billing_config",
-  "effective_date": "2026-08-26",
+  "effective_date": "2026-10-21",
   "canonical": true,
   "platform_fees": {
     "unit": "percent",
     "tiers": {
-      "basic": {
+      "free": {
         "physical": 5.0,
         "service": 6.0,
         "digital": 7.0,
@@ -17,6 +17,12 @@
         "service": 6.0,
         "digital": 7.0,
         "tip_jar": 5.0
+      },
+      "basic": {
+        "physical": 5.0,
+        "service": 6.0,
+        "digital": 7.0,
+        "tip_jar": 0.0
       },
       "pro": {
         "physical": 2.0,
@@ -52,5 +58,5 @@
     }
   },
   "created_at": 1780000000,
-  "updated_at": 1780000000
+  "updated_at": 1792600000
 }

@@ -47,18 +47,21 @@ class DeployedConfigTests(unittest.TestCase):
         self.assertEqual(_plain(DEPLOYED), _plain(DEFAULT_GLOBAL_BILLING_CONFIG))
 
     def test_the_pivot_rates_are_what_a_tenant_is_actually_charged(self):
-        # The 2026-08-26 model, asserted through the reader every caller uses rather than off the dict.
-        for plan, expected in (("basic", {"physical": 5, "service": 6, "digital": 7}),
+        # The 2026-10-21 ladder, asserted through the reader every caller uses rather than off the dict.
+        for plan, expected in (("free", {"physical": 5, "service": 6, "digital": 7}),
+                               ("basic", {"physical": 5, "service": 6, "digital": 7}),
                                ("pro", {"physical": 2, "service": 2, "digital": 2})):
             for product_type, percent in expected.items():
                 self.assertEqual(
                     platform_fee_rate(DEPLOYED, tenant_plan=plan, product_type=product_type),
                     Decimal(percent) / 100, f"{plan}/{product_type}")
-        # Tips: 5% free, free on premium.
-        self.assertEqual(platform_fee_rate(DEPLOYED, tenant_plan="basic", pricing_model="customer_chooses"),
+        # Tips: 5% on free, and FREE from $19 up. That one cell is the whole fee story of the $19
+        # tier, so the DEPLOYED file has to carry it -- not just the code's copy.
+        self.assertEqual(platform_fee_rate(DEPLOYED, tenant_plan="free", pricing_model="customer_chooses"),
                          Decimal("0.05"))
-        self.assertEqual(platform_fee_rate(DEPLOYED, tenant_plan="pro", pricing_model="customer_chooses"),
-                         Decimal("0"))
+        for paid in ("basic", "pro"):
+            self.assertEqual(platform_fee_rate(DEPLOYED, tenant_plan=paid, pricing_model="customer_chooses"),
+                             Decimal("0"), f"{paid} must take no tip fee")
 
     def test_every_tier_prices_every_fee_class(self):
         # `service` was absent from all three tiers in the stale file, so services silently fell through to

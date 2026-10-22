@@ -291,7 +291,7 @@ class ReconcileWebhookTests(unittest.TestCase):
         self.assertEqual(tenants.docs["t1"]["ai_generations"], 0)
         self.assertEqual(tenants.docs["t1"]["ai_image_quality"], "low")
         # Subscribing writes the PLAN's fee tier onto the tenant (this fixture plan carries fee_tier "basic").
-        self.assertEqual(tenants.docs["t1"]["tier_id"], "basic")
+        self.assertEqual(tenants.docs["t1"]["tier_id"], "free")
 
     def test_subscription_updated_sets_pro_fee_tier_from_plan(self):
         plan = {"plan_key": "premium", "label": "Premium", "monthly_amount": 1900, "price_id": "price_prem",
@@ -314,7 +314,7 @@ class ReconcileWebhookTests(unittest.TestCase):
             mode="test", tenant_repo=tenants)
         self.assertEqual(tenants.docs["t1"]["entitlements"], [])
         # Cancellation (fired at period end for cancel_at_period_end) reverts fees to the free tier.
-        self.assertEqual(tenants.docs["t1"]["tier_id"], "basic")
+        self.assertEqual(tenants.docs["t1"]["tier_id"], "free")
 
     def test_subscription_deleted_cancels(self):
         tenants = FakeTenantRepo([_tenant(billing_status="active")])

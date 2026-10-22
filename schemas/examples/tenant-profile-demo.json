@@ -23,7 +23,7 @@
     "primary_color": "#16a34a"
   },
   "billing_status": "trial",
-  "tier_id": "basic",
+  "tier_id": "free",
   "created_at": 1780092000,
   "updated_at": 1780092000
 }

@@ -13,26 +13,52 @@ class PriceCalculationError(ValueError):
 DEFAULT_GLOBAL_BILLING_CONFIG = {
     "schema_version": "2026-06-04",
     "document_type": "global_billing_config",
-    "effective_date": "2026-08-26",
+    "effective_date": "2026-10-21",
     "canonical": True,
     "platform_fees": {
         "unit": "percent",
-        # Free-forever + transaction-fee model (plans/TODO.md "Pricing pivot", decided 2026-08-26):
-        # `basic` = the free tier; `pro` = premium ($19/mo). The ladder tracks margin (physical thinnest
-        # -> lowest fee). `standard` is a dormant legacy key kept for zero-migration — mirrors basic.
+        # Free-forever + transaction-fee model (plans/TODO.md "Pricing pivot", decided 2026-08-26).
+        # The ladder tracks margin -- physical is thinnest, so it carries the lowest fee; digital the
+        # highest. `standard` is a dormant legacy key kept for zero-migration -- mirrors free.
+        #
+        # RENAMED AND RESTRUCTURED 2026-10-21, and the rename is the dangerous half: `basic` used to
+        # mean the FREE tier and now means $19. Every "fall back to basic" in this repo -- ten of them,
+        # including registration, checkout, both webhook paths and cancellation -- would have silently
+        # granted paid rates, and the cell that differs is the TIP JAR, so free tenants would have
+        # stopped paying tip fees. They now fall back to `free`. Existing tenant rows were migrated
+        # first, while the deployed code still read an unknown tier as free, so no tenant was ever
+        # priced wrong in between.
+        #
+        # Why the rates moved: $19 has to stay an attractive entry price, so it cannot also give away
+        # the transaction fee -- that fee is the revenue that scales with a tenant's success, while the
+        # AI allowances cost real money whether the tenant sells anything or not. The tip jar is the one
+        # exception: a competitor charges $12 for 0% tips, and charging 5% while asking MORE per month
+        # is not a position worth defending. A tenant taking tips clears $19 at $380/month of tips.
         "tiers": {
-            "basic": {
+            # $0. The free-forever floor.
+            "free": {
                 "physical": Decimal("5.0"),
                 "service": Decimal("6.0"),
                 "digital": Decimal("7.0"),
                 "tip_jar": Decimal("5.0"),
             },
+            # Dormant legacy key, kept so an old row resolves to something sane rather than to $19.
             "standard": {
                 "physical": Decimal("5.0"),
                 "service": Decimal("6.0"),
                 "digital": Decimal("7.0"),
                 "tip_jar": Decimal("5.0"),
             },
+            # $19/mo. Free-tier rates on goods and services; TIPS ARE FREE. That single zero is the
+            # whole of this tier's fee story.
+            "basic": {
+                "physical": Decimal("5.0"),
+                "service": Decimal("6.0"),
+                "digital": Decimal("7.0"),
+                "tip_jar": Decimal("0.0"),
+            },
+            # $29/mo. A flat 2% on everything -- where the fee discount now lives. No plan row grants
+            # this yet; the tier exists so the plan can be added without touching fee data.
             "pro": {
                 "physical": Decimal("2.0"),
                 "service": Decimal("2.0"),
@@ -67,7 +93,7 @@ DEFAULT_GLOBAL_BILLING_CONFIG = {
         },
     },
     "created_at": 1780000000,
-    "updated_at": 1780000000,
+    "updated_at": 1792600000,
 }
 
 
@@ -243,16 +269,23 @@ def cached_billing_config(
 
 
 def normalize_tier_id(value: Any) -> str:
-    tier_id = str(value or "basic").strip().lower()
-    if tier_id == "starter":
-        return "basic"
-    return tier_id or "basic"
+    """The tenant's fee tier, defaulting to FREE.
+
+    The default is load-bearing. It used to be "basic", which meant free -- and on 2026-10-21 `basic`
+    became the $19 tier, so leaving it would have handed every tenant with no tier_id a paid rate, and
+    with it a free tip jar. An absent tier must always resolve to the cheapest thing for us, never the
+    cheapest thing for them.
+    """
+    tier_id = str(value or "free").strip().lower()
+    if tier_id in ("starter", "standard"):
+        return "free"
+    return tier_id or "free"
 
 
 def platform_fee_rate(
     billing_config: dict[str, Any] | None,
     *,
-    tenant_plan: str = "basic",
+    tenant_plan: str = "free",
     product_type: str = "physical",
     pricing_model: str = "one_time",
 ) -> Decimal:
@@ -263,7 +296,9 @@ def platform_fee_rate(
     if value is None:
         value = (
             DEFAULT_GLOBAL_BILLING_CONFIG["platform_fees"]["tiers"]
-            .get(tenant_plan, DEFAULT_GLOBAL_BILLING_CONFIG["platform_fees"]["tiers"]["basic"])
+            # UNKNOWN TIER -> FREE, never the paid table. A typo, a stale row or a tier we have since
+            # retired must not be charged as though somebody paid for it.
+            .get(tenant_plan, DEFAULT_GLOBAL_BILLING_CONFIG["platform_fees"]["tiers"]["free"])
             .get(fee_class, Decimal("0"))
         )
     return _rate(value)
@@ -314,7 +349,7 @@ def calculate_price(
     product_type: str = "physical",
     fee_handling: str = "standard",
     pricing_model: str = "one_time",
-    tenant_plan: str = "basic",
+    tenant_plan: str = "free",
     stripe_fee_type: str = "domestic_card",
     payment_schedule_key: str = "US_USD",
     billing_config: dict[str, Any] | None = None,

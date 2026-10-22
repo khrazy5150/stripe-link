@@ -190,7 +190,7 @@ class CheckoutHandlerTests(unittest.TestCase):
         self.assertEqual(payload["metadata[product_id]"], ["prod_simple_coffee"])
         self.assertEqual(payload["metadata[price_id]"], ["price_simple_coffee"])
         self.assertEqual(payload["metadata[product_type]"], ["physical"])
-        self.assertEqual(payload["metadata[tenant_plan]"], ["basic"])
+        self.assertEqual(payload["metadata[tenant_plan]"], ["free"])
         self.assertNotIn("payment_intent_data[application_fee_amount]", payload)
 
     def _checkout_with_pages_repo(self, pages_repo):
@@ -314,7 +314,7 @@ class CheckoutHandlerTests(unittest.TestCase):
         # 1800 cents at the "basic" tier physical rate (10%) rounds to a 180 cent platform fee.
         self.assertEqual(payload["payment_intent_data[application_fee_amount]"], ["90"])
         self.assertEqual(payload["metadata[product_type]"], ["physical"])
-        self.assertEqual(payload["metadata[tenant_plan]"], ["basic"])
+        self.assertEqual(payload["metadata[tenant_plan]"], ["free"])
 
     def _offer_with_bump(self):
         offer = dict(self.offer)

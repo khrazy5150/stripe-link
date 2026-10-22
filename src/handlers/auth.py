@@ -98,7 +98,7 @@ def register(event, cognito, tenant_repositories, user_repository):
     tenant = tenant_profile_document(
         client_id=client_id, email=email, first_name=first_name, last_name=last_name,
         phone_number=phone_number, status="pending_confirmation", now=now,
-        tier_id=str(body.get("tier_id") or "basic"),
+        tier_id=str(body.get("tier_id") or "free"),
     )
     validate_tenant_profile(tenant)
     for tenant_repository in tenant_repositories:
@@ -322,7 +322,7 @@ def reset_password(event, cognito):
     return json_response({"message": "Password updated. You can sign in now."})
 
 
-def tenant_profile_document(*, client_id, email, first_name, last_name, phone_number="", status, now, email_verified=False, tier_id="basic"):
+def tenant_profile_document(*, client_id, email, first_name, last_name, phone_number="", status, now, email_verified=False, tier_id="free"):
     """The tenant profile shape, shared by register and the login/confirm self-heal so they can't drift."""
     return {
         "schema_version": "2026-05-29",

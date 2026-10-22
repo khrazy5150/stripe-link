@@ -41,7 +41,7 @@ def connect_card_handler(
         billing_config = cached_billing_config(billing_config_loader, now_fn)
         tier_id = normalize_tier_id(tenant.get("tier_id"))
         tiers = ((billing_config.get("platform_fees") or {}).get("tiers") or {})
-        effective_tier = tiers.get(tier_id) or tiers.get("basic") or {}
+        effective_tier = tiers.get(tier_id) or tiers.get("free") or {}
         mode = "live" if query_params(event).get("mode") == "live" else "test"
         stripe_keys = stripe_repository.get(tenant_id, mode=mode)
 

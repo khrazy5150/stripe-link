@@ -2032,7 +2032,7 @@ def fee_breakdown_from_session(
         product_type=metadata.get("product_type") or "physical",
         fee_handling="standard",
         pricing_model="recurring" if session.get("mode") == "subscription" else "one_time",
-        tenant_plan=metadata.get("tenant_plan") or "basic",
+        tenant_plan=metadata.get("tenant_plan") or "free",
         billing_config=cached_billing_config(billing_config_loader),
     )
 
@@ -2509,7 +2509,7 @@ def fee_breakdown_from_invoice(
         product_type=metadata.get("product_type") or "physical",
         fee_handling="standard",
         pricing_model="recurring",
-        tenant_plan=metadata.get("tenant_plan") or "basic",
+        tenant_plan=metadata.get("tenant_plan") or "free",
         billing_config=cached_billing_config(billing_config_loader),
     )
 
