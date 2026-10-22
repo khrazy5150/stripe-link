@@ -452,3 +452,38 @@ class CancelResumeTests(unittest.TestCase):
     def test_cancel_requires_subscription(self):
         resp = self._post("/platform-billing/cancel", FakeTenantRepo([_tenant()]), FakeOpener())
         self.assertEqual(resp["statusCode"], 409)
+
+
+class PlanCardsSayWhatYouGetTests(unittest.TestCase):
+    """Two plans showing nothing but a price are indistinguishable -- a $29 tier reads as a dearer $19."""
+
+    def test_allowances_become_plain_english(self):
+        from handlers.platform_subscription import _public_plan
+        card = _public_plan({"plan_key": "pro", "label": "Pro", "monthly_amount": 2900,
+                             "ai_generations": 30, "ai_images": 300})
+        self.assertEqual(card["features"],
+                         ["30 AI-written pages a month", "300 AI images a month"])
+
+    def test_hand_written_features_win(self):
+        # An admin who wrote their own copy meant it.
+        from handlers.platform_subscription import _public_plan
+        card = _public_plan({"plan_key": "p", "features": ["Mine"], "ai_images": 9})
+        self.assertEqual(card["features"], ["Mine"])
+
+    def test_a_capability_that_does_not_exist_yet_is_not_advertised(self):
+        # ai_videos has no generator behind it. Selling it on a card would be a promise.
+        from handlers.platform_subscription import _public_plan
+        card = _public_plan({"plan_key": "p", "ai_videos": 20, "ai_images": 5})
+        self.assertEqual(card["features"], ["5 AI images a month"])
+
+    def test_a_zero_allowance_is_not_listed(self):
+        from handlers.platform_subscription import _public_plan
+        card = _public_plan({"plan_key": "p", "ai_generations": 0, "ai_images": 200})
+        self.assertEqual(card["features"], ["200 AI images a month"])
+
+    def test_internals_never_reach_the_card(self):
+        from handlers.platform_subscription import _public_plan
+        card = _public_plan({"plan_key": "p", "price_id": "price_x", "product_id": "prod_x",
+                             "fee_tier": "pro", "ai_images": 5})
+        for secret in ("price_id", "product_id", "fee_tier"):
+            self.assertNotIn(secret, card)

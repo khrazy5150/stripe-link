@@ -82,7 +82,7 @@
           </div>
         </header>
 
-        <div class="billing-plan-grid">
+        <div class="billing-plan-grid billing-plan-grid--spaced">
           <div v-for="plan in billing.plans" :key="plan.plan_key"
                class="billing-plan" :class="{ current: plan.plan_key === billing.current.billing_plan_key }">
             <div class="billing-plan-head">
@@ -218,18 +218,54 @@ function subscribe(planKey) {
 .billing-status-pill.info { background: #dbeafe; color: #1e40af; }
 .billing-status-pill.danger { background: #fee2e2; color: #991b1b; }
 .billing-status-note { margin: 0; color: var(--muted); font-size: 1.4rem; }
-.billing-plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr)); gap: 1.2rem; }
-.billing-plan { border: 1px solid var(--line); border-radius: 12px; padding: 1.4rem; display: flex; flex-direction: column; gap: 0.6rem; }
-.billing-plan.current { border-color: var(--brand, #4f46e5); }
-.billing-plan-head { display: flex; align-items: center; justify-content: space-between; }
-.billing-plan-head h3 { margin: 0; }
-.billing-plan-current { font-size: 1.05rem; font-weight: 700; color: var(--brand, #4f46e5); }
-.billing-plan-price strong { font-size: 2.4rem; }
-.billing-plan-price span { color: var(--muted); }
+/* PLAN CARDS. They were a 1px outline on the same background as the panel behind them, so at a
+   glance there was no card -- just a price floating in a box. They now sit on their own surface with
+   a shadow, which is what makes a card read as a thing you can pick rather than a region of text. */
+.billing-plan-grid--spaced { margin-top: 1.6rem; }
+.billing-plan-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
+  gap: 1.6rem; align-items: stretch;
+}
+.billing-plan {
+  position: relative; border: 1px solid var(--line); border-radius: 14px;
+  padding: 2rem 1.8rem 1.8rem; display: flex; flex-direction: column; gap: 0.8rem;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 20px rgba(15, 23, 42, 0.05);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.billing-plan:hover {
+  transform: translateY(-2px); border-color: var(--brand, #4f46e5);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.06), 0 14px 32px rgba(15, 23, 42, 0.1);
+}
+@media (prefers-reduced-motion: reduce) { .billing-plan, .billing-plan:hover { transition: none; transform: none; } }
+/* The plan you are on is stated by a RING and a label, not by colour alone. */
+.billing-plan.current {
+  border-color: var(--brand, #4f46e5);
+  box-shadow: 0 0 0 2px var(--brand, #4f46e5), 0 8px 20px rgba(79, 70, 229, 0.12);
+}
+.billing-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.billing-plan-head h3 { margin: 0; font-size: 1.7rem; }
+.billing-plan-current {
+  font-size: 1.05rem; font-weight: 700; color: var(--brand, #4f46e5);
+  background: rgba(79, 70, 229, 0.1); padding: 0.2rem 0.7rem; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.billing-plan-price { margin: 0; display: flex; align-items: baseline; gap: 0.3rem; }
+.billing-plan-price strong { font-size: 3.2rem; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.billing-plan-price span { color: var(--muted); font-size: 1.3rem; }
 .billing-plan-tagline { margin: 0; color: var(--muted); }
-.billing-plan-features { margin: 0.4rem 0; padding-left: 1.2rem; color: var(--muted); font-size: 1.35rem; display: grid; gap: 0.3rem; }
-.billing-plan .primary-action { margin-top: auto; }
-.billing-promo { margin-top: 1.2rem; }
-.billing-promo label { display: flex; flex-direction: column; gap: 0.4rem; max-width: 28rem; color: var(--muted); font-size: 1.3rem; }
-.billing-promo input { padding: 0.7rem 1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+/* A rule under the price separates "what it costs" from "what you get". */
+.billing-plan-features {
+  margin: 0.6rem 0 0.2rem; padding: 1rem 0 0 1.2rem; color: var(--text);
+  font-size: 1.35rem; display: grid; gap: 0.5rem; border-top: 1px solid var(--line);
+}
+.billing-plan-features li::marker { color: var(--brand, #4f46e5); }
+.billing-plan .primary-action { margin-top: auto; width: 100%; min-height: 4rem; }
+
+/* PROMO CODE. It sat 1.2rem under the grid with nothing between them, so it read as part of the last
+   card rather than as a separate step. A rule and real space say it belongs to the section. */
+.billing-promo { margin-top: 2.4rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+.billing-promo label { display: flex; flex-direction: column; gap: 0.5rem; max-width: 28rem; color: var(--muted); font-size: 1.3rem; }
+.billing-promo input { padding: 0.9rem 1.1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.billing-promo input:focus-visible { outline: 2px solid var(--brand, #4f46e5); outline-offset: 1px; border-color: var(--brand, #4f46e5); }
 </style>

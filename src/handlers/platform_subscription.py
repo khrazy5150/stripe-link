@@ -35,8 +35,41 @@ def _default_return_url() -> str:
     return os.environ.get("PLATFORM_BILLING_RETURN_URL", "").rstrip("/")
 
 
+# What an allowance is CALLED to a buyer. The stored keys are ours; these are the words on the card.
+# A capability with no entry here is not shown -- an allowance named `ai_videos` on a plan sold before
+# AI video exists would be advertising something nobody can use.
+_ALLOWANCE_LABELS = (
+    ("ai_generations", "AI-written pages a month"),
+    ("ai_images", "AI images a month"),
+)
+
+
+def _plan_highlights(plan: dict[str, Any]) -> list[str]:
+    """What this plan GIVES you, derived rather than typed into `features` by hand.
+
+    Two plans showing nothing but a price are indistinguishable, which is how a $29 tier reads as a
+    more expensive $19 tier. The numbers are already on the row; the card just has to say them, and
+    deriving them means the card cannot drift from what the plan actually grants.
+    """
+    out: list[str] = []
+    for key, label in _ALLOWANCE_LABELS:
+        try:
+            count = int(plan.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            out.append(f"{count:,} {label}")
+    return out
+
+
 def _public_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    return {key: plan[key] for key in _PUBLIC_PLAN_FIELDS if key in plan}
+    public = {key: plan[key] for key in _PUBLIC_PLAN_FIELDS if key in plan}
+    # Hand-written `features` win: an admin who wrote their own copy meant it.
+    if not public.get("features"):
+        derived = _plan_highlights(plan)
+        if derived:
+            public["features"] = derived
+    return public
 
 
 def _safe_put(repository, document) -> None:
