@@ -9,7 +9,10 @@ export const usePlatformBillingStore = defineStore("platformBilling", {
     loaded: false,
     loading: false,
     error: "",
-    plans: [],           // [{ plan_key, label, monthly_amount, trial_days, features, ... }]
+    plans: [],           // [{ plan_key, label, monthly_amount, trial_days, features, free, retired, ... }]
+    // Whether a promo code could possibly work. There are none in production, so the code box was
+    // asking every tenant for something that could not exist.
+    promosAvailable: false,
     capabilities: [],    // [{ key, label, view }] — the full gateable-feature catalog
     current: {
       billing_status: "trial",
@@ -77,6 +80,7 @@ export const usePlatformBillingStore = defineStore("platformBilling", {
         const pb = body.platform_billing || {};
         this.plans = Array.isArray(pb.plans) ? pb.plans : [];
         this.capabilities = Array.isArray(pb.capabilities) ? pb.capabilities : [];
+        this.promosAvailable = Boolean(pb.promos_available);
         if (pb.current) this.current = { ...this.current, ...pb.current };
         this.loaded = true;
       } catch (error) {

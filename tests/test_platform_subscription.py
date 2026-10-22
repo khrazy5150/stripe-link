@@ -215,8 +215,11 @@ class SubscribeHandlerTests(unittest.TestCase):
             plans_repository=_basic_plans_repo(),
         )
         body = json.loads(resp["body"])["platform_billing"]
-        self.assertEqual([p["plan_key"] for p in body["plans"]], ["basic"])
-        self.assertNotIn("price_id", body["plans"][0])  # internal field not exposed
+        # The synthesised Free card leads; the sellable plans follow it.
+        self.assertEqual([p.get("plan_key") for p in body["plans"]], ["", "basic"])
+        self.assertTrue(body["plans"][0]["free"])
+        for card in body["plans"]:
+            self.assertNotIn("price_id", card)  # internal field not exposed
         self.assertEqual(body["current"]["billing_status"], "active")
 
 
@@ -511,7 +514,8 @@ class ARetiredPlanStaysVisibleToItsSubscribersTests(unittest.TestCase):
 
     def test_a_retired_plan_is_hidden_from_someone_who_is_not_on_it(self):
         payload = self._payload(_tenant(), [self.ACTIVE, self.RETIRED])
-        self.assertEqual([p["plan_key"] for p in payload["plans"]], ["basic"])
+        # The synthesised Free card leads; only the SELLABLE plans follow it.
+        self.assertEqual([p.get("plan_key") for p in payload["plans"]], ["", "basic"])
 
     def test_but_a_subscriber_still_sees_the_plan_they_are_paying_for(self):
         # Otherwise nothing on the screen is marked Current, which reads as "you are not subscribed"
@@ -534,4 +538,92 @@ class ARetiredPlanStaysVisibleToItsSubscribersTests(unittest.TestCase):
     def test_a_plan_key_that_no_longer_exists_at_all_is_skipped(self):
         tenant = _tenant(billing_plan_key="deleted_plan", stripe_subscription_id="sub_1")
         payload = self._payload(tenant, [self.ACTIVE])
-        self.assertEqual([p["plan_key"] for p in payload["plans"]], ["basic"])
+        self.assertEqual([p.get("plan_key") for p in payload["plans"]], ["", "basic"])
+
+
+class TheFreeCardTests(unittest.TestCase):
+    """Free is the ABSENCE of a subscription, so its card is synthesised -- and must not lie."""
+
+    def _cards(self, config=None, plans=None):
+        from handlers import platform_subscription as subs
+        from stripe_link.domain import platform_billing
+        platform_billing._CACHE.clear()
+        response = subs.handler(
+            {"httpMethod": "GET", "path": "/platform/plans",
+             "requestContext": {"authorizer": {"claims": {"sub": "t1"}}}}, None,
+            tenant_repository=FakeTenantRepo([_tenant()]),
+            plans_repository=FakePlansRepo(
+                plans if plans is not None else [
+                    {"plan_key": "basic", "label": "Basic", "monthly_amount": 1900, "active": True,
+                     "sort_order": 1, "price_id": "p", "ai_generations": 20, "ai_images": 200}],
+                {"default_plan_key": "basic", **(config or {})}))
+        return json.loads(response["body"])["platform_billing"]
+
+    def test_free_comes_first_and_costs_nothing(self):
+        cards = self._cards()["plans"]
+        self.assertEqual(cards[0]["label"], "Free")
+        self.assertEqual(cards[0]["monthly_amount"], 0)
+        self.assertTrue(cards[0]["free"])
+
+    def test_the_trial_line_is_DERIVED_from_the_same_config_the_gate_spends_from(self):
+        # A number typed into marketing copy drifts from the number the generator enforces, and the
+        # tenant finds out at the moment they are refused.
+        cards = self._cards({"ai_trial_generations": 3, "ai_trial_images": 30})["plans"]
+        line = [f for f in cards[0]["features"] if f.startswith("First ")][0]
+        self.assertIn("3 AI-written pages", line)
+        self.assertIn("30 AI images", line)
+
+    def test_the_free_copy_is_editable_without_a_deploy(self):
+        cards = self._cards({"free_plan_features": ["My own words"]})["plans"]
+        self.assertEqual(cards[0]["features"][0], "My own words")
+
+    def test_free_never_advertises_a_premium_capability(self):
+        # ab_testing is NOT in FREE_TIER_CAPABILITIES and has its own menu view, so a tenant who
+        # clicked it after reading the card would hit a wall.
+        from stripe_link.domain.entitlements import FREE_TIER_CAPABILITIES
+        self.assertNotIn("ab_testing", FREE_TIER_CAPABILITIES)
+        copy = " ".join(self._cards()["plans"][0]["features"]).lower()
+        self.assertNotIn("a/b", copy)
+
+    def test_each_paid_tier_says_what_it_inherits(self):
+        plans = [{"plan_key": "basic", "label": "Basic", "monthly_amount": 1900, "active": True,
+                  "sort_order": 1, "price_id": "p", "ai_images": 200},
+                 {"plan_key": "pro", "label": "Pro", "monthly_amount": 2900, "active": True,
+                  "sort_order": 2, "price_id": "p", "ai_images": 300}]
+        cards = self._cards(plans=plans)["plans"]
+        self.assertEqual(cards[1]["features"][0], "Everything in Free, plus")
+        self.assertEqual(cards[2]["features"][0], "Everything in Basic, plus")
+
+    def test_a_retired_plan_does_not_claim_to_inherit(self):
+        # It is shown for its own subscribers, not sold, so an inheritance line would be sales copy
+        # on something nobody can buy -- and would renumber the ladder behind it.
+        tenant = _tenant(billing_plan_key="old", stripe_subscription_id="sub_1")
+        from handlers import platform_subscription as subs
+        from stripe_link.domain import platform_billing
+        platform_billing._CACHE.clear()
+        response = subs.handler(
+            {"httpMethod": "GET", "path": "/platform/plans",
+             "requestContext": {"authorizer": {"claims": {"sub": "t1"}}}}, None,
+            tenant_repository=FakeTenantRepo([tenant]),
+            plans_repository=FakePlansRepo([
+                {"plan_key": "basic", "label": "Basic", "monthly_amount": 1900, "active": True,
+                 "sort_order": 1, "price_id": "p"},
+                {"plan_key": "old", "label": "Old", "monthly_amount": 900, "active": False,
+                 "sort_order": 9, "price_id": "p"}], {"default_plan_key": "basic"}))
+        cards = json.loads(response["body"])["platform_billing"]["plans"]
+        old = next(c for c in cards if c.get("plan_key") == "old")
+        self.assertTrue(old["retired"])
+        self.assertFalse(any(str(f).startswith("Everything in") for f in old.get("features") or []))
+
+
+class ThePromoBoxTests(unittest.TestCase):
+    def test_it_is_hidden_when_no_promo_could_work(self):
+        from handlers import platform_subscription as subs
+        from stripe_link.domain import platform_billing
+        platform_billing._CACHE.clear()
+        response = subs.handler(
+            {"httpMethod": "GET", "path": "/platform/plans",
+             "requestContext": {"authorizer": {"claims": {"sub": "t1"}}}}, None,
+            tenant_repository=FakeTenantRepo([_tenant()]),
+            plans_repository=FakePlansRepo([], {"default_plan_key": "basic"}))
+        self.assertFalse(json.loads(response["body"])["platform_billing"]["promos_available"])

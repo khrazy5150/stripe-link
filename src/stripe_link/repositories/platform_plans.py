@@ -84,6 +84,15 @@ class PlatformPlansRepository:
         item = response.get("Item")
         return self._strip_keys(item) if item else None
 
+    def list_promos(self, mode: str) -> list[dict[str, Any]]:
+        """Every promo for a mode. Used to decide whether the billing screen shows a code box at all:
+        asking a tenant for a code when none can exist is a dead end dressed as an offer."""
+        from boto3.dynamodb.conditions import Key
+
+        response = self.table.query(
+            KeyConditionExpression=Key("PK").eq(self._pk(mode)) & Key("SK").begins_with("PROMO#"))
+        return [self._strip_keys(item) for item in (response.get("Items") or [])]
+
     def put_promo(self, mode: str, promo: dict[str, Any]) -> dict[str, Any]:
         promo_code = str(promo.get("promo_code") or "").strip()
         if not promo_code:

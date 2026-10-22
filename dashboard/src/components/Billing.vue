@@ -83,11 +83,12 @@
         </header>
 
         <div class="billing-plan-grid billing-plan-grid--spaced">
-          <div v-for="plan in billing.plans" :key="plan.plan_key"
-               class="billing-plan" :class="{ current: plan.plan_key === billing.current.billing_plan_key }">
+          <div v-for="plan in billing.plans" :key="plan.plan_key || 'free'"
+               class="billing-plan"
+               :class="{ current: isCurrent(plan), free: plan.free }">
             <div class="billing-plan-head">
               <h3>{{ plan.label }}</h3>
-              <span v-if="plan.plan_key === billing.current.billing_plan_key" class="billing-plan-current">Current</span>
+              <span v-if="isCurrent(plan)" class="billing-plan-current">Current</span>
               <span v-else-if="plan.retired" class="billing-plan-retired">No longer offered</span>
             </div>
             <p class="billing-plan-price"><strong>{{ price(plan.monthly_amount) }}</strong><span>/mo</span></p>
@@ -99,7 +100,13 @@
             <ul v-if="plan.features && plan.features.length" class="billing-plan-features">
               <li v-for="(f, i) in plan.features" :key="i">{{ f }}</li>
             </ul>
+            <!-- The free tier has no button: it is not something you buy, it is where you already are
+                 when you buy nothing. A "Subscribe to Free" would be a control that does nothing. -->
+            <p v-if="plan.free" class="billing-plan-foot">
+              {{ isCurrent(plan) ? "You are on this plan." : "Always available — no card needed." }}
+            </p>
             <button
+              v-else
               type="button" class="primary-action"
               :disabled="billing.working || plan.plan_key === billing.current.billing_plan_key"
               @click="subscribe(plan.plan_key)"
@@ -109,7 +116,9 @@
           </div>
         </div>
 
-        <div class="billing-promo">
+        <!-- Only when a promo could actually work. There are none in production, so this was asking
+             every tenant for a code that could not exist. -->
+        <div v-if="billing.promosAvailable" class="billing-promo">
           <label>
             Have a promo code?
             <input v-model.trim="promoCode" type="text" placeholder="e.g. TRIAL14" autocomplete="off" />
@@ -134,6 +143,13 @@ import { usePlatformBillingStore } from "../stores/platformBilling";
 
 const billing = usePlatformBillingStore();
 const promoCode = ref("");
+
+/* The free card has no plan_key, so "am I on this?" is a question about having no subscription at
+   all -- not a key comparison that would match every tenant whose billing_plan_key is "". */
+function isCurrent(plan) {
+  if (plan.free) return !billing.current.has_subscription;
+  return plan.plan_key === billing.current.billing_plan_key;
+}
 const confirmingCancel = ref(false);
 
 async function confirmCancel() {
@@ -249,6 +265,11 @@ function subscribe(planKey) {
   background: var(--line); padding: 0.2rem 0.7rem; border-radius: 999px;
   text-transform: uppercase; letter-spacing: 0.03em;
 }
+/* The free card is quieter on purpose: it is the baseline the others are measured against, not an
+   option competing with them. */
+.billing-plan.free { background: var(--ground, var(--surface)); box-shadow: none; }
+.billing-plan.free:hover { transform: none; border-color: var(--line); box-shadow: none; }
+.billing-plan-foot { margin: auto 0 0; color: var(--muted); font-size: 1.25rem; }
 .billing-plan.current {
   border-color: var(--brand, #4f46e5);
   box-shadow: 0 0 0 2px var(--brand, #4f46e5), 0 8px 20px rgba(79, 70, 229, 0.12);

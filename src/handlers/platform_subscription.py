@@ -26,7 +26,7 @@ from stripe_link.stripe_platform_secrets import get_platform_secret_key
 # Fields safe to expose to the dashboard billing screen (never price_id/product_id/fee_tier/exempt internals).
 _PUBLIC_PLAN_FIELDS = (
     "plan_key", "label", "tagline", "badge", "cta_label",
-    "monthly_amount", "trial_days", "highlight", "features", "sort_order", "retired",
+    "monthly_amount", "trial_days", "highlight", "features", "sort_order", "retired", "free",
 )
 
 
@@ -42,6 +42,48 @@ _ALLOWANCE_LABELS = (
     ("ai_generations", "AI-written pages a month"),
     ("ai_images", "AI images a month"),
 )
+
+
+# What the FREE tier offers, as copy. Data on the CONFIG row (`free_plan_features`) with this as the
+# fallback, so the words can be edited from the Pricing screen without a deploy.
+#
+# A/B Testing is deliberately NOT here. `FREE_TIER_CAPABILITIES` is {landing_pages, sites, collections}
+# and `ab_testing` is premium with its own menu view -- a free tenant who clicked it after reading this
+# card would hit a wall, which is a worse outcome than not advertising it.
+DEFAULT_FREE_FEATURES = (
+    "Unlimited landing pages",
+    "Sales funnels",
+    "Sandbox mode",
+    "Coupons",
+    "Tips",
+)
+
+
+def _free_plan(mode: str, plans_repository) -> dict[str, Any]:
+    """The free tier, as a card. It is not a plan row -- free is the ABSENCE of a subscription -- so it
+    is synthesised, and its AI line is DERIVED from the same config the gate spends from.
+
+    Derived rather than written, because a number typed into marketing copy drifts from the number the
+    generator enforces, and the tenant finds out at the moment they are refused.
+    """
+    from stripe_link.domain.platform_billing import (cached_platform_billing, trial_ai_generations,
+                                                     trial_ai_images)
+
+    config = cached_platform_billing(mode, plans_repository)["config"]
+    features = [str(f) for f in (config.get("free_plan_features") or DEFAULT_FREE_FEATURES) if f]
+    try:
+        days = int(os.environ.get("TRIAL_PERIOD_DAYS", "14"))
+    except (TypeError, ValueError):
+        days = 14
+    pages = trial_ai_generations(mode, plans_repository)
+    images = trial_ai_images(mode, plans_repository)
+    if pages or images:
+        granted = " and ".join(bit for bit in (
+            f"{pages:,} AI-written pages" if pages else "",
+            f"{images:,} AI images" if images else "") if bit)
+        features.append(f"First {days} days only: {granted}")
+    return {"plan_key": "", "label": "Free", "monthly_amount": 0, "features": features,
+            "sort_order": 0, "free": True}
 
 
 def _plan_highlights(plan: dict[str, Any]) -> list[str]:
@@ -190,10 +232,29 @@ def _plans(event, tenant_repository, plans_repository, mode):
             # Marked so the screen can say it plainly rather than leaving someone to wonder why their
             # plan is not on the list any more.
             plans = plans + [{**retired, "retired": True}]
+    cards = [_public_plan(p) for p in plans]
+    # EACH PAID TIER INHERITS THE ONE BELOW IT, said out loud. Without it every card repeats the whole
+    # list or, worse, looks like it REPLACES what the cheaper one offered.
+    previous = "Free"
+    for card in cards:
+        if not card.get("retired"):
+            card["features"] = [f"Everything in {previous}, plus"] + list(card.get("features") or [])
+            previous = card.get("label") or previous
+    cards.insert(0, _free_plan(mode, plans_repository))
+
+    # The promo box is shown only when a promo could possibly work. There are none in production, so
+    # it was asking every tenant for a code that could not exist.
+    try:
+        promos = bool(plans_repository and getattr(plans_repository, "list_promos", None)
+                      and plans_repository.list_promos(mode))
+    except Exception:  # noqa: BLE001 - a promo listing that fails must not take the screen down
+        promos = False
+
     return json_response({
         "platform_billing": {
             "mode": mode,
-            "plans": [_public_plan(p) for p in plans],
+            "promos_available": promos,
+            "plans": cards,
             "current": {
                 "billing_status": tenant.get("billing_status") or "trial",
                 "billing_plan_key": tenant.get("billing_plan_key") or "",
