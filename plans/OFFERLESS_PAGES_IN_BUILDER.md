@@ -1,6 +1,14 @@
 # Offer-less pages in the builder (storefront / category / profile)
 
-**Status:** **P1 SHIPPED** (commit `3d6dcd7`, 2026-10-22). P2–P5 not built. Decided 2026-10-22.
+**Status:** **P1 + P2 SHIPPED** (`3d6dcd7`, `2c13465`, 2026-10-22). P3–P5 not built. Decided 2026-10-22.
+
+The outcome, proven end to end through the real publish gates on a verified custom domain:
+
+```
+storefront, as the wizard makes it      words=  11  noindex,follow   (+ warning now shown)
+storefront + builder content            words= 168  index,follow
+storefront + content, goal=search_seo    words= 168  index,follow  (+ structured_data composes)
+```
 
 ## 1. The finding
 
@@ -128,7 +136,40 @@ All three allow the content-bearing elements: `content_block`, `faq`, `photo`, `
 Pinned by a test asserting no transactional section is visible under any of the three — the regression that
 would otherwise put a Buy button on an About page.
 
-### P2 — Let the builder read and write the three sections
+### P2 — Let the builder read and write the three sections — SHIPPED 2026-10-22 (`2c13465`)
+
+Four changes had to land together, two of which were not in the plan:
+
+- `builderOfferType` reads `builder.offerless` first (mirrors `page_composition_key`); the flag is only set
+  for a page with no `offer_id`, which is what makes the cheap read equivalent to the Python guard.
+- **`builderIntent` now answers `"offerless"`.** Not in the plan and load-bearing: `offerIntent(null)`
+  answers `"transaction"`, so every `intent === "transaction"` branch would have fired — minting a
+  `post_checkout` thank-you page for a storefront, and enabling the `sale`/`flash_sale` priced views of an
+  offer that does not exist.
+- **The `offer_price_selector` push was gated on the intent alone** — the one structural push in
+  `builderSectionCandidates` that did not also consult the composition. So P1's exclusion would have been
+  bypassed and the page handed a price card bound to `offer_id: ""`. It now calls `sectionVisible()` like
+  every push around it.
+- `brand_hero` / `catalog_grid` / `seller_profile` became readable and writable, with editors.
+
+**Grid membership stays out of the builder.** The Collection is the grid's source of truth and the publisher
+re-resolves it against the Site route map on every publish, so editing the list in two places would let the
+page and the Collection disagree. Dropping the guard orphaned `editOfferlessPage`, which owns exactly that,
+so it kept its own menu entry ("Products & layout") instead of being deleted as dead code — removing it
+would have been a capability regression dressed as a cleanup.
+
+The emission and its inverse (`offerlessSections` / `offerlessState`) live in the shared composable, not the
+component, which is both the CLAUDE.md rule and what makes `tests/test_offerless_builder_roundtrip.py`
+possible: a wizard-created page round-trips through load-then-save unchanged, **section ids included** —
+`section_order` and per-section overrides are keyed by id, so a renumbered id discards a tenant's
+arrangement with no error.
+
+Two existing tests needed re-pinning, each for a real reason: `test_offer_intent_derivation` asserted
+`builderIntent` as one literal source line, and `test_lead_capture_page` sliced a fixed 3000 characters
+after an anchor — four added lines pushed the headline fallback to offset 3315, so it reported a fallback
+missing that was still there. A character count is a second fact about the file that nothing keeps true.
+
+*Original plan for this step, kept for the record:*
 
 `builderSectionCandidates()` cannot emit `brand_hero`, `catalog_grid` or `seller_profile` today; all six
 emissions live in the wizard's document builders (lines 4840, 5021, 5031). `populateBuilderFromPage()`
