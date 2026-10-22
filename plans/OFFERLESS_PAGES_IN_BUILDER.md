@@ -1,6 +1,6 @@
 # Offer-less pages in the builder (storefront / category / profile)
 
-**Status:** **P1 + P2 SHIPPED** (`3d6dcd7`, `2c13465`, 2026-10-22). P3–P5 not built. Decided 2026-10-22.
+**Status:** **P1 + P2 + P3 SHIPPED** (`3d6dcd7`, `2c13465`, `b1ab271`, 2026-10-22). P4–P5 not built. Decided 2026-10-22.
 
 The outcome, proven end to end through the real publish gates on a verified custom domain:
 
@@ -182,7 +182,43 @@ good creation flow — and the builder takes over editing, exactly as it does fo
 Server side needs nothing: `page_render.py:68` already accepts `offer: null` for an offer-less page, so the
 preview and its `page_health` warnings work the moment the builder opens one.
 
-### P3 — Give them the goal step
+### P3 — Give them the goal step — SHIPPED 2026-10-22 (`b1ab271`)
+
+Same wizard markup as the offer path: the offer-less detail steps moved from step 2 to 3 and the shared
+goal step fell into the gap, so there is one set of goal cards. Asked on **create only** — an existing
+page's goal is changed in the builder's Page Settings, and re-asking it on the edit path would re-run the
+seeding over content the tenant already owns.
+
+Creating one now **continues into the builder** rather than closing the wizard. That is what makes the goal
+mean anything here: seeds are empty elements in builder state, and `builderSections()` drops still-empty
+elements on save, so a goal chosen and never shown to anyone seeds nothing.
+
+**This plan was wrong about the seeds, and running it found out.** P3 was written claiming `search_seo`
+already seeded `content_block` + `faq`. It seeded only `faq`; `ad_landing` is the pack with both. So the
+SEO goal seeded less writing than the ads goal — backwards, since the 150-word demotion is the exact gate
+the discoverability goal exists to pass. `discoverability` now seeds prose too.
+
+**What it actually takes for a storefront to be indexed**, measured with both scaffolds filled at an
+ordinary level of effort (one paragraph, three questions), on a verified custom domain:
+
+```
+products in grid     bare    + seeds filled
+1                       9             125
+3                      16             132
+6                      27             143
+12                     49             165  <- clears the floor
+```
+
+Two properties are pinned instead of the numbers: the grid's product titles and prices **are** indexable
+content (not stripped chrome), so a real catalogue genuinely helps — an earlier reading looked worse than
+reality purely because the fixture had one product; and the grid alone never clears the floor at any
+catalogue size, because a page of tiles and nothing else is the doorway shape the floor exists to catch.
+
+Three goal notes were corrected for a step that is no longer offer-only: `search_seo` still called
+structured data "(later)" long after it shipped and advertised an `llms.txt` that does not exist, while
+`email_list` and `minimal` said "the offer" to someone building a page that has none.
+
+*Original plan for this step, kept for the record:*
 
 Once P1 exists, `offer_type x goal` composes for these shapes like any other, so a storefront can be
 "search-friendly" and get the same `content_block` + `faq` seeds that take an offer page from 108 to 166
