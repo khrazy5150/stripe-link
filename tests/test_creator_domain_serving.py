@@ -331,7 +331,11 @@ class WizardTests(unittest.TestCase):
         # itself. Only the CURRENT step needs the predicate.
         block = self.BUILDER.split("const displayStep", 1)[1][:260]
         self.assertIn("wizardDropsAStep", block)
-        labels = self.BUILDER.split("const wizardStepLabels", 1)[1][:400]
+        # Sliced to the computed's own closing rather than a fixed character count: P3 added two comment
+        # lines inside it and pushed `wizardSkipsGoal` to offset 396, so a 400-char window read almost but
+        # not quite far enough and reported the predicate missing while it sat on the next line
+        # (plans/OFFERLESS_PAGES_IN_BUILDER.md P3). The second time a magic window did this in one day.
+        labels = self.BUILDER.split("const wizardStepLabels", 1)[1].split("});", 1)[0]
         self.assertIn("wizardAsksUsername", labels)
         self.assertIn("wizardSkipsGoal", labels)
         # A separate total is what USED to be here; it was computed and never read, which the linter found

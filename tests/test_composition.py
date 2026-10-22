@@ -121,7 +121,12 @@ class GoalCompositionTests(unittest.TestCase):
 
     def test_goal_packs_and_seeds(self):
         self.assertEqual(goal_packs("search_seo"), ["discoverability"])
-        self.assertEqual(pack_seeds("search_seo"), ["faq"])
+        # Prose AND an FAQ since 2026-10-22. It seeded only an FAQ before, which made the SEO goal seed
+        # less writing than the ads goal -- backwards, because the 150-word thin-content demotion is the
+        # exact gate this goal exists to pass. An offer page clears that floor partly on offer-derived text
+        # (product description, prices, CTA, badges); an offer-less page has none, so a filled-in storefront
+        # with only an FAQ seeded still measured 122 (plans/OFFERLESS_PAGES_IN_BUILDER.md P3).
+        self.assertEqual(pack_seeds("search_seo"), ["content_block", "faq"])
         self.assertEqual(pack_seeds("social"), ["testimonials", "rating", "client_marquee"])
         # paid_ads answers the ad's promise and the obvious objections.
         self.assertEqual(pack_seeds("paid_ads"), ["content_block", "faq"])

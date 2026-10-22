@@ -1103,13 +1103,15 @@
     "discoverability": {
       "label": "Discoverability",
       "seeds": [
+        "content_block",
         "faq"
       ],
       "sections": [
         "structured_data"
-      ]
-    },
-    "social_proof": {
+      ],
+   "_comment": "Seeds PROSE as well as an FAQ. It seeded only an FAQ until 2026-10-22, which made the SEO goal seed less writing than the ads goal -- backwards, because the thin-content demotion (150 words, publishing.py) is the exact gate this goal exists to pass. It showed up on offer-less pages (plans/OFFERLESS_PAGES_IN_BUILDER.md P3): an offer page clears the floor partly on text derived from the offer -- product description, prices, CTA, badges -- and a storefront has none of that, so with only an FAQ seeded a filled-in storefront still measured 122 words. Union-only and tenant-owned once seeded, so no existing page changes: an unfilled scaffold renders nothing and builderSections() drops it on save."
+  },
+  "social_proof": {
       "label": "Social proof",
       "seeds": [
         "testimonials",
@@ -1129,7 +1131,7 @@
     },
     "search_seo": {
       "label": "Search-friendly",
-      "note": "Adds search-friendly content: an FAQ, plus (later) structured data and llms.txt from the offer.",
+      "note": "Adds search-friendly content: a prose block, an FAQ, and structured data so search engines can read the page as more than text. The one goal that changes what crawlers see — and the content is what gets a page over the length search engines expect.",
       "packs": [
         "discoverability"
       ]
@@ -1143,12 +1145,12 @@
     },
     "email_list": {
       "label": "Email list",
-      "note": "A warm audience that already knows you. Adds nothing extra — straight to the offer.",
+      "note": "A warm audience that already knows you. Adds nothing extra — straight to the point.",
       "packs": []
     },
     "minimal": {
       "label": "Minimal",
-      "note": "No extras of any kind. The offer's standard page, with nothing added on top.",
+      "note": "No extras of any kind. The page's standard shape, with nothing added on top.",
       "packs": []
     }
   },

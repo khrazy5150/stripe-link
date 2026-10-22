@@ -1956,7 +1956,7 @@
             </template>
           </section>
 
-          <section v-else-if="wizardStep === 2 && form.pageKind === 'storefront'" class="wizard-step">
+          <section v-else-if="wizardStep === 3 && form.pageKind === 'storefront'" class="wizard-step">
             <header class="wizard-step-header">
               <h3>Build your storefront</h3>
               <p>Name your store, then pick which pages appear in the product grid.</p>
@@ -2043,7 +2043,7 @@
             </div>
           </section>
 
-          <section v-else-if="wizardStep === 2 && form.pageKind === 'category'" class="wizard-step">
+          <section v-else-if="wizardStep === 3 && form.pageKind === 'category'" class="wizard-step">
             <header class="wizard-step-header">
               <h3>Build a category page</h3>
               <p>Pick a category. The page lists every page you've attached to your Site in that category — new ones appear automatically.</p>
@@ -2066,7 +2066,7 @@
             <small v-if="!storefrontCategories.length">No product categories yet — add categories to your products first.</small>
           </section>
 
-          <section v-else-if="wizardStep === 2 && form.pageKind === 'profile'" class="wizard-step">
+          <section v-else-if="wizardStep === 3 && form.pageKind === 'profile'" class="wizard-step">
             <header class="wizard-step-header">
               <h3>Store profile page</h3>
               <p>An "about" page. Its content — your store name, description, contact, catalog — comes from your Site's business profile, so keep that up to date on the Sites screen.</p>
@@ -2129,7 +2129,11 @@
                 <span v-if="goalSeedLabels(option.value).length" class="wizard-goal-adds">
                   Starts with: {{ goalSeedLabels(option.value).join(", ") }}
                 </span>
-                <span v-else class="wizard-goal-adds is-lean">Starts with the offer only</span>
+                <!-- "the offer only" is offer-page wording, and this step now also serves storefront,
+                     category and store-profile pages, which have no offer at all (P3). -->
+                <span v-else class="wizard-goal-adds is-lean">
+                  {{ form.pageKind === "offer" ? "Starts with the offer only" : "Starts with nothing extra" }}
+                </span>
               </WizardChoiceCard>
             </div>
           </section>
@@ -2201,19 +2205,19 @@
             {{ isEditingOfferless ? "Cancel" : "Back" }}
           </button>
           <template v-if="form.pageKind === 'storefront'">
-            <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-if="wizardStep < 3" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createStorefront">
               {{ creatingStorefront ? "Saving…" : isEditingOfferless ? "Save changes" : "Create storefront homepage" }}
             </button>
           </template>
           <template v-else-if="form.pageKind === 'category'">
-            <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-if="wizardStep < 3" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront || !form.categoryKey" @click="createCategory">
               {{ creatingStorefront ? "Saving…" : isEditingOfferless ? "Save changes" : "Create category page" }}
             </button>
           </template>
           <template v-else-if="form.pageKind === 'profile'">
-            <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-if="wizardStep < 3" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createProfile">
               {{ creatingStorefront ? "Saving…" : isEditingOfferless ? "Save changes" : "Create store profile" }}
             </button>
@@ -4535,8 +4539,21 @@ function selectOffer(offer) {
 
 function nextWizardStep() {
   wizardError.value = "";
+  // Offer-less kinds: pick kind -> goal -> configure + create. The goal step is SHARED markup with the
+  // offer path (plans/OFFERLESS_PAGES_IN_BUILDER.md P3) -- it is the only thing standing between a
+  // storefront and 150 words of indexable content, since `search_seo` and `paid_ads` are what seed a
+  // content block and an FAQ. Asked on CREATE only; editing one of these jumps straight to the details,
+  // and the goal stays changeable in the builder's Page Settings.
   if (form.pageKind !== "offer") {
-    wizardStep.value = 2;  // offer-less kinds are a two-step flow: pick kind, then configure + create
+    if (wizardStep.value === 1) {
+      wizardStep.value = 2;
+      return;
+    }
+    if (wizardStep.value === 2 && !form.goal) {
+      wizardError.value = "Choose a goal before continuing.";
+      return;
+    }
+    wizardStep.value = 3;
     return;
   }
   if (wizardStep.value === 1 && !selectedOffer.value) {
@@ -4599,7 +4616,9 @@ const wizardDropsAStep = computed(() => wizardSkipsGoal.value && !wizardAsksUser
 // to guard that. Both are gone -- the first was dead code the linter found, the second had already been
 // deleted while this comment went on citing it.)
 const wizardStepLabels = computed(() => {
-  if (form.pageKind !== "offer") return ["Site", "Type", "Details"];
+  // An offer-less page is asked for a goal too (P3), so its rail is four steps, not three. On the EDIT
+  // path the wizard opens straight at Details, so the rail is never shown mid-flow there.
+  if (form.pageKind !== "offer") return ["Site", "Type", "Goal", "Details"];
   const labels = ["Site", "Type"];
   if (wizardAsksUsername.value) labels.push("Username");
   else if (!wizardSkipsGoal.value) labels.push("Goal");
@@ -4837,6 +4856,11 @@ function finalizeOfferlessDoc(sections, { name, slug, title }) {
     name,
     route: { ...(base.route || {}), slug: slugify(slug || name) },
     seo: { ...(base.seo || {}), title },
+    // The goal is the page's second composition axis and it governs what the page STARTS with, so an
+    // offer-less page has to carry it like any other (P3). Preserved from the stored page when editing --
+    // the goal is changed in the builder now, and the edit path skips the goal step, so overwriting it
+    // from `form.goal` here would silently reset it to whatever the wizard last held.
+    goal: (isEditingOfferless.value ? base.goal : form.goal) || undefined,
     sections,
     revision: (base.revision || 0) + 1,
     created_at: base.created_at || now,
@@ -5134,7 +5158,11 @@ async function createStorefront() {
     message.value = isEditingOfferless.value
       ? "Storefront homepage saved."
       : `Storefront homepage created and set as ${selectedSite.value?.name || "your Site"}'s homepage. Publish it to go live.`;
-    if (attached) closeWizard();
+    if (!attached) return;
+    // A NEW page continues into the builder so the goal's content scaffolds are there to fill; editing one
+    // is finished here, because that path exists for the grid and layout the builder deliberately omits.
+    if (isEditingOfferless.value) closeWizard();
+    else openBuilderOnCreatedOfferlessPage(saved);
   } catch (error) {
     wizardError.value = error.message || "Failed to create the storefront homepage.";
   } finally {
@@ -5172,7 +5200,11 @@ async function createProfile() {
     message.value = isEditingOfferless.value
       ? "Store profile page saved."
       : `Store profile page created and attached to ${selectedSite.value?.name || "your Site"}. Publish it to go live.`;
-    if (attached) closeWizard();
+    if (!attached) return;
+    // A NEW page continues into the builder so the goal's content scaffolds are there to fill; editing one
+    // is finished here, because that path exists for the grid and layout the builder deliberately omits.
+    if (isEditingOfferless.value) closeWizard();
+    else openBuilderOnCreatedOfferlessPage(saved);
   } catch (error) {
     wizardError.value = error.message || "Failed to create the store profile page.";
   } finally {
@@ -5198,7 +5230,11 @@ async function createCategory() {
     message.value = isEditingOfferless.value
       ? "Category page saved."
       : `Category page created and attached to ${selectedSite.value?.name || "your Site"}. Publish it to go live.`;
-    if (attached) closeWizard();
+    if (!attached) return;
+    // A NEW page continues into the builder so the goal's content scaffolds are there to fill; editing one
+    // is finished here, because that path exists for the grid and layout the builder deliberately omits.
+    if (isEditingOfferless.value) closeWizard();
+    else openBuilderOnCreatedOfferlessPage(saved);
   } catch (error) {
     wizardError.value = error.message || "Failed to create the category page.";
   } finally {
@@ -5250,6 +5286,25 @@ function seedGoalElements(goal) {
 const SHAPE_SEEDS = {
   lead_social: ["social_links", "link_cards"],
 };
+
+// Hand a freshly created OFFER-LESS page straight to the builder, with its goal's content scaffolds already
+// seeded (plans/OFFERLESS_PAGES_IN_BUILDER.md P3).
+//
+// This is what makes the goal step mean anything on these pages. A goal's `seeds` are EMPTY elements living
+// in builder state -- an unfilled faq is not a valid page section, and builderSections() drops still-empty
+// elements on save -- so a goal chosen in the wizard and then never shown to anyone seeds nothing and
+// changes nothing. The offer path has always worked this way (startBuilderFromWizard); the offer-less path
+// created the document and closed, which is the other half of why these pages stayed at 11 words.
+function openBuilderOnCreatedOfferlessPage(saved) {
+  populateBuilderFromPage(saved);
+  seedGoalElements(form.goal);
+  seedShapeElements();
+  builderExistingPageId.value = saved.page_id;
+  builderOriginalPage.value = { ...saved };
+  builderOpen.value = true;
+  builderFormHidden.value = false;
+  wizardOpen.value = false;
+}
 
 function seedShapeElements() {
   for (const type of SHAPE_SEEDS[builderOfferType.value] || []) {
@@ -7404,7 +7459,10 @@ async function editOfferlessPage(page) {
   }
   editingOfferlessOriginal.value = { ...page };
   wizardOpen.value = true;
-  wizardStep.value = 2;
+  // Straight to Details: step 2 is now the GOAL step, which is a CREATE-time question (P3). The goal of
+  // an existing page is changed in the builder's Page Settings, and re-asking it here would also re-run
+  // the seeding on a page whose content the tenant already owns.
+  wizardStep.value = 3;
   try {
     await ensureCatalogLoaded();
     if (kind === "category") await ensureProductsLoaded();
