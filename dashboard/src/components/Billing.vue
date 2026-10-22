@@ -88,9 +88,14 @@
             <div class="billing-plan-head">
               <h3>{{ plan.label }}</h3>
               <span v-if="plan.plan_key === billing.current.billing_plan_key" class="billing-plan-current">Current</span>
+              <span v-else-if="plan.retired" class="billing-plan-retired">No longer offered</span>
             </div>
             <p class="billing-plan-price"><strong>{{ price(plan.monthly_amount) }}</strong><span>/mo</span></p>
             <p v-if="plan.tagline" class="billing-plan-tagline">{{ plan.tagline }}</p>
+            <!-- Said plainly, because "my plan vanished from the page" is alarming and this is not. -->
+            <p v-if="plan.retired" class="billing-plan-tagline">
+              This plan is no longer offered to new customers. Yours continues until you cancel.
+            </p>
             <ul v-if="plan.features && plan.features.length" class="billing-plan-features">
               <li v-for="(f, i) in plan.features" :key="i">{{ f }}</li>
             </ul>
@@ -239,6 +244,11 @@ function subscribe(planKey) {
 }
 @media (prefers-reduced-motion: reduce) { .billing-plan, .billing-plan:hover { transition: none; transform: none; } }
 /* The plan you are on is stated by a RING and a label, not by colour alone. */
+.billing-plan-retired {
+  font-size: 1.05rem; font-weight: 700; color: var(--muted);
+  background: var(--line); padding: 0.2rem 0.7rem; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
 .billing-plan.current {
   border-color: var(--brand, #4f46e5);
   box-shadow: 0 0 0 2px var(--brand, #4f46e5), 0 8px 20px rgba(79, 70, 229, 0.12);

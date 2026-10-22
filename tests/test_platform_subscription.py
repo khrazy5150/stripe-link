@@ -487,3 +487,51 @@ class PlanCardsSayWhatYouGetTests(unittest.TestCase):
                              "fee_tier": "pro", "ai_images": 5})
         for secret in ("price_id", "product_id", "fee_tier"):
             self.assertNotIn(secret, card)
+
+
+class ARetiredPlanStaysVisibleToItsSubscribersTests(unittest.TestCase):
+    """Unticking Active hides a plan from new buyers. It must not hide it from the people ON it."""
+
+    def _payload(self, tenant, plans):
+        from handlers import platform_subscription as subs
+        from stripe_link.domain import platform_billing
+        platform_billing._CACHE.clear()
+        # The tenant comes from VERIFIED claims on this route, not from a body.
+        response = subs.handler(
+            {"httpMethod": "GET", "path": "/platform/plans",
+             "requestContext": {"authorizer": {"claims": {"sub": "t1"}}}}, None,
+            tenant_repository=FakeTenantRepo([tenant]),
+            plans_repository=FakePlansRepo(plans, {"default_plan_key": "basic"}))
+        return json.loads(response["body"])["platform_billing"]
+
+    ACTIVE = {"plan_key": "basic", "label": "Basic", "monthly_amount": 1900, "active": True,
+              "sort_order": 1, "price_id": "price_19"}
+    RETIRED = {"plan_key": "pro", "label": "Pro", "monthly_amount": 2900, "active": False,
+               "sort_order": 2, "price_id": "price_29"}
+
+    def test_a_retired_plan_is_hidden_from_someone_who_is_not_on_it(self):
+        payload = self._payload(_tenant(), [self.ACTIVE, self.RETIRED])
+        self.assertEqual([p["plan_key"] for p in payload["plans"]], ["basic"])
+
+    def test_but_a_subscriber_still_sees_the_plan_they_are_paying_for(self):
+        # Otherwise nothing on the screen is marked Current, which reads as "you are not subscribed"
+        # to the one person who definitely is.
+        tenant = _tenant(billing_plan_key="pro", stripe_subscription_id="sub_1",
+                         billing_status="active")
+        payload = self._payload(tenant, [self.ACTIVE, self.RETIRED])
+        keys = [p["plan_key"] for p in payload["plans"]]
+        self.assertIn("pro", keys)
+        retired = next(p for p in payload["plans"] if p["plan_key"] == "pro")
+        self.assertTrue(retired["retired"])
+        self.assertEqual(payload["current"]["billing_plan_key"], "pro")
+
+    def test_an_active_plan_is_never_marked_retired(self):
+        tenant = _tenant(billing_plan_key="basic", stripe_subscription_id="sub_1")
+        payload = self._payload(tenant, [self.ACTIVE, self.RETIRED])
+        basic = next(p for p in payload["plans"] if p["plan_key"] == "basic")
+        self.assertNotIn("retired", basic)
+
+    def test_a_plan_key_that_no_longer_exists_at_all_is_skipped(self):
+        tenant = _tenant(billing_plan_key="deleted_plan", stripe_subscription_id="sub_1")
+        payload = self._payload(tenant, [self.ACTIVE])
+        self.assertEqual([p["plan_key"] for p in payload["plans"]], ["basic"])

@@ -26,7 +26,7 @@ from stripe_link.stripe_platform_secrets import get_platform_secret_key
 # Fields safe to expose to the dashboard billing screen (never price_id/product_id/fee_tier/exempt internals).
 _PUBLIC_PLAN_FIELDS = (
     "plan_key", "label", "tagline", "badge", "cta_label",
-    "monthly_amount", "trial_days", "highlight", "features", "sort_order",
+    "monthly_amount", "trial_days", "highlight", "features", "sort_order", "retired",
 )
 
 
@@ -178,6 +178,18 @@ def _plans(event, tenant_repository, plans_repository, mode):
     except RepositoryError as exc:
         return error_response(str(exc), code="platform_billing_error")
     plans = active_platform_plans(mode, plans_repository)
+    # THE PLAN YOU ARE ON IS ALWAYS SHOWN, even once it is retired. Retiring a plan hides it from
+    # people who have not bought it; it does not end anybody's subscription, and Stripe keeps billing
+    # the Price regardless. But showing only the plans a tenant could switch TO leaves a paying
+    # subscriber looking at a screen where nothing is marked Current -- which reads as "you are not
+    # subscribed" to the one person who definitely is.
+    current_key = str(tenant.get("billing_plan_key") or "").strip()
+    if current_key and not any(str(p.get("plan_key")) == current_key for p in plans):
+        retired = platform_plan(mode, current_key, plans_repository)
+        if retired:
+            # Marked so the screen can say it plainly rather than leaving someone to wonder why their
+            # plan is not on the list any more.
+            plans = plans + [{**retired, "retired": True}]
     return json_response({
         "platform_billing": {
             "mode": mode,
