@@ -381,6 +381,38 @@ Resources:
         # it was asking permission for. The preflight reveals nothing -- it answers which methods and
         # headers are allowed, never any data.
         AddDefaultAuthorizerToCorsPreflight: false
+      # A REFUSAL THE BROWSER CAN READ. API Gateway's own 401 -- produced by the authorizer, before any
+      # of our code runs -- carries no CORS headers, so a browser cannot see the status and reports the
+      # generic "Failed to fetch". A dashboard then cannot tell an expired session from the network
+      # being down: the reactive renew-and-retry below never fires, nothing signs the tenant out, and
+      # they are left looking at an error with no way forward.
+      #
+      # The client renews PROACTIVELY, which is why this has not bitten a tenant yet -- but proactive
+      # renewal is the half that stops working when a refresh token finally expires, and the reactive
+      # path is the safety net that was blind. Found 2026-10-21 on the admin site, where there is no
+      # proactive renewal and an expired session stranded the operator completely.
+      GatewayResponses:
+        UNAUTHORIZED:
+          StatusCode: 401
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
+              Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
+        ACCESS_DENIED:
+          StatusCode: 403
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
+              Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
+        EXPIRED_TOKEN:
+          StatusCode: 401
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
+              Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
       Cors:
         AllowMethods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
         AllowHeaders: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
