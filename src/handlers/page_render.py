@@ -207,7 +207,9 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None, events_repo=N
         return json_response({
             "html": html,
             "warnings": {
-                "structured_data": structured_data_warnings(offer, products_by_id, services_by_id),
+                # `page` so an OFFER-LESS page is checked against the markup IT can emit, rather than
+                # being told no Product markup is possible -- true, intended, and not actionable.
+                "structured_data": structured_data_warnings(offer, products_by_id, services_by_id, page),
                 # Quality baseline (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4): heading outline +
                 # accessibility (CLS next) + the SEO-08 thin-content floor. Checked on the rendered HTML —
                 # the source of truth for what ships.

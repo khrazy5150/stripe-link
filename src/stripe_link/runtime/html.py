@@ -14,7 +14,8 @@ from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.coupon_grants import grant_prefix
 from stripe_link.domain.composition import (
-    compose_page, composition_key, default_cta_label, element_channel, shows_breadcrumb)
+    compose_page, composition_key, default_cta_label, element_channel, offerless_composition,
+    shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -1994,6 +1995,67 @@ def _return_window_days(policy: dict[str, Any]) -> int:
     return int(match.group(1)) if match else 0
 
 
+def _grid_item_count(page: dict[str, Any]) -> int:
+    """How many cards the catalog grid will actually show. Read off the RESOLVED section, which the
+    publisher fills from the Site route map before rendering (resolve_category_grids), so this counts the
+    products a visitor sees rather than whatever the Collection claims to contain."""
+    total = 0
+    for section in page.get("sections") or []:
+        if isinstance(section, dict) and section.get("type") == "catalog_grid":
+            total += len([item for item in (section.get("items") or []) if item])
+    return total
+
+
+def offerless_description(page: dict[str, Any]) -> str:
+    """The meta description for a page with NO offer — a storefront, a category page, a store profile.
+
+    These used to fall through the whole offer-shaped derivation below and come out as the bare rotating
+    CTA, so every offer-less page on a Site published the identical `Get yours today!` — a duplicate
+    description footprint across a Site, and plainly wrong on an "about" page (SEO-04,
+    plans/OFFERLESS_PAGES_IN_BUILDER.md P4).
+
+    WHICH SOURCE LEADS DEPENDS ON THE SHAPE, and that is the whole difficulty. An about page's subject IS
+    the business, so the business description the tenant wrote for the Site is the right first choice there.
+    A catalog page's subject is its catalogue, so it leads with what THIS page is and what is on it. Taking
+    the business description first for both — the obvious implementation, and the first one written here —
+    gave a Site's storefront and its about page the same sentence word for word, which is the duplicate
+    footprint this function exists to remove, just with better prose.
+
+    No CTA is ever appended: "Order now" on a page with no checkout is a promise the page cannot keep.
+    """
+    hero = next((s for s in (page.get("sections") or [])
+                 if isinstance(s, dict) and s.get("type") == "brand_hero"), {})
+    headline = headline_plain_text(str(hero.get("headline") or "")).strip()
+    tagline = str(hero.get("tagline") or "").strip().rstrip(".")
+    org_name = str(_RENDER_ORG.get("name") or "").strip()
+    org_description = re.sub(r"[.\s]+$", "", str(_RENDER_ORG.get("description") or "").strip())
+    is_profile = offerless_composition(page) == "store_profile"
+
+    # The about page: the tenant's own words about the business, and nothing bolted on in front of them.
+    if is_profile and len(org_description) >= _DESC_MIN:
+        return trim_meta(org_description, _DESC_MAX)
+
+    segments: list[str] = []
+    if headline and tagline:
+        segments.append(f"{headline} — {tagline}.")
+    elif headline:
+        # Name the store alongside the page's own subject, so a category page reads "Widgets from Probe
+        # Store" rather than the bare word a dozen other shops also use as a heading.
+        segments.append(f"{headline} from {org_name}." if org_name and org_name != headline
+                        else f"{headline}.")
+    elif tagline:
+        segments.append(f"{tagline}.")
+    count = _grid_item_count(page)
+    if count:
+        segments.append(f"Browse {count} product{'s' if count != 1 else ''}.")
+    # The business description is the LAST resort on a catalog page: borrowing it when the page already
+    # said something of its own is what made two pages read identically.
+    if org_description and not segments:
+        segments.append(f"{org_description}.")
+    text = re.sub(r"\s+", " ", " ".join(segments)).strip()
+    return trim_meta(text, _DESC_MAX)
+
+
 def document_description(page: dict[str, Any], offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
     """The <head> <meta name="description"> (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-04). Tenant's text wins
     (capped). Otherwise the product description, and when it's thin (<100 chars) it is enriched into
@@ -2002,6 +2064,12 @@ def document_description(page: dict[str, Any], offer: dict[str, Any], products_b
     explicit = str((page.get("seo") or {}).get("description") or "").strip()
     if explicit:
         return trim_meta(explicit, _DESC_MAX)
+    # A page with no offer has nothing for the derivation below to read, and every branch of it is phrased
+    # for something being sold. Decided on the page's own sections rather than on `offer` being empty: the
+    # same question `is_offerless_page` answers everywhere else, and true whether or not a caller happened
+    # to pass an empty offer.
+    if is_offerless_page(page):
+        return offerless_description(page)
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
     model = resolve_semantic_model(offer, products_by_id)
@@ -2659,7 +2727,8 @@ def _render_page_body(
     # First-party reviews render after the page's sections (visible content matching the Product review JSON-LD).
     business_reviews_block = render_business_reviews_block(page)
     head_extras = "\n".join(part for part in (
-        render_head_section(section, page, offer, products_by_id, services_by_id, composed_sections)
+        render_head_section(section, page, offer, products_by_id, services_by_id, composed_sections,
+                            offers_by_id)
         for section in head_sections
     ) if part)
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in composed_sections)
@@ -2988,11 +3057,16 @@ def render_head_section(
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]],
     composed_sections: list[dict[str, Any]],
+    offers_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
+    """`offers_by_id` carries the OTHER offers the page references -- the ones behind a catalog grid's
+    cards. A head section describing a catalog page needs them: its own `offer` is empty, because the page
+    has none (plans/OFFERLESS_PAGES_IN_BUILDER.md P4)."""
     renderer = HEAD_SECTION_REGISTRY.get(str(section.get("type") or ""))
     if renderer is None:
         return ""
-    return renderer(section, page, offer, products_by_id, services_by_id, composed_sections)
+    return renderer(section, page, offer, products_by_id, services_by_id, composed_sections,
+                    offers_by_id or {})
 
 
 def render_section(
@@ -5028,17 +5102,48 @@ def thin_content_warnings(html: str, offer: dict[str, Any] | None = None) -> lis
     ]
 
 
+def _catalog_markup_warnings(page: dict[str, Any]) -> list[str]:
+    """What would keep an offer-less page's own markup from being emitted.
+
+    Only things the tenant can act on. A store profile derives its Organization node from the Site's
+    business profile, so the one thing that can be missing there is the business name; a catalog page's
+    ItemList needs cards to list. Everything else about these pages is derived and cannot be wrong.
+    """
+    warnings: list[str] = []
+    if offerless_composition(page) == "store_profile":
+        if not str(_RENDER_ORG.get("name") or "").strip():
+            warnings.append(
+                "Your business has no name set, so this page cannot tell search engines who you are. "
+                "Add one under Sites → business profile.")
+        return warnings
+    if not _grid_item_count(page):
+        warnings.append(
+            "This page's product grid is empty, so there is no catalogue for search engines to read. "
+            "Publish some product pages on this Site and they will appear here.")
+    return warnings
+
+
 def structured_data_warnings(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]] | None = None,
+    page: dict[str, Any] | None = None,
 ) -> list[str]:
-    """What is missing for this page's Product markup to earn a rich result.
+    """What is missing for this page's markup to earn a rich result.
 
     Warnings only, never a gate — the quality baseline is surfaced as nudges, never as a block on publishing
     (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Thin markup isn't invalid, it just gets ignored by Google,
     which is exactly the failure a tenant can't see for themselves.
+
+    An OFFER-LESS page is checked against what IT can emit, not against Product markup. Every check below
+    reads a product this page does not have, and the first of them would have told the tenant of a
+    storefront "No price is shown on this page, so no Product markup can be emitted." — which describes
+    correct, intended behaviour and names nothing they could do about it. That notice was unreachable until
+    these pages started opening in the builder (P2), so the exposure arrived with the fix
+    (plans/OFFERLESS_PAGES_IN_BUILDER.md P4).
     """
+    if page is not None and is_offerless_page(page):
+        return _catalog_markup_warnings(page)
     warnings: list[str] = []
     prices = landing_page_offer_prices(offer, products_by_id, services_by_id or {})
     if not prices:
@@ -5214,6 +5319,7 @@ def render_structured_data(
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]],
     composed_sections: list[dict[str, Any]],
+    offers_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """JSON-LD for the page, DERIVED from the offer and the sections the composer actually put on the page.
 
@@ -5239,6 +5345,12 @@ def render_structured_data(
     product_ld = product_json_ld(page, offer, products_by_id, services_by_id)
     if product_ld:
         blocks.append(product_ld)
+    # A CATALOG page (storefront / category) describes a list of other pages, not a product. product_json_ld
+    # returns "" for it -- there are no prices to read -- which is why these pages emitted no markup at all
+    # for the one thing they do contain (plans/OFFERLESS_PAGES_IN_BUILDER.md P4).
+    collection_ld = collection_json_ld(page, offers_by_id or {}, composed_sections)
+    if collection_ld:
+        blocks.append(collection_ld)
     breadcrumb_ld = breadcrumb_json_ld(breadcrumb_trail(offer, products_by_id))
     if breadcrumb_ld:
         blocks.append(breadcrumb_ld)
@@ -5250,6 +5362,75 @@ def render_structured_data(
     return "\n".join(
         f"  <script type=\"application/ld+json\">{block}</script>" for block in blocks
     )
+
+
+def collection_json_ld(
+    page: dict[str, Any],
+    offers_by_id: dict[str, dict[str, Any]],
+    composed_sections: list[dict[str, Any]],
+) -> str:
+    """ItemList markup for a catalog page's grid — the machine-readable form of the page's only content
+    (plans/OFFERLESS_PAGES_IN_BUILDER.md P4).
+
+    A storefront homepage and a category page ARE a list of links to other pages, and they emitted no
+    structured data whatever: `product_json_ld` returns "" without prices, and the grid renderer emits none
+    of its own. So the two page types that carry the catalogue were invisible to structured-data consumers
+    while the store-profile page — which carries no products at all — emitted three node types.
+
+    Each entry is a `ListItem` with a url and a name, and deliberately NOT a nested Product with an Offer.
+    The listing page's job is to link; the full Product/Offer markup belongs on the product's own page,
+    where it already is, and restating prices here would duplicate a claim in two places that can disagree.
+    Names and urls are exactly what the cards show, which keeps the rule this file holds everywhere: markup
+    describes what is on the page.
+
+    Wrapped in a `CollectionPage` only when nothing else on the page already claims to be one.
+    `render_seller_profile` emits its own `CollectionPage` (mainEntity: the Organization), so an about page
+    that also carries a grid would otherwise publish two contradictory CollectionPage nodes for one URL.
+    """
+    home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
+    items: list[dict[str, Any]] = []
+    for section in composed_sections:
+        if not isinstance(section, dict) or section.get("type") != "catalog_grid":
+            continue
+        for entry in section.get("items") or []:
+            if not isinstance(entry, dict):
+                continue
+            slug = str(entry.get("slug") or "").strip()
+            linked = offers_by_id.get(str(entry.get("offer_id") or "")) or {}
+            name = headline_plain_text(
+                str((linked.get("presentation") or {}).get("headline") or linked.get("name") or "")
+            ).strip()
+            # No url means no card a crawler could follow, which is the same condition that makes
+            # render_catalog_grid emit a plain tile instead of a link. An entry with nothing to point at
+            # does not belong in an ItemList.
+            if not (home and slug):
+                continue
+            node: dict[str, Any] = {
+                "@type": "ListItem",
+                "position": len(items) + 1,
+                "url": f"{home}{slug if slug.startswith('/') else '/' + slug}",
+            }
+            if name:
+                node["name"] = name
+            items.append(node)
+    if not items:
+        return ""
+    item_list = {"@type": "ItemList", "numberOfItems": len(items), "itemListElement": items}
+    has_collection_page = any(
+        isinstance(section, dict) and section.get("type") == "seller_profile"
+        for section in composed_sections
+    )
+    if has_collection_page:
+        return json_ld_dump({"@context": "https://schema.org", **item_list})
+    canonical = _RENDER_STATE.get("canonical") or ""
+    payload: dict[str, Any] = {"@context": "https://schema.org", "@type": "CollectionPage"}
+    if canonical:
+        payload["url"] = canonical
+    name = str((page.get("seo") or {}).get("title") or "").strip()
+    if name:
+        payload["name"] = name
+    payload["mainEntity"] = item_list
+    return json_ld_dump(payload)
 
 
 def json_ld_dump(payload: dict[str, Any]) -> str:
