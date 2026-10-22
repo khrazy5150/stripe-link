@@ -163,10 +163,27 @@ CONFIG_BUCKET="$(aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs[?OutputKey=='ConfigBucketName'].OutputValue | [0]" \
   --output text)"
 
+# SEED ONLY. This file is the baseline a NEW environment starts from; the LIVE fee table is the S3
+# object, and the Admin Site edits it. Uploading unconditionally -- which this did until 2026-10-21 --
+# meant the next deploy silently reverted every rate an admin had changed, and nothing would have said
+# so until a tenant was charged the old number.
+#
+# To push the repo's baseline on purpose: BILLING_CONFIG_RESEED=1 ./deploy/deploy.sh <env>
 if [[ -n "${CONFIG_BUCKET}" && "${CONFIG_BUCKET}" != "None" ]]; then
-  aws s3 cp \
-    "$(dirname "$0")/../schemas/examples/global-billing-config.json" \
-    "s3://${CONFIG_BUCKET}/global_billing_config.json" \
-    --region "${REGION}" \
-    --content-type "application/json"
+  if [[ "${BILLING_CONFIG_RESEED:-}" == "1" ]]; then
+    echo "==> Billing config: RESEEDING from the repo (overwrites Admin Site edits)"
+    aws s3 cp \
+      "$(dirname "$0")/../schemas/examples/global-billing-config.json" \
+      "s3://${CONFIG_BUCKET}/global_billing_config.json" \
+      --region "${REGION}" --content-type "application/json"
+  elif aws s3api head-object --bucket "${CONFIG_BUCKET}" --key "global_billing_config.json" \
+       --region "${REGION}" >/dev/null 2>&1; then
+    echo "==> Billing config: already present, left alone (the Admin Site owns it)"
+  else
+    echo "==> Billing config: seeding the baseline (none present)"
+    aws s3 cp \
+      "$(dirname "$0")/../schemas/examples/global-billing-config.json" \
+      "s3://${CONFIG_BUCKET}/global_billing_config.json" \
+      --region "${REGION}" --content-type "application/json"
+  fi
 fi

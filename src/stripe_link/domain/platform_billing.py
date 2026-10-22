@@ -134,6 +134,36 @@ def free_ai_generations(mode: str, repository: Any | None = None) -> int:
     return _as_int(config.get("ai_free_generations"), DEFAULT_FREE_AI_GENERATIONS)
 
 
+def plan_limits(plan: dict[str, Any] | None) -> dict[str, int]:
+    """A plan's countable allowances as a generic map: `{"ai_images": 200, "ai_videos": 5, ...}`.
+
+    GENERIC ON PURPOSE. `ai_generations` and `ai_images` are named fields read by named accessors, so
+    each new metered capability used to mean a code change just to carry its number. A map means the
+    allowance for AI video -- or whatever comes after it -- is a row edit. The named fields are still
+    read first so nothing existing moves; `limits` fills in the rest and wins where both are set.
+
+    What this does NOT make configurable is the capability itself. Something still has to call the
+    video API. Config owns the number, the tier gate and the price; the integration is code.
+    """
+    plan = plan or {}
+    limits: dict[str, int] = {}
+    for key, field in (("ai_generations", "ai_generations"), ("ai_images", "ai_images")):
+        if field in plan:
+            limits[key] = _as_int(plan.get(field), 0)
+    configured = plan.get("limits")
+    if isinstance(configured, dict):
+        for key, value in configured.items():
+            name = str(key or "").strip()
+            if name:
+                limits[name] = _as_int(value, 0)
+    return limits
+
+
+def plan_limit(plan: dict[str, Any] | None, name: str, fallback: int = 0) -> int:
+    """One allowance by name, so a new capability needs no new accessor."""
+    return plan_limits(plan).get(str(name or "").strip(), int(fallback))
+
+
 def ai_monthly_budget_usd(mode: str, repository: Any | None = None) -> float:
     """The platform's own monthly AI spend ceiling, in USD. 0 (the default) means no ceiling.
 

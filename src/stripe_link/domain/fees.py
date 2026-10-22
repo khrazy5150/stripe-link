@@ -253,6 +253,30 @@ def load_billing_config_from_s3() -> dict[str, Any]:
         return default_billing_config()
 
 
+def apply_tier_overrides(billing_config: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Merge tier edits over a baseline. Per-TIER, so an edit adds or replaces one rung and leaves
+    every other tier, and the processing schedule, exactly as it was.
+
+    USED BY THE ADMIN SITE to compose the document it writes, NOT on the fee path. Reading an override
+    while pricing a checkout was tried and backed out the same hour: `fees` is reached by 22 functions,
+    so it would have added a DynamoDB read to every checkout, every invoice and every download, for a
+    table that changes about once a month -- and needed the plans table granted to all 22. The guard in
+    tests/test_env_var_grants.py is what said so.
+
+    The live document lives in S3, where the fee path already reads it. The Admin Site writes there.
+    """
+    if not overrides:
+        return billing_config
+    merged = deepcopy(billing_config)
+    tiers = merged.setdefault("platform_fees", {}).setdefault("tiers", {})
+    for name, rates in overrides.items():
+        key = str(name or "").strip().lower()
+        if not key or not isinstance(rates, dict):
+            continue
+        tiers[key] = {**(tiers.get(key) or {}), **rates}
+    return merged
+
+
 def cached_billing_config(
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     now_fn: Callable[[], float] = time.time,

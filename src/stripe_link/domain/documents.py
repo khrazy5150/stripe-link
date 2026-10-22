@@ -72,7 +72,11 @@ SUPPORTED_THEME_PRESETS = {
 SUPPORTED_FONT_SERVICES = {"system", "junior-bay"}
 SUPPORTED_FONT_FALLBACKS = {"system", "sans-serif", "serif", "monospace"}
 SUPPORTED_APP_CONFIG_ENVIRONMENTS = {"dev", "prod"}
-SUPPORTED_PLATFORM_FEE_TIERS = {"free", "basic", "pro", "standard"}
+# THE ONE TIER NAME THAT STAYS IN CODE, and only because it cannot not be: something has to be the
+# answer when a tier is unknown, retired or missing, and making THAT configurable is circular -- if the
+# config cannot be read, which tier do you fall back to? Everything else about tiers is data. A new
+# rung is a row, not a deploy.
+DEFAULT_PLATFORM_FEE_TIER = "free"
 SUPPORTED_PLATFORM_FEE_CLASSES = {"physical", "digital", "tip_jar"}
 SUPPORTED_STRIPE_FEE_RATE_TYPES = {"domestic_card", "international_card"}
 OFFER_UI_ONLY_FIELDS = {"intentLabel", "image", "productSummary"}
@@ -506,7 +510,13 @@ def validate_global_billing_config(document: dict[str, Any]) -> None:
     if platform_fees.get("unit") != "percent":
         raise DocumentValidationError("Global billing config platform_fees.unit must be 'percent'.")
     tiers = require_object(platform_fees.get("tiers"), "Global billing config platform_fees.tiers")
-    for tier in sorted(SUPPORTED_PLATFORM_FEE_TIERS):
+    # EVERY tier present must be complete, rather than a fixed list of names having to be present.
+    # The old check named four tiers, which meant adding a rung was a code change -- and worse, a tier
+    # added WITHOUT one of the fee classes passed validation and then silently fell back to the free
+    # table at read time, charging nothing extra while looking configured.
+    if not tiers:
+        raise DocumentValidationError("Global billing config platform_fees.tiers must not be empty.")
+    for tier in sorted(tiers):
         fee_tier = require_object(tiers.get(tier), f"Global billing config platform_fees.tiers.{tier}")
         for fee_class in sorted(SUPPORTED_PLATFORM_FEE_CLASSES):
             require_percent_number(
@@ -514,6 +524,12 @@ def validate_global_billing_config(document: dict[str, Any]) -> None:
                 fee_class,
                 f"Global billing config platform_fees.tiers.{tier}.{fee_class}",
             )
+    # The floor must exist, because it is what an unknown tier resolves to. Without it a typo'd
+    # fee_tier would have nothing safe to land on.
+    if DEFAULT_PLATFORM_FEE_TIER not in tiers:
+        raise DocumentValidationError(
+            f"Global billing config must define the '{DEFAULT_PLATFORM_FEE_TIER}' tier: it is what an "
+            f"unknown or retired tier falls back to.")
 
     payment_processing = require_object(
         document.get("payment_processing"),
