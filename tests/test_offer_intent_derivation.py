@@ -41,8 +41,25 @@ class SingleDerivationTests(unittest.TestCase):
     def test_section_visibility_and_the_cta_ask_the_same_function(self):
         # The two that disagreed. If these ever read different things again, a lead-gen page can carry
         # transactional sections while its CTA says otherwise.
-        self.assertIn("const builderIntent = computed(() => offerIntent(", BUILDER)
+        #
+        # Asserted on the BODY rather than as one literal line, because builderIntent now short-circuits
+        # for an offer-less page -- a storefront neither transacts nor captures a lead, and inheriting
+        # offerIntent(null)'s "transaction" default minted a post_checkout thank-you page for it
+        # (plans/OFFERLESS_PAGES_IN_BUILDER.md P2). That branch answers a question about the PAGE and is
+        # taken only when there is no offer at all; the moment there IS one, this still delegates to
+        # offerIntent and to nothing else, which is the invariant the test exists for.
+        body = re.search(r"const builderIntent = computed\((.*?)\);", BUILDER, re.S).group(1)
+        self.assertIn("offerIntent(", body)
+        self.assertNotIn("product_intent", body, "builderIntent derives intent itself again")
         self.assertIn('if (offerIntent(offer) === "lead_gen") {', BUILDER)
+
+    def test_only_an_offerless_page_may_skip_offerIntent(self):
+        """The short-circuit must key on the page having NO offer. Keyed on anything else it would start
+        answering for pages that do have one, which is the drift this file exists to prevent."""
+        body = re.search(r"const builderIntent = computed\((.*?)\);", BUILDER, re.S).group(1)
+        self.assertIn("builder.offerless", body)
+        populate = BUILDER.split("function populateBuilderFromPage(page) {", 1)[1][:4000]
+        self.assertIn('page.offer_id ? "" : offerlessComposition(page)', populate)
 
 
 if __name__ == "__main__":

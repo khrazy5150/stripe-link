@@ -200,5 +200,93 @@ class ExistingPagesUnchangedTests(unittest.TestCase):
         self.assertIn("offer_price_selector", composed)
 
 
+class ContentCanLiftThePageOverTheIndexingFloorTests(unittest.TestCase):
+    """The outcome the whole plan is for: a storefront that a tenant has written content on must publish
+    `index,follow`, and a bare one must still be demoted AND warned about.
+
+    Before P1/P2 a storefront measured 11 words with no authoring path to more, so every one of them
+    published noindex and the warning that says so was unreachable -- it only surfaces through the builder's
+    preview, and these pages could not open in the builder.
+    """
+
+    @staticmethod
+    def _page(sections, goal=""):
+        page = {
+            "schema_version": "2026-05-29", "document_type": "page", "tenant_id": "tenant_demo",
+            "page_id": "pg_sf", "name": "Storefront", "status": "published", "published_at": None,
+            "revision": 1, "route": {"slug": "home"}, "theme": {"preset": "clean-slate"},
+            "seo": {"title": "Probe Store"}, "sections": sections,
+        }
+        if goal:
+            page["goal"] = goal
+        return page
+
+    BARE = [
+        {"id": "brand-hero", "type": "brand_hero", "headline": "Probe Store",
+         "tagline": "Good things, fairly priced"},
+        {"id": "catalog-grid", "type": "catalog_grid", "collection_id": "c1"},
+    ]
+    # Only elements the builder can actually add to one of these pages now -- and the two `search_seo`
+    # seeds, so this is the path the goal step in P3 will put a tenant on.
+    CONTENT = [
+        {"id": "content-block", "type": "content_block", "blocks": [
+            {"title": "Why shop with us", "text":
+             "We have sold supplements out of Springfield, Oregon since 2014 and we keep the range "
+             "deliberately short: creatine, electrolytes and protein. Every batch is third-party tested "
+             "and the certificate is on the batch page, because a claim you cannot check is not a claim."},
+            {"title": "How shipping works", "text":
+             "Orders placed before two in the afternoon ship the same business day from our own warehouse, "
+             "not a drop-shipper. Everything is packed by the same two people who answer the phone, and if "
+             "an order arrives wrong we replace it and pay the return postage."},
+        ]},
+        {"id": "faq", "type": "faq", "items": [
+            {"question": "Do you ship outside the United States?",
+             "answer": "Not yet. We ship to all fifty states and to Canada, and we are working on the rest."},
+            {"question": "Can I return something I have opened?",
+             "answer": "Yes. If you have taken a few and decided it is not for you, send the rest back "
+                       "within thirty days and we refund the order."},
+        ]},
+    ]
+
+    def _render(self, page):
+        from stripe_link.domain.documents import validate_page_document
+        from stripe_link.runtime.html import render_page
+        validate_page_document(page)
+        return render_page(page, {}, {}, canonical_url="https://probestore.com/",
+                           api_base_url="https://api.example.com")
+
+    def test_a_bare_storefront_is_still_too_thin_and_the_tenant_is_told(self):
+        from stripe_link.runtime.html import (
+            THIN_CONTENT_MIN_WORDS, indexable_word_count, thin_content_warnings,
+        )
+        html = self._render(self._page(self.BARE))
+        self.assertLess(indexable_word_count(html), THIN_CONTENT_MIN_WORDS)
+        # `offer` is {} for these pages, so is_thin_by_design() must NOT swallow the notice: unlike a lead
+        # page, being short is a DEFECT here and adding content is a remedy the tenant can act on.
+        self.assertTrue(thin_content_warnings(html, {}),
+                        "a thin storefront must warn -- the remedy is now reachable")
+
+    def test_content_the_builder_can_add_clears_the_floor(self):
+        from stripe_link.runtime.html import THIN_CONTENT_MIN_WORDS, indexable_word_count
+        html = self._render(self._page(self.BARE + self.CONTENT))
+        self.assertGreaterEqual(indexable_word_count(html), THIN_CONTENT_MIN_WORDS)
+
+    def test_the_added_content_actually_composes_onto_the_page(self):
+        """The exclusions in P1 are broad, so this is the other half: they must not have swept up the
+        elements these pages need in order to stop being thin."""
+        page = self._page(self.BARE + self.CONTENT)
+        composed = {s["type"] for s in compose_page({}, page)}
+        self.assertIn("content_block", composed)
+        self.assertIn("faq", composed)
+        self.assertIn("brand_hero", composed)
+        self.assertIn("catalog_grid", composed)
+
+    def test_no_transactional_section_appears_in_the_rendered_html(self):
+        html = self._render(self._page(self.BARE + self.CONTENT))
+        for key in TRANSACTIONAL_GOVERNED + TRANSACTIONAL_ADDABLE:
+            with self.subTest(section=key):
+                self.assertNotIn(f'data-section-type="{key}"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

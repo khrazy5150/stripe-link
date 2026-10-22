@@ -144,6 +144,76 @@ export function pageCompositionKey(page, offer, deriveKey) {
   return offerlessComposition(page) || deriveKey(offer || {});
 }
 
+// The sections an OFFER-LESS page is made of, from the builder's state for them. Pure data, so it lives
+// here rather than in the component (and so it can be tested against the documents the create wizard
+// writes — see tests/test_offerless_builder_roundtrip.py).
+//
+// The ids are FIXED and match the wizard's exactly. A page whose section ids churn between a wizard save
+// and a builder save loses its `section_order` and any per-section override keyed by id, so "brand-hero"
+// stays "brand-hero" forever.
+//
+// `undefined` rather than "" for the optional fields: the page document is cleaned before it is sent, so an
+// omitted key means "nothing here" while an empty string would persist as authored-but-blank.
+export function offerlessSections(shape, state) {
+  if (!shape) return [];
+  const brandHero = state.brand_hero || {};
+  const sections = [{
+    id: "brand-hero",
+    type: "brand_hero",
+    headline: brandHero.headline || state.name || "",
+    tagline: brandHero.tagline || undefined,
+    logo_url: brandHero.logo_url || undefined,
+  }];
+  if (shape === "store_profile") {
+    // The block derives its CONTENT (description, contact, address, hours, verified social) from the Site's
+    // Organization at publish, so a heading is the only thing there is to author.
+    sections.push({
+      id: "seller-profile",
+      type: "seller_profile",
+      heading: (state.seller_profile || {}).heading || undefined,
+    });
+    return sections;
+  }
+  const grid = state.catalog_grid || {};
+  // No collection_id, no grid. Not a defensive check: the Collection is the grid's source of truth, and a
+  // catalog_grid with neither a collection_id nor inline items resolves to an empty grid that renders
+  // nothing — persisting one would persist a blank section.
+  if (grid.collection_id) {
+    sections.push({
+      id: "catalog-grid",
+      type: "catalog_grid",
+      collection_id: grid.collection_id,
+      heading: grid.heading || undefined,
+    });
+  }
+  return sections;
+}
+
+// The builder state for an offer-less page's sections, read back off a saved page. The inverse of
+// offerlessSections, and kept beside it so the two cannot drift: a round trip through both must be the
+// identity, which is what keeps opening one of these pages in the builder from rewriting it.
+export function offerlessState(page) {
+  const sections = ((page || {}).sections || []).filter((s) => s && typeof s === "object");
+  const find = (type) => sections.find((s) => String(s.type || "") === type) || {};
+  const hero = find("brand_hero");
+  const grid = find("catalog_grid");
+  const profile = find("seller_profile");
+  return {
+    brand_hero: {
+      headline: hero.headline || "",
+      tagline: hero.tagline || "",
+      logo_url: hero.logo_url || "",
+    },
+    catalog_grid: {
+      collection_id: grid.collection_id || "",
+      heading: grid.heading || "",
+    },
+    seller_profile: {
+      heading: profile.heading || "",
+    },
+  };
+}
+
 // The shipping element cannot live in an offer_type's section list: `single` and `bundle` cover digital
 // goods too, and a shipping card on a download is nonsense. It keys on the one thing that decides it.
 // Mirrors SHIPS_PHYSICAL_SECTION / default_visible() in domain/composition.py.

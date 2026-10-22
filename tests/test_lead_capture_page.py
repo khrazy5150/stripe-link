@@ -260,8 +260,21 @@ class HeroRoundTripTests(unittest.TestCase):
         here quote the very fallbacks they describe removing."""
         return "\n".join(line for line in block.splitlines() if not line.strip().startswith("//"))
 
+    @staticmethod
+    def _populate_body():
+        """populateBuilderFromPage's whole body, from the hero lookup down.
+
+        Anchored on the function rather than sliced to a fixed 3000 characters, which is how this test came
+        to fail for a reason that had nothing to do with it: P2 added four lines above the headline fallback
+        and pushed it to offset 3315, so the assertion read an empty window and reported a fallback missing
+        that was still right there (plans/OFFERLESS_PAGES_IN_BUILDER.md P2). A character count is a second
+        fact about the file that nothing keeps true.
+        """
+        body = BUILDER.split("function populateBuilderFromPage(page) {", 1)[1].split("\n}", 1)[0]
+        return body.split("const hero = sections.find(", 1)[1]
+
     def test_loading_falls_back_to_the_derived_value_not_the_filename(self):
-        load = self._code(BUILDER.split("const hero = sections.find(", 1)[1][:3000])
+        load = self._code(self._populate_body())
         self.assertIn("formatHeadline(offerHeadline(offer)", load)
         self.assertIn("offerDescription(offer)", load)
         self.assertNotIn("|| page.name", load)

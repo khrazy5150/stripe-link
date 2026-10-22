@@ -148,6 +148,15 @@
                     </svg>
                     <span>Edit</span>
                   </button>
+                  <!-- Offer-less pages only. "Edit" now opens the builder for these like any other page
+                       (P2), so the one thing the builder deliberately does NOT edit — which products the
+                       grid contains, since the Collection is its source of truth — keeps its own way in. -->
+                  <button v-if="isStorefrontPage(page)" type="button" role="menuitem" @click="editOfferlessPage(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5.5h5v5H4v-5Zm11 0h5v5h-5v-5ZM4 13.5h5v5H4v-5Zm11 0h5v5h-5v-5Z" />
+                    </svg>
+                    <span>Products &amp; layout</span>
+                  </button>
                   <button type="button" role="menuitem" @click="duplicatePage(page)">
                     <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8h10.5A1.5 1.5 0 0 1 20 9.5V20a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V9.5A1.5 1.5 0 0 1 8 8Z" />
@@ -707,6 +716,71 @@
                     Profile → Business, or override it here for this page.
                   </small>
                 </label>
+            </template>
+
+            <!-- The three OFFER-LESS section editors (plans/OFFERLESS_PAGES_IN_BUILDER.md P2). Before these,
+                 editing a storefront / category / store-profile page reopened the create wizard, which is why
+                 those pages could never be given body content and so could never clear the 150-word floor the
+                 publisher demotes them on. -->
+            <template v-else-if="sectionEditor.row.editor === 'brand_hero'">
+                <label class="offer-field">
+                  <span>Store name</span>
+                  <input v-model.trim="builder.brand_hero.headline" type="text" :placeholder="builder.name || 'Your store name'" />
+                  <small class="field-note">The page's main heading, and its only H1.</small>
+                </label>
+                <label class="offer-field">
+                  <span>Tagline (optional)</span>
+                  <input v-model.trim="builder.brand_hero.tagline" type="text" placeholder="What your store is about" />
+                </label>
+                <div class="offer-field">
+                  <span>Logo (optional)</span>
+                  <div class="storefront-logo-field">
+                    <div class="storefront-logo-preview" :class="{ faux: !builder.brand_hero.logo_url }">
+                      <img v-if="builder.brand_hero.logo_url" :src="builder.brand_hero.logo_url" alt="Store logo preview" />
+                      <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" />
+                      </svg>
+                    </div>
+                    <div class="storefront-logo-actions">
+                      <input ref="builderLogoInput" type="file" accept="image/*" class="visually-hidden" @change="onBuilderLogoPicked" />
+                      <button type="button" class="secondary-action compact" :disabled="builderLogoUploading" @click="$refs.builderLogoInput.click()">
+                        {{ builderLogoUploading ? "Uploading…" : (builder.brand_hero.logo_url ? "Replace logo" : "Upload logo") }}
+                      </button>
+                      <button v-if="builder.brand_hero.logo_url" type="button" class="link-danger-btn" @click="builder.brand_hero.logo_url = ''">Remove</button>
+                      <small class="field-note">No logo? We'll show a clean placeholder mark.</small>
+                      <small v-if="builderLogoError" class="field-error">{{ builderLogoError }}</small>
+                    </div>
+                  </div>
+                </div>
+            </template>
+
+            <template v-else-if="sectionEditor.row.editor === 'catalog_grid'">
+                <label class="offer-field">
+                  <span>Grid heading (optional)</span>
+                  <input v-model.trim="builder.catalog_grid.heading" type="text" placeholder="Shop all" />
+                </label>
+                <!-- Membership is NOT editable here on purpose: the Collection this grid embeds is the source
+                     of truth, and the publisher re-resolves it against the Site route map on every publish.
+                     Editing the list in two places would let the page and the Collection disagree. -->
+                <small class="field-note">
+                  Which products appear here comes from this page's collection, and the grid refreshes itself
+                  every time you publish — a new product page on this Site shows up on its own.
+                  <template v-if="!builder.catalog_grid.collection_id">
+                    This page has no collection yet, so the grid will not render.
+                  </template>
+                </small>
+            </template>
+
+            <template v-else-if="sectionEditor.row.editor === 'seller_profile'">
+                <label class="offer-field">
+                  <span>Heading</span>
+                  <input v-model.trim="builder.seller_profile.heading" type="text" placeholder="About our store" />
+                </label>
+                <small class="field-note">
+                  Everything else on this block — your description, contact details, address, opening hours and
+                  verified social profiles — comes from your business profile, so it stays right on every page
+                  at once. Edit it under Sites.
+                </small>
             </template>
 
             <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
@@ -2716,7 +2790,7 @@ import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
+import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -3013,7 +3087,12 @@ const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []
   if (typeof requires === "boolean") return requires;
   return product?.product_type === "physical";
 }));
-const builderIntent = computed(() => offerIntent(builderOffer.value));
+// An offer-less page (storefront / category / store profile) has no offer, so it neither transacts nor
+// captures a lead -- a third value, rather than letting it inherit `offerIntent(null)`'s "transaction"
+// default. That default was not cosmetic: every `intent === "transaction"` branch would have fired, minting
+// a post_checkout thank-you page for a storefront and emitting an offer_price_selector bound to offer_id ""
+// (plans/OFFERLESS_PAGES_IN_BUILDER.md P2).
+const builderIntent = computed(() => (builder.offerless ? "offerless" : offerIntent(builderOffer.value)));
 // Post-purchase funnel gating (P3.5): the upsell/downsell/carousel copy only matters when the offer carries a
 // funnel; the thank-you copy applies to every transaction funnel. MAX_SEQUENTIAL_UPSELLS=4 → the grid/carousel
 // screen (matches upsell_pages.py); expose the carousel copy only when there are that many upsells.
@@ -3294,7 +3373,11 @@ const brandLabelFallback = computed(() =>
 const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl || "");
 const effectiveAvatarUrl = computed(() => builder.avatar_url || storeAvatarUrl.value);
 const avatarIsFromProfile = computed(() => !builder.avatar_url && Boolean(storeAvatarUrl.value));
-const builderOfferType = computed(() => deriveOfferType(builderOffer.value));
+// Mirrors page_composition_key() in domain/composition.py: an offer-less page composes as its own shape,
+// and THE OFFER ALWAYS WINS where there is one. `builder.offerless` is only ever set for a page with no
+// offer_id (populateBuilderFromPage enforces that), so reading it first is equivalent to the Python guard
+// without re-deriving the shape from sections on every keystroke.
+const builderOfferType = computed(() => builder.offerless || deriveOfferType(builderOffer.value));
 // A tip jar's button says "Send tip", not "Buy Now" — nothing is being bought, and the verb is the last
 // thing a supporter reads before their card is charged. From the shared rules file, so the builder and the
 // renderer agree; "" there means the composition has no opinion and the old default stands.
@@ -4128,6 +4211,29 @@ function defaultBuilderForm() {
     refund_policy: {
       enabled: true,
     },
+    // Which offer-less shape this page is -- "" for an ordinary offer page. Set from the page's own sections
+    // when one is loaded (offerlessComposition), and it is what makes builderOfferType / builderIntent
+    // answer correctly for a storefront, a category page or a store profile.
+    offerless: "",
+    // The three OFFER-LESS sections, previously writable only by the create wizard, which is why editing one
+    // of these pages had to reopen the wizard and why they could never be given body content
+    // (plans/OFFERLESS_PAGES_IN_BUILDER.md P2). Field names match the sections the wizard already writes, so
+    // a page created before this loads and saves unchanged.
+    brand_hero: {
+      headline: "",
+      tagline: "",
+      logo_url: "",
+    },
+    // The grid holds NO inline items: the Collection it references is the source of truth, and the publisher
+    // resolves it against the Site route map at publish (resolve_category_grids). The builder therefore edits
+    // only the heading and never the membership -- that stays on the wizard/Collections screen.
+    catalog_grid: {
+      collection_id: "",
+      heading: "",
+    },
+    seller_profile: {
+      heading: "",
+    },
     // The destination selector. It stores only its WORDING: destinations and rates arrive at runtime from
     // /shipping-quote, because a rate baked into a published page starts rotting immediately and the server
     // validator refuses a section carrying one (plans/SHIPPING_ELEMENT.md).
@@ -4793,6 +4899,27 @@ const showDupNameWarning = computed(() => !!duplicateStoreName.value && duplicat
 // Storefront logo upload — reuses the shared uploadImage() service (same as builder/sub-item images).
 const storefrontLogoUploading = ref(false);
 const storefrontLogoError = ref("");
+// The builder's own logo picker for a storefront's brand_hero. Separate refs from the wizard's rather than
+// shared: the two surfaces are never open at once today, but a shared "uploading" flag between two editors
+// is the kind of coupling that only shows up as a stuck spinner.
+const builderLogoUploading = ref(false);
+const builderLogoError = ref("");
+
+async function onBuilderLogoPicked(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  builderLogoError.value = "";
+  builderLogoUploading.value = true;
+  try {
+    builder.brand_hero.logo_url = await uploadPageImage(file);
+  } catch (err) {
+    builderLogoError.value = err.message || "Logo upload failed.";
+  } finally {
+    builderLogoUploading.value = false;
+  }
+}
+
 async function onStorefrontLogoPicked(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
@@ -5140,7 +5267,14 @@ function populateBuilderFromPage(page) {
   const trustBadges = sections.find((section) => section.type === "trust_badges") || {};
   const refundPolicy = sections.find((section) => section.type === "refund_policy") || {};
   const cta = sections.find((section) => section.type === "checkout_cta") || {};
+  // THE OFFER WINS. Guarding on `page.offer_id` here is what makes builderOfferType's cheap
+  // `builder.offerless || deriveOfferType(...)` equivalent to page_composition_key's offer-first rule --
+  // a link-in-bio page carries link_cards and may carry a catalog_grid of its own, and reading the shape
+  // off its sections would compose it as a storefront and strip every exclusion that makes it a link hub.
+  const offerless = page.offer_id ? "" : offerlessComposition(page);
   Object.assign(builder, defaultBuilderForm(), {
+    offerless,
+    ...offerlessState(page),
     // The tenant's OWN arrangement, and nothing else. Absent until they actually drag something, which
     // is what lets baseline_order(goal) govern a page nobody has rearranged. This used to be derived
     // from the saved sections array — which made every page a fixed point, since whatever order it
@@ -5461,6 +5595,11 @@ function builderSections(intent) {
 // bands and the tenant's drag order are applied by builderSections() above.
 function builderSectionCandidates(intent) {
   const sections = [];
+  // The OFFER-LESS shape sections (storefront / category / store profile). Built by the shared composable,
+  // which is also where the inverse read lives, so the load and the save cannot drift. Emission order here
+  // is only a default -- `orderSections` places them by their slots (brand_hero -> identity/10,
+  // seller_profile -> identity/20, catalog_grid -> what/30), which is the order the wizard wrote them in.
+  sections.push(...offerlessSections(builder.offerless, builder));
   if (builder.countdown.enabled) {
     sections.push({
       id: "countdown",
@@ -5569,7 +5708,11 @@ function builderSectionCandidates(intent) {
     const section = elementSection(element);
     if (section && sectionVisible(section.type)) sections.push(section);
   });
-  if (intent === "transaction") {
+  // Gated on the COMPOSITION as well as the intent, like every other structural push above it. The intent
+  // check alone was the one gap: `offerIntent(null)` answers "transaction", so an offer-less page would have
+  // been handed a price selector bound to `offer_id: ""` even though its composition excludes the section
+  // outright (plans/OFFERLESS_PAGES_IN_BUILDER.md P1/P2).
+  if (intent === "transaction" && sectionVisible("offer_price_selector")) {
     sections.push({
       id: "offer-selector",
       type: "offer_price_selector",
@@ -6224,6 +6367,11 @@ const SECTION_EDITORS = {
   checkout_cta: "checkout_cta",
   refund_policy: "refund_policy",
   shipping: "shipping",
+  // The offer-less shape sections (plans/OFFERLESS_PAGES_IN_BUILDER.md P2). All three are ui=internal, so
+  // they never appear in the Add-content menu -- they arrive with the page and are edited in place.
+  brand_hero: "brand_hero",
+  catalog_grid: "catalog_grid",
+  seller_profile: "seller_profile",
 };
 
 const contentRows = computed(() => {
@@ -7273,10 +7421,14 @@ async function editOfferlessPage(page) {
 
 function editPage(page) {
   openMenuId.value = "";
-  if (isStorefrontPage(page)) {
-    editOfferlessPage(page);
-    return;
-  }
+  // Every page kind opens in the builder now, offer-less ones included (plans/OFFERLESS_PAGES_IN_BUILDER.md
+  // P2). This used to reroute a storefront / category / store-profile page into the create WIZARD, which
+  // offered a store name, a tagline, a logo and a grid heading and no way to write a single sentence -- so
+  // those pages sat at 5-15 words and the publisher demoted every one of them to noindex, with the warning
+  // that says so unreachable because it only surfaces through the builder's preview.
+  //
+  // The wizard still CREATES them: picking a Site, a kind and a collection is a good creation flow and is
+  // not what was broken. `editOfferlessPage` is kept for the grid-membership edit it still owns.
   populateBuilderFromPage(page);
   loadLinkClicks(page.page_id);
   builderExistingPageId.value = page.page_id;
