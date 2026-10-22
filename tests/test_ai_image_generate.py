@@ -17,17 +17,17 @@ from tests.test_ai_generate import FakeEvents, FakeJobs, FakeProfiles, FakeUsage
 
 NOW = 1_800_000_000
 TENANT = "t1"
-ALLOWANCES = {"trial_allowance": 7, "free_allowance": 0, "trial_quality": "low"}
+ALLOWANCES = {"trial_allowance": 7, "free_allowance": 0, "trial_qualities": ["low"]}
 
 
 def trial(**extra):
     return FakeProfiles(billing_status="trial", trial_ends_at=NOW + 86400, **extra)
 
 
-def subscriber(images=30, quality="low", **extra):
+def subscriber(images=30, qualities=("low",), **extra):
     return FakeProfiles(billing_status="active", stripe_subscription_id="sub_1",
                         billing_plan_key="premium", ai_generations=20, ai_images=images,
-                        ai_image_quality=quality, entitlements=["ai_builder"], **extra)
+                        ai_image_qualities=list(qualities), entitlements=["ai_builder"], **extra)
 
 
 def _event(body):
@@ -133,14 +133,27 @@ class QualityIsClampedServerSideTests(Harness):
         self.run_it({"prompt": "a dog", "quality": "high"}, profile=trial())
         self.assertEqual(self.started[0]["quality"], "low")
 
-    def test_a_subscriber_is_clamped_to_their_plans_ceiling(self):
-        self.run_it({"prompt": "a dog", "quality": "high"}, profile=subscriber(quality="low"))
+    def test_a_subscriber_is_clamped_to_what_their_plan_grants(self):
+        self.run_it({"prompt": "a dog", "quality": "high"}, profile=subscriber(qualities=("low",)))
         self.assertEqual(self.started[0]["quality"], "low")
 
-    def test_a_lifted_ceiling_is_honoured_without_a_code_change(self):
-        # The whole point of the ceiling being data: this is the $29 tier, and nothing here changes.
-        self.run_it({"prompt": "a dog", "quality": "high"}, profile=subscriber(quality="high"))
+    def test_a_granted_quality_is_honoured_without_a_code_change(self):
+        # The whole point of the grant being data: this is the $29 tier, and nothing here changes.
+        self.run_it({"prompt": "a dog", "quality": "high"},
+                    profile=subscriber(qualities=("low", "high")))
         self.assertEqual(self.started[0]["quality"], "high")
+
+    def test_a_gap_in_the_grant_is_respected(self):
+        # Granted low and high; asking for medium yields low, not high.
+        self.run_it({"prompt": "a dog", "quality": "medium"},
+                    profile=subscriber(qualities=("low", "high")))
+        self.assertEqual(self.started[0]["quality"], "low")
+
+    def test_a_legacy_ceiling_row_still_works(self):
+        profile = FakeProfiles(billing_status="active", stripe_subscription_id="sub_1",
+                               ai_images=30, ai_image_quality="medium")
+        self.run_it({"prompt": "a dog", "quality": "high"}, profile=profile)
+        self.assertEqual(self.started[0]["quality"], "medium")
 
     def test_clamping_does_not_refuse_the_request(self):
         response, _ = self.run_it({"prompt": "a dog", "quality": "high"}, profile=trial())

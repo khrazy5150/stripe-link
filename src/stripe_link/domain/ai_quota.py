@@ -42,6 +42,7 @@ DEFAULT_FREE_ALLOWANCE = 0
 DEFAULT_PLAN_IMAGES = 30
 DEFAULT_TRIAL_IMAGES = 7
 DEFAULT_FREE_IMAGES = 0
+DEFAULT_IMAGE_QUALITY = "low"
 
 # The trial's counter is a LIFETIME one, so it does not live in a calendar period. `period_key` is the month,
 # and a trial starting 25 September spans two of them -- handing out the allowance twice.
@@ -196,21 +197,32 @@ def _image_entitlement(profile: dict[str, Any], *, now: int | None, monthly: str
     return {"allowance": allowance, "period": image_period(monthly), "source": "free"}
 
 
-def quality_ceiling_for(profile: dict[str, Any] | None, source: str, *, trial_quality: str = "",
-                        default: str = "low") -> str:
-    """The best image quality this tenant may request. ONE resolver, two readers.
+def image_qualities_for(profile: dict[str, Any] | None, source: str, *,
+                        trial_qualities: Any = None, default: Any = None) -> list[str]:
+    """Which image qualities this tenant may request. ONE resolver, two readers.
 
     The generator clamps with this and the config endpoint reports it, because `ai_config.py` already
     learned what happens otherwise: *"The screen must read the SAME counter the generator will spend
-    from."* A screen promising a quality the generator refuses is that bug with a different noun.
+    from."* A screen offering a quality the generator refuses is that bug with a different noun.
+
+    A SET rather than a ceiling, so a plan can grant low and high without medium -- and so lifting a
+    grant is an explicit tick rather than a side effect of a comparison.
     """
+    from stripe_link.domain.ai_images import clean_qualities, qualities_up_to
+
     profile = profile or {}
+    fallback = default if default is not None else [DEFAULT_IMAGE_QUALITY]
     if source == "trial":
-        return str(trial_quality or default).strip().lower()
+        return list(clean_qualities(trial_qualities, fallback=fallback))
     if source == "plan":
-        return str(profile.get("ai_image_quality") or default).strip().lower()
+        granted = profile.get("ai_image_qualities")
+        if granted:
+            return list(clean_qualities(granted, fallback=fallback))
+        legacy = str(profile.get("ai_image_quality") or "").strip().lower()
+        if legacy:
+            return list(qualities_up_to(legacy))
     # exempt included: the platform pays for those too, so there is no reason to buy the dear one.
-    return str(default).strip().lower()
+    return list(clean_qualities(fallback))
 
 
 def _int_or(value: Any, fallback: int) -> int:

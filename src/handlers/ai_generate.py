@@ -54,7 +54,7 @@ from stripe_link.domain.ai_provision import (chosen_badges, compose_sections, ne
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
 from stripe_link.domain.ai_quota import (OPERATION_IMAGE, PLATFORM_TENANT, entitlement_for,
-                                          may_generate, period_key, quality_ceiling_for,
+                                          image_qualities_for, may_generate, period_key,
                                           within_platform_budget)
 from stripe_link.domain import ai_images
 from stripe_link import ai_image_client
@@ -288,11 +288,11 @@ def _configured_image_allowances():
     """The image numbers, from the deployed CONFIG row. Code holds fallbacks, never the policy."""
     try:
         from stripe_link.domain.platform_billing import (free_ai_images, platform_billing_mode,
-                                                         trial_ai_image_quality, trial_ai_images)
+                                                         trial_ai_image_qualities, trial_ai_images)
 
         mode = platform_billing_mode()
         return {"trial_allowance": trial_ai_images(mode), "free_allowance": free_ai_images(mode),
-                "trial_quality": trial_ai_image_quality(mode)}
+                "trial_qualities": trial_ai_image_qualities(mode)}
     except Exception as exc:  # noqa: BLE001 - an unreadable config must not take the screen down
         print(f"[ai] image allowances unreadable, using fallbacks: {type(exc).__name__}: {exc}")
         return {}
@@ -327,15 +327,20 @@ def _generate_image(body, *, tenant_id, event, now, pick, jobs_repo, usage_repo,
     # images, the platform's account pays for every one, and passing the page provider here would hand
     # a tenant who configured their own key a 200-image ceiling billed to us.
     allowances = _configured_image_allowances()
-    trial_quality = allowances.pop("trial_quality", "")
+    trial_qualities = allowances.pop("trial_qualities", None)
+    # Belt and braces: whatever else the config layer hands back, only the two ALLOWANCE numbers may
+    # reach `entitlement_for`. A stray key becomes a TypeError on the generation path, which is a
+    # spectacular way to fail for a settings row nobody edited on purpose.
+    allowances = {k: v for k, v in allowances.items()
+                  if k in ("trial_allowance", "free_allowance")}
     entitlement = entitlement_for(profile, now=now, operation=OPERATION_IMAGE, **allowances)
     allowance, period = entitlement["allowance"], entitlement["period"]
 
-    # The CEILING, resolved from the same function the config screen reports from, then clamped. A
-    # request above it means a stale page, not an attack, so it is lowered rather than refused -- what
-    # must never happen is sending the dearer one.
-    ceiling = quality_ceiling_for(profile, entitlement["source"], trial_quality=trial_quality)
-    quality = ai_images.clamp_quality(body.get("quality"), ceiling)
+    # The GRANTED SET, resolved from the same function the config screen reports from, then clamped.
+    # A request for something ungranted means a stale page, not an attack, so it is lowered rather
+    # than refused -- what must never happen is sending a dearer one than was granted.
+    granted = image_qualities_for(profile, entitlement["source"], trial_qualities=trial_qualities)
+    quality = ai_images.clamp_quality(body.get("quality"), granted)
 
     # GATE 3 -- the platform's own ceiling. Always checked for images: unlike pages there is no BYOK
     # case whose spend is not ours.

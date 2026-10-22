@@ -77,6 +77,44 @@ MAX_IMAGES_PER_REQUEST = 4
 MAX_IMAGES_PER_PAGE_GENERATION = 10
 
 
+def clean_qualities(values: Any, *, fallback: Any = None) -> tuple[str, ...]:
+    """A GRANTED SET of qualities, ordered cheapest-first, or the fallback when nothing is usable.
+
+    A SET and not a ceiling. "Up to medium" could only ever express a prefix of the ladder, so a plan
+    granting low and high but not medium was unsayable -- and the implied ordering meant lifting a
+    ceiling silently granted everything beneath it, which is a pricing decision made by a comparison
+    operator rather than by a person.
+
+    Order is imposed rather than taken from the caller, because `[0]` has to be the CHEAPEST grant:
+    that is what an unrecognised request falls back to, and sorting is how it stays the cheapest no
+    matter which order the boxes were ticked.
+    """
+    if isinstance(values, str):
+        values = [values]
+    seen = {str(v or "").strip().lower() for v in (values or []) if str(v or "").strip()}
+    kept = tuple(q for q in QUALITIES if q in seen)
+    if kept:
+        return kept
+    if fallback is None:
+        return (DEFAULT_QUALITY,)
+    return clean_qualities(fallback, fallback=[DEFAULT_QUALITY])
+
+
+def qualities_up_to(ceiling: str) -> tuple[str, ...]:
+    """The old CEILING read as a set, for rows written before the set existed.
+
+    `ai_image_quality: "medium"` meant low and medium, so that is what it becomes. Nothing is migrated:
+    a row keeps whichever field it has and this makes them mean the same thing.
+
+    Computed straight from the ladder, NOT via `clamp_quality` -- that function calls this one for a
+    string argument, and the pair recursed until the stack gave out.
+    """
+    name = str(ceiling or "").strip().lower()
+    if name not in QUALITIES:
+        name = DEFAULT_QUALITY
+    return QUALITIES[:QUALITIES.index(name) + 1]
+
+
 def rank(quality: str) -> int:
     """Where a quality sits on the price ladder. Unknown sorts to the cheapest, never the dearest."""
     try:
@@ -85,32 +123,41 @@ def rank(quality: str) -> int:
         return 0
 
 
-def clamp_quality(wanted: str, ceiling: str) -> str:
-    """The quality we will actually send: what was asked for, or the ceiling, whichever is cheaper.
+def clamp_quality(wanted: Any, allowed: Any) -> str:
+    """The quality we will actually send: what was asked for if it is granted, else the cheapest grant.
 
-    CLAMPS rather than refuses. A request above the ceiling is not an attack to repel -- the control
-    that offers it was built from the same ceiling, so it means a stale page or a caller that has not
-    been updated, and silently giving them the quality they are entitled to is the kinder answer that
-    costs us nothing. What must never happen is sending the dearer one.
+    CLAMPS rather than refuses. A request for something ungranted is not an attack to repel -- the
+    control that offered it was built from the same grant, so it means a stale page or a caller that
+    has not been updated, and quietly giving them what they ARE entitled to costs us nothing. What must
+    never happen is sending a dearer one than was granted.
+
+    `allowed` may be a set, a list, or a single string (a ceiling from an older row), because this is
+    reached from both shapes and the caller should not have to know which.
+
+    THE RULE: the dearest grant that is not dearer than what was asked for; failing that, the cheapest
+    grant. That generalises the old ceiling exactly -- granted {low, medium} and asked for high still
+    yields medium, not low -- while giving a non-contiguous grant a sensible answer too: granted
+    {low, high} and asked for medium yields low, because low is what they are entitled to that is no
+    more than they asked for. Never dearer than requested unless nothing cheaper is granted at all.
     """
-    ceiling = str(ceiling or "").strip().lower()
-    ceiling = ceiling if ceiling in QUALITIES else DEFAULT_QUALITY
+    granted = clean_qualities(allowed) if not isinstance(allowed, str) else qualities_up_to(allowed)
     wanted = str(wanted or "").strip().lower()
     if wanted not in QUALITIES:
-        return ceiling if rank(DEFAULT_QUALITY) > rank(ceiling) else DEFAULT_QUALITY
-    return wanted if rank(wanted) <= rank(ceiling) else ceiling
+        wanted = DEFAULT_QUALITY
+    affordable = [q for q in granted if rank(q) <= rank(wanted)]
+    return affordable[-1] if affordable else granted[0]
 
 
-def allowed_qualities(ceiling: str) -> list[dict[str, Any]]:
+def allowed_qualities(allowed: Any) -> list[dict[str, Any]]:
     """What this tenant may choose, for the UI to RENDER rather than decide.
 
-    A one-entry list renders no control at all, which is why there is no quality selector today without
-    anyone having decided there would not be one. When a tier lifts the ceiling this list grows and the
-    control appears, with no change to the page that draws it.
+    A one-entry list renders no control at all, which is why there is no quality selector on a plan
+    granting only `low` -- without anyone having decided there would not be one. Tick a second box on
+    the plan and the control appears, with no change to the page that draws it.
     """
-    top = rank(clamp_quality(ceiling, ceiling))
+    granted = clean_qualities(allowed) if not isinstance(allowed, str) else qualities_up_to(allowed)
     return [{"value": q, "label": QUALITY_LABELS.get(q, q), "credits": QUALITY_CREDITS.get(q, 1)}
-            for q in QUALITIES[:top + 1]]
+            for q in granted]
 
 
 def credits_for(quality: str, count: int = 1) -> int:

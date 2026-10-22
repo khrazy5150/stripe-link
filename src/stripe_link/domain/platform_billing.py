@@ -92,6 +92,25 @@ def plan_ai_images(plan: dict[str, Any] | None) -> int:
     return _as_int((plan or {}).get("ai_images"), DEFAULT_PLAN_AI_IMAGES)
 
 
+def plan_ai_image_qualities(plan: dict[str, Any] | None) -> list[str]:
+    """Which image qualities this plan GRANTS, cheapest first.
+
+    Reads `ai_image_qualities` (the set) and falls back to `ai_image_quality` (the old ceiling) read
+    as everything up to it. Nothing is migrated: a row keeps whichever field it has, and both mean the
+    same thing to every caller.
+    """
+    from stripe_link.domain.ai_images import clean_qualities, qualities_up_to
+
+    plan = plan or {}
+    configured = plan.get("ai_image_qualities")
+    if configured:
+        return list(clean_qualities(configured))
+    legacy = str(plan.get("ai_image_quality") or "").strip().lower()
+    if legacy:
+        return list(qualities_up_to(legacy))
+    return list(qualities_up_to(DEFAULT_AI_IMAGE_QUALITY))
+
+
 def plan_ai_image_quality(plan: dict[str, Any] | None) -> str:
     """The BEST image quality this plan may request -- a ceiling, not a setting.
 
@@ -112,6 +131,17 @@ def free_ai_images(mode: str, repository: Any | None = None) -> int:
     """What the free tier gets. Zero -- images are for a paying tenant or one inside their 14 days."""
     config = cached_platform_billing(mode, repository)["config"]
     return _as_int(config.get("ai_free_images"), DEFAULT_FREE_AI_IMAGES)
+
+
+def trial_ai_image_qualities(mode: str, repository: Any | None = None) -> list[str]:
+    """What a trial may generate at. Same two shapes as a plan, same precedence."""
+    from stripe_link.domain.ai_images import clean_qualities, qualities_up_to
+
+    config = cached_platform_billing(mode, repository)["config"]
+    configured = config.get("ai_trial_image_qualities")
+    if configured:
+        return list(clean_qualities(configured))
+    return list(qualities_up_to(trial_ai_image_quality(mode, repository)))
 
 
 def trial_ai_image_quality(mode: str, repository: Any | None = None) -> str:

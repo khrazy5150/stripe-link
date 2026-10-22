@@ -136,18 +136,23 @@ def _image_block(tenant_id, usage_repo, tenant_repo, now):
     no control, and when a ceiling lifts the control appears without the picker being touched.
     """
     from stripe_link.domain import ai_images
-    from stripe_link.domain.ai_quota import OPERATION_IMAGE, quality_ceiling_for
+    from stripe_link.domain.ai_quota import OPERATION_IMAGE, image_qualities_for
 
     profile = _profile(tenant_id, tenant_repo)
     allowances = _configured_image_allowances()
-    trial_quality = allowances.pop("trial_quality", "")
+    trial_qualities = allowances.pop("trial_qualities", None)
+    # Belt and braces: whatever else the config layer hands back, only the two ALLOWANCE numbers may
+    # reach `entitlement_for`. A stray key becomes a TypeError on the generation path, which is a
+    # spectacular way to fail for a settings row nobody edited on purpose.
+    allowances = {k: v for k, v in allowances.items()
+                  if k in ("trial_allowance", "free_allowance")}
     entitlement = entitlement_for(profile, now=now, operation=OPERATION_IMAGE, **allowances)
     allowance, period = entitlement["allowance"], entitlement["period"]
     try:
         used = (usage_repo or ai_usage_repository()).used(tenant_id, period)
     except Exception:  # noqa: BLE001 - a counter read must not break the screen
         used = 0
-    ceiling = quality_ceiling_for(profile, entitlement["source"], trial_quality=trial_quality)
+    granted = image_qualities_for(profile, entitlement["source"], trial_qualities=trial_qualities)
     left = remaining(used, allowance)
     return {
         "period": period, "used": used, "allowance": allowance, "remaining": left,
@@ -157,7 +162,7 @@ def _image_block(tenant_id, usage_repo, tenant_repo, now):
         # rather than inventing a cheerier one of its own.
         "reason": "" if (allowance == UNLIMITED or left > 0)
                   else ai_images.refusal(used, allowance, entitlement["source"]),
-        "qualities": ai_images.allowed_qualities(ceiling),
+        "qualities": ai_images.allowed_qualities(granted),
         "styles": [{"value": s["value"], "label": s["label"]} for s in ai_images.styles()],
         "max_per_request": ai_images.MAX_IMAGES_PER_REQUEST,
         "default_size": ai_images.HERO_SIZE,
@@ -167,11 +172,11 @@ def _image_block(tenant_id, usage_repo, tenant_repo, now):
 def _configured_image_allowances():
     try:
         from stripe_link.domain.platform_billing import (free_ai_images, platform_billing_mode,
-                                                         trial_ai_image_quality, trial_ai_images)
+                                                         trial_ai_image_qualities, trial_ai_images)
 
         mode = platform_billing_mode()
         return {"trial_allowance": trial_ai_images(mode), "free_allowance": free_ai_images(mode),
-                "trial_quality": trial_ai_image_quality(mode)}
+                "trial_qualities": trial_ai_image_qualities(mode)}
     except Exception:  # noqa: BLE001 - fallbacks, never a blank screen
         return {}
 
