@@ -82,7 +82,12 @@
           </div>
         </header>
 
-        <div class="billing-plan-grid billing-plan-grid--spaced">
+        <!-- The header is inset 2rem but the grid was a direct child of the panel with no padding of
+             its own, so the cards sat flush on its edge -- and `.dashboard-card` is `overflow: hidden`,
+             which then clipped the current-plan ring and the hover shadow. This wrapper gives
+             everything below the header the header's own inset, and room for a shadow to exist in. -->
+        <div class="billing-plan-body">
+          <div class="billing-plan-grid">
           <div v-for="plan in billing.plans" :key="plan.plan_key || 'free'"
                class="billing-plan"
                :class="{ current: isCurrent(plan), free: plan.free }">
@@ -131,7 +136,8 @@
           <a href="#" @click.prevent="billing.openPortal()">Open the secure Stripe portal</a>
         </p>
 
-        <div v-if="billing.error" class="keys-status-banner error">{{ billing.error }}</div>
+          <div v-if="billing.error" class="keys-status-banner error">{{ billing.error }}</div>
+        </div>
       </section>
     </template>
   </section>
@@ -242,7 +248,9 @@ function subscribe(planKey) {
 /* PLAN CARDS. They were a 1px outline on the same background as the panel behind them, so at a
    glance there was no card -- just a price floating in a box. They now sit on their own surface with
    a shadow, which is what makes a card read as a thing you can pick rather than a region of text. */
-.billing-plan-grid--spaced { margin-top: 1.6rem; }
+/* Matches `.dashboard-card-header`'s inset so the cards align with the heading above them, with extra
+   at the bottom so the hover lift is not shaved off by the panel's overflow clip. */
+.billing-plan-body { padding: 1.8rem 2rem 2.2rem; }
 .billing-plan-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
   gap: 1.6rem; align-items: stretch;
