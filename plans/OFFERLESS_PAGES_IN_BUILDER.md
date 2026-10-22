@@ -1,6 +1,6 @@
 # Offer-less pages in the builder (storefront / category / profile)
 
-**Status:** **P1 + P2 + P3 SHIPPED** (`3d6dcd7`, `2c13465`, `b1ab271`, 2026-10-22). P4–P5 not built. Decided 2026-10-22.
+**Status:** **P1–P4 SHIPPED** (`3d6dcd7`, `2c13465`, `b1ab271`, `7607730`, 2026-10-22). **P5 (sitemap) is all that remains.** Decided 2026-10-22.
 
 The outcome, proven end to end through the real publish gates on a verified custom domain:
 
@@ -224,7 +224,40 @@ Once P1 exists, `offer_type x goal` composes for these shapes like any other, so
 "search-friendly" and get the same `content_block` + `faq` seeds that take an offer page from 108 to 166
 words. Add the Goal step to the offer-less wizard path (`wizardStepLabels`).
 
-### P4 — The two SEO defects found alongside
+### P4 — The two SEO defects found alongside — SHIPPED 2026-10-22 (`7607730`)
+
+Catalog pages emit `CollectionPage` → `mainEntity` → `ItemList` of the grid's cards, read off the grid
+**resolved** against the Site route map so it lists what a visitor sees. `ListItem` carries url + name and
+deliberately **not** a nested Product/Offer — the listing page links, the product page already carries the
+full markup, and restating prices would put one claim in two places that can disagree. Unlinkable entries
+are dropped, matching `render_catalog_grid`. Wrapped in a `CollectionPage` only when nothing else claims to
+be one, because `render_seller_profile` emits its own — an about page with a grid gets a bare `ItemList`
+rather than two contradictory CollectionPage nodes for one URL. Goal-gated via `structured_data`, like an
+offer page's Product markup.
+
+**The description fix needed two attempts.** Leading with the business description for every shape — the
+obvious implementation — gave a Site's storefront and its about page the same sentence word for word, which
+is the duplicate footprint the fix was for. So the source now depends on the shape: an about page's subject
+IS the business and leads with its description; a catalog page leads with what the page is and what is on
+it. For one Site:
+
+```
+storefront  Probe Store — Good things, fairly priced. Browse 4 products.
+category    Widgets from Probe Store. Browse 4 products.
+profile     Probe Store has sold supplements out of Springfield, Oregon since 2014. We keep the range...
+```
+
+**P2 created an exposure that P4 had to fix.** `structured_data_warnings` opened with *"No price is shown
+on this page, so no Product markup can be emitted."* On a storefront that describes correct, intended
+behaviour and names nothing the tenant could do — and it was unreachable until these pages started opening
+in the builder, so the fix is what exposed it. Offer-less pages are now checked against the markup *they*
+can emit: an empty grid is warned about (publishing product pages fixes it), a missing business name on an
+about page likewise, a working storefront not at all.
+
+A finished storefront on a verified custom domain now publishes `index,follow`, a page-specific
+description, and Organization + WebSite + CollectionPage(ItemList) + FAQPage.
+
+*Original plan for this step, kept for the record:*
 
 - **No structured data on storefront/category.** `render_catalog_grid()` (`html.py:7628`) emits no JSON-LD
   at all — no `CollectionPage`, no `ItemList`. The about page emits `Organization` + `CollectionPage` +
