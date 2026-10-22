@@ -47,6 +47,57 @@ def _safe_put(repository, document) -> None:
         pass
 
 
+def _create_price(event, plans_repository, mode, opener, secret_key):
+    """Create a Stripe Product (if needed) and a recurring Price. CREATE ONLY -- never modify.
+
+    A Stripe Price is IMMUTABLE: its amount cannot be edited. So "change the price" is always "make a
+    new Price and decide what happens to everyone on the old one", and this function deliberately does
+    only the first half. It never touches an existing price, never archives one, and never migrates a
+    subscriber -- those are decisions, and a button that quietly made them would be worse than no
+    button.
+
+    The PRODUCT is reused when the plan already has one, so a ladder of price changes stays one product
+    with a history rather than a pile of near-identical products.
+    """
+    plan_key = str(event.get("plan_key") or "").strip()
+    amount = int(event.get("monthly_amount") or 0)
+    if not plan_key or amount <= 0:
+        return {"ok": False, "error": "plan_key and a positive monthly_amount are required."}
+
+    key = secret_key or get_platform_secret_key(mode)
+    if not key:
+        return {"ok": False, "error": f"No platform Stripe key for mode '{mode}'."}
+
+    plan = platform_plan(mode, plan_key, plans_repository) or {}
+    product_id = str(event.get("product_id") or plan.get("product_id") or "").strip()
+    label = str(event.get("label") or plan.get("label") or plan_key.replace("_", " ").title())
+    currency = str(event.get("currency") or "usd").lower()
+
+    try:
+        if not product_id:
+            product = stripe_request(
+                "POST", "/products", api_key=key, opener=opener,
+                data={"name": label, "metadata": {"plan_key": plan_key, "source": "junior_bay_admin"}},
+                # Keyed on the PLAN, not on the attempt: a double-click must not mint two products.
+                idempotency_key=f"jb-product-{mode}-{plan_key}")
+            product_id = str(product.get("id") or "")
+        price = stripe_request(
+            "POST", "/prices", api_key=key, opener=opener,
+            data={"product": product_id, "unit_amount": amount, "currency": currency,
+                  "recurring": {"interval": "month"},
+                  "metadata": {"plan_key": plan_key, "source": "junior_bay_admin"}},
+            # Keyed on the AMOUNT too, so re-pressing the button for the same price is a no-op while
+            # a genuinely new amount still mints a new Price.
+            idempotency_key=f"jb-price-{mode}-{plan_key}-{amount}-{currency}")
+    except StripeApiError as exc:
+        return {"ok": False, "error": f"Stripe refused: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"Stripe could not be reached: {exc}"}
+
+    return {"ok": True, "mode": mode, "plan_key": plan_key, "product_id": product_id,
+            "price_id": str(price.get("id") or ""), "monthly_amount": amount, "currency": currency}
+
+
 def handler(
     event,
     context,
@@ -57,6 +108,13 @@ def handler(
     secret_key=None,
     now_fn: Callable[[], float] = time.time,
 ):
+    # THE INTERNAL PATH: the Admin Site asking us to mint a Stripe Price for a plan it is editing.
+    # It lives here rather than in the admin stack so the platform secret key stays in ONE service.
+    # Copying a key that can create charges into a second place, to save one Lambda invoke, is a bad
+    # trade however convenient.
+    if (event or {}).get("internal_create_price"):
+        return _create_price(event, plans_repository, platform_billing_mode(), opener, secret_key)
+
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
