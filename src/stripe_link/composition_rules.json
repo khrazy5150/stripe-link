@@ -1039,6 +1039,52 @@
       ],
       "default_cta_label": "Send tip",
       "_comment": "A tip jar. Transactional, so it keeps the price selector and the CTA -- but it is not a SALES page: nothing ships, nothing is delivered, and there is no purchase decision to de-risk, so the trust badges a checkout page leans on ('Secure checkout', 'Money-back guarantee') have nothing to say here and are excluded outright, as on a link hub (author, 2026-09-13). The tip_jar ELEMENT is excluded for the same reason `single` excludes it: a page that already takes tips does not link to another one. The refund policy stays -- see plans/PAY_WHAT_YOU_WANT.md 5f, which is an open question rather than a settled one. The CTA says \"Send tip\", not \"Buy Now\": nothing is being bought, and the verb on the button is the last thing a supporter reads before their card is charged."
+    },
+    "storefront": {
+      "sections": [
+        "legal_footer"
+      ],
+      "allowed_ctas": [],
+      "excludes": [
+        "brand_label",
+        "hero",
+        "hero_media",
+        "trust_badges",
+        "offer_price_selector",
+        "checkout_cta",
+        "refund_policy",
+        "shipping",
+        "product_details",
+        "price_highlight",
+        "product_carousel",
+        "related_products",
+        "reviews",
+        "tip_jar"
+      ],
+      "_comment": "An OFFER-LESS catalog page: a brand hero over a grid of the store's own pages. Serves BOTH the storefront homepage and a category page -- their composition is identical, so they share one key rather than duplicating it; split it the day they genuinely differ. Keyed off the PAGE's sections, not an offer, because there is no offer (plans/OFFERLESS_PAGES_IN_BUILDER.md P1). `brand_hero`, `catalog_grid` and `seller_profile` are ungoverned, so they render whenever present. WHY THE EXCLUDES ARE EXCLUSIONS AND NOT JUST ABSENCES: an absent governed section can be switched back on by a tenant override OR unioned in by a goal pack -- `paid_ads` turns on trust_badges and refund_policy -- and 'Secure checkout' plus a 30-day refund promise on a page that takes no money is incoherent, not merely unwanted. `hero`/`headline` are excluded for a harder reason still: brand_hero is already the page's H1, and a second one breaks the heading outline the renderer enforces (plans/SEMANTIC_HTML.md). The offer-shaped elements (product_details, price_highlight, product_carousel, related_products, reviews) all read a primary product or offer that does not exist here, so each would be a control that can never fill. `structured_data` is deliberately NOT excluded: it emits nothing today with no offer, and it is the hook the catalog's CollectionPage/ItemList markup lands on (P4). coupon, countdown_timer, before_after and the prose elements stay available -- a site-wide sale banner or an intro paragraph is exactly what these pages need to stop being too thin to index. The tip_jar ELEMENT is excluded to hold the line tests/test_tip_jar.py draws as an exact set: it is offered on the link hub and nowhere else, so a new composition inherits that exclusion rather than relitigating it."
+    },
+    "store_profile": {
+      "sections": [
+        "legal_footer"
+      ],
+      "allowed_ctas": [],
+      "excludes": [
+        "brand_label",
+        "hero",
+        "hero_media",
+        "trust_badges",
+        "offer_price_selector",
+        "checkout_cta",
+        "refund_policy",
+        "shipping",
+        "product_details",
+        "price_highlight",
+        "product_carousel",
+        "related_products",
+        "reviews",
+        "tip_jar"
+      ],
+      "_comment": "An OFFER-LESS store profile / 'about' page: a brand hero over the seller_profile block, whose content derives from the Site's Organization at publish (TENANT_PROFILE_REQUIREMENTS SS4). Same exclusions and the same reasoning as `storefront` above -- it sells nothing either. Kept as its own key although its section list currently matches `storefront`, because the two shapes diverge where it counts: this page already emits Organization + CollectionPage JSON-LD from seller_profile, while a catalog page needs ItemList, and their meta descriptions derive from different sources (P4). A catalog_grid here is allowed, not excluded: 'our products' under an about page is reasonable, and the element is ui=internal so it is not in the Add-content menu regardless."
     }
   },
   "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base — never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in — the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) — the mechanism is here so they slot in without a renderer change. Editing guide: docs/CONFIGURING_GOALS.md. NEVER delete or rename a goal — pages that stored it would stop validating and could no longer be saved or re-rendered. Retire one with \"deprecated\": true, which hides it from the wizard while existing pages keep validating and composing.",

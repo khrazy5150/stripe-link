@@ -103,6 +103,47 @@ export function excludedSections(offerType) {
   return new Set(offerTypeRule(offerType).excludes || []);
 }
 
+// The two OFFER-LESS compositions. Mirrors OFFERLESS_COMPOSITIONS / offerless_composition() /
+// page_composition_key() in domain/composition.py — see plans/OFFERLESS_PAGES_IN_BUILDER.md P1 for why
+// these exist at all: with no offer, composition_key() falls through to `single`, under which the price
+// selector and the Buy CTA are visible. The renderer survives that (compose_page only FILTERS sections),
+// the builder does not — it CONSTRUCTS them from builder state gated on isSectionVisible(), so a
+// storefront opened here would be handed a price card and a Buy button for a page with nothing to sell.
+export const OFFERLESS_COMPOSITIONS = ["store_profile", "storefront"];
+// Order matters: a profile page may also carry a grid, and the profile block is the more specific claim.
+const OFFERLESS_MARKERS = [
+  ["store_profile", "seller_profile"],
+  ["storefront", "catalog_grid"],
+  ["storefront", "brand_hero"],
+];
+
+// Which offer-less shape a page is, or "" for an ordinary offer page. Derived from the page's own sections
+// rather than a stored field, so existing pages need no migration.
+export function offerlessComposition(page) {
+  const present = new Set(
+    ((page || {}).sections || []).filter((s) => s && typeof s === "object").map((s) => String(s.type || "")),
+  );
+  for (const [composition, marker] of OFFERLESS_MARKERS) {
+    if (present.has(marker)) return composition;
+  }
+  return "";
+}
+
+// The composition for a PAGE. THE OFFER ALWAYS WINS — a link-in-bio page may carry a catalog_grid of its
+// own (its excludes say so), so it must keep composing as lead_social and not as a storefront. `deriveKey`
+// is the caller's own offer->key function (deriveOfferType in LandingPages.vue), kept as a parameter so
+// this module stays free of the offer-shape derivation that lives there.
+export function pageCompositionKey(page, offer, deriveKey) {
+  // `hasOffer`, not `if (offer)`. In Python `{}` is falsy and `if offer:` reads correctly; in JS an empty
+  // object is TRUTHY, so the direct translation takes the has-an-offer branch for a page that has none and
+  // hands back `single` — the exact composition P1 exists to stop these pages getting, and only in the
+  // builder, while the publisher went on composing them correctly. Caught by evaluating both sides against
+  // each other rather than by reading them (2026-10-22).
+  const hasOffer = Boolean(offer) && Object.keys(offer).length > 0;
+  if (hasOffer) return deriveKey(offer);
+  return offerlessComposition(page) || deriveKey(offer || {});
+}
+
 // The shipping element cannot live in an offer_type's section list: `single` and `bundle` cover digital
 // goods too, and a shipping card on a download is nonsense. It keys on the one thing that decides it.
 // Mirrors SHIPS_PHYSICAL_SECTION / default_visible() in domain/composition.py.

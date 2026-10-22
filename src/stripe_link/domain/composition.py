@@ -272,6 +272,61 @@ def composition_key(offer: dict[str, Any]) -> str:
     return derived_offer_type(offer or {})
 
 
+# The two OFFER-LESS compositions, and the sections that identify each (plans/OFFERLESS_PAGES_IN_BUILDER.md
+# P1). A storefront homepage, a category page and a store profile carry no offer at all, so `composition_key`
+# -- which reads an offer -- has nothing to read and falls through to `single`. Under `single` the price
+# selector and the Buy CTA are visible, which is harmless in the renderer (compose_page only ever FILTERS
+# page.sections, it never adds one) and wrong in the builder, which CONSTRUCTS sections from builder state
+# gated on the same predicate. That asymmetry is the whole reason offer-less pages were locked out of the
+# builder; naming their shapes here is what unlocks them.
+#
+# Derived from the page's own sections rather than a new stored field, so every page that already exists
+# composes correctly with no migration -- the same signal `is_offerless_page()` and the dashboard's
+# `pageAttachKind()` already read.
+OFFERLESS_COMPOSITIONS = ("store_profile", "storefront")
+_OFFERLESS_MARKERS = (
+    # Order matters: a profile page may also carry a grid, and the profile block is the more specific claim.
+    ("store_profile", "seller_profile"),
+    ("storefront", "catalog_grid"),
+    ("storefront", "brand_hero"),
+)
+
+
+def offerless_composition(page: dict[str, Any] | None) -> str:
+    """Which offer-less shape this page is, or "" when it is an ordinary offer page.
+
+    Only meaningful for a page with NO offer. A link hub (`lead_social`) may carry a `catalog_grid` of its
+    own -- its excludes say so explicitly -- so this must never be consulted ahead of the offer; see
+    `page_composition_key`, which is the only correct way in.
+    """
+    present = {
+        str(section.get("type") or "")
+        for section in ((page or {}).get("sections") or [])
+        if isinstance(section, dict)
+    }
+    for composition, marker in _OFFERLESS_MARKERS:
+        if marker in present:
+            return composition
+    return ""
+
+
+def page_composition_key(page: dict[str, Any] | None, offer: dict[str, Any] | None) -> str:
+    """The composition for a PAGE: its offer's shape, or its offer-less shape when it has no offer.
+
+    THE OFFER ALWAYS WINS. `publish_page` sets `offer = {}` for a page with no `offer_id` and only then
+    (runtime/publishing.py), so an empty offer is exactly the "no offer" signal and nothing else -- which
+    is what keeps a link-in-bio page holding a `catalog_grid` composing as `lead_social` and not as a
+    storefront.
+
+    `composition_key(offer)` is left alone on purpose: six callers in the renderer ask it a question about
+    the OFFER ("is this a link hub?", "is this a listicle?"), and widening its signature would invite a
+    page-shaped answer at a call site that wants an offer-shaped one.
+    """
+    if offer:
+        return composition_key(offer)
+    return offerless_composition(page) or composition_key(offer or {})
+
+
 # Compositions that may NEVER be indexed, whatever the Site's eligibility says (plans/LEAD_GEN_PAGES.md §5).
 # This is a statement about what the page IS, not a preference, so there is no tenant override -- the same
 # standing as `excludes` above, and for the same reason. A bridge page's whole purpose is to send the visitor
@@ -355,7 +410,7 @@ def compose_page(
 
     The renderer only iterates the result — it never decides.
     """
-    offer_type = composition_key(offer or {})
+    offer_type = page_composition_key(page, offer)
     overrides = page_overrides(page)
     goal = page_goal(page)
     authored = page_type in AUTHORED_PAGE_TYPES
