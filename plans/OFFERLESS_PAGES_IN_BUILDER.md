@@ -1,6 +1,6 @@
 # Offer-less pages in the builder (storefront / category / profile)
 
-**Status:** PLANNED, not built. Decided 2026-10-22.
+**Status:** **P1 SHIPPED** (commit `3d6dcd7`, 2026-10-22). P2–P5 not built. Decided 2026-10-22.
 
 ## 1. The finding
 
@@ -83,7 +83,31 @@ ungoverned so they always pass. Nothing protects the builder, which writes rathe
 
 In dependency order. Each step is independently shippable.
 
-### P1 — Teach composition the three shapes (blocks everything else)
+### P1 — Teach composition the three shapes — SHIPPED 2026-10-22 (`3d6dcd7`)
+
+Built as **two** compositions, not three: `storefront` serves the storefront homepage *and* category pages,
+because their section lists are identical — splitting them the day they genuinely differ is additive.
+`store_profile` is the other. Both derive from the page's own sections (`offerless_composition`), and
+`page_composition_key(page, offer)` puts the offer first so a link-in-bio page holding a `catalog_grid`
+still composes as `lead_social`. `composition_key(offer)` is unchanged.
+
+Two things the tests caught that reading had not:
+
+- `tests/test_tip_jar.py` pins, as an exact set, that the tip-jar element is offered on the link hub and
+  nowhere else. Both new types failed it. Honoured rather than loosened — a recorded decision outranks a
+  fresh "seems plausible".
+- **The Vue mirror disagreed with Python.** `if offer:` is right in Python (`{}` is falsy); the direct
+  translation `if (offer)` is wrong in JS (`{}` is truthy), so the builder would have composed these pages
+  as `single` — the very thing P1 exists to prevent — while the publisher composed them correctly. Pinned
+  by `tests/test_offerless_composition_parity.py`, which evaluates both sides against each other and was
+  verified to go red on the bug.
+
+One property worth knowing before P2: `is_section_visible` short-circuits on ungoverned keys *before*
+consulting `excludes`, so an exclusion is render-enforced for a governed section and
+**builder-enforced only** for an ungoverned one. That is fine — the Add-content menu is the only way such
+a section enters a document — but it means P2 must not assume the renderer will filter them.
+
+*Original plan for this step, kept for the record:*
 
 `composition_rules.json` gains `offer_types` entries for `storefront`, `category`, `profile`, and
 `composition_key()` / `deriveOfferType()` learn to return them for an offer-less page. Derive the key from
