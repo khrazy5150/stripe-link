@@ -1,6 +1,11 @@
 # Domain health sweep — notice when a tenant's custom domain stops working
 
-**Status:** BUILT 2026-10-23, not yet deployed. Written 2026-10-23.
+**Status:** SHIPPED dev + prod 2026-10-23. Written 2026-10-23.
+
+First real pass on each: dev `{checked: 1, unhealthy: 0, notified: 0}` -- `shop.coderbay.net`, serving,
+recorded `healthy`, no notice, which is the whole point. Prod `{checked: 0, ...}`: its one live Site runs
+on a platform hostname, and the SK-prefix filter correctly skipped the two subdomain reservations sharing
+the table.
 
 Pieces: `src/stripe_link/domain/domain_health.py` (the decisions),
 `src/handlers/domain_health_sweep.py` (the sweep), `DynamoDocumentRepository.update_domain_health`

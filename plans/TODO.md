@@ -282,10 +282,11 @@ distribution stops claiming a hostname it no longer serves.
 
 ## ⭐⭐ HIGH — a tenant's custom domain can stop working and nothing tells anyone (found 2026-10-23)
 
-**BUILT 2026-10-23, awaiting deploy.** `domain/domain_health.py` + `handlers/domain_health_sweep.py`,
+**SHIPPED dev + prod 2026-10-23.** `domain/domain_health.py` + `handlers/domain_health_sweep.py`,
 dispatched from `SitesFunction` on a `rate(1 day)` schedule, recorded through `update_domain_health`,
 covered by `tests/test_domain_health_sweep.py`. The `www.` sibling is deliberately out of scope — see the
-plan's §4. Remaining: deploy, then set `CloudflareApexIpv4`/`IPV6`.
+plan's §4. First pass: dev reported `shop.coderbay.net` healthy and said nothing; prod has no custom
+domain to check yet. Remaining: set `CloudflareApexIpv4`/`IPV6`, which this unblocked.
 
 **Plan: `plans/DOMAIN_HEALTH_SWEEP.md`** (written 2026-10-23). Precondition for apex domains — the last
 open item on `SITE_OBJECT.md` Phase 2.6b.
