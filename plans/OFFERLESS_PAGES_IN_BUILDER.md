@@ -1,6 +1,6 @@
 # Offer-less pages in the builder (storefront / category / profile)
 
-**Status:** **COMPLETE — P1–P5 ALL SHIPPED** 2026-10-22 (`3d6dcd7`, `2c13465`, `b1ab271`, `7607730`, `21fcd6e`). Not yet verified in a browser; not yet exercised on a real custom domain.
+**Status:** **COMPLETE — P1–P5 ALL SHIPPED** 2026-10-22 (`3d6dcd7`, `2c13465`, `b1ab271`, `7607730`, `21fcd6e`). **P5 exercised for real on shop.coderbay.net 2026-10-23** (sandbox, live mode, verified custom domain): 2-URL sitemap, robots.txt, IndexNow, `/thank-you` correctly excluded. That run found a clobber in P5's own denormalization — fixed in `54fc69f`, see [[feedback-shared-document-read-modify-write]].
 
 The outcome, proven end to end through the real publish gates on a verified custom domain:
 
