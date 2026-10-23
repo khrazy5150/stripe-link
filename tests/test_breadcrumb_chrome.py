@@ -180,11 +180,42 @@ class GoalDefaultTests(unittest.TestCase):
         self.assertFalse(shows_breadcrumb(_lead("capture_email"), self._page("")))
         self.assertTrue(shows_breadcrumb(_lead("capture_email"), self._page("search_seo")))
 
-    def test_the_other_goals_leave_the_shape_in_charge(self):
-        for goal in ("social", "email_list", "minimal"):
+    def test_only_search_friendly_shows_a_breadcrumb(self):
+        """The author's rule, and it reverses what this file used to assume: a breadcrumb is not something
+        visitors want, it is an on-page SEO device. So the question is "did this page come from search?",
+        not "is this page a node in a hierarchy?" -- and ad, social and email traffic all answer no."""
+        from stripe_link.domain.composition import offerable_goals
+
+        for goal in offerable_goals():
+            expected = goal == "search_seo"
+            for shape, offer in (("product", _offer()), ("lead", _lead("capture_email"))):
+                with self.subTest(goal=goal, shape=shape):
+                    self.assertIs(shows_breadcrumb(offer, self._page(goal)), expected)
+
+    def test_every_goal_states_its_own_answer(self):
+        """None of them may fall through to the shape. A goal that forgot to set it would silently take
+        the old hierarchy-based default, which is the behaviour being replaced."""
+        from stripe_link.domain.composition import goal_chrome, offerable_goals
+
+        for goal in offerable_goals():
             with self.subTest(goal=goal):
-                self.assertTrue(shows_breadcrumb(_offer(), self._page(goal)))
-                self.assertFalse(shows_breadcrumb(_lead("social_redirect"), self._page(goal)))
+                self.assertIsNotNone(goal_chrome(goal, "breadcrumb"))
+
+    def test_a_page_with_no_goal_keeps_the_old_shape_default(self):
+        """Pages created before the goal axis are not migrated, so nothing live moves on its own: the
+        shape default is reached only by them."""
+        self.assertTrue(shows_breadcrumb(_offer(), self._page("")))
+        self.assertFalse(shows_breadcrumb(_lead("social_redirect"), self._page("")))
+
+    def test_lead_pages_obey_the_goal_like_any_other(self):
+        """The point of the change rather than a side effect (author: "please make sure that lead pages
+        also obey the goal"). A lead page is usually fed by ads or a link, not search -- but when one IS
+        built for search it gets the breadcrumb."""
+        for action in ("capture_email", "capture_phone", "capture_email_phone",
+                       "call_number", "external_url", "social_redirect", "register_event"):
+            with self.subTest(action=action):
+                self.assertFalse(shows_breadcrumb(_lead(action), self._page("paid_ads")))
+                self.assertTrue(shows_breadcrumb(_lead(action), self._page("search_seo")))
 
     def test_the_tenants_own_tick_outranks_the_goal(self):
         for goal, override in (("paid_ads", True), ("search_seo", False)):
@@ -198,9 +229,11 @@ class GoalDefaultTests(unittest.TestCase):
 
         self.assertIs(RULES["goals"]["paid_ads"]["chrome"]["breadcrumb"], False)
         self.assertIs(RULES["goals"]["search_seo"]["chrome"]["breadcrumb"], True)
-        self.assertIsNone(goal_chrome("social", "breadcrumb"), "a goal with no opinion must return None")
+        # No goal set / an unknown goal returns None, which is what leaves the shape in charge for a page
+        # that predates the goal axis.
         self.assertIsNone(goal_chrome("", "breadcrumb"))
         self.assertIsNone(goal_chrome("nonexistent_goal", "breadcrumb"))
+        self.assertIsNone(goal_chrome("search_seo", "a_key_no_goal_sets"))
 
     def test_nothing_is_written_into_the_document(self):
         """Stored as a DEFAULT, not baked into each new page: a page whose goal changes later has to move

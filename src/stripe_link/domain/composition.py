@@ -111,9 +111,13 @@ def goal_chrome(goal: str, key: str) -> bool | None:
     """A chrome default this goal sets, or None when it has no opinion.
 
     The goal is a statement about WHY the page exists, and some of the page's furniture follows from that
-    rather than from what it sells: ad traffic lands on a focused conversion page and does not want a trail
-    back up into a catalogue, while a page built to be found in search does. Configuration rather than code
-    so a new goal can set its own without a renderer change — same reason packs live in this file.
+    rather than from what it sells. The breadcrumb is the clearest case: it is an on-page SEO device, not
+    something a visitor wants, so it belongs on a page that came from search and nowhere else. Every goal
+    therefore sets it, and only `search_seo` sets it true.
+
+    Configuration rather than code, so a NEW goal sets its own chrome without a renderer change — same
+    reason packs live in this file. A goal that sets nothing returns None and leaves the shape in charge,
+    which is what a page predating the goal axis still gets.
     """
     value = (_GOALS.get(str(goal or "")) or {}).get("chrome") or {}
     found = value.get(key)
@@ -370,16 +374,19 @@ def shows_breadcrumb(offer: dict[str, Any], page: dict[str, Any] | None = None) 
     Three inputs, most specific first:
 
     1. `page.chrome.breadcrumb` — the tenant said so for THIS page, and nothing outranks that.
-    2. The GOAL's own default (author, 2026-10-22). `paid_ads` turns it off: ad traffic lands on a focused
-       conversion page, and a trail back up into a catalogue is an exit from the thing the click paid for.
-       `search_seo` turns it on. Stored as a default rather than written into each new document, so a page
-       whose goal changes later moves with it -- writing the resolved value would freeze today's answer, the
-       mistake the brand label made.
-    3. The composition's default: the lead shapes off, everything else on.
+    2. The GOAL's own default, which every goal now sets (author, 2026-10-22): ONLY `search_seo` shows a
+       breadcrumb. The reasoning is the author's and it is worth keeping, because it reverses what this
+       function used to assume -- **a breadcrumb is not a thing visitors want, it is an on-page SEO device**.
+       So the question is not "is this page a node in a hierarchy?" but "did this page come from search?".
+       Ad, social and email traffic already knows where it is and did not arrive looking to browse upward.
+    3. The composition's default: the lead shapes off, everything else on. Reached only by a page with NO
+       goal at all -- one created before the goal axis existed. Those keep composing exactly as they did,
+       which is why the goals carry the new rule and this line was left alone.
 
-    A goal therefore outranks the shape. That is deliberate but worth knowing: setting `search_seo` on a
-    lead page turns its breadcrumb ON, where the shape alone would have left it off. All three layers are
-    defaults -- the tenant's own tick always wins -- so this orders preferences, not invariants.
+    A goal therefore outranks the SHAPE, and that was the point of the change rather than a side effect:
+    lead pages obey it too. A lead page is generally fed by paid ads or a link, not by search, but when one
+    IS built for search it gets the breadcrumb like anything else. All three layers are defaults -- the
+    tenant's own tick always wins -- so this orders preferences, not invariants.
     """
     override = ((page or {}).get("chrome") or {}).get("breadcrumb")
     if isinstance(override, bool):

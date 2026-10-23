@@ -1144,6 +1144,9 @@
     },
     "social": {
       "label": "Social",
+      "chrome": {
+       "breadcrumb": false
+      },
       "note": "Built to convert a scrolling audience: adds social proof — testimonials, rating, client logos.",
       "packs": [
         "social_proof"
@@ -1151,11 +1154,17 @@
     },
     "email_list": {
       "label": "Email list",
+      "chrome": {
+       "breadcrumb": false
+      },
       "note": "A warm audience that already knows you. Adds nothing extra — straight to the point.",
       "packs": []
     },
     "minimal": {
       "label": "Minimal",
+      "chrome": {
+       "breadcrumb": false
+      },
       "note": "No extras of any kind. The page's standard shape, with nothing added on top.",
       "packs": []
     }

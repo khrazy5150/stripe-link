@@ -3391,10 +3391,13 @@ const ctaLabelDefault = computed(() =>
 // is true of a product inside a catalogue and false of the lead shapes -- a link hub is an identity page, not
 // a node under a store, and a bridge page is noindex by rule, so a crawlable trail on it has no reader.
 //
-// The GOAL outranks the shape (author, 2026-10-22): `paid_ads` turns it off, because ad traffic lands on a
-// focused conversion page and a trail back up into a catalogue is an exit from the thing the click paid for;
-// `search_seo` turns it on. The tenant's own tick still outranks both -- all three layers are defaults, and
-// only a DEVIATION from this value is persisted (see the save payload's `chrome`).
+// The GOAL outranks the shape, and every goal sets it (author, 2026-10-22): ONLY `search_seo` shows a
+// breadcrumb. That reverses the assumption this used to encode -- a breadcrumb is not a thing visitors
+// want, it is an on-page SEO device, so the question is "did this page come from search?" and not "is this
+// page a node in a hierarchy?". Lead pages obey it too. The LEAD_COMPOSITION_TYPES line below is now
+// reached only by a page with NO goal, i.e. one created before the goal axis, which keeps its old default.
+// The tenant's own tick still outranks both -- all three layers are defaults, and only a DEVIATION from
+// this value is persisted (see the save payload's `chrome`).
 const breadcrumbDefault = computed(() => {
   const fromGoal = goalChrome(builderGoal.value, "breadcrumb");
   if (fromGoal !== null) return fromGoal;
