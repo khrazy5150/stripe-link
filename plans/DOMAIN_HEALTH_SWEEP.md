@@ -1,6 +1,11 @@
 # Domain health sweep — notice when a tenant's custom domain stops working
 
-**Status:** PLANNED, not built. Written 2026-10-23.
+**Status:** BUILT 2026-10-23, not yet deployed. Written 2026-10-23.
+
+Pieces: `src/stripe_link/domain/domain_health.py` (the decisions),
+`src/handlers/domain_health_sweep.py` (the sweep), `DynamoDocumentRepository.update_domain_health`
+(the targeted write), a `rate(1 day)` Schedule event on `SitesFunction`, and
+`tests/test_domain_health_sweep.py`.
 
 ## 1. The problem
 
@@ -54,11 +59,18 @@ Missing: the schedule, the comparison, and a little state so it reports once rat
 
 ### What it checks, and in what order of authority
 
-1. **Cloudflare's own status** for the custom hostname (and the `www.` sibling if the Site has one) —
+1. **Cloudflare's own status** for the custom hostname —
    `status` and `ssl.status`. This is authoritative; the docstring on `diagnose_dns_records` already says
    so. A hostname that is `active`/`active` is healthy and the sweep stops there.
 2. **Only when (1) is unhealthy**, run `diagnose_dns_records` over the STORED `dns_records` to say *which*
    record is wrong. That is what turns "your domain is down" into "the `_acme-challenge` CNAME is missing".
+
+**The `www.` sibling is deliberately not checked.** An apex Site also provisions `www.<apex>` as a 301,
+but that is best-effort (`_setup_www_redirect`) and the store serves without it. A tenant who never
+created its DNS rows is in the same observable state as one whose rows broke, and without per-hostname
+history the two cannot be told apart — so checking it would nag about a redirect some tenants never
+wanted. The connect screen already shows those rows with a Verify button; this sweep is for regressions,
+not for setup a tenant chose not to finish. Revisit if `www` ever stops being optional.
 
 Checking Cloudflare first matters for a reason specific to apex: after we change `CloudflareApexIpv4`, a
 tenant still pointing at the OLD IPs may be perfectly healthy. Re-deriving the expected records and
@@ -100,6 +112,14 @@ A notice needs an action the tenant must take (`feedback-notices-only-when-actio
 - Nothing is auto-disconnected, auto-unpublished or de-indexed by the sweep.
 - Tested with: a healthy domain (silent), a missing routing record, a missing DCV record, and a domain
   whose Cloudflare hostname was deleted out from under it.
+
+All met, in `tests/test_domain_health_sweep.py`. Two cases beyond the list proved worth pinning:
+
+- **A Cloudflare outage blames nobody.** `CustomDomainError` records no verdict and sends no notice — a
+  notice there would tell a tenant to fix their DNS because our provider was down.
+- **A serving domain has its DNS re-examined by nothing at all.** One test injects a diagnoser that
+  raises; a second asserts the module never so much as names `custom_hostname_dns_records`. That is the
+  structural guard on §4's never-re-derive rule, which is what keeps the apex migration quiet.
 
 ## 6. What this unblocks
 

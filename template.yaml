@@ -1550,6 +1550,7 @@ Resources:
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
+          NOTIFICATIONS_TABLE: !Ref NotificationsTable
           PAGES_TABLE: !Ref PagesTable
           SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
@@ -1575,6 +1576,9 @@ Resources:
             TableName: !Ref CustomDomainsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref StripeKeysTable
+        # The domain health sweep tells a tenant their custom domain stopped working.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
         - !If
           - HasCloudflareZone
           - Statement:
@@ -1595,6 +1599,16 @@ Resources:
                   - !Ref StripePlatformSecretArn
           - !Ref AWS::NoValue
       Events:
+        # Re-check every verified custom domain (plans/DOMAIN_HEALTH_SWEEP.md). Verification was one-shot
+        # before this: a store could go dark while the dashboard still read "Connected & verified".
+        #
+        # DAILY, not the 15 minutes the other sweeps use. Every failure mode here is slow -- a registrar
+        # lapsing, a provider migration, an anycast IP reassignment -- so a tighter cadence would buy
+        # nothing and multiply Cloudflare API calls by ninety-six.
+        DomainHealthSweep:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
         SitesConnectDomain:
           Type: Api
           Properties:
@@ -2361,6 +2375,10 @@ Resources:
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
+          # Reached only through `handlers.sites`, which this imports for subdomain provisioning and
+          # which now dispatches the domain health sweep. Declared because tests/envreach.py
+          # over-approximates on purpose: a few bytes of env var beats a runtime NameError.
+          NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
           PAGES_TABLE: !Ref PagesTable
           PRODUCTS_TABLE: !Ref ProductsTable

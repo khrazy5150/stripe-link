@@ -193,6 +193,15 @@ def platform_label(hostname: str) -> str:
 
 
 def handler(event, context, repository=None, registry=None, tenant_repo=None):
+    # THE SCHEDULED SWEEP, not an API call. EventBridge delivers a bare event with no httpMethod, so it
+    # must be answered before anything reads one. It shares this function rather than owning one because
+    # the stack sits near CloudFormation's 1MB transform limit, and because this IS its home: it re-asks
+    # the question check_domain answers exactly once (plans/DOMAIN_HEALTH_SWEEP.md).
+    if str((event or {}).get("source") or "") == "aws.events":
+        from handlers.domain_health_sweep import handler as sweep_domain_health
+
+        return sweep_domain_health(event, context)
+
     mode = resolve_stripe_mode(event)
     repository = repository or sites_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()

@@ -16,7 +16,9 @@
     },
     "type": {
       "type": "string",
-      "enum": ["paid_invoice", "refund_request", "order", "shipping", "system", "stripe_connect"]
+      "description": "Every value a notification builder emits. Kept in step with them: 'fulfilment', 'lead', 'subscription_renewed' and 'domain_health' were in production before they were listed here.",
+      "enum": ["paid_invoice", "refund_request", "order", "shipping", "system", "stripe_connect",
+               "fulfilment", "lead", "subscription_renewed", "domain_health"]
     },
     "severity": {
       "type": "string",
@@ -43,7 +45,11 @@
         "refund_request_id": { "type": "string" },
         "customer_id": { "type": "string" },
         "page_id": { "type": "string" },
-        "offer_id": { "type": "string" }
+        "offer_id": { "type": "string" },
+        "appointment_id": { "type": "string" },
+        "lead_id": { "type": "string" },
+        "site_id": { "type": "string" },
+        "domain": { "type": "string" }
       }
     },
     "action": {

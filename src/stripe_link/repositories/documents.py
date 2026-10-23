@@ -354,6 +354,33 @@ class DynamoDocumentRepository:
                 if "ConditionalCheckFailed" not in str(type(exc).__name__) + str(exc):
                     raise
 
+    def update_domain_health(self, tenant_id: str, document_id: str,
+                             health: dict[str, Any]) -> None:
+        """Record the domain health sweep's verdict on a Site, WITHOUT rewriting the document.
+
+        Same reason as `update_route_crawl_facts` above: a sweep walks many Sites and `check_domain`
+        writes this very document when a tenant clicks Verify. A read-modify-write would let the sweep
+        restore a stale `domain_provisioning` over a verification that landed mid-pass -- silently, and in
+        the one block whose whole job is to say whether the domain works.
+
+        `attribute_exists(domain_provisioning)` guards the case where the tenant disconnected between the
+        scan that found the Site and this write: there is then nothing to annotate, and that is not an
+        error.
+        """
+        if not health:
+            return
+        try:
+            self.table.update_item(
+                Key=self._key(tenant_id, document_id),
+                UpdateExpression="SET #prov.#health = :health",
+                ConditionExpression="attribute_exists(#prov)",
+                ExpressionAttributeNames={"#prov": "domain_provisioning", "#health": "health"},
+                ExpressionAttributeValues=dynamo_safe({":health": health}),
+            )
+        except Exception as exc:  # noqa: BLE001
+            if "ConditionalCheckFailed" not in str(type(exc).__name__) + str(exc):
+                raise
+
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key=self._key(tenant_id, document_id))
         item = response.get("Item")
