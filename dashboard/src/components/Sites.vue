@@ -873,13 +873,21 @@ const dnsProviders = [
   { id: "cpanel", label: "cPanel", fqdn: true },
   { id: "other", label: "Other / full name", fqdn: true },
 ];
-// Custom-domain serving is production/Live-only (single prod edge Worker) — hide it in Test to avoid a dead end.
+// LIVE-MODE only, and the reason is reputational, not infrastructural (corrected 2026-10-23). This read
+// "production/Live-only (single prod edge Worker)", which was never quite true and is now plainly false:
+// the setup script provisions a Worker per environment and sandbox has carried its own Cloudflare zone
+// (jbay.be, fallback origin domains.jbay.be) since 2026-10-23. A sandbox Site CAN serve a real domain.
+// What must not is a TEST-MODE Site: it would present test pages as a real business, and that is a
+// reputation the tenant cannot get back. The server enforces it — _reject_non_live_site reads the SITE's
+// stripe_mode — so this only hides a control the API would refuse.
 const customDomainsEnabled = computed(() => getStripeMode() === "live");
 function customDomainLabel(site) {
-  // "Not connected" is only true-and-useful on a Live Site. On a sandbox Site it reads as an invitation to
-  // connect something the server refuses (custom_domains_live_only), so say why instead.
+  // "Not connected" is only true-and-useful on a Live Site. On a TEST-MODE Site it reads as an invitation
+  // to connect something the server refuses (custom_domains_live_only), so say why instead. (Said "sandbox
+  // Site": sandbox is a SILO, and a sandbox deployment serves live-mode Sites too — stripe_link/silo.py.)
   if (site.hosting?.custom_domain) return site.hosting.custom_domain;
-  return customDomainsEnabled.value ? "Not connected" : "Live environment only";
+  // "Live mode only", not "Live environment only": environment is the DEPLOYMENT in this codebase.
+  return customDomainsEnabled.value ? "Not connected" : "Live mode only";
 }
 const dnsProvider = ref("route53");
 const openStep = ref(0);
@@ -1195,7 +1203,9 @@ function indexReason(site) {
   return "Search indexing requires a verified custom domain and a verified Stripe Connect account. On the free address a Site is never indexed.";
 }
 
-// Archiving a Site de-indexes all its pages (noindex,nofollow,noarchive in prod). Robots are baked into each
+// Archiving a Site de-indexes all its pages — noindex,nofollow,noarchive, unconditionally: it is the FIRST
+// branch of page_robots_directive, ahead of mode, eligibility and everything else. (Said "in prod", which
+// named the wrong axis and implied a gate that is not there.) Robots are baked into each
 // published artifact at publish time, so flipping the status must ALSO re-render the Site's published pages —
 // orchestrated here (same pattern as attach/detach), reusing the publish endpoint.
 const pendingArchive = ref("");   // "archive" | "unarchive" while the confirm dialog is open

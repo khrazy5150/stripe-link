@@ -4743,7 +4743,9 @@ function siteNameForPage(page) {
   return siteForPage(page)?.name || "";
 }
 // The page's real public URL when it's on a Site with a VERIFIED custom domain: https://domain/slug (homepage
-// at "/"). Only verified (prod) Sites qualify — custom domains are live-only — so this never shows a dead URL.
+// at "/"). Only a Site with a VERIFIED custom domain qualifies, and custom domains are LIVE-MODE only, so
+// this never shows a dead URL. (Said "verified (prod) Sites": prod is the deployment, and a sandbox
+// deployment serves live-mode Sites with verified domains too.)
 function sitePublicUrl(page) {
   for (const s of sitesStore.sites) {
     const hosting = s.hosting || {};
