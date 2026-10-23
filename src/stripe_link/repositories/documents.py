@@ -291,6 +291,69 @@ class DynamoDocumentRepository:
         self.table.put_item(Item=dynamo_safe(item))
         return document
 
+    def update_route_crawl_facts(self, tenant_id: str, document_id: str,
+                                 facts: dict[str, dict[str, Any]]) -> None:
+        """Write the sitemap's facts onto individual Site route entries, WITHOUT rewriting the document.
+
+        Same reason `AiUsageRepository` has its own class: a read-modify-write loses concurrent writes.
+        Here the loss is silent and delayed rather than immediate. Verifying a custom domain republishes
+        every page on the Site at once; each publish was loading the whole Site, setting its own page's
+        `indexable`, and putting the document back, so the last writer restored every sibling's value from
+        the copy it had read a second earlier. Observed on shop.coderbay.net 2026-10-23: both pages
+        rendered index,follow and the sitemap came out right -- it is built from the in-memory copy, which
+        was correct -- while the STORED flags stayed at the pre-verification `false`. Nothing looked
+        broken, and the next single-page publish would have rebuilt the sitemap from those stored flags
+        and silently dropped every page but the one publishing.
+
+        One `update_item` per slug, each touching only `pages.<slug>.{indexable,lastmod,images}`. A
+        concurrent publish writing a different slug cannot collide; one writing the SAME slug is writing
+        the same answer. `attribute_exists` guards against resurrecting a route that was detached between
+        the read that found the slug and this write.
+        """
+        for slug, fact in (facts or {}).items():
+            names: dict[str, str] = {"#pages": "pages", "#slug": slug}
+            values: dict[str, Any] = {}
+            sets: list[str] = []
+            removes: list[str] = []
+            if "indexable" in fact:
+                names["#indexable"] = "indexable"
+                values[":indexable"] = bool(fact["indexable"])
+                sets.append("#pages.#slug.#indexable = :indexable")
+            if fact.get("lastmod"):
+                names["#lastmod"] = "lastmod"
+                values[":lastmod"] = int(fact["lastmod"])
+                sets.append("#pages.#slug.#lastmod = :lastmod")
+            if "images" in fact:
+                names["#images"] = "images"
+                images = [str(url) for url in (fact.get("images") or []) if url]
+                if images:
+                    values[":images"] = images
+                    sets.append("#pages.#slug.#images = :images")
+                else:
+                    # A page whose images were deleted must stop advertising them, so an empty list is a
+                    # removal rather than a skip.
+                    removes.append("#pages.#slug.#images")
+            if not sets and not removes:
+                continue
+            expression = " ".join(part for part in (
+                ("SET " + ", ".join(sets)) if sets else "",
+                ("REMOVE " + ", ".join(removes)) if removes else "",
+            ) if part)
+            kwargs: dict[str, Any] = {
+                "Key": self._key(tenant_id, document_id),
+                "UpdateExpression": expression,
+                "ConditionExpression": "attribute_exists(#pages.#slug)",
+                "ExpressionAttributeNames": names,
+            }
+            if values:
+                kwargs["ExpressionAttributeValues"] = dynamo_safe(values)
+            try:
+                self.table.update_item(**kwargs)
+            except Exception as exc:  # noqa: BLE001
+                # A ConditionalCheckFailed means the route is gone -- nothing to record, and not an error.
+                if "ConditionalCheckFailed" not in str(type(exc).__name__) + str(exc):
+                    raise
+
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key=self._key(tenant_id, document_id))
         item = response.get("Item")

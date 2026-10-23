@@ -613,7 +613,7 @@ _SITEMAP_IMAGES_PER_PAGE = 5
 
 
 def _denormalize_page_crawl(site: dict[str, Any], page_id: str, *, indexable: bool, lastmod: int,
-                           image_urls: list[str]) -> bool:
+                           image_urls: list[str]) -> dict[str, dict[str, Any]]:
     """Record on the page's Site route entry what the sitemap needs to know about it. Returns whether
     anything changed.
 
@@ -624,26 +624,32 @@ def _denormalize_page_crawl(site: dict[str, Any], page_id: str, *, indexable: bo
     skipping the thin-content check would advertise URLs that publish `noindex`
     (plans/OFFERLESS_PAGES_IN_BUILDER.md P5).
     """
-    changed = False
+    changes: dict[str, dict[str, Any]] = {}
     images = [url for url in image_urls if url][:_SITEMAP_IMAGES_PER_PAGE]
-    for entry in (site.get("pages") or {}).values():
+    for slug, entry in (site.get("pages") or {}).items():
         if not (isinstance(entry, dict) and entry.get("page_id") == page_id):
             continue
+        fact: dict[str, Any] = {}
         if entry.get("indexable") != indexable:
-            entry["indexable"] = indexable
-            changed = True
+            fact["indexable"] = indexable
         if lastmod and entry.get("lastmod") != lastmod:
-            entry["lastmod"] = lastmod
-            changed = True
-        # An empty list is written as a REMOVAL, not skipped: a page whose images were deleted must stop
-        # advertising them, and "no images" is a fact worth recording.
+            fact["lastmod"] = lastmod
+        # An empty list is a REMOVAL, not a skip: a page whose images were deleted must stop advertising
+        # them, and "no images" is a fact worth recording.
         if images != [url for url in (entry.get("images") or []) if url]:
+            fact["images"] = images
+        if not fact:
+            continue
+        # The in-memory Site is updated too, because publish_site_crawl_files builds this publish's
+        # sitemap from it a few lines later and must see the answer this page just produced.
+        entry.update({k: v for k, v in fact.items() if k != "images"})
+        if "images" in fact:
             if images:
                 entry["images"] = images
             else:
                 entry.pop("images", None)
-            changed = True
-    return changed
+        changes[slug] = fact
+    return changes
 
 
 def site_sitemap_entries(site: dict[str, Any] | None, custom_domain: str) -> list[dict[str, Any]]:
@@ -1667,14 +1673,19 @@ def publish_page_document(
         # rest of the block down with it -- a bad Site write here would have skipped `_sync_domain_index`
         # and left the edge resolver stale, with nothing said. See [[feedback-one-guess-hides-the-cause]].
         try:
-            if _denormalize_page_crawl(
+            crawl_facts = _denormalize_page_crawl(
                 site, page_id,
                 indexable=published_robots == INDEXABLE_ROBOTS,
                 lastmod=int(page.get("updated_at") or page.get("published_at") or 0),
                 image_urls=_homepage_image_urls(offer, products_by_id),
-            ):
-                validate_site(site)
-                site = sites_repository.put(site)
+            )
+            if crawl_facts:
+                # A TARGETED update, not put(site). Verifying a domain republishes every page at once, and
+                # a whole-document write restores each sibling's flag from the copy this invocation read a
+                # second ago -- which is how two indexable pages came to be stored as noindex while their
+                # artifacts and the sitemap were both correct (shop.coderbay.net, 2026-10-23).
+                sites_repository.update_route_crawl_facts(
+                    str(page.get("tenant_id") or ""), str(site.get("site_id") or ""), crawl_facts)
         except Exception:  # noqa: BLE001 - a sitemap fact is never worth failing a publish over
             logger.exception("sitemap denormalization failed for page %s", page_id)
         try:

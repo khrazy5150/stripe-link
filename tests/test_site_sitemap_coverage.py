@@ -15,6 +15,7 @@ been carrying are pinned here:
   one URL that had not changed.
 """
 
+import re
 import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_site
@@ -253,6 +254,113 @@ class CrawlFilePublishTests(unittest.TestCase):
         s3, _, _ = self._publish(publishing_page_id="page_home")
         self.assertIn(f"Sitemap: https://{DOMAIN}/sitemap.xml", s3.objects["page_home/robots.txt"])
         self.assertIn("Allow: /", s3.objects["page_home/robots.txt"])
+
+
+class TheWriteCannotClobberASiblingTests(unittest.TestCase):
+    """Verifying a custom domain republishes every page on the Site at once.
+
+    Each publish used to load the whole Site, set its own page's `indexable`, and put the document back --
+    so the last writer restored every sibling's flag from the copy it had read a second earlier. Seen on
+    shop.coderbay.net 2026-10-23: both pages rendered `index,follow` and the sitemap was correct (it is
+    built from the in-memory copy), while the STORED flags stayed at the pre-verification `false`. Nothing
+    looked wrong until the next single-page publish, which would have rebuilt the sitemap from those
+    stored flags and dropped every page but the one publishing.
+
+    The guarantee is now structural: one targeted `update_item` per slug, naming only that slug's
+    attributes. These assert the SHAPE of the write rather than simulating DynamoDB, because the shape is
+    the guarantee -- an expression that cannot address a sibling cannot overwrite one.
+    """
+
+    class RecordingTable:
+        def __init__(self):
+            self.updates = []
+            self.puts = []
+
+        def update_item(self, **kwargs):
+            self.updates.append(kwargs)
+
+        def put_item(self, **kwargs):
+            self.puts.append(kwargs)
+
+    def _repo(self):
+        from stripe_link.repositories.documents import DynamoDocumentRepository
+
+        table = self.RecordingTable()
+        repo = DynamoDocumentRepository("jb-sites-test", document_type="site", id_field="site_id",
+                                        table=table, mode="live", mode_scoped=True)
+        return repo, table
+
+    def test_each_slug_is_written_on_its_own(self):
+        repo, table = self._repo()
+        repo.update_route_crawl_facts("t1", "site_1", {
+            "/": {"indexable": True, "lastmod": 7, "images": ["https://img/a.jpg"]},
+            "/two": {"indexable": False},
+        })
+        self.assertEqual(len(table.updates), 2)
+        self.assertEqual([u["ExpressionAttributeNames"]["#slug"] for u in table.updates], ["/", "/two"])
+
+    def test_the_expression_can_only_address_the_named_slug(self):
+        repo, table = self._repo()
+        repo.update_route_crawl_facts("t1", "site_1", {"/only": {"indexable": True, "lastmod": 9}})
+        update = table.updates[0]
+        expression = update["UpdateExpression"]
+        # Every path in the expression is rooted at this one slug.
+        for path in re.findall(r"#pages\.[^ ,=]+", expression):
+            self.assertTrue(path.startswith("#pages.#slug."), path)
+        self.assertEqual(update["ExpressionAttributeNames"]["#slug"], "/only")
+        self.assertIn("attribute_exists(#pages.#slug)", update["ConditionExpression"])
+
+    def test_it_never_writes_the_whole_document(self):
+        """The regression itself: a put() here restores every sibling from a stale read."""
+        repo, table = self._repo()
+        repo.update_route_crawl_facts("t1", "site_1", {"/": {"indexable": True}})
+        self.assertEqual(table.puts, [], "the crawl write must not put the whole Site")
+
+    def test_losing_every_image_is_a_removal(self):
+        repo, table = self._repo()
+        repo.update_route_crawl_facts("t1", "site_1", {"/": {"images": []}})
+        self.assertIn("REMOVE #pages.#slug.#images", table.updates[0]["UpdateExpression"])
+        self.assertNotIn("ExpressionAttributeValues", table.updates[0])
+
+    def test_nothing_to_say_writes_nothing(self):
+        repo, table = self._repo()
+        repo.update_route_crawl_facts("t1", "site_1", {"/": {}})
+        self.assertEqual(table.updates, [])
+
+    def test_a_detached_route_is_not_resurrected(self):
+        """ConditionalCheckFailed means the slug was detached between the read that found it and this
+        write. There is nothing to record, and it is not an error."""
+        from botocore.exceptions import ClientError
+
+        repo, table = self._repo()
+
+        def fail(**kwargs):
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+
+        table.update_item = fail
+        repo.update_route_crawl_facts("t1", "site_1", {"/gone": {"indexable": True}})  # must not raise
+
+
+class TheDenormalizerReportsWhatChangedTests(unittest.TestCase):
+    def test_it_returns_the_changes_per_slug(self):
+        site = _site({"/": _entry("page_home", page_type="homepage", indexable=None, lastmod=0),
+                      "/also": _entry("page_home", indexable=None, lastmod=0),
+                      "/other": _entry("page_other")})
+        changes = _denormalize_page_crawl(site, "page_home", indexable=True, lastmod=11, image_urls=[])
+        self.assertEqual(sorted(changes), ["/", "/also"], "every slug the page owns, and no other")
+        self.assertEqual(changes["/"]["indexable"], True)
+        self.assertEqual(changes["/"]["lastmod"], 11)
+
+    def test_the_in_memory_site_is_updated_too(self):
+        """publish_site_crawl_files builds THIS publish's sitemap from the in-memory Site moments later,
+        so it has to see the answer this page just produced."""
+        site = _site({"/": _entry("page_home", page_type="homepage", indexable=None, lastmod=0)})
+        _denormalize_page_crawl(site, "page_home", indexable=True, lastmod=11,
+                                image_urls=["https://img/a.jpg"])
+        entry = site["pages"]["/"]
+        self.assertIs(entry["indexable"], True)
+        self.assertEqual(entry["lastmod"], 11)
+        self.assertEqual(entry["images"], ["https://img/a.jpg"])
 
 
 class SiteSchemaTests(unittest.TestCase):
