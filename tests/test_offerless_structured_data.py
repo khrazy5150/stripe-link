@@ -309,6 +309,23 @@ class WarningsStayActionableTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("grid is empty", warnings[0])
 
+    def test_the_thin_content_remedy_fits_the_page(self):
+        """Same lesson one notice over: three of the four remedies the thin-content nudge offers -- a
+        product description, a specifications table, condition details -- do not exist on an offer-less
+        page. P2 made that notice reachable, so P4 has to make it callable. Found by invoking the DEPLOYED
+        dev renderer, not by reading the code."""
+        from stripe_link.runtime.html import thin_content_warnings
+
+        html = "<html><body><p>Four short words here</p></body></html>"
+        offerless = thin_content_warnings(html, {}, self.STOREFRONT_PAGE)[0]
+        self.assertIn("intro paragraph", offerless)
+        for dead_end in ("product description", "specifications table", "condition details"):
+            self.assertNotIn(dead_end, offerless)
+        # An offer page keeps the remedies that suit it, and so does a caller passing no page at all.
+        for warning in (thin_content_warnings(html, None, _fixture("page-creatine-standard.json"))[0],
+                        thin_content_warnings(html)[0]):
+            self.assertIn("product description", warning)
+
     def test_an_offer_page_keeps_every_product_check(self):
         """The offer-shaped warnings are right for a page that sells something, and the new branch must be
         reachable only via the page argument."""

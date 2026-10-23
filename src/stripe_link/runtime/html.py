@@ -5069,7 +5069,8 @@ def indexable_word_count(html: str) -> int:
     return len(text.split())
 
 
-def thin_content_warnings(html: str, offer: dict[str, Any] | None = None) -> list[str]:
+def thin_content_warnings(html: str, offer: dict[str, Any] | None = None,
+                          page: dict[str, Any] | None = None) -> list[str]:
     """Builder page-health nudge (SEO-08): a page below the unique-content floor is too thin to index, so tell
     the tenant what to add. Warning, never a gate — publishing is never blocked.
 
@@ -5094,11 +5095,21 @@ def thin_content_warnings(html: str, offer: dict[str, Any] | None = None) -> lis
     count = indexable_word_count(html)
     if count >= THIN_CONTENT_MIN_WORDS:
         return []
+    # The remedies have to be things THIS page can actually do. Three of the four below -- a product
+    # description, a specifications table, condition details -- do not exist on a storefront, a category
+    # page or a store profile, and that notice became reachable the moment those pages started opening in
+    # the builder (plans/OFFERLESS_PAGES_IN_BUILDER.md P2). A notice naming remedies the tenant cannot take
+    # reads as a dead end, which is the same defect as warning about correct behaviour.
+    if page is not None and is_offerless_page(page):
+        remedy = ("Add an intro paragraph about your store, a content block, or an FAQ to make it "
+                  "eligible.")
+    else:
+        remedy = ("Add a product description, a specifications table, an FAQ, or condition details to "
+                  "make it eligible.")
     return [
         f"This page has only about {count} words of unique content (under {THIN_CONTENT_MIN_WORDS}). On a "
         "verified custom domain that is too thin to index, so it would publish as noindex — hidden from "
-        "search — to protect your site's ranking. Add a product description, a specifications table, an "
-        "FAQ, or condition details to make it eligible."
+        f"search — to protect your site's ranking. {remedy}"
     ]
 
 
