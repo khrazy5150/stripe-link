@@ -33,13 +33,17 @@ class RoutesCrudTests(unittest.TestCase):
             code_fn=lambda: code,
         )
 
-    def test_create_page_route_returns_short_url(self):
-        with patch.dict(os.environ, {"SHORT_URL_HOST": "go.jbay.uk"}, clear=False):
-            response = self.create({"target_type": "page", "target_page_id": "page_1", "label": "Coffee promo"})
+    def test_create_page_route_returns_the_code_and_no_dead_url(self):
+        """The CODE is what matters and is load-bearing: publish writes one per page and the shareable
+        test link {stage}-test.juniorbay.com/published/{code} is built from it, with test_page_serve
+        reading this table directly. The `short_url` this used to assert -- https://go.jbay.uk/{code} --
+        was retired 2026-10-23: nothing produced one any more and the host 404'd for a code that served
+        perfectly through the viewer."""
+        response = self.create({"target_type": "page", "target_page_id": "page_1", "label": "Coffee promo"})
         self.assertEqual(response["statusCode"], 201)
         route = json.loads(response["body"])["route"]
         self.assertEqual(route["short_code"], "abc123XYZ00")
-        self.assertEqual(route["short_url"], "https://go.jbay.uk/abc123XYZ00")
+        self.assertNotIn("short_url", route)
         self.assertEqual(route["target_page_id"], "page_1")
         self.assertEqual(route["label"], "Coffee promo")
 

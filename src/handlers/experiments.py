@@ -2,7 +2,6 @@ import os
 import time
 
 from stripe_link.common import error_response, json_response, normalize_stripe_mode, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
-from handlers.routes import short_url_for_code
 from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED, repoint_to_winner
 from stripe_link.domain.experiment_stats import summarize
 from stripe_link.runtime.publishing import site_page_slug, site_serving_origin
@@ -88,11 +87,12 @@ def _action_from_event(event):
 
 
 def with_short_url(experiment):
-    # Omitted while the short-code entry point is disabled, so nothing downstream can show a tenant a link
-    # that no longer enters the experiment.
-    if not SHORT_CODE_ENTRY_ENABLED:
-        return dict(experiment)
-    return {**experiment, "short_url": short_url_for_code(experiment.get("short_code", ""))}
+    # Kept as the single place every experiment response passes through, but it no longer adds anything.
+    # The `short_url` it used to attach pointed at go.jbay.uk, retired 2026-10-23 -- and it was already
+    # omitted in practice, because SHORT_CODE_ENTRY_ENABLED has been False since an experiment started
+    # running on the page's own url instead (ABTesting.vue). Pinned by
+    # test_experiments_handler: assertNotIn("short_url", experiment).
+    return dict(experiment)
 
 
 def with_links(experiment, tenant_id, sites=None, mode="test"):

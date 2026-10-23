@@ -1,18 +1,20 @@
-// Cloudflare Worker for the jbay.uk, jbay.be AND jbay.page zones. Handles four things on the platform edge:
+// Cloudflare Worker for the jbay.uk, jbay.be AND jbay.page zones. Handles three things on the platform edge:
 //
-//  1. Short URLs on the short-URL host (go.jbay.uk/{code}): resolve the code to a
-//     destination via the routes resolve endpoint and 302-redirect the visitor. For A/B
-//     experiment codes the destination is the experiment resolver, which itself redirects
-//     to a weighted variant.
-//  2. Tenant custom domains: resolve the hostname to a published page and reverse-proxy it
+//  (Was four. The go.jbay.uk short-URL host was removed 2026-10-23: A/B testing had already moved off it --
+//   "an experiment runs on the page's OWN url now", ABTesting.vue -- and nothing else produced one, so a
+//   valid short code 404'd there while the SAME code served fine through the test viewer. The short CODES
+//   are untouched and very much alive: publish writes one on every page and the shareable test link
+//   {stage}-test.juniorbay.com/published/{code} is built from it.)
+//
+//  1. Tenant custom domains: resolve the hostname to a published page and reverse-proxy it
 //     verbatim, so the visitor's browser only ever sees their own custom domain.
-//  3. Free platform-host stores ({label}.jbay.uk in prod, {label}.jbay.be in test): the SAME
+//  2. Free platform-host stores ({label}.jbay.uk in prod, {label}.jbay.be in test): the SAME
 //     resolve + reverse-proxy path as a custom domain (the resolve endpoint distinguishes them
 //     by the domain-index record), except the resolver flags the route `noindex: true`, so we
 //     stamp `X-Robots-Tag: noindex, nofollow` on the response. A platform host is a navigable
 //     but NEVER-indexed store surface — the reputation-isolation floor
 //     (plans/PLATFORM_HOSTNAME_SERVING.md).
-//  4. Link-in-bio pages on the creator apex (jbay.page/{username}): the same resolve + proxy path again.
+//  3. Link-in-bio pages on the creator apex (jbay.page/{username}): the same resolve + proxy path again.
 //     The difference is WHERE the tenant is named — every creator shares one hostname, so the resolver
 //     keys off host + first path segment instead of host alone. That split lives server-side; this script
 //     already forwards both, so the only edge work is the apex guard below. Also noindex-stamped: a shared
@@ -22,18 +24,31 @@
 
 const API_BASE = "https://REPLACE_WITH_PUBLIC_API_BASE_URL";
 const CUSTOM_DOMAIN_RESOLVE = `${API_BASE}/custom-domains/resolve`;
-const ROUTES_RESOLVE = `${API_BASE}/routes/resolve`;
 
-const SHORT_URL_HOST = "go.jbay.uk";
 // Infrastructure hostnames on the jbay.uk / jbay.be zones that must pass straight through to
 // their normal origin rather than being resolved as a Site store. Add any leftover stripe-cart
 // subdomains on jbay.be here so they don't collide with the `*.jbay.be` store route.
+//
+// `domains.jbay.be` was MISSING while `domains.jbay.uk` was present (fixed 2026-10-23). The asymmetry
+// encoded the pre-decoupling assumption that jbay.uk was "production, authorized to serve published pages"
+// and jbay.be was "sandbox, not authorized" (author). That is the deployment axis, and it is not the one
+// that decides anything here: a sandbox stack serves live-mode Sites, and whether a page may be INDEXED is
+// decided per-Site by Stripe mode and the eligibility gate, server-side -- see page_robots_directive and
+// stripe_link/silo.py. Both zones are ordinary platform edges and their fallback origins are infrastructure
+// in exactly the same way.
+//
+// `go.jbay.be` is listed defensively. It is DNS-only today, so this Worker never sees it, and it belongs to
+// the legacy stripe-cart app (Lambda@Edge rewrites /{code} into its own bucket). Reserving it means someone
+// turning that cloud orange gets a pass-through rather than a 404 from a resolver that has never heard of
+// it. Costs a line; removes a footgun that exists only while the old app does.
 // The creator apex. NOT in RESERVED_HOSTS, and it must never be added there: that set is keyed on hostname
 // alone, and every creator URL shares this one hostname — reserving it would pass every creator page through
 // to the origin instead of resolving it. The bare apex (no username) is guarded in handleSiteHost instead.
 const CREATOR_HOST = "REPLACE_WITH_CREATOR_HOST";
 const RESERVED_HOSTS = new Set([
   "domains.jbay.uk",
+  "domains.jbay.be",
+  "go.jbay.be",
   "jbay.uk",
   "www.jbay.uk",
   "jbay.be",
@@ -60,19 +75,6 @@ async function resolveJson(cacheNamespace, cacheValue, url) {
   });
   await cache.put(cacheKey, cacheResponse.clone());
   return JSON.parse(bodyText);
-}
-
-async function handleShortUrl(sourceUrl) {
-  const code = sourceUrl.pathname.replace(/^\/+/, "").split("/")[0];
-  if (!code) {
-    return new Response("Short link not found.", { status: 404 });
-  }
-  const resolved = await resolveJson("short-url-router", code, `${ROUTES_RESOLVE}?code=${encodeURIComponent(code)}`);
-  const route = resolved && resolved.route;
-  if (!route || route.type !== "redirect" || !route.destination_url) {
-    return new Response("Short link not found.", { status: 404 });
-  }
-  return Response.redirect(route.destination_url, 302);
 }
 
 // What a visitor sees when an address does not resolve: a renamed creator handle, an archived Site, a slug
@@ -246,9 +248,6 @@ async function handleRequest(request, waitUntil) {
   const sourceUrl = new URL(request.url);
   const hostname = sourceUrl.hostname.toLowerCase();
 
-  if (hostname === SHORT_URL_HOST) {
-    return handleShortUrl(sourceUrl);
-  }
   if (RESERVED_HOSTS.has(hostname)) {
     return fetch(request);
   }

@@ -7,16 +7,12 @@ from stripe_link.ids import generate_short_url_code
 from stripe_link.repositories.documents import RepositoryError, routes_repository
 
 
-def _short_url_host():
-    return os.environ.get("SHORT_URL_HOST", "go.jbay.uk")
-
-
-def short_url_for_code(short_code):
-    return f"https://{_short_url_host()}/{short_code}" if short_code else ""
-
-
-def with_short_url(route):
-    return {**route, "short_url": short_url_for_code(route.get("short_code", ""))}
+# A route USED to carry a `short_url` -- https://go.jbay.uk/{code}, resolved by the edge Worker. Removed
+# 2026-10-23: A/B testing had already moved off short links ("an experiment runs on the page's OWN url
+# now", ABTesting.vue) and nothing else produced one, so a valid code 404'd on that host while the same
+# code served fine through the test viewer. The short CODE is untouched and load-bearing: publish writes
+# one per page and {stage}-test.juniorbay.com/published/{code} is built from it (test_page_serve.py reads
+# this table directly, not through any URL).
 
 
 def handler(event, context, *, repository=None, now_fn=lambda: int(time.time()), code_fn=generate_short_url_code):
@@ -42,7 +38,7 @@ def list_routes(event, repository):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    routes = [with_short_url(route) for route in repository.list_for_tenant(tenant_id)]
+    routes = list(repository.list_for_tenant(tenant_id))
     routes.sort(key=lambda item: int(item.get("created_at") or 0), reverse=True)
     return json_response({"routes": routes, "count": len(routes)})
 
@@ -83,7 +79,7 @@ def create_route(event, repository, now_fn, code_fn):
         saved = repository.put(document)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_route")
-    return json_response({"route": with_short_url(saved)}, status_code=201)
+    return json_response({"route": saved}, status_code=201)
 
 
 def allocate_short_code(repository, code_fn):

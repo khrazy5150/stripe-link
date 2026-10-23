@@ -201,10 +201,6 @@ Parameters:
     Type: String
     Default: ""
     Description: Comma-separated static IPv6 addresses for apex proxying. Empty until procured.
-  ShortUrlHost:
-    Type: String
-    Default: go.jbay.uk
-    Description: Public short-URL host served by the Cloudflare Worker on the jbay.uk zone (short links look like https://go.jbay.uk/{code}).
 
   SupportInbox:
     Type: String
@@ -332,7 +328,6 @@ Globals:
         # proxying is procured; then apex domains switch from ALIAS/flattening guidance to plain A/AAAA records.
         CLOUDFLARE_APEX_IPV4: !Ref CloudflareApexIpv4
         CLOUDFLARE_APEX_IPV6: !Ref CloudflareApexIpv6
-        SHORT_URL_HOST: !Ref ShortUrlHost
     Tracing: Active
 
 Resources:
