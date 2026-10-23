@@ -2315,17 +2315,31 @@ NOINDEX_ARCHIVED_ROBOTS = "noindex,nofollow,noarchive"
 NONINDEXABLE_PAGE_TYPES = {"checkout", "thank_you", "funnel_step"}
 
 
-def page_robots_directive(*, kind: str, environment: str, eligibility: str, page_type: str, on_custom_domain: bool, site_archived: bool = False, seo_enabled: bool = True) -> str:
+def page_robots_directive(*, kind: str, mode: str, eligibility: str, page_type: str, on_custom_domain: bool, site_archived: bool = False, seo_enabled: bool = True) -> str:
     """The robots directive for a page artifact (plans/SITE_OBJECT.md §2.2, TP-08, SEO-02). Only a published
-    artifact in production, actually served on the Site's verified custom domain, whose Site is index-eligible
+    artifact in LIVE mode, actually served on the Site's verified custom domain, whose Site is index-eligible
     (verified custom domain AND verified Stripe Connect), on an indexable page_type, gets index,follow.
-    Everything on platform infrastructure — and any page not served on the custom domain — is noindex,nofollow,
-    the reputation-isolation floor."""
+    Everything else — a test-mode page, a preview, any page not served on the custom domain — is
+    noindex,nofollow, the reputation-isolation floor.
+
+    GATED ON STRIPE MODE, NOT ON THE PLATFORM STACK (author, 2026-10-23). This read
+    `environment != "prod"` and treated the dev stack as inherently unindexable. That was the pre-decoupling
+    world, where dev meant test and prod meant live; since plans/STRIPE_MODE_DECOUPLING.md the two are
+    independent, and the question "may search engines see this?" is answered by the MODE alone. A live-mode
+    store on a verified custom domain is a real shop whichever stack renders it, and a test-mode page is
+    test data wherever it runs — which is why this used to need a second `if page_mode == "test"` override
+    applied by the caller immediately afterwards. One gate now, in the function whose job it is.
+
+    `checkout_base_url_for_page` kept its `environment` parameter "for signature compatibility" through the
+    same decoupling; this one is renamed instead, because an argument named `environment` that must be
+    handed a Stripe mode is how the two get confused again.
+    """
     if site_archived:
         return NOINDEX_ARCHIVED_ROBOTS  # an archived Site de-indexes every one of its pages, everywhere
     if not seo_enabled:
         return NOINDEX_ROBOTS  # the tenant turned search visibility off for this Site (Site-level opt-out)
-    if kind != "published" or environment != "prod":
+    # Test data must never reach search, whatever the Site's eligibility says.
+    if kind != "published" or str(mode or "").strip().lower() != "live":
         return NOINDEX_ROBOTS
     if not on_custom_domain:
         return NOINDEX_ROBOTS  # platform host, or a page not served on the custom domain: never indexed

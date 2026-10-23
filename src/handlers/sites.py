@@ -213,10 +213,20 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
     if method == "DELETE" and site_id and resource.endswith("/pages"):
         return detach_page(event, repository, site_id, mode=mode)
     if site_id and resource.endswith(("/domain", "/domain/check")):
-        # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
-        # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
-        if os.environ.get("ENVIRONMENT") != "prod":
-            return error_response(LIVE_ONLY_MESSAGE, status_code=403, code="custom_domains_live_only")
+        # Custom domains are LIVE-ONLY, and `live` is a STRIPE MODE, not a deployment (author, 2026-10-23).
+        #
+        # This refused every request on a non-prod DEPLOYMENT, on the stated grounds that "custom-domain
+        # serving is handled by the single production edge Worker". There is no single Worker: the setup
+        # script provisions one per environment -- `jb-custom-domain-router-dev` on jbay.be and `-prod` on
+        # jbay.uk -- each pointed at its own stack's API base. So the gate was blocking a live-mode Site on
+        # the sandbox stack from a flow its own edge Worker can serve, which also meant the sitemap and
+        # robots.txt could never be exercised anywhere but prod.
+        #
+        # What stops a TEST Site taking a real domain is `_reject_non_live_site`, which reads
+        # `site.environment` and guards both connect and check. That is the axis that matters, and its own
+        # docstring already said so: "The router already refuses this on non-prod DEPLOYMENTS, but that is
+        # a different axis." Disconnect is deliberately ungated -- dropping a stale domain must stay
+        # possible whatever mode the Site is in.
         if method == "POST" and resource.endswith("/domain/check"):
             return check_domain(event, repository, site_id, mode=mode)
         if method == "POST" and resource.endswith("/domain"):

@@ -89,29 +89,61 @@ class SiteEligibilityTests(unittest.TestCase):
 
 
 class RobotsDirectiveTests(unittest.TestCase):
+    """Gated on STRIPE MODE, not on the platform stack (author, 2026-10-23).
+
+    This asserted `environment="dev"` -> noindex, which encoded the pre-decoupling world where dev meant
+    test and prod meant live. Since plans/STRIPE_MODE_DECOUPLING.md the two are independent: a live-mode
+    store on a verified custom domain is a real shop whichever stack renders it, and a test-mode page is
+    test data wherever it runs. The parameter is `mode` now rather than a reused `environment`, because an
+    argument named `environment` that must be handed a Stripe mode is how the two get confused again.
+    """
+
     def test_page_not_on_custom_domain_is_always_noindex(self):
-        # Platform host, or a non-homepage page of a custom-domain Site: never indexed even in prod.
-        self.assertEqual(page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=False), "noindex,nofollow")
+        # Platform host, or a non-homepage page of a custom-domain Site: never indexed, live mode or not.
+        self.assertEqual(page_robots_directive(kind="published", mode="live", eligibility="eligible", page_type="landing", on_custom_domain=False), "noindex,nofollow")
 
     def test_eligible_custom_domain_landing_indexes(self):
-        d = page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True)
+        d = page_robots_directive(kind="published", mode="live", eligibility="eligible", page_type="landing", on_custom_domain=True)
         self.assertEqual(d, "index,follow,max-image-preview:large,max-snippet:-1")
 
     def test_eligible_checkout_page_is_crawl_not_index(self):
-        self.assertEqual(page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="checkout", on_custom_domain=True), "noindex,follow")
+        self.assertEqual(page_robots_directive(kind="published", mode="live", eligibility="eligible", page_type="checkout", on_custom_domain=True), "noindex,follow")
 
     def test_pending_custom_domain_is_crawl(self):
-        self.assertEqual(page_robots_directive(kind="published", environment="prod", eligibility="pending", page_type="landing", on_custom_domain=True), "noindex,follow")
+        self.assertEqual(page_robots_directive(kind="published", mode="live", eligibility="pending", page_type="landing", on_custom_domain=True), "noindex,follow")
 
-    def test_preview_and_nonprod_are_noindex_nofollow(self):
-        self.assertEqual(page_robots_directive(kind="preview", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
-        self.assertEqual(page_robots_directive(kind="published", environment="dev", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
+    def test_a_preview_is_never_indexable(self):
+        self.assertEqual(page_robots_directive(kind="preview", mode="live", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
+
+    def test_test_mode_is_never_indexable(self):
+        """Test data must not reach search, whatever the Site's eligibility says. This used to be a second
+        override the CALLER applied straight after this function; it belongs to the one function whose job
+        is deciding what search engines may see."""
+        for mode in ("test", "", None, "TEST", "unknown"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    page_robots_directive(kind="published", mode=mode, eligibility="eligible", page_type="landing", on_custom_domain=True),
+                    "noindex,nofollow")
+
+    def test_live_mode_is_not_spelled_case_sensitively(self):
+        self.assertEqual(
+            page_robots_directive(kind="published", mode="LIVE", eligibility="eligible", page_type="landing", on_custom_domain=True),
+            "index,follow,max-image-preview:large,max-snippet:-1")
+
+    def test_the_platform_stack_no_longer_has_a_say(self):
+        """The regression this file would otherwise stop noticing: a sandbox Site in live mode on a verified
+        custom domain must be indexable, because `environment` is not an input any more."""
+        import inspect
+
+        signature = inspect.signature(page_robots_directive)
+        self.assertNotIn("environment", signature.parameters)
+        self.assertIn("mode", signature.parameters)
 
     def test_archived_site_de_indexes_every_page(self):
         # An archived Site overrides everything — even an otherwise-indexable eligible custom-domain page — and
         # adds noarchive so the cached snapshot drops too.
         self.assertEqual(
-            page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True, site_archived=True),
+            page_robots_directive(kind="published", mode="live", eligibility="eligible", page_type="landing", on_custom_domain=True, site_archived=True),
             "noindex,nofollow,noarchive",
         )
 

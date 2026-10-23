@@ -1490,15 +1490,15 @@ def publish_page_document(
     indexable_words = None
     published_robots = ""
     for target in targets:
+        # The page's STRIPE MODE decides, not the platform stack. A live-mode store on a verified custom
+        # domain is a real shop whether sandbox or prod renders it; a test-mode page is test data either
+        # way. The test-mode override that used to be applied on the next line is inside the directive now,
+        # so one function answers "may search engines see this?" (author, 2026-10-23).
         robots = page_robots_directive(
-            kind=target["kind"], environment=environment, eligibility=eligibility,
+            kind=target["kind"], mode=page_mode, eligibility=eligibility,
             page_type=page_type, on_custom_domain=on_custom_domain, site_archived=site_archived,
             seo_enabled=seo_enabled,
         )
-        # Test-mode pages are never indexable, whatever the Site's eligibility — test data must not reach search
-        # (plans/STRIPE_MODE_DECOUPLING.md P5). Live pages are unaffected.
-        if page_mode == "test":
-            robots = NOINDEX_ROBOTS
         # A bridge page is never indexable either, whatever the Site's eligibility (plans/LEAD_GEN_PAGES.md §5).
         # It exists to send the visitor elsewhere, which is the thin doorway shape search engines penalise, and
         # it carries no content of its own to rank. A rule with no tenant override, deliberately: every other
@@ -1698,7 +1698,11 @@ def publish_page_document(
     # robots.txt / sitemap.xml / {indexnow_key}.txt next to it (keyed under the homepage page_id so the
     # path-aware resolver can serve them at the domain root) and ping IndexNow with the changed URL.
     crawl = {}
-    if environment == "prod" and on_custom_domain and custom_domain:
+    # LIVE MODE, not the prod stack (author, 2026-10-23). A sandbox Site running in live mode on a verified
+    # custom domain gets its robots.txt and sitemap.xml like any other; a test-mode Site gets none,
+    # wherever it runs. Before the mode decoupling those were the same condition, and reading
+    # `environment == "prod"` as "this is the real one" is the confusion that outlived it.
+    if page_mode == "live" and on_custom_domain and custom_domain:
         # Under the SITE'S ROOT page, which is where custom_domains_resolve serves /sitemap.xml and
         # /robots.txt from. Passing the publishing page's own id wrote all three files to a prefix nothing
         # reads, so publishing anything but the homepage left the live sitemap untouched (P5). Falls back to

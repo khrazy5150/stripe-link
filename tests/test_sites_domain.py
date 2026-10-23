@@ -201,11 +201,39 @@ class SitesDomainTests(unittest.TestCase):
         return site
 
     def test_domain_endpoints_are_live_only(self):
-        self.repo.put(base_site())
-        with patch.dict(os.environ, {"ENVIRONMENT": "dev"}):
-            resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
+        """LIVE is a STRIPE MODE, not a deployment (author, 2026-10-23).
+
+        This used to assert that `ENVIRONMENT=dev` refused the request, which encoded the pre-decoupling
+        world. The gate that matters is `_reject_non_live_site`, which reads the SITE's environment -- and
+        it is the stronger of the two anyway: on the prod deployment a test Site passed the deployment
+        check, so the deployment gate never protected the thing it looked like it was protecting.
+        """
+        self.repo.put(base_site(site_id="site_D1", environment="test"))
+        resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
         self.assertEqual(resp["statusCode"], 403)
         self.assertIn("live", json.loads(resp["body"])["message"].lower())
+
+    def test_a_live_site_is_not_refused_for_running_on_the_sandbox_stack(self):
+        """The regression this replaces: a live-mode Site on the dev stack was refused outright, so its
+        custom domain -- and therefore its sitemap and robots.txt -- could never be exercised anywhere but
+        prod. Each stack has its own edge Worker (jb-custom-domain-router-dev on jbay.be)."""
+        self.repo.put(base_site())
+        with patch.dict(os.environ, {"ENVIRONMENT": "dev"}):
+            with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+                resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
+        self.assertEqual(resp["statusCode"], 201)
+
+    def test_the_router_no_longer_gates_on_the_deployment(self):
+        """A source assertion as well, because the behavioural test above passes for any number of reasons
+        and this names the specific one that must not come back."""
+        import pathlib
+
+        handler = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                   / "sites.py").read_text(encoding="utf-8")
+        router = handler.split('if site_id and resource.endswith(("/domain", "/domain/check")):', 1)[1]
+        router = router.split("if method ==", 1)[0]
+        code = "\n".join(l for l in router.splitlines() if not l.strip().startswith("#"))
+        self.assertNotIn('os.environ.get("ENVIRONMENT")', code)
 
     def test_connect_creates_hostname_and_returns_dns_instructions(self):
         self.repo.put(base_site())
