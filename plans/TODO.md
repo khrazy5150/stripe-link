@@ -245,6 +245,38 @@ inert — every outbound call pins its own version (`stripe_client.STRIPE_API_VE
 hand-built requests). The fee read's pin is load-bearing and guarded by
 `tests/test_fee_read_api_version.py`: Basil (2025-03-31) removed `invoice.charge`, which that read needs.
 
+## ⭐⭐ HIGH — a tenant's custom domain can stop working and nothing tells anyone (found 2026-10-23)
+
+**Plan: `plans/DOMAIN_HEALTH_SWEEP.md`** (written 2026-10-23). Precondition for apex domains — the last
+open item on `SITE_OBJECT.md` Phase 2.6b.
+
+**Verification is one-shot.** `check_domain` runs when the tenant clicks Verify and never again. There is
+no scheduled re-check anywhere in the stack. So a store goes dark and the dashboard still says *Connected
+& verified*, because that is a stored boolean from the day it passed. Silent today: a tenant editing their
+own DNS, a registrar lapsing, a provider migration dropping a CNAME, a removed `_acme-challenge`
+delegation stopping certificate renewal. The first to notice is the tenant, via traffic that stopped.
+
+Same shape as several bugs found this week: **the stored state and the served reality drift, and nothing
+compares them.**
+
+**Why HIGH, and why now.** Apex domains need A records — Route 53 and most registrars cannot point a bare
+apex at an external hostname. The IPs to publish already exist (both Cloudflare zones resolve to an
+anycast pair) and `_apex_routing_records` emits them the moment `CloudflareApexIpv4` is set. But they are
+SHARED anycast IPs on a Free-plan zone, not addresses we own. If Cloudflare reassigns one, every tenant
+apex breaks at once — and, today, invisibly. This sweep turns that from catastrophic-and-undetected into
+annoying-and-reported, which is what makes shared IPs a reasonable starting point rather than a gamble.
+
+**It is assembly, not invention.** `domain_provisioning.dns_records` already stores exactly what each
+tenant was told to create; `diagnose_dns_records` already does live per-record DNS-over-HTTPS checks with
+an apex branch; Cloudflare's hostname status is already readable; the notifications repository and the
+`rate(...)` sweep shape both exist. Missing: the schedule, the comparison, and a little state so it
+reports once rather than nagging daily.
+
+**Two rules the plan is strict about.** Ask Cloudflare FIRST and use DNS only to explain a failure —
+re-deriving the expected records and comparing would flag every tenant still pointing at
+superseded-but-working apex IPs as broken. And never auto-disconnect or de-index on a failed check: a
+transient blip must not cost a store its indexing, which is far more expensive to recover than the outage.
+
 ## Stripe API version drift — HIGH
 
 **The account is on `2026-05-27.preview`, and the code is written against remembered field names.** Three

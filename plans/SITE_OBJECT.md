@@ -320,9 +320,17 @@ a page-specific meta description. Read that plan alongside this section.
 - **www↔apex redirect — SHIPPED.** An apex connect provisions `www.<apex>` as its own custom hostname carrying
   a `redirect_to` on its domain-index record; `custom_domains_resolve` turns that into a 301 to the apex (the
   canonical). Best-effort: the apex serves whether or not www succeeds.
-- **Remaining — ONE item: procure Cloudflare apex proxying** (static IPs). Everything in code is written and
-  waiting on it: `_apex_routing_records` emits plain A/AAAA the moment `CLOUDFLARE_APEX_IPV4/IPV6` are set,
-  and both stacks carry them empty. A config flip, no code change, no deploy risk beyond a parameter.
+- **Remaining — ONE item, and it is smaller than "procure" implied** (reassessed 2026-10-23 against the
+  live Cloudflare zones). Both zones are already proxied with an active fallback origin, and each resolves
+  to an anycast pair — `104.21.71.205`/`172.67.149.43` for jbay.uk, a different pair for jbay.be. Setting
+  `CloudflareApexIpv4` per environment makes `_apex_routing_records` emit plain A records today, which is
+  the one record type every provider supports, Route 53 included. No code change.
+  **The catch:** those are SHARED anycast IPs on a Free-plan zone, not addresses we own. A reassignment
+  breaks every tenant apex at once. Dedicated IPs remove that, and switching to them later is cheap *if we
+  control the timing* — `domain_provisioning.dns_records` records what each tenant was told, so the
+  migration is a known list of names and a gradual overlap rather than a coordinated outage.
+  **Sequence: `plans/DOMAIN_HEALTH_SWEEP.md` first** (nothing currently re-checks a verified domain, so a
+  reassignment would be silent), then the shared IPs, then dedicated IPs when apex tenants justify them.
 - **The dead-end this phase set out to close is NARROWER, not gone** (2026-10-23). The historical note below
   warned that `assert_valid_domain` "ACCEPTS an apex it can't route". The ALIAS path fixed that for providers
   with an apex feature — Cloudflare flattening, DNSimple, ANAME — and left it for the rest. **Route 53 is the
