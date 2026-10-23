@@ -7,6 +7,13 @@
 
 ---
 
+**Status audited against the code 2026-10-23.** Every "SHIPPED"/"COMPLETE" claim below was re-checked
+rather than trusted; what changed is recorded inline with the date. Corrections made in that pass: Phase 2.4
+was describing a per-Site sitemap that in fact held one URL until 2026-10-22; Phase 2.6b listed a www↔apex
+redirect as remaining when it had shipped; §2.3 omitted the two gates (Stripe mode, thin content) that were
+added after it was written; and two of §6's open sub-questions were already answered. Placeholder hostnames
+that never existed (`*.juniorbay-sites`) were replaced with the real `jbay.uk`/`jbay.be`.
+
 ## 1. Context & problem
 
 The platform grew as "a landing-page builder." A **Page** ended up carrying responsibilities that were never
@@ -70,7 +77,7 @@ didn't state — same rule as Product JSON-LD.
 
 ### 2.2 The hosting model: platform hostname + custom domain, both retained
 
-Every Site has a **permanent, tenant-chosen platform hostname** (`axel-mart.juniorbay-sites.example`) and an
+Every Site has a **permanent, tenant-chosen platform hostname** (`axel-mart.jbay.uk`, `.jbay.be` in sandbox) and an
 optional **custom domain** (`axelmart.com`). The platform hostname never disappears or gets recycled — it
 backs previews, rollbacks, migration, disaster recovery, and support. The **canonical** hostname is the custom
 domain once connected; until then it is the platform hostname.
@@ -91,7 +98,8 @@ commercial content on the platform's own domain at scale is the "site reputation
 `TENANT_PROFILE_REQUIREMENTS.md` §2 flags as existential. Therefore:
 
 - **Everything on platform infrastructure is `noindex,nofollow`** — the S3/CloudFront artifact URL *and* the
-  `*.juniorbay-sites` platform subdomain. The platform host is a functional preview/starter host, never indexed.
+  `*.jbay.uk` / `*.jbay.be` platform subdomain. The platform host is a functional preview/starter host, never
+  indexed.
 - **A Site becomes index-eligible only when BOTH hold:** (a) it has its **own custom domain** (its own eTLD+1),
   verified; and (b) the tenant's **Stripe Connect account is verified** (`charges_enabled`, not merely OAuth-
   connected). This is TP-06 + TP-08: a real domain boundary *and* a KYC'd business relationship.
@@ -101,6 +109,19 @@ commercial content on the platform's own domain at scale is the "site reputation
 `Site.indexing.eligibility ∈ {blocked, pending, eligible, revoked}` is recomputed on domain verification and on
 Stripe `account.updated` webhooks. Only `eligible` + a published page on a verified custom domain renders
 `index,follow`.
+
+**Two further gates were added after this section was written, and both outrank eligibility** (the full
+decision lives in `page_robots_directive` + the thin-content step in `publish_page`):
+
+- **Stripe mode.** Only a **live-mode** page is ever indexable; a test-mode page is test data and stays
+  `noindex` wherever it runs. This is the MODE, never the deployment — `environment` (dev/prod) names the
+  stack, and one stack serves both modes (`plans/STRIPE_MODE_DECOUPLING.md`, `src/stripe_link/silo.py`).
+  Corrected 2026-10-23: the directive had been gated on the prod STACK, which made a live store on sandbox
+  inherently unindexable and left the whole crawl-file path untestable outside prod.
+- **Thin content (SEO-08).** An otherwise-indexable page under 150 words of unique body text is demoted to
+  `noindex,follow` so a doorway-thin page cannot drag the Site's ranking down. Measured on the rendered HTML,
+  so only the publisher knows it — which is why the sitemap reads a denormalized flag rather than recomputing
+  (Phase 2.4).
 
 **Side effect that resolves a real risk:** because platform hosts are never indexed, the custom-domain switch
 is a clean **first indexation**, not a domain migration (no 301 chains, no equity loss, no duplicate content).
@@ -197,9 +218,20 @@ is additive (existing pages keep working throughout — incremental migration).
 - Robots directive: `index,follow` only for a published page, on a verified custom domain, on an eligible Site,
   whose `page_type` is indexable; everything else `noindex` (SEO-02/21, TP-08).
 
-**Phase 2.4 — Crawl infrastructure per Site.**
+**Phase 2.4 — Crawl infrastructure per Site. SHIPPED (dev+prod).**
 - `sitemap.xml` + `robots.txt` generated per Site (canonical, indexable URLs only; page_type/robots-aware).
-- IndexNow submission on publish/unpublish (SEO-15). Webmaster verification tokens in `<head>` (SEO-16).
+- IndexNow submission on publish (SEO-15). Webmaster verification tokens in `<head>` (SEO-16) — Google, Bing
+  and Pinterest.
+- **The multi-URL sitemap only became true on 2026-10-22** (`plans/OFFERLESS_PAGES_IN_BUILDER.md` P5). Until
+  then this described the intent while the file held exactly ONE url, the homepage — so a Site with a
+  storefront, category pages, an about page and a dozen products advertised one of them. Each publish now
+  records `indexable`/`lastmod`/`images` on its own Site route entry and the sitemap is built from the route
+  map; a page with no flag has not published since that shipped and is left out rather than guessed at.
+  One entry per PAGE at its own address, so `/sale`, `/flash-sale` and the reserved funnel slugs are excluded
+  as the same page_id. Two latent bugs were fixed in the same pass: the crawl files were written under the
+  page CURRENTLY PUBLISHING while the resolver serves them from the Site's ROOT page, and IndexNow was always
+  pinged with the root rather than the page that changed.
+- First exercised end to end on a real custom domain 2026-10-23 (`shop.coderbay.net`, sandbox, live mode).
 
 **Phase 2.5 — On-page structure. COMPLETE (dev+prod).** Breadcrumbs (SEO-11) + thin-content gate (SEO-08) +
 visible nav / store-root internal linking (SEO-13, the part not needing collection pages) shipped. The rest of
@@ -223,7 +255,12 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   (Home→current) until category pages exist; a category level slots in between then. JSON-LD rides the
   search_seo discoverability pack (like Product/FAQ); the visible trail renders regardless of goal. render_page
   gained a `page_type` param + `_RENDER_STATE` home_url/page_type holders.
-**Phase 2.5b — Storefront homepage + collection/category pages. COMPLETE (dev+prod).**
+**Phase 2.5b — Storefront homepage + collection/category pages. COMPLETE (dev+prod); substantially extended
+2026-10-22 by `plans/OFFERLESS_PAGES_IN_BUILDER.md` (P1–P4).** The page types below shipped able to render but
+not to be *authored*: editing one reopened the create wizard, which offered no prose field at all, so every
+storefront, category and store-profile page measured 5–15 words and the thin-content gate demoted all of them
+to `noindex`. They now open in the real builder, carry a goal, and emit `CollectionPage`/`ItemList` markup and
+a page-specific meta description. Read that plan alongside this section.
 - **Slice 1 (SHIPPED)** — the storefront homepage. Composition-respecting (no renderer fork): two ungoverned
   sections `brand_hero` (store name as single H1, no product) + `catalog_grid` (curated cards → each offer's
   landing slug, internal linking). Offer-less pages: `offer_id` optional when a `catalog_grid` is present
@@ -280,8 +317,26 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   providers), or plain A/AAAA to static IPs when `CLOUDFLARE_APEX_IPV4/IPV6` are configured (apex proxying —
   works on every provider incl. Route 53; empty until procured, then a config flip). DCV delegation unchanged
   (on the `_acme-challenge` subdomain). Sites.vue shows provider-adaptive apex guidance.
-- **Remaining:** procure Cloudflare apex proxying (paid/enterprise static IPs) for universal A-record apex;
-  www↔apex redirect (standard SaaS) — a follow-up.
+- **www↔apex redirect — SHIPPED.** An apex connect provisions `www.<apex>` as its own custom hostname carrying
+  a `redirect_to` on its domain-index record; `custom_domains_resolve` turns that into a 301 to the apex (the
+  canonical). Best-effort: the apex serves whether or not www succeeds.
+- **Remaining — ONE item: procure Cloudflare apex proxying** (static IPs). Everything in code is written and
+  waiting on it: `_apex_routing_records` emits plain A/AAAA the moment `CLOUDFLARE_APEX_IPV4/IPV6` are set,
+  and both stacks carry them empty. A config flip, no code change, no deploy risk beyond a parameter.
+- **The dead-end this phase set out to close is NARROWER, not gone** (2026-10-23). The historical note below
+  warned that `assert_valid_domain` "ACCEPTS an apex it can't route". The ALIAS path fixed that for providers
+  with an apex feature — Cloudflare flattening, DNSimple, ANAME — and left it for the rest. **Route 53 is the
+  one that matters**: its ALIAS targets only AWS resources, so it cannot point an apex at `domains.jbay.uk`.
+  Found while assessing `coderbay.net`, whose nameservers are `awsdns-*`.
+- **The tenant is NOT left guessing**, which this note first claimed and a check disproved. `Sites.vue`'s
+  `apexHint` carries a Route 53 case verbatim: *"Route 53 can't point a root domain at an external host like
+  ours. Use a subdomain (e.g. www) for now, or move DNS to a provider with ANAME/ALIAS support."* Two residual
+  gaps, both smaller than "no guidance": the provider is a manual `<select>` defaulting to `route53`, so a
+  tenant who never touches it reads Route 53 advice whatever their DNS actually is (the real nameservers are
+  already looked up at Verify time by `diagnose_dns_records` — detection is available, just unused here); and
+  the SERVER still accepts the connect and mints a Cloudflare hostname the provider cannot point at, so the
+  UI warns while the API proceeds. Client-side gates are not access control — the same sentence
+  `_reject_non_live_site` makes about a different door.
 
 **(historical) Phase 2.6b was — Apex / root domain support (COMMITTED — REQUIRED, not optional).**
 - The product is a website builder for SEO; tenants must be able to use `example.com`, not only a subdomain.
@@ -340,7 +395,15 @@ tenant storefronts, and only a tenant's own domain ever carries indexed reputati
 
 ### Remaining sub-questions (not blockers)
 
-- Whether to **retire `jbay.be`** and consolidate free hosting on `jbay.uk` (recommended) vs keep both.
-- The **environment model** for Sites (`test`/`live` in-schema vs the per-stack `dev`/`prod` reality) —
-  reconcile in 2.1.
-- Moving the dashboard from the raw CloudFront URL to `app.juniorbay.com` — polish, not a blocker.
+- **Whether to retire `jbay.be`** — STILL OPEN, but the cost rose on 2026-10-23: `jbay.be` is no longer only
+  sandbox's free-hosting domain, it is also sandbox's **Cloudflare for SaaS zone** (fallback origin
+  `domains.jbay.be`). Retiring it now would take sandbox custom domains with it.
+- ~~The **environment model** for Sites (`test`/`live` in-schema vs the per-stack `dev`/`prod` reality)~~ —
+  **RESOLVED.** There are THREE axes, not two, and they are named: `ENVIRONMENT` (dev/prod) is the deployment,
+  `stripe_mode` (test/live) is Stripe's, and the **silo** (sandbox/production) is "which independent copy of
+  Junior Bay is this" — see `src/stripe_link/silo.py`, which exists to stop the three being read for each
+  other. The Site's own field was called `environment` while holding `live`/`test`; renamed to `stripe_mode`
+  2026-10-23, which also collapsed a duplicate (the mode-scoped repository already stamped `stripe_mode`, so
+  a Site stored the answer twice and a test existed to stop the two disagreeing).
+- ~~Moving the dashboard from the raw CloudFront URL to `app.juniorbay.com`~~ — **DONE.** `app.juniorbay.com`
+  is prod, `sandbox.juniorbay.com` is dev.
