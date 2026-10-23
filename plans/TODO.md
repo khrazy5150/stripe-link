@@ -286,7 +286,7 @@ distribution stops claiming a hostname it no longer serves.
 dispatched from `SitesFunction` on a `rate(1 day)` schedule, recorded through `update_domain_health`,
 covered by `tests/test_domain_health_sweep.py`. The `www.` sibling is deliberately out of scope — see the
 plan's §4. First pass: dev reported `shop.coderbay.net` healthy and said nothing; prod has no custom
-domain to check yet. Remaining: set `CloudflareApexIpv4`/`IPV6`, which this unblocked.
+domain to check yet. The apex addresses it unblocked are set too — `SITE_OBJECT.md` Phase 2.6b is complete.
 
 **Plan: `plans/DOMAIN_HEALTH_SWEEP.md`** (written 2026-10-23). Precondition for apex domains — the last
 open item on `SITE_OBJECT.md` Phase 2.6b.

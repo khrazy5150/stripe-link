@@ -80,6 +80,37 @@ else
   PARAMETER_OVERRIDES+=("CustomDomainTargetHost=domains.jbay.be")
 fi
 
+# Apex custom domains (plans/SITE_OBJECT.md 2.6b). DNS forbids a CNAME at a zone apex, and Route 53's ALIAS
+# only targets AWS resources, so a tenant on Route 53 -- or GoDaddy, or Namecheap -- could not point
+# `example.com` at us at all. These are the A/AAAA addresses they add instead. With them set,
+# `_apex_routing_records` emits plain A/AAAA rows and the dashboard switches its guidance to match; left
+# empty, it falls back to ALIAS/ANAME/flattening guidance, which works only on some providers.
+#
+# Each environment publishes the pair its OWN zone resolves to, so the records a tenant is given point at
+# the zone their custom hostname actually lives on.
+#
+# THEY ARE SHARED CLOUDFLARE ANYCAST ADDRESSES, not addresses we own, which is the thing to understand
+# before changing them. Two measurements from 2026-10-23 say how much that matters:
+#
+#   curl --resolve shop.coderbay.net:443:104.21.88.48  -> 200   (its own zone's pair)
+#   curl --resolve shop.coderbay.net:443:104.21.71.205 -> 200   (the OTHER zone's pair)
+#
+# Cloudflare's edge routes purely by SNI/Host to whichever zone registered the custom hostname, so a
+# reassignment WITHIN Cloudflare's anycast space keeps serving. The failure that would actually break
+# tenants is one of these addresses leaving Cloudflare's network entirely -- rare, slow, and now detected
+# rather than silent: plans/DOMAIN_HEALTH_SWEEP.md was built first precisely so this could not go
+# unnoticed. Dedicated IPs remain the eventual answer; when apex tenants justify the line item, the
+# migration is a known list of names (we store what each tenant was told) and a gradual overlap.
+#
+# Re-read with `dig +short A domains.jbay.uk` / `AAAA`, never from memory.
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  PARAMETER_OVERRIDES+=("CloudflareApexIpv4=104.21.71.205,172.67.149.43")                      # jbay.uk
+  PARAMETER_OVERRIDES+=("CloudflareApexIpv6=2606:4700:3035::6815:47cd,2606:4700:3036::ac43:952b")
+else
+  PARAMETER_OVERRIDES+=("CloudflareApexIpv4=104.21.88.48,172.67.173.6")                        # jbay.be
+  PARAMETER_OVERRIDES+=("CloudflareApexIpv6=2606:4700:3033::6815:5830,2606:4700:3030::ac43:ad06")
+fi
+
 # Link-in-bio apex (plans/CREATOR_DOMAIN_SERVING.md): prod serves creators on jbay.page, dev on
 # test.jbay.page. ONE zone, two Worker routes pointing at the two environments' APIs -- the same live/test
 # split the platform host makes with jbay.uk/jbay.be, without buying a second domain for it. Never a shared
