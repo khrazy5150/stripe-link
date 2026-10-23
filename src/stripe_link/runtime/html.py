@@ -2120,8 +2120,10 @@ def render_head_seo_tags(
     canonical = _RENDER_STATE.get("canonical") or ""
     if canonical:
         lines.append(f'  <link rel="canonical" href="{escape(canonical)}">')
-    # Indexing directive: index only for the published artifact in production; preview and non-prod are
-    # noindex,nofollow (SEO-02/21). Funnel/upsell/thank-you noindex is still Phase 2 (needs funnel context).
+    # Indexing directive: index only for the published artifact in LIVE mode; a preview and anything in
+    # test mode are noindex,nofollow (SEO-02/21). Funnel, upsell and thank-you pages are covered —
+    # NONINDEXABLE_PAGE_TYPES demotes them to noindex,follow — which this described as "still Phase 2"
+    # long after it shipped (author, 2026-10-23).
     lines.append(f'  <meta name="robots" content="{escape(_RENDER_STATE.get("robots") or NOINDEX_ROBOTS)}">')
     # Webmaster verification tokens (SEO-16) — let a tenant verify their Site in Google/Bing Search Console
     # so they can submit sitemaps. Emitted only when set on the Site.
@@ -2301,8 +2303,10 @@ _RENDER_LEAD_DIALOG: dict[str, str] = {}
 # Business-target reviews for the page's Site — a visible trust block, NEVER a self-serving LocalBusiness
 # AggregateRating (Google suppresses those; plans/REVIEWS.md).
 _RENDER_BUSINESS_REVIEWS: list[dict[str, Any]] = []
-# A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
-# the tenant's preview, any non-production environment — must be kept out of the index.
+# A page is indexable only when it is the published artifact in LIVE Stripe mode (SEO-02/21). Everything
+# else — the tenant's preview, anything in test mode — must be kept out of the index. This read "in
+# production", which was the pre-decoupling world where the prod stack and live mode were the same thing;
+# since plans/STRIPE_MODE_DECOUPLING.md the stack has no say (author, 2026-10-23).
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
 NOINDEX_ROBOTS = "noindex,nofollow"
 # Crawlable-but-not-indexed: pending Connect verification, and funnel/checkout/thank-you pages on an otherwise

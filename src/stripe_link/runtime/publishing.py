@@ -1415,10 +1415,12 @@ def publish_page_document(
         preview_domain=preview_domain,
     )
 
-    # Render per target so the robots directive is correct per artifact. Only a published artifact in
-    # production, on an eligible Site (verified custom domain + Stripe Connect), on an indexable page_type,
-    # gets index,follow; everything on platform infrastructure stays noindex (plans/SITE_OBJECT.md §2.2,
+    # Render per target so the robots directive is correct per artifact. Only a published artifact in LIVE
+    # Stripe mode, on an eligible Site (verified custom domain + Stripe Connect), on an indexable
+    # page_type, gets index,follow; everything on a platform host stays noindex (plans/SITE_OBJECT.md §2.2,
     # TP-08, SEO-02). Eligibility is recomputed on the account.updated webhook and stored on the Site.
+    # Said "in production" until 2026-10-23: the deployment stopped being the axis when Stripe mode was
+    # decoupled from it, and a live-mode store is a real shop whichever stack renders it.
     page_id = str(page.get("page_id") or "")
     # `seo_identity_page_id` was resolved before the Site lookup above -- page_type, slug, canonical, robots
     # and home_url all flow from it.
