@@ -461,19 +461,22 @@ def create_site(event, repository, registry=None, mode="test"):
         document["document_type"] = "site"
         # SERVER-OWNED, like document_type and updated_at above it, and for a sharper reason.
         #
-        # A Site says which books it belongs to TWICE: `stripe_mode`, stamped by the mode-scoped
-        # repository, and `environment`, which arrived in the payload. `_reject_non_live_site` reads
-        # `environment` -- deliberately, because the Site's own axis is the one that matters there -- so a
-        # document sent with environment="live" while the request is in test mode would land in the TEST
-        # partition and still pass the live-only gate. That is the reputational harm that gate exists to
-        # prevent ("a test Site serving a real domain would present sandbox pages as a real business"),
-        # reached by a different door, and its own docstring already says why the door matters: client-side
-        # gates are not access control.
+        # A Site used to say which books it belongs to TWICE -- `stripe_mode`, stamped by the mode-scoped
+        # repository, and `environment`, which arrived in the payload and was what the live-only domain
+        # gate read. A document sent with environment="live" during a test-mode request landed in the TEST
+        # partition and still passed that gate: the reputational harm the gate exists to prevent ("a test
+        # Site serving a real domain would present sandbox pages as a real business"), reached by a
+        # different door. Setting it server-side from the request's mode closed that door; collapsing the
+        # two fields into one (2026-10-23) removes the door.
         #
-        # Setting it from the request's mode makes the two fields agree by construction rather than by
-        # the client being well-behaved. Checked before changing: all three Sites in dev and prod already
-        # agree, so nothing is being reclassified.
-        document["environment"] = "live" if mode == "live" else "test"
+        # Still written here, before validate_site, rather than left to the repository's stamp on put --
+        # the document has to be valid before anything else looks at it, and both come from `mode`.
+        document["stripe_mode"] = "live" if mode == "live" else "test"
+        # And the abolished name does not get to come back through the door it left by. Nothing reads
+        # `environment` on a Site any more, so a client-supplied one is inert today -- but it would be
+        # stored, and the next reader to reach for the familiar word would find it there and believe it.
+        # Dropping it here also migrates a legacy row the moment it is next saved.
+        document.pop("environment", None)
         document.setdefault("schema_version", SITE_SCHEMA_VERSION)
         document.setdefault("tenant_id", tenant_id_from_event(event, document))
         now = int(time.time())
@@ -599,7 +602,7 @@ def _refresh_eligibility(repository, tenant_id, sites):
     for site in sites:
         try:
             changed = False
-            connect_verified, connect_restricted = _connect_state(tenant_id, site.get("environment"))
+            connect_verified, connect_restricted = _connect_state(tenant_id, site.get("stripe_mode"))
             eligibility = compute_site_eligibility(
                 site, connect_verified=connect_verified, connect_restricted=connect_restricted,
                 domain_verified=site_domain_verified(site),
@@ -723,12 +726,12 @@ def _apex_proxy_ips():
     return _ips("CLOUDFLARE_APEX_IPV4"), _ips("CLOUDFLARE_APEX_IPV6")
 
 
-def _connect_state(tenant_id, environment):
+def _connect_state(tenant_id, stripe_mode):
     """(connect_verified, connect_restricted) for the tenant. Prefers the Connect verification the
     account.updated webhook captured on the stripe_keys doc; if it was never captured (a pre-existing connected
     account that hasn't had an update) but the tenant has a connected account, pulls the live status from
     Stripe ONCE and persists it — so eligibility reflects reality instead of a missing webhook."""
-    mode = "live" if environment == "live" else "test"
+    mode = "live" if stripe_mode == "live" else "test"
     try:
         keys_repo = stripe_keys_repository()
         keys = keys_repo.get(tenant_id, mode)
@@ -855,7 +858,7 @@ def _refresh_www_status(provisioning, domain, *, zone_id, api_token, dcv_uuid, s
 
 
 def _recompute_eligibility(site, tenant_id, now):
-    connect_verified, connect_restricted = _connect_state(tenant_id, site.get("environment"))
+    connect_verified, connect_restricted = _connect_state(tenant_id, site.get("stripe_mode"))
     eligibility = compute_site_eligibility(
         site, connect_verified=connect_verified, connect_restricted=connect_restricted,
         domain_verified=site_domain_verified(site),
@@ -908,18 +911,19 @@ LIVE_ONLY_MESSAGE = "Custom domains are available on your live Site only. Switch
 
 
 def _reject_non_live_site(site):
-    """Custom domains are a LIVE-only feature, and the axis that matters is the SITE's environment.
+    """Custom domains are a LIVE-only feature, and the axis that matters is the SITE's Stripe mode.
 
     The reason is reputational, not technical: a test Site serving a real domain would present sandbox
     pages as a real business, and search engines have no way to tell the difference. That is a
     reputation the tenant cannot get back.
 
-    The router already refuses this on non-prod DEPLOYMENTS, but that is a different axis. On the prod
-    deployment a Site with environment="test" passed that check, and neither connect nor check looked
-    again -- so the only thing standing between a test Site and a real domain was the dashboard choosing
-    not to render the form. Client-side gates are not access control.
+    The router used to refuse this on non-prod DEPLOYMENTS as well, which was a different axis and the
+    weaker of the two: on the prod deployment a test-mode Site passed that check, and neither connect nor
+    check looked again -- so the only thing standing between a test Site and a real domain was the
+    dashboard choosing not to render the form. Client-side gates are not access control. That deployment
+    gate is gone (2026-10-23); this one is the whole guard.
     """
-    if str(site.get("environment") or "").lower() != "live":
+    if str(site.get("stripe_mode") or "").lower() != "live":
         return error_response(LIVE_ONLY_MESSAGE, status_code=403, code="custom_domains_live_only")
     return None
 

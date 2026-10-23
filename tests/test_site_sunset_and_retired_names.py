@@ -27,7 +27,7 @@ DOMAIN = "jbay.page"
 
 def _site(**over):
     site = {
-        "tenant_id": "t1", "site_id": "site_1", "environment": "live", "status": "active",
+        "tenant_id": "t1", "site_id": "site_1", "stripe_mode": "live", "status": "active",
         "hosting": {"type": "platform", "platform_hostname": "toys.jbay.uk", "creator_username": "toybox"},
         "pages": {"/links": {"page_id": "hub", "composition": "lead_social"}},
     }

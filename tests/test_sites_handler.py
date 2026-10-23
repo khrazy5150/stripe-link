@@ -10,7 +10,7 @@ def base_site(**overrides):
         "schema_version": "2026-07-20",
         "document_type": "site",
         "tenant_id": "tenant_demo",
-        "environment": "live",
+        "stripe_mode": "live",
         "name": "Axel Mart",
         "status": "active",
         "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},

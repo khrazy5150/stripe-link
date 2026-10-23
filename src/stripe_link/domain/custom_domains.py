@@ -110,7 +110,7 @@ def domain_index_record(site: dict[str, Any]) -> dict[str, Any]:
         "site_id": str(site.get("site_id") or ""),
         # The Site's Stripe mode, so the edge resolver reads the mode-partitioned artifact key
         # (plans/STRIPE_MODE_DECOUPLING.md P5). Custom domains are live-only, so this is "live" in practice.
-        "stripe_mode": "live" if str(site.get("environment") or "").strip().lower() == "live" else "test",
+        "stripe_mode": "live" if str(site.get("stripe_mode") or "").strip().lower() == "live" else "test",
     }
 
 
@@ -136,7 +136,7 @@ def platform_domain_index_record(site: dict[str, Any]) -> dict[str, Any] | None:
         "host_kind": "platform",
         # Platform hostnames serve BOTH free/test and live Sites, so the resolver reads the mode-partitioned key
         # off this (plans/STRIPE_MODE_DECOUPLING.md P5).
-        "stripe_mode": "live" if str(site.get("environment") or "").strip().lower() == "live" else "test",
+        "stripe_mode": "live" if str(site.get("stripe_mode") or "").strip().lower() == "live" else "test",
     }
 
 
@@ -241,7 +241,7 @@ def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> di
     # otherwise write the same row -- the same collision that took the platform host down (found on prod
     # 2026-09-20). A test-mode Site has nowhere to serve here and should not: the apex is the creator's real
     # identity, not a sandbox.
-    if str(site.get("environment") or "").strip().lower() != "live":
+    if str(site.get("stripe_mode") or "").strip().lower() != "live":
         return None
     username = creator_username(site)
     found = creator_page_entry(site)
@@ -257,7 +257,7 @@ def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> di
         "status": "active",
         "site_id": str(site.get("site_id") or ""),
         "host_kind": "creator",
-        "stripe_mode": "live" if str(site.get("environment") or "").strip().lower() == "live" else "test",
+        "stripe_mode": "live" if str(site.get("stripe_mode") or "").strip().lower() == "live" else "test",
     }
 
 

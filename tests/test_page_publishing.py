@@ -392,7 +392,7 @@ class PagePublishingTests(unittest.TestCase):
     def _valid_site(self, pages):
         return {
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_x", "tenant_id": "tenant_demo",
-            "environment": "live", "name": "Store", "status": "active",
+            "stripe_mode": "live", "name": "Store", "status": "active",
             "hosting": {"type": "platform", "platform_hostname": "store.jbay.uk", "custom_domain": None},
             "organization": {"name": "Store", "entity_type": "OnlineStore"},
             "indexing": {"eligibility": "blocked"}, "pages": pages, "created_at": 1, "updated_at": 1,
@@ -1295,7 +1295,7 @@ class CascadePublishDraftMembersTests(unittest.TestCase):
         # entry is disabled (the dashboard sets enabled = status=='published'). So the grid would drop it AND the
         # edge resolver would 404 its card until it's published.
         return {"schema_version": "2026-07-20", "document_type": "site", "site_id": "site_x",
-                "tenant_id": self.tenant, "environment": "live", "name": "Shop", "status": "active",
+                "tenant_id": self.tenant, "stripe_mode": "live", "name": "Shop", "status": "active",
                 "hosting": {"type": "custom", "platform_hostname": "shop.jbay.uk",
                             "custom_domain": "shop.example.com", "verification": {"verified": True}},
                 "organization": {"name": "Shop", "entity_type": "OnlineStore"},
@@ -1532,7 +1532,7 @@ class FunnelPublishIntegrationTests(unittest.TestCase):
         }
         site = {
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_ABC123",
-            "tenant_id": "tenant_demo", "environment": "live", "name": "Demo", "status": "active",
+            "tenant_id": "tenant_demo", "stripe_mode": "live", "name": "Demo", "status": "active",
             "hosting": {"type": "custom", "platform_hostname": "demo.jbay.uk", "custom_domain": "shop.example.com",
                         "verification": {"verified": True}},
             "organization": {"name": "Demo", "entity_type": "OnlineStore"},
@@ -1571,7 +1571,7 @@ class FunnelPublishIntegrationTests(unittest.TestCase):
         page.pop("post_checkout", None)  # no funnel -> attach produces no change
         site = {
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_PLAT",
-            "tenant_id": "tenant_demo", "environment": "live", "name": "Demo", "status": "active",
+            "tenant_id": "tenant_demo", "stripe_mode": "live", "name": "Demo", "status": "active",
             "hosting": {"type": "custom", "platform_hostname": "demo.jbay.uk", "custom_domain": "shop.example.com",
                         "verification": {"verified": True}},
             "organization": {"name": "Demo", "entity_type": "OnlineStore"},

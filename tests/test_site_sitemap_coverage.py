@@ -30,7 +30,7 @@ DOMAIN = "probestore.com"
 def _site(pages, **overrides):
     site = {
         "schema_version": "2026-05-29", "document_type": "site", "tenant_id": "tenant_demo",
-        "site_id": "site_1", "name": "Probe Store", "status": "active", "environment": "live",
+        "site_id": "site_1", "name": "Probe Store", "status": "active", "stripe_mode": "live",
         "hosting": {"type": "custom", "platform_hostname": "probe.jbay.uk",
                     "custom_domain": DOMAIN, "verification": {"verified": True}},
         "indexing": {"eligibility": "eligible"},

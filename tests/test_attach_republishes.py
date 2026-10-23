@@ -67,7 +67,7 @@ class AttachTests(unittest.TestCase):
         # tests/test_document_validation.py, which is where the canonical one lives.
         self.site = {
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_1",
-            "tenant_id": "tenant_1", "environment": "live", "name": "Poliaxis", "status": "active",
+            "tenant_id": "tenant_1", "stripe_mode": "live", "name": "Poliaxis", "status": "active",
             "hosting": {"type": "platform", "platform_hostname": "poliaxis.jbay.uk", "custom_domain": None},
             "organization": {"name": "Poliaxis", "entity_type": "OnlineStore"},
             "indexing": {"eligibility": "blocked"},

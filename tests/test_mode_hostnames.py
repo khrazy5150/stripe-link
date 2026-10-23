@@ -25,7 +25,7 @@ ENV = {"PLATFORM_HOSTING_DOMAIN": "jbay.uk"}
 
 def _site(**over):
     site = {
-        "tenant_id": "t1", "site_id": "site_1", "status": "active", "environment": "live",
+        "tenant_id": "t1", "site_id": "site_1", "status": "active", "stripe_mode": "live",
         "hosting": {"type": "platform", "platform_hostname": "maria.jbay.uk"},
         "pages": {"/links": {"page_id": "hub", "composition": "lead_social"}},
     }
@@ -88,7 +88,7 @@ class PairedReservationTests(unittest.TestCase):
 class IndexRowsNoLongerCollideTests(unittest.TestCase):
     def test_the_two_modes_write_different_rows(self):
         live = {r["domain"] for r in site_index_records(_site(), "jbay.page")}
-        test_site = _site(environment="test")
+        test_site = _site(stripe_mode="test")
         test_site["hosting"]["platform_hostname"] = "maria-test.jbay.uk"
         test_rows = {r["domain"] for r in site_index_records(test_site, "jbay.page")}
         self.assertIn("maria.jbay.uk", live)
@@ -98,7 +98,7 @@ class IndexRowsNoLongerCollideTests(unittest.TestCase):
     def test_archiving_one_mode_cannot_reach_the_other(self):
         """The actual prod symptom: an archived live Site took the active test Site off the air."""
         archived_live = _site(status="archived")
-        active_test = _site(environment="test")
+        active_test = _site(stripe_mode="test")
         active_test["hosting"]["platform_hostname"] = "maria-test.jbay.uk"
         live_rows = {r["domain"]: r for r in site_index_records(archived_live, "jbay.page")}
         test_rows = {r["domain"]: r for r in site_index_records(active_test, "jbay.page")}
@@ -109,14 +109,14 @@ class IndexRowsNoLongerCollideTests(unittest.TestCase):
 class CreatorApexIsLiveOnlyTests(unittest.TestCase):
     def test_a_test_site_never_claims_the_creator_url(self):
         """One public name per creator. The apex is an identity, not a sandbox."""
-        self.assertIsNone(creator_domain_index_record(_site(environment="test"), "jbay.page"))
+        self.assertIsNone(creator_domain_index_record(_site(stripe_mode="test"), "jbay.page"))
 
     def test_the_live_site_still_does(self):
         record = creator_domain_index_record(_site(), "jbay.page")
         self.assertEqual(record["domain"], "jbay.page/maria")
 
     def test_and_it_is_absent_from_a_test_site_record_set(self):
-        test_site = _site(environment="test")
+        test_site = _site(stripe_mode="test")
         test_site["hosting"]["platform_hostname"] = "maria-test.jbay.uk"
         domains = {r["domain"] for r in site_index_records(test_site, "jbay.page")}
         self.assertNotIn("jbay.page/maria", domains)

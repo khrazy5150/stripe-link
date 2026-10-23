@@ -227,7 +227,7 @@ class TheSameTrapInFloatsTests(unittest.TestCase):
 
         validate_site({
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_ABC123",
-            "tenant_id": "t1", "environment": "live", "name": "Axel Mart", "status": "active",
+            "tenant_id": "t1", "stripe_mode": "live", "name": "Axel Mart", "status": "active",
             "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},
             "organization": {"name": "Axel Mart", "entity_type": "OnlineStore",
                              # As they come back out of DynamoDB.

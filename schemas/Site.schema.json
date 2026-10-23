@@ -10,7 +10,7 @@
     "document_type",
     "site_id",
     "tenant_id",
-    "environment",
+    "stripe_mode",
     "name",
     "status",
     "hosting",
@@ -34,9 +34,9 @@
       "type": "string",
       "minLength": 1
     },
-    "environment": {
+    "stripe_mode": {
       "type": "string",
-      "description": "Sites are authored in test and copied to live by a later workflow (mirrors the platform's per-stack dev/prod split).",
+      "description": "The Stripe mode this Site belongs to. NOT the deployment: `environment` (dev/prod) names the stack, and one stack serves both modes. Called `environment` until 2026-10-23, which is how the two came to be read for each other. Sites are authored in test and copied to live by a later workflow.",
       "enum": [
         "test",
         "live"

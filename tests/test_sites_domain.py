@@ -14,7 +14,7 @@ def base_site(pages=None, **overrides):
         "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_D1",
         # live, because that is the only environment where a custom domain is legal at all -- a test Site
         # serving a real domain would present sandbox pages as a real business. See _reject_non_live_site.
-        "tenant_id": "t1", "environment": "live", "name": "Axel Mart", "status": "active",
+        "tenant_id": "t1", "stripe_mode": "live", "name": "Axel Mart", "status": "active",
         "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},
         "organization": {"name": "Axel Mart", "entity_type": "OnlineStore"},
         "indexing": {"eligibility": "blocked"},
@@ -68,7 +68,7 @@ class SetHomepageTests(unittest.TestCase):
         self.repo = FakeDocumentRepository("site_id")
         self.site = {
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_H1", "tenant_id": "t1",
-            "environment": "live", "name": "Store", "status": "active",
+            "stripe_mode": "live", "name": "Store", "status": "active",
             "hosting": {"type": "platform", "platform_hostname": "store.jbay.uk", "custom_domain": None},
             "organization": {"name": "Store", "entity_type": "OnlineStore"},
             "indexing": {"eligibility": "blocked"},
@@ -208,7 +208,7 @@ class SitesDomainTests(unittest.TestCase):
         it is the stronger of the two anyway: on the prod deployment a test Site passed the deployment
         check, so the deployment gate never protected the thing it looked like it was protecting.
         """
-        self.repo.put(base_site(site_id="site_D1", environment="test"))
+        self.repo.put(base_site(site_id="site_D1", stripe_mode="test"))
         resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
         self.assertEqual(resp["statusCode"], 403)
         self.assertIn("live", json.loads(resp["body"])["message"].lower())
@@ -447,7 +447,7 @@ class SitesDomainTests(unittest.TestCase):
         self.keys.verification = "verified"
         site = base_site(hosting={"type": "custom", "platform_hostname": "axel-mart.jbay.uk",
                                   "custom_domain": "shop.axelmart.com", "verification": {"verified": True}},
-                         indexing={"eligibility": "pending"}, environment="live")
+                         indexing={"eligibility": "pending"}, stripe_mode="live")
         self.repo.put(site)
         resp = handler({"httpMethod": "GET", "queryStringParameters": {"tenant_id": "t1"}}, None, repository=self.repo)
         sites = json.loads(resp["body"])["sites"]
@@ -495,7 +495,7 @@ class CustomDomainsAreLiveOnlyTests(unittest.TestCase):
 
     The reason is reputational: sandbox pages presenting as a real business is a search reputation the
     tenant cannot get back. Until 2026-09-09 the only guard was on the DEPLOYMENT (ENVIRONMENT != prod),
-    which is a different axis -- on the prod deployment a Site with environment="test" sailed past it, and
+    which is a different axis -- on the prod deployment a Site with stripe_mode="test" sailed past it, and
     the sole remaining obstacle was the dashboard choosing not to render the form.
     """
 
@@ -503,7 +503,7 @@ class CustomDomainsAreLiveOnlyTests(unittest.TestCase):
         self.repo = FakeDocumentRepository("site_id")
 
     def _test_site(self):
-        site = base_site(environment="test")
+        site = base_site(stripe_mode="test")
         site["hosting"] = {"type": "platform", "platform_hostname": "axel-mart.jbay.uk",
                            "custom_domain": None}
         self.repo.put(site)

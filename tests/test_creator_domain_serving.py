@@ -26,7 +26,7 @@ DOMAIN = "jbay.page"
 
 def _site(**over):
     site = {
-        "tenant_id": "t1", "site_id": "site_1", "environment": "live",
+        "tenant_id": "t1", "site_id": "site_1", "stripe_mode": "live",
         "hosting": {"type": "platform", "platform_hostname": "maria.jbay.uk"},
         "pages": {
             "/": {"page_id": "page_home", "page_type": "landing"},
@@ -363,7 +363,7 @@ class HubMovesOffThePlatformHostTests(unittest.TestCase):
     """
 
     SITE = {
-        "tenant_id": "t1", "site_id": "site_1", "environment": "live", "status": "active",
+        "tenant_id": "t1", "site_id": "site_1", "stripe_mode": "live", "status": "active",
         "hosting": {"type": "platform", "platform_hostname": "maria.jbay.uk"},
         "pages": {"/shop": {"page_id": "buy"}, "/links": {"page_id": "hub", "composition": "lead_social"}},
     }

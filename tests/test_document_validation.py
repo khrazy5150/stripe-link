@@ -256,7 +256,7 @@ class DocumentValidationTests(unittest.TestCase):
     def _site(self, **kw):
         site = {
             "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_ABC123",
-            "tenant_id": "t1", "environment": "live", "name": "Axel Mart", "status": "active",
+            "tenant_id": "t1", "stripe_mode": "live", "name": "Axel Mart", "status": "active",
             "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},
             "organization": {"name": "Axel Mart", "entity_type": "OnlineStore"},
             "indexing": {"eligibility": "blocked"},
@@ -311,7 +311,7 @@ class DocumentValidationTests(unittest.TestCase):
         validate_site(site)
 
     def test_rejects_bad_site_shapes(self):
-        for bad in ({"status": "live"}, {"environment": "prod"}, {"pages": "not-a-map"},
+        for bad in ({"status": "live"}, {"stripe_mode": "prod"}, {"pages": "not-a-map"},
                     {"pages": {"/": {"page_id": "nope"}}}, {"site_id": "s_1"}):
             with self.assertRaises(DocumentValidationError):
                 validate_site(self._site(**bad))

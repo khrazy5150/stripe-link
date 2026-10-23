@@ -2626,8 +2626,10 @@ def validate_collection(document: dict[str, Any]) -> None:
     require_string(document, "collection_id", "Collection id")
     require_string(document, "site_id", "Collection site_id")
     require_string(document, "name", "Collection name")
-    if document.get("environment") is not None:
-        require_enum(document, "environment", {"live", "test"}, "Collection environment")
+    # Optional, unlike a Site's: a Collection is reached through its Site and the mode-scoped repository
+    # stamps it on write. Named `environment` until 2026-10-23 -- same rename, same reason.
+    if document.get("stripe_mode") is not None:
+        require_enum(document, "stripe_mode", SITE_STRIPE_MODES, "Collection stripe_mode")
     rule = document.get("rule", "manual")
     if rule not in COLLECTION_RULES:
         raise DocumentValidationError("Collection rule must be one of: manual, all, category.")
@@ -2735,7 +2737,11 @@ def validate_calendar_connection(document: dict[str, Any]) -> None:
 
 # Site (the public aggregate root — plans/SITE_OBJECT.md, schemas/Site.schema.json v2).
 SITE_STATUSES = {"draft", "active", "archived"}
-SITE_ENVIRONMENTS = {"test", "live"}
+# The Site's STRIPE MODE. Named for the axis it is -- it was `environment` until 2026-10-23, which is the
+# word this codebase uses for the DEPLOYMENT (dev/prod), so a field holding `live`/`test` carried the name
+# of a different axis and the two were read for each other more than once. See stripe_link/silo.py, which
+# exists to keep deployment, Stripe mode and silo apart.
+SITE_STRIPE_MODES = {"test", "live"}
 SITE_HOSTING_TYPES = {"platform", "custom"}
 SITE_INDEXING_ELIGIBILITY = {"blocked", "pending", "eligible", "revoked"}
 SITE_ENTITY_TYPES = {
@@ -2775,7 +2781,7 @@ def validate_site(document: dict[str, Any]) -> None:
     require_document_fields(document, "site", "site_id")
     if not re.match(r"^site_[A-Za-z0-9]+$", str(document.get("site_id") or "")):
         raise DocumentValidationError("Site site_id must match ^site_[A-Za-z0-9]+$.")
-    require_enum(document, "environment", SITE_ENVIRONMENTS, "Site environment")
+    require_enum(document, "stripe_mode", SITE_STRIPE_MODES, "Site stripe_mode")
     require_string(document, "name", "Site name")
     require_enum(document, "status", SITE_STATUSES, "Site status")
 
