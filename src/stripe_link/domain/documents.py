@@ -2867,6 +2867,15 @@ def validate_site(document: dict[str, Any]) -> None:
         # `category` on a page_type=category entry is instead the category that page LISTS.
         optional_string(entry, "offer_id", f"Site page '{slug}' offer_id")
         optional_string(entry, "category", f"Site page '{slug}' category")
+        # Crawl facts, denormalized at publish so the sitemap can be built from the route map without
+        # loading and RE-RENDERING every page (plans/OFFERLESS_PAGES_IN_BUILDER.md P5). `indexable` is the
+        # page's FINAL robots answer, which cannot be re-derived cheaply: the thin-content demotion depends
+        # on the rendered word count, so only the publisher knows it, and only at the moment it rendered.
+        # Absent means "never published since this existed" and the page is left out of the sitemap --
+        # listing a URL we are not sure is indexable is the contradiction the sitemap exists to avoid.
+        optional_bool(entry, "indexable", f"Site page '{slug}' indexable")
+        optional_non_negative_int(entry, "lastmod", f"Site page '{slug}' lastmod")
+        optional_string_list(entry, "images", f"Site page '{slug}' images")
         # A Sale/Flash-Sale context view (plans/SALES_FUNNELS.md P1c) points at a base page but serves its
         # sibling artifact rendered in this price context.
         if entry.get("price_context") is not None:

@@ -606,6 +606,87 @@ def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str,
     return changed
 
 
+# At most this many image URLs per page in the sitemap. The cap is on the Site document, not the XML: the
+# route map lives in one DynamoDB item, so unbounded per-page image lists would eventually be what stops a
+# Site saving at all.
+_SITEMAP_IMAGES_PER_PAGE = 5
+
+
+def _denormalize_page_crawl(site: dict[str, Any], page_id: str, *, indexable: bool, lastmod: int,
+                           image_urls: list[str]) -> bool:
+    """Record on the page's Site route entry what the sitemap needs to know about it. Returns whether
+    anything changed.
+
+    Written AFTER the artifacts render, because `indexable` is the page's final robots answer and the
+    thin-content demotion that can produce it is only known once there is HTML to count words in. That is
+    the whole reason this is denormalized rather than recomputed: a sitemap built by re-deriving each
+    page's directive would have to re-render every page on the Site to be correct, and one built by
+    skipping the thin-content check would advertise URLs that publish `noindex`
+    (plans/OFFERLESS_PAGES_IN_BUILDER.md P5).
+    """
+    changed = False
+    images = [url for url in image_urls if url][:_SITEMAP_IMAGES_PER_PAGE]
+    for entry in (site.get("pages") or {}).values():
+        if not (isinstance(entry, dict) and entry.get("page_id") == page_id):
+            continue
+        if entry.get("indexable") != indexable:
+            entry["indexable"] = indexable
+            changed = True
+        if lastmod and entry.get("lastmod") != lastmod:
+            entry["lastmod"] = lastmod
+            changed = True
+        # An empty list is written as a REMOVAL, not skipped: a page whose images were deleted must stop
+        # advertising them, and "no images" is a fact worth recording.
+        if images != [url for url in (entry.get("images") or []) if url]:
+            if images:
+                entry["images"] = images
+            else:
+                entry.pop("images", None)
+            changed = True
+    return changed
+
+
+def site_sitemap_entries(site: dict[str, Any] | None, custom_domain: str) -> list[dict[str, Any]]:
+    """Every indexable page on the Site, as sitemap entries — one per PAGE, at its own address.
+
+    One page owns several slugs: its own, plus the `/sale` and `/flash-sale` context views and the reserved
+    `/upsell`, `/downsell` and `/thank-you` funnel steps. Only its own address belongs here. The context
+    views are the same page at a different price and listing both would be submitting our own duplicate
+    content; the funnel slugs serve synthetic artifacts that are `noindex` by page_type anyway. Keying the
+    result by page_id and asking `site_page_slug` for the address is what enforces that — that function
+    already owns the rule that a reserved funnel slug is not a page's address.
+
+    Excluded: routes that are disabled (a draft page's route is disabled at attach, and the resolver 404s
+    it), and any page whose `indexable` flag is not exactly True — absent means it has not published since
+    the flag existed, and a URL we cannot vouch for does not go in.
+    """
+    if not (site and custom_domain):
+        return []
+    root = f"https://{custom_domain}"
+    best: dict[str, dict[str, Any]] = {}
+    for entry in ((site or {}).get("pages") or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        page_id = str(entry.get("page_id") or "")
+        if not page_id or page_id in best:
+            continue
+        if entry.get("enabled") is not True or entry.get("indexable") is not True:
+            continue
+        slug = site_page_slug(site, page_id)
+        if not slug:
+            continue
+        path = "" if slug == "/" else slug.lstrip("/")
+        item: dict[str, Any] = {"loc": f"{root}/{path}"}
+        if entry.get("lastmod"):
+            item["lastmod"] = entry["lastmod"]
+        images = [url for url in (entry.get("images") or []) if url]
+        if images:
+            item["images"] = images[:_SITEMAP_IMAGES_PER_PAGE]
+        best[page_id] = item
+    # Homepage first, then by path, so the file is stable between publishes and reads like the site.
+    return sorted(best.values(), key=lambda item: (item["loc"] != f"{root}/", item["loc"]))
+
+
 def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: dict[str, Any],
                                       site: dict[str, Any] | None, *, pages_repository: Any, now: int) -> dict[str, Any]:
     """Auto-publish the never-published draft member pages the tenant selected into any MANUAL collection this
@@ -1574,6 +1655,26 @@ def publish_page_document(
                 pass
 
     if site and sites_repository is not None:
+        # Record what the SITEMAP needs about this page, before the crawl files below are written from it
+        # (P5). Here rather than beside the other denormalization further up, because `published_robots` is
+        # the artifact's FINAL directive and is only known once the HTML exists -- the thin-content
+        # demotion counts rendered words.
+        #
+        # In its OWN try, not folded into the one below. That one swallows everything so a route-attach
+        # failure cannot block the publish, so anything sharing it inherits a silent failure AND takes the
+        # rest of the block down with it -- a bad Site write here would have skipped `_sync_domain_index`
+        # and left the edge resolver stale, with nothing said. See [[feedback-one-guess-hides-the-cause]].
+        try:
+            if _denormalize_page_crawl(
+                site, page_id,
+                indexable=published_robots == INDEXABLE_ROBOTS,
+                lastmod=int(page.get("updated_at") or page.get("published_at") or 0),
+                image_urls=_homepage_image_urls(offer, products_by_id),
+            ):
+                validate_site(site)
+                site = sites_repository.put(site)
+        except Exception:  # noqa: BLE001 - a sitemap fact is never worth failing a publish over
+            logger.exception("sitemap denormalization failed for page %s", page_id)
         try:
             if serving_origin:
                 updated_site, changed_ctx = attach_context_view_slugs(site, page)
@@ -1598,8 +1699,13 @@ def publish_page_document(
     # path-aware resolver can serve them at the domain root) and ping IndexNow with the changed URL.
     crawl = {}
     if environment == "prod" and on_custom_domain and custom_domain:
+        # Under the SITE'S ROOT page, which is where custom_domains_resolve serves /sitemap.xml and
+        # /robots.txt from. Passing the publishing page's own id wrote all three files to a prefix nothing
+        # reads, so publishing anything but the homepage left the live sitemap untouched (P5). Falls back to
+        # this page when the Site has no root yet -- then this page IS what the domain will serve.
+        crawl_page_id = site_homepage_page_id(site) or page_id
         crawl = publish_site_crawl_files(
-            site=site, homepage_page_id=page_id, custom_domain=custom_domain, page=page,
+            site=site, homepage_page_id=crawl_page_id, custom_domain=custom_domain, page=page,
             image_urls=_homepage_image_urls(offer, products_by_id), s3_client=s3_client, pages_bucket=pages_bucket,
             homepage_indexable=published_robots == INDEXABLE_ROBOTS,
         )
@@ -1685,24 +1791,54 @@ def _homepage_image_urls(offer: dict[str, Any], products_by_id: dict[str, dict[s
 
 
 def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, image_urls, s3_client, pages_bucket, indexnow_opener=None, homepage_indexable=True):
-    """Generate + write the Site's crawl files under the homepage artifact key, and submit the homepage URL to
-    IndexNow. Best-effort on the IndexNow ping — never fail a publish on it."""
+    """Generate + write the Site's crawl files under the homepage artifact key, and submit the page that just
+    published to IndexNow. Best-effort on the IndexNow ping — never fail a publish on it.
+
+    THE SITEMAP COVERS THE WHOLE SITE. It held exactly one URL, the homepage, for as long as a Site could
+    only serve one page; so a tenant with a storefront, three category pages, an about page and a dozen
+    product pages advertised one of them, and the other sixteen were discoverable only by a crawler
+    following links (plans/OFFERLESS_PAGES_IN_BUILDER.md P5). The rest come from the Site's own route map,
+    via the `indexable`/`lastmod`/`images` facts each page's publish records on its entry — see
+    `_denormalize_page_crawl` for why they are stored rather than recomputed.
+
+    `homepage_page_id` must be the page the RESOLVER serves these files from, which is the Site's root page
+    (custom_domains_resolve maps /sitemap.xml to `{target_page_id}/sitemap.xml`). It used to be passed the
+    page currently publishing, so publishing anything other than the homepage wrote all three files under a
+    prefix nothing reads — which did not matter while the sitemap only ever described the homepage, and
+    matters completely now that publishing a product page is supposed to add it.
+    """
     from stripe_link.domain.sitemap import robots_txt, sitemap_xml
 
     # An archived Site — or a Site whose tenant turned search visibility OFF (seo_enabled False) — drops its whole
     # domain from crawling: empty sitemap + disallow-all robots (paired with the noindex meta re-rendered onto
     # each page). No IndexNow ping either.
     suppress = (site or {}).get("status") == "archived" or not site_seo_enabled(site)
-    # The sitemap holds exactly ONE url — this homepage — so it must not advertise a homepage that just rendered
-    # with a noindex meta tag. Submitting a URL to IndexNow and then telling the crawler not to index it is a
-    # contradiction we send at our own expense. `homepage_indexable` is read from the artifact's FINAL directive
-    # rather than re-derived, so every reason it can be noindex counts here automatically: a bridge page
-    # (plans/LEAD_GEN_PAGES.md §5), a test-mode page, or one the thin-content gate demoted.
-    # robots.txt is deliberately NOT disallowed for this: only the homepage is known noindex, and the Site's other
-    # pages may well be indexable. A Site-level suppression above is what closes the whole domain.
-    listable = not suppress and homepage_indexable
     root = f"https://{custom_domain}/"
-    sitemap = sitemap_xml([] if not listable else [{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
+    page_id = str(page.get("page_id") or "")
+    page_slug = site_page_slug(site, page_id)
+    page_url = root if page_slug in ("", "/") else f"{root}{page_slug.lstrip('/')}"
+
+    entries = [] if suppress else site_sitemap_entries(site, custom_domain)
+    # The page that just published is the one page whose answer we hold live, so it overrides whatever its
+    # route entry says. `homepage_indexable` is the artifact's FINAL directive rather than a re-derivation,
+    # so every reason it can be noindex counts automatically: a bridge page (plans/LEAD_GEN_PAGES.md §5), a
+    # test-mode page, or one the thin-content gate demoted. The denormalized flag is written in the same
+    # breath, so this only matters for the ordering of a single publish — but getting it from the artifact
+    # means a sitemap is never one publish behind the page it describes.
+    if not suppress:
+        entries = [item for item in entries if item["loc"] != page_url]
+        if homepage_indexable:
+            live: dict[str, Any] = {"loc": page_url}
+            lastmod = page.get("updated_at") or page.get("published_at")
+            if lastmod:
+                live["lastmod"] = lastmod
+            images = [url for url in image_urls if url][:_SITEMAP_IMAGES_PER_PAGE]
+            if images:
+                live["images"] = images
+            entries.append(live)
+        entries.sort(key=lambda item: (item["loc"] != root, item["loc"]))
+
+    sitemap = sitemap_xml(entries)
     robots = robots_txt(f"https://{custom_domain}/sitemap.xml", allow=not suppress)
     prefix = f"{homepage_page_id}/"
     cache = "public, max-age=300"
@@ -1711,11 +1847,16 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     s3_client.put_object(Bucket=pages_bucket, Key=prefix + "robots.txt", Body=robots.encode("utf-8"),
                          ContentType="text/plain; charset=utf-8", CacheControl=cache)
     key = str(((site or {}).get("seo") or {}).get("indexnow_key") or "").strip()
+    listable = not suppress and homepage_indexable
     if key and listable:
         s3_client.put_object(Bucket=pages_bucket, Key=prefix + f"{key}.txt", Body=key.encode("utf-8"),
                              ContentType="text/plain; charset=utf-8", CacheControl=cache)
-        submit_indexnow(custom_domain, key, [root], opener=indexnow_opener)
-    return {"root": root, "sitemap": root + "sitemap.xml", "indexnow_submitted": bool(key) and listable}
+        # Submit THE PAGE THAT CHANGED, not the root. Pinging the homepage because a product page published
+        # tells the crawler to re-fetch the one URL that did not change, and says nothing about the one that
+        # did — the whole point of IndexNow.
+        submit_indexnow(custom_domain, key, [page_url], opener=indexnow_opener)
+    return {"root": root, "sitemap": root + "sitemap.xml", "urls": len(entries),
+            "indexnow_submitted": bool(key) and listable, "indexnow_url": page_url if (key and listable) else ""}
 
 
 def submit_indexnow(host: str, key: str, urls: list[str], *, opener=None) -> bool:
