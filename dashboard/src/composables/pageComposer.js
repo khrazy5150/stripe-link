@@ -103,6 +103,13 @@ export function excludedSections(offerType) {
   return new Set(offerTypeRule(offerType).excludes || []);
 }
 
+// A chrome default this goal sets, or null when it has no opinion. Mirrors goal_chrome() in
+// domain/composition.py — the preview and the published page must agree about whether the breadcrumb is on.
+export function goalChrome(goal, key) {
+  const value = (GOALS[goal] || {}).chrome || {};
+  return typeof value[key] === "boolean" ? value[key] : null;
+}
+
 // The two OFFER-LESS compositions. Mirrors OFFERLESS_COMPOSITIONS / offerless_composition() /
 // page_composition_key() in domain/composition.py — see plans/OFFERLESS_PAGES_IN_BUILDER.md P1 for why
 // these exist at all: with no offer, composition_key() falls through to `single`, under which the price

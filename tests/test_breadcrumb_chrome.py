@@ -145,6 +145,106 @@ class BuilderTests(unittest.TestCase):
         self.assertIn('LEAD_COMPOSITION_TYPES = new Set(["lead_capture", "lead_call", "lead_bridge", "lead_social"])',
                       BUILDER)
 
+    def test_the_builder_default_consults_the_goal_too(self):
+        """Otherwise the preview shows a trail the published page will not have, which is the exact
+        preview/publish disagreement the parity tests in this file exist for."""
+        body = BUILDER.split("const breadcrumbDefault = computed(", 1)[1].split("\n});", 1)[0]
+        self.assertIn('goalChrome(builderGoal.value, "breadcrumb")', body)
+        self.assertIn("LEAD_COMPOSITION_TYPES", body)
+
+
+class GoalDefaultTests(unittest.TestCase):
+    """A goal may set the breadcrumb default (author, 2026-10-22).
+
+    Ad traffic lands on a focused conversion page, and a trail back up into a catalogue is an exit from the
+    thing the click paid for — so `paid_ads` turns it off. `search_seo` turns it on. Configuration, in
+    composition_rules.json, so a new goal sets its own without a renderer change.
+    """
+
+    @staticmethod
+    def _page(goal, **kw):
+        page = {"page_id": "pg1", "sections": []}
+        if goal:
+            page["goal"] = goal
+        page.update(kw)
+        return page
+
+    def test_paid_ads_turns_it_off_on_a_page_that_would_otherwise_have_one(self):
+        self.assertTrue(shows_breadcrumb(_offer(), self._page("")))
+        self.assertFalse(shows_breadcrumb(_offer(), self._page("paid_ads")))
+
+    def test_search_seo_turns_it_on(self):
+        self.assertTrue(shows_breadcrumb(_offer(), self._page("search_seo")))
+        # And it HOLDS it on where the shape alone would have switched it off. A goal outranks the shape;
+        # both are defaults, so the tenant still decides.
+        self.assertFalse(shows_breadcrumb(_lead("capture_email"), self._page("")))
+        self.assertTrue(shows_breadcrumb(_lead("capture_email"), self._page("search_seo")))
+
+    def test_the_other_goals_leave_the_shape_in_charge(self):
+        for goal in ("social", "email_list", "minimal"):
+            with self.subTest(goal=goal):
+                self.assertTrue(shows_breadcrumb(_offer(), self._page(goal)))
+                self.assertFalse(shows_breadcrumb(_lead("social_redirect"), self._page(goal)))
+
+    def test_the_tenants_own_tick_outranks_the_goal(self):
+        for goal, override in (("paid_ads", True), ("search_seo", False)):
+            with self.subTest(goal=goal, override=override):
+                page = self._page(goal, chrome={"breadcrumb": override})
+                self.assertIs(shows_breadcrumb(_offer(), page), override)
+
+    def test_it_is_configuration_not_code(self):
+        """The standing rule for this file's rules: a new goal sets its own chrome without a code change."""
+        from stripe_link.domain.composition import RULES, goal_chrome
+
+        self.assertIs(RULES["goals"]["paid_ads"]["chrome"]["breadcrumb"], False)
+        self.assertIs(RULES["goals"]["search_seo"]["chrome"]["breadcrumb"], True)
+        self.assertIsNone(goal_chrome("social", "breadcrumb"), "a goal with no opinion must return None")
+        self.assertIsNone(goal_chrome("", "breadcrumb"))
+        self.assertIsNone(goal_chrome("nonexistent_goal", "breadcrumb"))
+
+    def test_nothing_is_written_into_the_document(self):
+        """Stored as a DEFAULT, not baked into each new page: a page whose goal changes later has to move
+        with it. Writing the resolved value would freeze today's answer, the mistake the brand label made."""
+        page = self._page("paid_ads")
+        self.assertNotIn("chrome", page)
+        self.assertFalse(shows_breadcrumb(_offer(), page))
+        page["goal"] = "search_seo"
+        self.assertTrue(shows_breadcrumb(_offer(), page))
+
+    def test_the_visible_trail_and_its_markup_move_together(self):
+        """Markup for a breadcrumb a visitor cannot see is the mismatch Google's guidelines call out, so
+        the two must never disagree -- checked on rendered HTML, not on the predicate."""
+        import copy
+        import json
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        fx = lambda n: json.loads((root / "schemas" / "examples" / n).read_text())
+        product, offer, base = (fx("product-creatine-gummies.json"),
+                                fx("offer-creatine-standard.json"),
+                                fx("page-creatine-standard.json"))
+        site = {
+            "document_type": "site", "tenant_id": product["tenant_id"], "site_id": "s1",
+            "name": "Probe Store", "hostname": "probestore.com",
+            "hosting": {"custom_domain": "probestore.com", "verification": {"verified": True}},
+            "indexing": {"eligibility": "eligible"}, "status": "active",
+            "organization": {"name": "Probe Store"},
+            "pages": {"/": {"page_id": "pg_home", "page_type": "homepage", "enabled": True},
+                      "/gummies": {"page_id": base["page_id"], "offer_id": offer["offer_id"],
+                                   "page_type": "landing", "enabled": True}},
+        }
+        for goal, expected in (("paid_ads", False), ("search_seo", True)):
+            with self.subTest(goal=goal):
+                page = copy.deepcopy(base)
+                page["goal"], page["route"] = goal, {"slug": "gummies"}
+                rendered = html_module.render_page(
+                    page, offer, {product["product_id"]: product},
+                    canonical_url="https://probestore.com/gummies", indexable=True, site=site,
+                    page_type="landing", home_url="https://probestore.com/",
+                    api_base_url="https://api.example.com")
+                self.assertIs('class="sl-breadcrumb"' in rendered, expected)
+                # search_seo also switches structured_data on, so its trail is the one that gets markup.
+                self.assertIs('"BreadcrumbList"' in rendered, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

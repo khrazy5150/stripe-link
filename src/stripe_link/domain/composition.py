@@ -107,6 +107,19 @@ def pack_seeds(goal: str) -> list[str]:
     return seeds
 
 
+def goal_chrome(goal: str, key: str) -> bool | None:
+    """A chrome default this goal sets, or None when it has no opinion.
+
+    The goal is a statement about WHY the page exists, and some of the page's furniture follows from that
+    rather than from what it sells: ad traffic lands on a focused conversion page and does not want a trail
+    back up into a catalogue, while a page built to be found in search does. Configuration rather than code
+    so a new goal can set its own without a renderer change — same reason packs live in this file.
+    """
+    value = (_GOALS.get(str(goal or "")) or {}).get("chrome") or {}
+    found = value.get(key)
+    return found if isinstance(found, bool) else None
+
+
 def goal_sections(goal: str) -> set[str]:
     """Governed sections the goal's packs turn on, unioned over the base. Empty until derived head/sidecar
     sections (structured_data, llms_txt) land — see plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 3."""
@@ -353,10 +366,27 @@ def shows_breadcrumb(offer: dict[str, Any], page: dict[str, Any] | None = None) 
     Gates BOTH the visible nav and the BreadcrumbList JSON-LD, which is why it lives inside breadcrumb_trail
     rather than beside one of its callers: structured data has to describe what is on the page, and markup for
     a breadcrumb a visitor cannot see is exactly the mismatch Google's guidelines call out.
+
+    Three inputs, most specific first:
+
+    1. `page.chrome.breadcrumb` — the tenant said so for THIS page, and nothing outranks that.
+    2. The GOAL's own default (author, 2026-10-22). `paid_ads` turns it off: ad traffic lands on a focused
+       conversion page, and a trail back up into a catalogue is an exit from the thing the click paid for.
+       `search_seo` turns it on. Stored as a default rather than written into each new document, so a page
+       whose goal changes later moves with it -- writing the resolved value would freeze today's answer, the
+       mistake the brand label made.
+    3. The composition's default: the lead shapes off, everything else on.
+
+    A goal therefore outranks the shape. That is deliberate but worth knowing: setting `search_seo` on a
+    lead page turns its breadcrumb ON, where the shape alone would have left it off. All three layers are
+    defaults -- the tenant's own tick always wins -- so this orders preferences, not invariants.
     """
     override = ((page or {}).get("chrome") or {}).get("breadcrumb")
     if isinstance(override, bool):
         return override
+    from_goal = goal_chrome(page_goal(page or {}), "breadcrumb")
+    if from_goal is not None:
+        return from_goal
     return not is_lead_composition(offer)
 
 

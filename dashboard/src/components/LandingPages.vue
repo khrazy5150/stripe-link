@@ -2794,7 +2794,7 @@ import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState } from "../composables/pageComposer";
+import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, goalChrome } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -3390,7 +3390,16 @@ const ctaLabelDefault = computed(() =>
 // Mirrors shows_breadcrumb() in domain/composition.py. A breadcrumb says "you are HERE in a hierarchy", which
 // is true of a product inside a catalogue and false of the lead shapes -- a link hub is an identity page, not
 // a node under a store, and a bridge page is noindex by rule, so a crawlable trail on it has no reader.
-const breadcrumbDefault = computed(() => !LEAD_COMPOSITION_TYPES.has(builderOfferType.value));
+//
+// The GOAL outranks the shape (author, 2026-10-22): `paid_ads` turns it off, because ad traffic lands on a
+// focused conversion page and a trail back up into a catalogue is an exit from the thing the click paid for;
+// `search_seo` turns it on. The tenant's own tick still outranks both -- all three layers are defaults, and
+// only a DEVIATION from this value is persisted (see the save payload's `chrome`).
+const breadcrumbDefault = computed(() => {
+  const fromGoal = goalChrome(builderGoal.value, "breadcrumb");
+  if (fromGoal !== null) return fromGoal;
+  return !LEAD_COMPOSITION_TYPES.has(builderOfferType.value);
+});
 // The checkbox binds to the EFFECTIVE value, not the stored one. builder.breadcrumb is undefined until the
 // tenant touches it -- that is what "derive from the shape" looks like in the document -- and an undefined
 // v-model renders unchecked, which would have shown every checkout page as breadcrumb-off while it rendered

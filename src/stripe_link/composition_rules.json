@@ -1124,6 +1124,9 @@
   "goals": {
     "paid_ads": {
       "label": "Paid ads",
+      "chrome": {
+       "breadcrumb": false
+      },
       "note": "Ad traffic converts fast or bounces. Adds a benefits block and an FAQ so the page answers the ad's promise and the obvious objections.",
       "packs": [
         "ad_landing"
@@ -1131,6 +1134,9 @@
     },
     "search_seo": {
       "label": "Search-friendly",
+      "chrome": {
+       "breadcrumb": true
+      },
       "note": "Adds search-friendly content: a prose block, an FAQ, and structured data so search engines can read the page as more than text. The one goal that changes what crawlers see — and the content is what gets a page over the length search engines expect.",
       "packs": [
         "discoverability"
