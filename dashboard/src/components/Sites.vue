@@ -364,13 +364,24 @@
                       <p v-if="providerTip" class="field-note">{{ providerTip }}</p>
                       <div class="dns-field"><span class="dns-field-label">Type</span><code>{{ rec.type }}</code></div>
                       <div class="dns-field">
-                        <span class="dns-field-label">Name</span><code>{{ rec.displayName }}</code>
-                        <button type="button" class="copy-btn" @click="copy(rec.displayName)">{{ copied === rec.displayName ? 'Copied!' : 'Copy' }}</button>
+                        <span class="dns-field-label">Name</span>
+                        <code v-if="rec.nameIsBlank" class="dns-blank">leave blank</code>
+                        <template v-else>
+                          <code>{{ rec.displayName }}</code>
+                          <button type="button" class="copy-btn" @click="copy(rec.displayName)">{{ copied === rec.displayName ? 'Copied!' : 'Copy' }}</button>
+                        </template>
                       </div>
+                      <p v-if="rec.nameNote" class="field-note">{{ rec.nameNote }}</p>
                       <div class="dns-field">
-                        <span class="dns-field-label">Value</span><code class="dns-value">{{ rec.value }}</code>
-                        <button type="button" class="copy-btn" @click="copy(rec.value)">{{ copied === rec.value ? 'Copied!' : 'Copy' }}</button>
+                        <span class="dns-field-label">Value</span>
+                        <span class="dns-values">
+                          <span v-for="v in rec.values" :key="v" class="dns-value-row">
+                            <code class="dns-value">{{ v }}</code>
+                            <button type="button" class="copy-btn" @click="copy(v)">{{ copied === v ? 'Copied!' : 'Copy' }}</button>
+                          </span>
+                        </span>
                       </div>
+                      <p v-if="rec.valueNote" class="field-note">{{ rec.valueNote }}</p>
                       <p v-if="rec.note" class="field-note">{{ rec.note }}</p>
                     </div>
                   </div>
@@ -511,6 +522,7 @@ import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
+import { DNS_PROVIDERS, dnsRecordSteps } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -865,14 +877,7 @@ async function attachPage() {
 }
 const domainDiagnostics = ref({});
 
-const dnsProviders = [
-  { id: "route53", label: "AWS Route 53", fqdn: false },
-  { id: "cloudflare", label: "Cloudflare", fqdn: false },
-  { id: "godaddy", label: "GoDaddy", fqdn: false },
-  { id: "namecheap", label: "Namecheap", fqdn: false },
-  { id: "cpanel", label: "cPanel", fqdn: true },
-  { id: "other", label: "Other / full name", fqdn: true },
-];
+const dnsProviders = DNS_PROVIDERS;
 // LIVE-MODE only, and the reason is reputational, not infrastructural (corrected 2026-10-23). This read
 // "production/Live-only (single prod edge Worker)", which was never quite true and is now plainly false:
 // the setup script provisions a Worker per environment and sandbox has carried its own Cloudflare zone
@@ -900,28 +905,18 @@ const providerTip = computed(() =>
     : `${providerLabel.value} adds your domain automatically — enter only the Name shown (the part before your domain).`,
 );
 
-function rootDomain(domain) {
-  const parts = String(domain || "").split(".");
-  return parts.length > 2 ? parts.slice(-2).join(".") : domain;
-}
-function hostPrefix(fullName, domain) {
-  const root = rootDomain(domain);
-  if (fullName === root) return "@";
-  return fullName.endsWith("." + root) ? fullName.slice(0, -(root.length + 1)) : fullName;
-}
-
 const displayRecords = computed(() => {
   const domain = editing.value?.hosting?.custom_domain || "";
-  return (editing.value?.domain_provisioning?.dns_records || []).map((rec) => {
-    const diag = domainDiagnostics.value[rec.name];
+  const steps = dnsRecordSteps(editing.value?.domain_provisioning?.dns_records || [],
+                               { domain, providerId: dnsProvider.value });
+  return steps.map((step) => {
+    // Diagnostics are keyed by the record's real hostname, so a grouped step reads the one verdict that
+    // covers it -- the apex check asks whether the name answers with A/AAAA, not with which address.
+    const diag = domainDiagnostics.value[step.recordName];
     const resolved = diag ? diag.resolved : null;
-    const isSsl = rec.name.startsWith("_acme-challenge");
     return {
-      type: rec.type,
-      value: rec.value,
-      note: rec.note || "",
-      displayName: providerFqdn.value ? rec.name : hostPrefix(rec.name, domain),
-      stepLabel: isSsl ? "SSL certificate" : "Point your domain",
+      ...step,
+      stepLabel: step.isSsl ? "SSL certificate" : "Point your domain",
       badgeClass: resolved === true ? "ok" : resolved === false ? "bad" : "idle",
       badgeIcon: resolved === true ? "✓" : resolved === false ? "!" : "•",
       statusText: resolved === true ? "Detected" : resolved === false ? (diag.note || "Not found yet") : "",
@@ -1393,6 +1388,27 @@ onMounted(async () => {
   text-transform: uppercase;
   font-weight: 700;
   color: var(--muted);
+}
+/* An apex record set holds several addresses. They are ONE record, so they stack inside one step rather
+   than becoming a second "create a record" instruction the provider would refuse. */
+.dns-values {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.dns-value-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+/* Not a value to type: Route 53 wants the Name field left empty, and a copyable `@` is the mistake. */
+.dns-blank {
+  font-style: italic;
+  color: var(--muted);
+  background: none !important;
+  border-style: dashed !important;
 }
 .dns-field code {
   flex: 1 1 auto;
