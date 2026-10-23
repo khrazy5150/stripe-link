@@ -1,6 +1,6 @@
 # Offer-less pages in the builder (storefront / category / profile)
 
-**Status:** **P1–P4 SHIPPED** (`3d6dcd7`, `2c13465`, `b1ab271`, `7607730`, 2026-10-22). **P5 (sitemap) is all that remains.** Decided 2026-10-22.
+**Status:** **COMPLETE — P1–P5 ALL SHIPPED** 2026-10-22 (`3d6dcd7`, `2c13465`, `b1ab271`, `7607730`, `21fcd6e`). Not yet verified in a browser; not yet exercised on a real custom domain.
 
 The outcome, proven end to end through the real publish gates on a verified custom domain:
 
@@ -268,7 +268,38 @@ description, and Organization + WebSite + CollectionPage(ItemList) + FAQPage.
   `Get yours today!`. Identical across every offer-less page on a Site, and wrong on an About page. Derive
   per shape from the Site organization / category / collection heading.
 
-### P5 — The sitemap (separate, larger)
+### P5 — The sitemap — SHIPPED 2026-10-22 (`21fcd6e`)
+
+Publishing one product page on a twelve-route Site now writes six URLs — `/`, `/about`, `/gummies`,
+`/protein`, `/sticks`, `/widgets` — each with `lastmod` and its own images, and leaves out the
+`/gummies/sale` context view, `/upsell`, `/thank-you`, a disabled draft route, a thin-content demoted page,
+and a page that has not published since this existed.
+
+Indexability **cannot be recomputed** cheaply — the thin-content demotion depends on the rendered word
+count, so only the publisher knows it and only at the moment it rendered. Each publish therefore records
+`indexable` / `lastmod` / `images` on its own Site route entry (`_denormalize_page_crawl`) and the sitemap
+is built from the route map. Absent `indexable` means "not published since this existed" and the page is
+left out.
+
+One entry per PAGE at its own address, keyed by page_id via `site_page_slug` — which already owns the rule
+that a reserved funnel slug is not a page's address. The `/sale` and `/flash-sale` views are the same page
+at a different price, so listing both would be submitting our own duplicate content.
+
+**Two bugs the function had been carrying, neither covered — there were no tests for
+`publish_site_crawl_files` at all, which is also why nothing failed when it changed:**
+
+- The files were written under the page **currently publishing**, while `custom_domains_resolve` serves
+  `/sitemap.xml` from `{target_page_id}/sitemap.xml`, the Site's **root** page. Publishing anything but the
+  homepage wrote all three files to a prefix nothing reads. Harmless while the sitemap only described the
+  homepage; fatal to P5.
+- **IndexNow was always pinged with the root**, so publishing a product page told the crawler to re-fetch
+  the one URL that had not changed. It now submits the page that published.
+
+The denormalization sits in its **own** try, not the route-attach block below it: that block swallows
+everything so a route failure cannot block a publish, so a bad Site write sharing it would have skipped
+`_sync_domain_index` and left the edge resolver stale with nothing said.
+
+*Original plan for this step, kept for the record:*
 
 `publish_site_crawl_files()` (`publishing.py:1705`) writes **exactly one URL**, the homepage. Even once
 these pages are indexable, nothing advertises them. Tracked separately — it is a Site-level change, not a
