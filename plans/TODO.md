@@ -245,6 +245,41 @@ inert — every outbound call pins its own version (`stripe_client.STRIPE_API_VE
 hand-built requests). The fee read's pin is load-bearing and guarded by
 `tests/test_fee_read_api_version.py`: Basil (2025-03-31) removed `invoice.charge`, which that read needs.
 
+## ⭐⭐ HIGH — sandbox's custom-domain fallback origin points at the LEGACY stripe-cart app (found 2026-10-23)
+
+**One DNS record. Deleting stripe-cart would take sandbox custom domains with it, and nothing would have
+warned anyone** — which is the whole danger: it "just works" today.
+
+```
+domains.jbay.uk  ->  dlxn0y34f7dbz   "jb stripe-link published pages prod"    correct
+domains.jbay.be  ->  d3v471h7qgmfcl  "Short URL routing (go.jbay.be) - prod"  the LEGACY app
+```
+
+`d3v471h7qgmfcl` is stripe-cart's distribution, origin `landing-pages-prod-…s3`, and it carries BOTH
+`go.jbay.be` and `domains.jbay.be` as aliases. `domains.jbay.be` is stripe-link sandbox's Cloudflare-for-
+SaaS **fallback origin** — where Cloudflare sends custom-hostname traffic that no Worker handles.
+
+**Why nobody noticed:** the Worker always handles it first and reverse-proxies to the resolved origin, so
+the fallback is never reached on the happy path. Verified 2026-10-23: `shop.coderbay.net` served 200 from
+`drjfn283z66uz` (stripe-link dev pages) while the fallback pointed at the legacy app the whole time.
+
+**What it costs when it IS reached** — a Worker error, a route misconfiguration, a hostname added outside
+the normal flow: the request falls through to the OLD APPLICATION'S bucket under a tenant's own domain.
+Best case a 404; worse, another tenant's legacy page served from a live storefront hostname.
+
+**Fix: repoint `domains.jbay.be` -> `drjfn283z66uz.cloudfront.net`, proxied.** Mirrors prod's shape.
+Baseline before the change: `domains.jbay.uk` direct returns 403 (its distribution has no matching alias,
+which is the intended inert answer) while `domains.jbay.be` returned 404 from the legacy app. After, both
+should answer alike. Regression check: `shop.coderbay.net` and `quill.jbay.be` must stay 200.
+
+**Do NOT delete `go.jbay.be`.** Still live: `go.jbay.be/0Q8uS8GfNvU` returned 200 on 2026-10-23, served by
+stripe-cart's Lambda@Edge from `tenants/{client_id}/{code}/index.html`. It is DNS-only (grey cloud)
+deliberately, to bypass stripe-link's Worker. That record belongs to the legacy app, not to this one.
+`go.jbay.uk` IS stripe-link's and IS dead (404 for a valid code) — remove it with the short-URL code.
+
+**Follow-up after the repoint:** drop `domains.jbay.be` from `d3v471h7qgmfcl`'s alias list so the legacy
+distribution stops claiming a hostname it no longer serves.
+
 ## ⭐⭐ HIGH — a tenant's custom domain can stop working and nothing tells anyone (found 2026-10-23)
 
 **Plan: `plans/DOMAIN_HEALTH_SWEEP.md`** (written 2026-10-23). Precondition for apex domains — the last
