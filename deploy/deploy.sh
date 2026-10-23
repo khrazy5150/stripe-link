@@ -62,6 +62,24 @@ else
   PARAMETER_OVERRIDES+=("PlatformHostingDomain=jbay.be")
 fi
 
+# Cloudflare for SaaS, per environment. A tenant's custom domain becomes a custom hostname on THIS
+# stack's zone and is told to CNAME at THIS stack's fallback origin -- otherwise the DNS points at the
+# other stack's Worker, which asks the other stack's resolver, which has never heard of the Site. That is
+# not hypothetical: both stacks carried the jbay.uk zone and domains.jbay.uk until 2026-10-23, so a domain
+# connected on sandbox verified successfully and then served a 404 (shop.coderbay.net, found the hard way).
+#
+# SET HERE AND NOT ONLY IN samconfig.toml. This script passes its own --parameter-overrides, so
+# CloudFormation keeps the PREVIOUS stack value for anything absent from the array below and samconfig's
+# copy is never read. Editing samconfig alone deploys nothing -- verified on this very change.
+# Both zones are already configured for SaaS with an active fallback origin.
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  PARAMETER_OVERRIDES+=("CloudflareZoneId=d842792b5a5240f5518f263835220df6")   # jbay.uk
+  PARAMETER_OVERRIDES+=("CustomDomainTargetHost=domains.jbay.uk")
+else
+  PARAMETER_OVERRIDES+=("CloudflareZoneId=d5a70f95c54659e26600cae1bb0ce48a")   # jbay.be
+  PARAMETER_OVERRIDES+=("CustomDomainTargetHost=domains.jbay.be")
+fi
+
 # Link-in-bio apex (plans/CREATOR_DOMAIN_SERVING.md): prod serves creators on jbay.page, dev on
 # test.jbay.page. ONE zone, two Worker routes pointing at the two environments' APIs -- the same live/test
 # split the platform host makes with jbay.uk/jbay.be, without buying a second domain for it. Never a shared
