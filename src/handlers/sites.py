@@ -1091,6 +1091,9 @@ def check_domain(event, repository, site_id, pages_repo=None, mode="test"):
         try:
             refreshed = retrigger_ssl_validation(hostname_id, zone_id=zone_id, api_token=api_token)
             if refreshed:
+                # Rebind, not just the derived pair: the hint below reads verification_errors off this
+                # object, and a stale copy would explain a state we no longer have.
+                cloudflare_hostname = refreshed
                 status, ssl_status = derive_status(cloudflare_hostname=refreshed)
         except CustomDomainError:
             pass
@@ -1137,7 +1140,22 @@ def check_domain(event, repository, site_id, pages_repo=None, mode="test"):
             parts = [f"{d['name']} ({d['note']})" if d.get("note") else d["name"] for d in missing]
             hint = "These records aren't resolving yet — check the name, type, and value exactly as shown: " + "; ".join(parts) + "."
         else:
-            hint = "Your DNS records look correct. Cloudflare is issuing the certificate — this can take a few minutes. Re-check shortly."
+            # Every record resolves and we are still not verified, so DO NOT guess at "the certificate is
+            # issuing" -- that sentence sent a tenant away to wait for something that had already finished
+            # (coderbay.net, 2026-10-23: ssl.status active, hostname pending, cause unreported). Cloudflare
+            # says why in `verification_errors`; quote it rather than inventing a kinder story.
+            errors = [str(err) for err in (cloudflare_hostname.get("verification_errors") or []) if err]
+            if errors and is_apex_domain(domain):
+                hint = ("The certificate has issued. Cloudflare still can't confirm the domain is yours — "
+                        "a root domain has no CNAME to point at us, so it asks for the TXT record above "
+                        "(_cf-custom-hostname) instead. Add that record, then re-check. Cloudflare reports: "
+                        + "; ".join(errors))
+            elif errors:
+                hint = "Your records resolve, but Cloudflare reports: " + "; ".join(errors)
+            elif ssl_status and ssl_status != "active":
+                hint = "Your DNS records look correct. Cloudflare is issuing the certificate — this can take a few minutes. Re-check shortly."
+            else:
+                hint = "Your DNS records look correct. Cloudflare hasn't finished activating the domain yet — re-check shortly."
     return json_response({"site": saved, "status": status, "dns_records": dns_records, "diagnostics": diagnostics, "hint": hint})
 
 

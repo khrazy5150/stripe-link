@@ -916,7 +916,7 @@ const displayRecords = computed(() => {
     const resolved = diag ? diag.resolved : null;
     return {
       ...step,
-      stepLabel: step.isSsl ? "SSL certificate" : "Point your domain",
+      stepLabel: step.isSsl ? "SSL certificate" : step.isOwnership ? "Prove ownership" : "Point your domain",
       badgeClass: resolved === true ? "ok" : resolved === false ? "bad" : "idle",
       badgeIcon: resolved === true ? "✓" : resolved === false ? "!" : "•",
       statusText: resolved === true ? "Detected" : resolved === false ? (diag.note || "Not found yet") : "",

@@ -61,6 +61,14 @@ function multiValueNote(count) {
     : "";
 }
 
+/** Route 53 rejects an unquoted TXT value outright ("Invalid Resource Record"), which reads as a bad
+ *  instruction rather than a formatting rule. Only claimed for the provider it was confirmed on. */
+function txtQuotingNote(type, providerId) {
+  return String(type).toUpperCase() === "TXT" && providerId === "route53"
+    ? "Route 53 wants a TXT value in double quotes — paste it as \"…\" or it refuses the record."
+    : "";
+}
+
 /**
  * Group the server's records into the steps a tenant performs. Rows sharing a type AND a name are one
  * record set with several values, which is what DNS actually stores and what every provider's form expects.
@@ -85,6 +93,9 @@ export function dnsRecordSteps(records, { domain = "", providerId = "other" } = 
       note: record.note || "",
       isApex,
       isSsl: String(record.name || "").startsWith("_acme-challenge"),
+      // An apex proves ownership with this TXT instead of a routing CNAME it cannot have. It is neither
+      // "point your domain" nor a certificate record, and labelling it as either hides what it is for.
+      isOwnership: String(record.name || "").startsWith("_cf-custom-hostname"),
     };
     byKey.set(key, step);
     steps.push(step);
@@ -92,7 +103,8 @@ export function dnsRecordSteps(records, { domain = "", providerId = "other" } = 
   for (const step of steps) {
     // Computed last, because the multi-value note depends on the grouping being finished.
     step.nameNote = step.isApex ? apexNameNote(providerId) : "";
-    step.valueNote = multiValueNote(step.values.length);
+    step.valueNote = [multiValueNote(step.values.length), txtQuotingNote(step.type, providerId)]
+      .filter(Boolean).join(" ");
     step.nameIsBlank = step.displayName === "";
   }
   return steps;

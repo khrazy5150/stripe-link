@@ -140,3 +140,49 @@ class RecordsGivenToTheTenantTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnershipProofTests(unittest.TestCase):
+    """An apex has to prove it is yours, and it cannot do it the way everything else does.
+
+    Found on the first real apex connect (coderbay.net, 2026-10-23). Cloudflare had issued the
+    certificate -- `ssl.status: active` -- and still held the hostname at:
+
+        status: pending
+        verification_errors: ["custom hostname does not CNAME to this zone."]
+
+    Cloudflare treats the routing CNAME as the ownership proof. An apex has no CNAME to point, only A
+    records at anycast addresses Cloudflare does not accept as evidence, so the `_cf-custom-hostname` TXT
+    is the only route — and `custom_hostname_dns_records` returned before ever reaching it whenever DCV
+    delegation was in play, which is always. The tenant was shown five records, every one of them
+    resolving, and told to wait for something that had already finished.
+    """
+
+    OWNERSHIP = {"ownership_verification": {"type": "txt", "name": "_cf-custom-hostname.example.com",
+                                            "value": "b2103dcc-9713-49cc-9624-3bcd9d8aafc3"}}
+
+    def test_an_apex_is_given_the_ownership_txt_alongside_dcv_delegation(self):
+        records = custom_hostname_dns_records(
+            self.OWNERSHIP, hostname="example.com", dns_target="domains.jbay.uk",
+            dcv_delegation_uuid="u1", apex_ipv4=("104.21.71.205",))
+        txt = [r for r in records if r["type"] == "TXT"]
+        self.assertEqual(len(txt), 1)
+        self.assertEqual(txt[0]["name"], "_cf-custom-hostname.example.com")
+        self.assertEqual(txt[0]["value"], "b2103dcc-9713-49cc-9624-3bcd9d8aafc3")
+        self.assertIn("pending", txt[0]["note"])          # says what happens without it
+        # ...and the DCV delegation it used to displace is still there.
+        self.assertTrue(any(r["name"] == "_acme-challenge.example.com" for r in records))
+
+    def test_a_subdomain_is_not_asked_to_prove_what_its_cname_proves(self):
+        records = custom_hostname_dns_records(
+            self.OWNERSHIP, hostname="shop.example.com", dns_target="domains.jbay.uk",
+            dcv_delegation_uuid="u1")
+        self.assertFalse([r for r in records if r["type"] == "TXT"])
+
+    def test_a_create_response_without_the_token_yields_no_phantom_record(self):
+        # Cloudflare omits ownership_verification on some create responses and includes it on every read,
+        # so a connect that starts without it picks it up at the first Verify. It must not emit a blank.
+        records = custom_hostname_dns_records(
+            {}, hostname="example.com", dns_target="domains.jbay.uk", dcv_delegation_uuid="u1",
+            apex_ipv4=("104.21.71.205",))
+        self.assertFalse([r for r in records if r["type"] == "TXT"])

@@ -434,6 +434,45 @@ class SitesDomainTests(unittest.TestCase):
             body = json.loads(self._check()["body"])
         self.assertIn("issuing the certificate", body["hint"])
 
+    def _apex_site(self):
+        site = self._provisioned_site()
+        site["hosting"]["custom_domain"] = "axelmart.com"
+        return site
+
+    def test_apex_hint_names_the_ownership_record_instead_of_blaming_the_certificate(self):
+        """The failure the first real apex connect hit (coderbay.net, 2026-10-23).
+
+        Every record resolved, the certificate was ALREADY issued, and the panel said "Cloudflare is
+        issuing the certificate — re-check shortly". The tenant was sent away to wait for something that
+        had finished, for a state that would never have resolved itself: Cloudflare wanted an ownership
+        record nothing had shown them. A hint must not invent a kinder cause than the one on the record.
+        """
+        self.repo.put(self._apex_site())
+        cf = {"id": "cf_123", "status": "pending", "ssl": {"status": "active"},
+              "verification_errors": ["custom hostname does not CNAME to this zone."],
+              "ownership_verification": {"type": "txt", "name": "_cf-custom-hostname.axelmart.com",
+                                         "value": "b2103dcc"}}
+        diag = [{"type": "A", "name": "axelmart.com", "value": "104.21.71.205", "resolved": True}]
+        with patch.object(sites_handler, "get_custom_hostname", return_value=cf), \
+             patch.object(sites_handler, "diagnose_dns_records", return_value=diag):
+            body = json.loads(self._check()["body"])
+        self.assertIn("_cf-custom-hostname", body["hint"])
+        self.assertIn("custom hostname does not CNAME to this zone.", body["hint"])  # Cloudflare's words
+        self.assertNotIn("issuing the certificate", body["hint"])
+        # ...and the record it names is actually in the list the tenant is looking at.
+        self.assertIn("_cf-custom-hostname.axelmart.com", {r["name"] for r in body["dns_records"]})
+
+    def test_a_subdomain_with_a_verification_error_is_quoted_not_guessed_at(self):
+        self.repo.put(self._provisioned_site())
+        cf = {"id": "cf_123", "status": "pending", "ssl": {"status": "active"},
+              "verification_errors": ["custom hostname does not CNAME to this zone."]}
+        diag = [{"type": "CNAME", "name": "shop.axelmart.com", "value": "domains.jbay.uk", "resolved": True}]
+        with patch.object(sites_handler, "get_custom_hostname", return_value=cf), \
+             patch.object(sites_handler, "diagnose_dns_records", return_value=diag):
+            body = json.loads(self._check()["body"])
+        self.assertIn("custom hostname does not CNAME to this zone.", body["hint"])
+        self.assertNotIn("issuing the certificate", body["hint"])
+
     def test_check_pending_dns_stays_unverified(self):
         self.repo.put(self._provisioned_site())
         with patch.object(sites_handler, "get_custom_hostname", return_value=CF_PENDING):
