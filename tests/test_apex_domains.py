@@ -33,11 +33,11 @@ class DeployConfigTests(unittest.TestCase):
     """Asserted on the deploy script, because that is where the value is decided — the same reason the
     creator apex and the zone IDs are asserted there, and samconfig.toml is never read by a deploy."""
 
-    def test_the_apex_addresses_are_empty(self):
+    def test_a_deploy_never_sets_the_apex_addresses(self):
         # Not "not yet procured" -- actively harmful. Set, they suppress the ALIAS/flattening row that is
-        # the working apex path, and replace it with A records Cloudflare will never activate.
-        self.assertIn('CloudflareApexIpv4=")', DEPLOY)
-        self.assertIn('CloudflareApexIpv6=")', DEPLOY)
+        # the working apex path and replace it with A records Cloudflare will never activate.
+        self.assertNotIn('PARAMETER_OVERRIDES+=("CloudflareApexIpv4', DEPLOY)
+        self.assertNotIn('PARAMETER_OVERRIDES+=("CloudflareApexIpv6', DEPLOY)
 
     def test_the_zones_own_anycast_addresses_are_not_published_as_apex_targets(self):
         # The exact mistake, by value, so re-adding it fails here rather than at a tenant's registrar.
@@ -45,11 +45,15 @@ class DeployConfigTests(unittest.TestCase):
             self.assertNotIn(f"CloudflareApexIpv4={address}", DEPLOY)
             self.assertNotIn(f"CloudflareApexIpv4=\"{address}", DEPLOY)
 
-    def test_they_are_passed_rather_than_omitted(self):
-        """CloudFormation keeps the PREVIOUS value for a parameter absent from --parameter-overrides, so
-        deleting the lines would have left both stacks running the addresses that do not work."""
+    def test_a_stack_carrying_apex_addresses_stops_the_deploy(self):
+        """They cannot be passed as empty — the shorthand is rejected and the long form is dropped, so
+        CloudFormation keeps the previous value either way (both tried, 2026-10-23). Nothing is passed;
+        the live value is compared against the intent instead, and a mismatch fails the deploy rather
+        than quietly handing the next apex tenant records that can never verify."""
         block = DEPLOY.split("Apex custom domains", 1)[1].split("Link-in-bio apex", 1)[0]
-        self.assertIn("PARAMETER_OVERRIDES+=", block)
+        self.assertIn("CloudflareApexIpv4'].ParameterValue", block)   # reads the LIVE value
+        self.assertIn("exit 1", block)
+        self.assertNotIn("PARAMETER_OVERRIDES+=", block)              # passing it does not work
 
     def test_the_refusal_is_recorded_where_someone_would_readd_them(self):
         block = DEPLOY.split("Apex custom domains", 1)[1].split("Link-in-bio apex", 1)[0]

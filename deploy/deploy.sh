@@ -102,11 +102,28 @@ fi
 #
 # Set them ONLY from an Apex Proxying allocation. Never from `dig domains.jbay.uk`.
 #
-# PASSED EXPLICITLY AS EMPTY, not omitted: CloudFormation keeps the PREVIOUS value for any parameter
-# missing from --parameter-overrides, so simply deleting these lines would leave both stacks running the
-# addresses that do not work.
-PARAMETER_OVERRIDES+=("CloudflareApexIpv4=")
-PARAMETER_OVERRIDES+=("CloudflareApexIpv6=")
+# THEY CANNOT SIMPLY BE PASSED AS EMPTY, which is why this is a guard and not an override. The shorthand
+# `CloudflareApexIpv4=` is rejected outright ("is not in valid format"), and the long
+# `ParameterKey=CloudflareApexIpv4,ParameterValue=` form parses but is DROPPED -- CloudFormation then
+# keeps the previous value. Both were tried on 2026-10-23 and the changeset came back still carrying the
+# old addresses. Clearing them took a one-off `update-stack --use-previous-template` with every other
+# parameter on UsePreviousValue.
+#
+# So: nothing is passed, and instead the live value is compared against the intent. Stored state and
+# served reality drifting with nothing comparing them is the shape of most of this week's bugs; here the
+# comparison costs one describe-stacks and turns a silent wrong answer into a stopped deploy.
+APEX_IPS_LIVE="$(aws cloudformation describe-stacks \
+  --region "${REGION}" --stack-name "${STACK_NAME}" \
+  --query "Stacks[0].Parameters[?ParameterKey=='CloudflareApexIpv4'].ParameterValue | [0]" \
+  --output text 2>/dev/null)"
+if [[ -n "${APEX_IPS_LIVE}" && "${APEX_IPS_LIVE}" != "None" ]]; then
+  echo "ERROR: ${STACK_NAME} has CloudflareApexIpv4='${APEX_IPS_LIVE}'." >&2
+  echo "       Apex A records only work with addresses Cloudflare allocated to this SaaS zone through" >&2
+  echo "       its Apex Proxying add-on. Anything else hands tenants records that can never verify and" >&2
+  echo "       suppresses the ALIAS row that does work. See the comment above this check." >&2
+  echo "       If Apex Proxying IS now in place, remove this guard in the same change that sets them." >&2
+  exit 1
+fi
 
 # Link-in-bio apex (plans/CREATOR_DOMAIN_SERVING.md): prod serves creators on jbay.page, dev on
 # test.jbay.page. ONE zone, two Worker routes pointing at the two environments' APIs -- the same live/test
