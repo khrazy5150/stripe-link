@@ -444,8 +444,8 @@ class SitesDomainTests(unittest.TestCase):
 
         Every record resolved, the certificate was ALREADY issued, and the panel said "Cloudflare is
         issuing the certificate — re-check shortly". The tenant was sent away to wait for something that
-        had finished, for a state that would never have resolved itself: Cloudflare wanted an ownership
-        record nothing had shown them. A hint must not invent a kinder cause than the one on the record.
+        had finished, in a state that would never have resolved itself. A hint must not invent a kinder
+        cause than the one on the record; quoting Cloudflare is what exposed the real one.
         """
         self.repo.put(self._apex_site())
         cf = {"id": "cf_123", "status": "pending", "ssl": {"status": "active"},
@@ -456,11 +456,14 @@ class SitesDomainTests(unittest.TestCase):
         with patch.object(sites_handler, "get_custom_hostname", return_value=cf), \
              patch.object(sites_handler, "diagnose_dns_records", return_value=diag):
             body = json.loads(self._check()["body"])
-        self.assertIn("_cf-custom-hostname", body["hint"])
         self.assertIn("custom hostname does not CNAME to this zone.", body["hint"])  # Cloudflare's words
         self.assertNotIn("issuing the certificate", body["hint"])
-        # ...and the record it names is actually in the list the tenant is looking at.
-        self.assertIn("_cf-custom-hostname.axelmart.com", {r["name"] for r in body["dns_records"]})
+        # The actionable part: Route 53 cannot do this, so name the two things that can.
+        self.assertIn("flattening", body["hint"])
+        self.assertIn("www", body["hint"])
+        # And do NOT send them after the ownership token -- Cloudflare refuses it for this very shape.
+        self.assertNotIn("_cf-custom-hostname", body["hint"])
+        self.assertFalse([r for r in body["dns_records"] if r["type"] == "TXT"])
 
     def test_a_subdomain_with_a_verification_error_is_quoted_not_guessed_at(self):
         self.repo.put(self._provisioned_site())

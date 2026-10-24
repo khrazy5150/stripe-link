@@ -1,9 +1,21 @@
 """Apex custom domains (plans/SITE_OBJECT.md 2.6b): `example.com`, not just `shop.example.com`.
 
-DNS forbids a CNAME at a zone apex, and Route 53's ALIAS only targets AWS resources -- so until the apex
-IPs were published, a tenant whose DNS lives at Route 53, GoDaddy or Namecheap could not point their root
-domain at us at all. The record builder has handled both shapes for a while; what was missing was the
-addresses, which the deploy script decides.
+**The working apex path is the tenant's own CNAME flattening / ALIAS / ANAME, and there is currently no
+other one.** This file asserted the opposite for a few hours on 2026-10-23 and was wrong, so the evidence
+is here rather than only in a plan.
+
+The claim was that publishing each zone's public anycast pair as A records made apex work everywhere,
+Route 53 included. `curl --resolve shop.coderbay.net:443:<either pair>` serving 200 was taken as proof.
+It proved ROUTING. The gate is VERIFICATION, and Cloudflare refused the first real apex in its own words:
+
+    "custom hostname does not CNAME to this zone."
+    "The hostname is using Cloudflare and cannot be activated with an TXT or HTTP validation token.
+     To activate the custom hostname, the DNS target needs to point to the SaaS zone"
+
+Pointing an apex AT Cloudflare makes the hostname "using Cloudflare", which also disqualifies the
+token-validation fallback -- so the A-record path does not merely fail, it closes the only other door.
+Apex A records need addresses allocated to this SaaS zone through Cloudflare's Apex Proxying add-on,
+which we do not have. Hence the parameters are empty and these tests hold them there.
 """
 
 import os
@@ -17,58 +29,35 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEPLOY = (ROOT / "deploy" / "deploy.sh").read_text(encoding="utf-8")
 
 
-def _apex_branch(environment):
-    """The deploy script's apex block for one environment, so a prod value cannot satisfy a dev assertion."""
-    block = DEPLOY.split("Re-read with `dig +short A domains.jbay.uk`", 1)[1]
-    prod, dev = block.split("else", 1)
-    return prod if environment == "prod" else dev.split("\nfi", 1)[0]
-
-
-def _zone_branch(environment):
-    """The block above it that picks the Cloudflare zone and the routing target."""
-    block = DEPLOY.split("Both zones are already configured for SaaS", 1)[1]
-    prod, dev = block.split("else", 1)
-    return prod if environment == "prod" else dev.split("\nfi", 1)[0]
-
-
 class DeployConfigTests(unittest.TestCase):
-    """Asserted on the deploy script, because that is where the value is actually decided — the same
-    reason the creator apex and the zone IDs are asserted there. A constant in Python would be a second
-    copy of a fact CloudFormation owns, and samconfig.toml is never read by a deploy.sh deploy."""
+    """Asserted on the deploy script, because that is where the value is decided — the same reason the
+    creator apex and the zone IDs are asserted there, and samconfig.toml is never read by a deploy."""
 
-    def test_both_environments_publish_apex_addresses_at_all(self):
-        # Empty is the "not procured yet" state, and it silently downgrades every apex tenant to
-        # ALIAS/ANAME guidance their provider may not support.
-        for environment in ("prod", "dev"):
-            branch = _apex_branch(environment)
-            self.assertIn("CloudflareApexIpv4=", branch)
-            self.assertIn("CloudflareApexIpv6=", branch)
-            self.assertNotIn("CloudflareApexIpv4=\"\"", branch)
+    def test_the_apex_addresses_are_empty(self):
+        # Not "not yet procured" -- actively harmful. Set, they suppress the ALIAS/flattening row that is
+        # the working apex path, and replace it with A records Cloudflare will never activate.
+        self.assertIn('CloudflareApexIpv4=")', DEPLOY)
+        self.assertIn('CloudflareApexIpv6=")', DEPLOY)
 
-    def test_each_environment_publishes_its_own_zone_pair(self):
-        # The pair must come from the zone the tenant's custom hostname lives on. Both stacks carried the
-        # jbay.uk zone until 2026-10-23 and a sandbox domain verified then served a 404; this is the same
-        # mistake one layer down, and it would look like a working apex that serves nothing.
-        prod, dev = _apex_branch("prod"), _apex_branch("dev")
-        self.assertIn("104.21.71.205", prod)        # domains.jbay.uk
-        self.assertIn("104.21.88.48", dev)          # domains.jbay.be
-        self.assertNotIn("104.21.88.48", prod)
-        self.assertNotIn("104.21.71.205", dev)
+    def test_the_zones_own_anycast_addresses_are_not_published_as_apex_targets(self):
+        # The exact mistake, by value, so re-adding it fails here rather than at a tenant's registrar.
+        for address in ("104.21.71.205", "172.67.149.43", "104.21.88.48", "172.67.173.6"):
+            self.assertNotIn(f"CloudflareApexIpv4={address}", DEPLOY)
+            self.assertNotIn(f"CloudflareApexIpv4=\"{address}", DEPLOY)
 
-    def test_ipv6_is_published_too(self):
-        # A tenant whose resolver is IPv6-only gets nothing from A records alone.
-        self.assertIn("2606:4700:3035::6815:47cd", _apex_branch("prod"))
-        self.assertIn("2606:4700:3033::6815:5830", _apex_branch("dev"))
+    def test_they_are_passed_rather_than_omitted(self):
+        """CloudFormation keeps the PREVIOUS value for a parameter absent from --parameter-overrides, so
+        deleting the lines would have left both stacks running the addresses that do not work."""
+        block = DEPLOY.split("Apex custom domains", 1)[1].split("Link-in-bio apex", 1)[0]
+        self.assertIn("PARAMETER_OVERRIDES+=", block)
 
-    def test_the_apex_pair_and_the_routing_target_name_the_same_zone(self):
-        # Whatever the addresses are, they and CustomDomainTargetHost must describe ONE zone per
-        # environment. The addresses carry the zone they were read from as a trailing comment, which is
-        # what makes that checkable here instead of only by resolving them.
-        for environment, zone in (("prod", "jbay.uk"), ("dev", "jbay.be")):
-            self.assertIn(zone, _apex_branch(environment))
-            self.assertIn(f"CustomDomainTargetHost=domains.{zone}", _zone_branch(environment))
+    def test_the_refusal_is_recorded_where_someone_would_readd_them(self):
+        block = DEPLOY.split("Apex custom domains", 1)[1].split("Link-in-bio apex", 1)[0]
+        self.assertIn("Apex Proxying", block)
+        self.assertIn("using Cloudflare", block)          # Cloudflare's own words, not a paraphrase
 
-    def test_the_template_declares_and_hands_over_the_parameters(self):
+    def test_the_template_still_declares_the_parameters(self):
+        # The code path stays, ready for an Apex Proxying allocation; only the values are withheld.
         template = (ROOT / "template.yaml").read_text(encoding="utf-8")
         self.assertIn("CloudflareApexIpv4:", template)
         self.assertIn("CLOUDFLARE_APEX_IPV4: !Ref CloudflareApexIpv4", template)
@@ -93,96 +82,86 @@ class ProxyIpParsingTests(unittest.TestCase):
 
 
 class RecordsGivenToTheTenantTests(unittest.TestCase):
-    PROD_V4 = ("104.21.71.205", "172.67.149.43")
-    PROD_V6 = ("2606:4700:3035::6815:47cd",)
-
     def _records(self, hostname, **over):
-        kwargs = {"dns_target": "domains.jbay.uk", "dcv_delegation_uuid": "u1",
-                  "apex_ipv4": self.PROD_V4, "apex_ipv6": self.PROD_V6}
+        kwargs = {"dns_target": "domains.jbay.uk", "dcv_delegation_uuid": "u1"}
         kwargs.update(over)
         return custom_hostname_dns_records({}, hostname=hostname, **kwargs)
 
-    def test_a_route53_tenant_gets_records_route53_can_actually_create(self):
-        # The whole point of 2.6b. An ALIAS row is unactionable at Route 53 (its ALIAS targets only AWS
-        # resources), so the presence of A/AAAA and the ABSENCE of ALIAS are both the requirement.
-        records = self._records("example.com")
-        self.assertEqual([r["type"] for r in records if r.get("apex")], ["A", "A", "AAAA"])
-        self.assertNotIn("ALIAS", [r["type"] for r in records])
-        self.assertEqual([r["name"] for r in records if r.get("apex")], ["example.com"] * 3)
+    def test_an_apex_is_told_to_flatten_a_cname_at_the_root(self):
+        # The one shape Cloudflare accepts: the apex must RESOLVE THROUGH the SaaS target, not merely
+        # point at Cloudflare. Flattening/ALIAS/ANAME does that; A records at shared addresses do not.
+        routing = self._records("example.com")[0]
+        self.assertEqual(routing["type"], "ALIAS")
+        self.assertEqual(routing["value"], "domains.jbay.uk")
+        self.assertEqual(routing["apex"], "true")
+        self.assertIn("ALIAS", routing["note"])
 
     def test_the_certificate_record_is_still_a_subdomain_cname(self):
-        # Why apex certificates work at all: `_acme-challenge.example.com` is a subdomain, so it can hold
-        # the DCV delegation CNAME that lets Cloudflare renew without the tenant touching anything again.
+        # Why apex certificates work at all, and they do -- the cert issued for coderbay.net while the
+        # hostname itself stayed pending. `_acme-challenge.example.com` is a subdomain, so it can hold the
+        # DCV delegation CNAME that lets Cloudflare renew without the tenant touching anything again.
         dcv = [r for r in self._records("example.com") if r["name"].startswith("_acme-challenge")]
         self.assertEqual([r["type"] for r in dcv], ["CNAME"])
         self.assertIn("dcv.cloudflare.com", dcv[0]["value"])
 
-    def test_a_subdomain_is_unaffected_by_apex_addresses_being_configured(self):
+    def test_a_subdomain_takes_the_ordinary_routing_cname(self):
         records = self._records("shop.example.com")
         self.assertEqual(records[0], {"type": "CNAME", "name": "shop.example.com",
                                       "value": "domains.jbay.uk"})
         self.assertFalse([r for r in records if r.get("apex")])
 
-    def test_the_www_sibling_takes_a_cname_because_it_is_a_subdomain(self):
-        # An apex Site also provisions `www.<apex>` to 301 at the canonical root. Giving it the apex
-        # addresses would be wrong twice: unnecessary, and it would survive an addressing change.
+    def test_the_www_sibling_is_a_subdomain_and_verifies_on_its_own(self):
+        # Worth pinning: on the connect that failed, www.coderbay.net went fully active while the apex
+        # never could. The www hostname is the fallback a Route 53 tenant is now pointed at.
         self.assertFalse(is_apex_domain("www.example.com"))
-        records = self._records("www.example.com")
-        self.assertEqual(records[0]["type"], "CNAME")
+        self.assertEqual(self._records("www.example.com")[0]["type"], "CNAME")
 
-    def test_without_addresses_the_apex_falls_back_to_alias_guidance(self):
-        # The pre-2.6b behaviour has to keep working: a new environment deploys with these unset.
-        records = self._records("example.com", apex_ipv4=(), apex_ipv6=())
-        routing = records[0]
-        self.assertEqual(routing["type"], "ALIAS")
-        self.assertIn("ALIAS", routing["note"])
+    def test_apex_addresses_still_produce_a_and_aaaa_if_they_are_ever_allocated(self):
+        # The code path is not deleted -- an Apex Proxying allocation would make it correct. What is
+        # withheld is the VALUES; see DeployConfigTests.
+        records = self._records("example.com", apex_ipv4=("192.0.2.1",), apex_ipv6=("2606:4700::1",))
+        self.assertEqual([r["type"] for r in records if r.get("apex")], ["A", "AAAA"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+class OwnershipTokenTests(unittest.TestCase):
+    """Cloudflare offers an apex a `_cf-custom-hostname` TXT, and it is not a way in.
 
+    It was shown to tenants for about an hour on 2026-10-23, because it looked exactly like the missing
+    piece: the certificate was active, the hostname was pending, and here was an unused ownership record.
+    The tenant added it. Cloudflare's answer:
 
-class OwnershipProofTests(unittest.TestCase):
-    """An apex has to prove it is yours, and it cannot do it the way everything else does.
+        "The hostname is using Cloudflare and cannot be activated with an TXT or HTTP validation token.
+         To activate the custom hostname, the DNS target needs to point to the SaaS zone"
 
-    Found on the first real apex connect (coderbay.net, 2026-10-23). Cloudflare had issued the
-    certificate -- `ssl.status: active` -- and still held the hostname at:
-
-        status: pending
-        verification_errors: ["custom hostname does not CNAME to this zone."]
-
-    Cloudflare treats the routing CNAME as the ownership proof. An apex has no CNAME to point, only A
-    records at anycast addresses Cloudflare does not accept as evidence, so the `_cf-custom-hostname` TXT
-    is the only route — and `custom_hostname_dns_records` returned before ever reaching it whenever DCV
-    delegation was in play, which is always. The tenant was shown five records, every one of them
-    resolving, and told to wait for something that had already finished.
+    There is no configuration in which it helps. An apex pointed at Cloudflare addresses is "using
+    Cloudflare" and disqualified; an apex flattened to the SaaS target proves ownership by that CNAME and
+    is never asked. A record a tenant can complete and still be refused for is worse than no record.
     """
 
     OWNERSHIP = {"ownership_verification": {"type": "txt", "name": "_cf-custom-hostname.example.com",
                                             "value": "b2103dcc-9713-49cc-9624-3bcd9d8aafc3"}}
 
-    def test_an_apex_is_given_the_ownership_txt_alongside_dcv_delegation(self):
+    def test_an_apex_is_not_shown_a_token_cloudflare_will_refuse(self):
         records = custom_hostname_dns_records(
             self.OWNERSHIP, hostname="example.com", dns_target="domains.jbay.uk",
-            dcv_delegation_uuid="u1", apex_ipv4=("104.21.71.205",))
-        txt = [r for r in records if r["type"] == "TXT"]
-        self.assertEqual(len(txt), 1)
-        self.assertEqual(txt[0]["name"], "_cf-custom-hostname.example.com")
-        self.assertEqual(txt[0]["value"], "b2103dcc-9713-49cc-9624-3bcd9d8aafc3")
-        self.assertIn("pending", txt[0]["note"])          # says what happens without it
-        # ...and the DCV delegation it used to displace is still there.
-        self.assertTrue(any(r["name"] == "_acme-challenge.example.com" for r in records))
+            dcv_delegation_uuid="u1")
+        self.assertFalse([r for r in records if r["type"] == "TXT"])
+        self.assertEqual([r["type"] for r in records], ["ALIAS", "CNAME"])
 
-    def test_a_subdomain_is_not_asked_to_prove_what_its_cname_proves(self):
+    def test_a_subdomain_is_not_shown_one_either(self):
         records = custom_hostname_dns_records(
             self.OWNERSHIP, hostname="shop.example.com", dns_target="domains.jbay.uk",
             dcv_delegation_uuid="u1")
         self.assertFalse([r for r in records if r["type"] == "TXT"])
 
-    def test_a_create_response_without_the_token_yields_no_phantom_record(self):
-        # Cloudflare omits ownership_verification on some create responses and includes it on every read,
-        # so a connect that starts without it picks it up at the first Verify. It must not emit a blank.
+    def test_the_no_delegation_fallback_still_uses_it(self):
+        # A zone without DCV delegation has no DCV CNAME to offer, so Cloudflare's rotating ownership TXT
+        # is all there is. That branch is untouched by any of this.
         records = custom_hostname_dns_records(
-            {}, hostname="example.com", dns_target="domains.jbay.uk", dcv_delegation_uuid="u1",
-            apex_ipv4=("104.21.71.205",))
-        self.assertFalse([r for r in records if r["type"] == "TXT"])
+            self.OWNERSHIP, hostname="shop.example.com", dns_target="domains.jbay.uk",
+            dcv_delegation_uuid="")
+        self.assertIn("TXT", [r["type"] for r in records])
+
+
+if __name__ == "__main__":
+    unittest.main()

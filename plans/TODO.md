@@ -286,7 +286,15 @@ distribution stops claiming a hostname it no longer serves.
 dispatched from `SitesFunction` on a `rate(1 day)` schedule, recorded through `update_domain_health`,
 covered by `tests/test_domain_health_sweep.py`. The `www.` sibling is deliberately out of scope — see the
 plan's §4. First pass: dev reported `shop.coderbay.net` healthy and said nothing; prod has no custom
-domain to check yet. The apex addresses it unblocked are set too — `SITE_OBJECT.md` Phase 2.6b is complete.
+domain to check yet.
+
+**The apex addresses it was built to unblock turned out not to work** — Cloudflare will not activate an
+apex that is merely pointed at its shared anycast IPs (*"the DNS target needs to point to the SaaS
+zone"*), and doing so also disqualifies token validation. Reverted to empty the same day; see
+`SITE_OBJECT.md` Phase 2.6b. Apex works via the tenant's own CNAME flattening/ALIAS, or via Cloudflare's
+paid Apex Proxying add-on. **Open: should `www` be canonical for tenants whose registrar cannot do
+apex?** Today every apex connect makes `www` a 301 to the apex, which for those tenants points the only
+working hostname at the one that cannot serve.
 
 **Plan: `plans/DOMAIN_HEALTH_SWEEP.md`** (written 2026-10-23). Precondition for apex domains — the last
 open item on `SITE_OBJECT.md` Phase 2.6b.

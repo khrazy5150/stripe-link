@@ -1146,9 +1146,14 @@ def check_domain(event, repository, site_id, pages_repo=None, mode="test"):
             # says why in `verification_errors`; quote it rather than inventing a kinder story.
             errors = [str(err) for err in (cloudflare_hostname.get("verification_errors") or []) if err]
             if errors and is_apex_domain(domain):
-                hint = ("The certificate has issued. Cloudflare still can't confirm the domain is yours — "
-                        "a root domain has no CNAME to point at us, so it asks for the TXT record above "
-                        "(_cf-custom-hostname) instead. Add that record, then re-check. Cloudflare reports: "
+                # Cloudflare will not activate an apex that is merely POINTED at it; the apex has to
+                # resolve THROUGH the SaaS target, which means the provider's CNAME flattening / ALIAS /
+                # ANAME. Route 53 has none, so for that tenant the honest answer is a different provider
+                # or the www hostname -- not "wait a bit longer".
+                hint = ("The certificate has issued, but Cloudflare won't activate the root domain: it "
+                        "needs the apex to resolve through our target, which takes a DNS provider with "
+                        "CNAME flattening, ALIAS or ANAME. Route 53 has none of those — use your www "
+                        "subdomain, or move DNS to a provider that does. Cloudflare reports: "
                         + "; ".join(errors))
             elif errors:
                 hint = "Your records resolve, but Cloudflare reports: " + "; ".join(errors)

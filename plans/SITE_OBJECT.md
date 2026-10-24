@@ -310,7 +310,7 @@ a page-specific meta description. Read that plan alongside this section.
   reference (thank-you page_id with no published artifact) attaches a slug that 404s — a tenant data issue, not
   a routing bug; the buyer-after-purchase hop for such a funnel was already broken pre-2.6.
 
-**Phase 2.6b — Apex / root domain support. COMPLETE (dev+prod 2026-10-23): A/AAAA apex proxying is on.**
+**Phase 2.6b — Apex / root domain support. PARTIAL: flattening/ALIAS works; Route 53 and friends do not.**
 - Serving infra already handled apex (resolver/Worker key by hostname); the real work was the DNS-instruction
   layer. `assert_valid_domain` no longer rejects apex. `custom_hostname_dns_records` emits an ALIAS/flattened
   CNAME → `domains.jbay.uk` by default (works on Cloudflare's CNAME-flattening, DNSimple, ANAME/ALIAS
@@ -320,30 +320,43 @@ a page-specific meta description. Read that plan alongside this section.
 - **www↔apex redirect — SHIPPED.** An apex connect provisions `www.<apex>` as its own custom hostname carrying
   a `redirect_to` on its domain-index record; `custom_domains_resolve` turns that into a 301 to the apex (the
   canonical). Best-effort: the apex serves whether or not www succeeds.
-- **The last item is DONE** (2026-10-23). `deploy/deploy.sh` now sets `CloudflareApexIpv4`/`IPV6` per
-  environment to its own zone's anycast pair — `104.21.71.205`/`172.67.149.43` (+ IPv6) for jbay.uk,
-  `104.21.88.48`/`172.67.173.6` for jbay.be — so every apex tenant is handed plain A/AAAA records, the one
-  record type every provider supports, Route 53 included. No code change was needed; the record builder and
-  the dashboard's A/AAAA copy had been waiting for the addresses. Guarded by `tests/test_apex_domains.py`,
-  which asserts on the deploy script, because that is where the value is decided.
-  **They are SHARED anycast addresses, and two measurements changed how alarming that is.** Pinning a
-  working custom hostname to its own zone's pair serves 200 — and pinning it to the OTHER zone's pair also
-  serves 200 (`curl --resolve shop.coderbay.net:443:104.21.71.205`, 2026-10-23). Cloudflare's edge routes
-  purely by SNI/Host to whichever zone registered the hostname, so a reassignment *within* Cloudflare's
-  anycast space keeps serving. The failure that would actually break tenants is an address leaving
-  Cloudflare's network entirely — rare, slow, and no longer silent: `plans/DOMAIN_HEALTH_SWEEP.md` shipped
-  first precisely so it could not be.
-  Dedicated IPs remain the eventual answer, on timing we control: `domain_provisioning.dns_records` records
-  what each tenant was told, so that migration is a known list of names and a gradual overlap rather than a
-  coordinated outage. **Sequence as planned: the sweep, then the shared IPs, then dedicated IPs when apex
-  tenants justify the line item.** The first two are done.
-- **The dead-end this phase set out to close is now CLOSED** (2026-10-23). The historical note below warned
-  that `assert_valid_domain` "ACCEPTS an apex it can't route". The ALIAS path fixed that for providers with
-  an apex feature — Cloudflare flattening, DNSimple, ANAME — and left it for the rest. **Route 53 was the
-  one that mattered**: its ALIAS targets only AWS resources, so it cannot point an apex at
-  `domains.jbay.uk`. Found while assessing `coderbay.net`, whose nameservers are `awsdns-*`. With the apex
-  addresses published, that tenant is handed A records Route 53 can create, and `apexHint` already says so:
-  *"Your root domain uses plain A/AAAA records below — these work on any provider, including Route 53."*
+- **The "last item" was declared done on 2026-10-23 and retracted the same day.** The claim was that
+  publishing each zone's public anycast pair as `CloudflareApexIpv4`/`IPV6` made apex work on every
+  provider, Route 53 included. It does not, and the way it fails is worth keeping:
+  - The evidence FOR it was `curl --resolve shop.coderbay.net:443:104.21.88.48` → 200, and the same
+    against the *other* zone's pair → 200. Real, reproducible, and about the wrong thing: it proved
+    Cloudflare's edge ROUTES by SNI. The gate is VERIFICATION.
+  - Cloudflare refused the first real apex (`coderbay.net`, Route 53) in its own words:
+    *"custom hostname does not CNAME to this zone."* and, after the tenant added the ownership TXT
+    Cloudflare itself offered, *"The hostname is using Cloudflare and cannot be activated with an TXT or
+    HTTP validation token. To activate the custom hostname, the DNS target needs to point to the SaaS
+    zone"*.
+  - So pointing an apex AT Cloudflare makes it "using Cloudflare", which **also** disqualifies token
+    validation. The A-record path does not merely fail to help; it shuts the only other door, and it
+    suppresses the ALIAS row that is the working path.
+  - Apex A records need addresses allocated to this SaaS zone by Cloudflare's **Apex Proxying** add-on.
+    The parameters are declared, wired and tested; they are passed as EMPTY and `tests/test_apex_domains.py`
+    holds them there by value, so re-adding the anycast pair fails in CI rather than at a registrar.
+- **What actually works today:** the tenant's own CNAME flattening / ALIAS / ANAME pointed at
+  `domains.jbay.{uk,be}`. Cloudflare DNS (free), DNSimple, DNS Made Easy, NS1. The apex must RESOLVE
+  THROUGH the SaaS target, not merely point at Cloudflare.
+- **What does not, and the honest answer for it:** Route 53, GoDaddy, Namecheap. Two options, both real:
+  connect `www.<domain>` — it verifies normally and `www.coderbay.net` went active on the same connect
+  that the apex could not — and redirect the root to it at the registrar; or move DNS to a provider with
+  flattening. `apexHint` now says exactly that per provider instead of promising "full Route 53 apex
+  support is coming".
+- **Open question this raises:** every apex connect provisions `www` as a 301 TO the apex. For a tenant
+  whose provider cannot do apex at all, that is backwards — `www` is the only hostname that can serve, so
+  it should be canonical and the apex should redirect to it. Inverting that is a product decision, not a
+  bug fix, and is not built.
+
+- **The dead-end this phase set out to close is NARROWED, not closed** (2026-10-23, after the retraction
+  above). The historical note below warned that `assert_valid_domain` "ACCEPTS an apex it can't route".
+  The ALIAS path fixed that for providers with an apex feature — Cloudflare flattening, DNSimple, ANAME —
+  and left it for the rest. **Route 53 remains the one that matters**: its ALIAS targets only AWS
+  resources. Found while assessing `coderbay.net`, whose nameservers are `awsdns-*`, and confirmed by
+  trying it. The server still accepts the connect and mints a Cloudflare hostname such a tenant cannot
+  activate; the UI now tells them so before and during, but the API does not refuse it.
 - **The tenant is NOT left guessing**, which this note first claimed and a check disproved. `Sites.vue`'s
   `apexHint` carries a Route 53 case verbatim: *"Route 53 can't point a root domain at an external host like
   ours. Use a subdomain (e.g. www) for now, or move DNS to a provider with ANAME/ALIAS support."* **Both residual gaps stopped mattering** when the apex

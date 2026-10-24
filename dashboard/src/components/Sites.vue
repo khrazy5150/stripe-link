@@ -931,12 +931,15 @@ const isApexDomain = computed(() =>
 const apexHint = computed(() => {
   if (!isApexDomain.value) return "";
   const usingA = (editing.value?.domain_provisioning?.dns_records || []).some((rec) => rec.apex && (rec.type === "A" || rec.type === "AAAA"));
+  // Only reachable with apex proxying configured. It is NOT, and plain A records at shared addresses do
+  // not work — Cloudflare refuses to activate a hostname that is pointed at it rather than resolving
+  // through it (coderbay.net, 2026-10-23). See deploy.sh's CloudflareApexIpv4 comment.
   if (usingA) return "Your root domain uses plain A/AAAA records below — these work on any provider, including Route 53.";
   const byProvider = {
     cloudflare: "At the root (@), add a CNAME to the target below — Cloudflare flattens it automatically at the apex.",
-    route53: "Route 53 can't point a root domain at an external host like ours. Use a subdomain (e.g. www) for now, or move DNS to a provider with ANAME/ALIAS support — full Route 53 apex support is coming.",
-    godaddy: "Use GoDaddy's forwarding/root options or a provider with ANAME/ALIAS. A plain CNAME won't work at the root.",
-    namecheap: "Namecheap doesn't support ALIAS at the root — use a subdomain (e.g. www) for now, or a provider with ANAME/ALIAS.",
+    route53: "Route 53 can't point a root domain at an external host like ours, and there is no workaround at Route 53 itself. Either connect www.yourdomain instead (it works today, and you can redirect the root to it), or move DNS to a provider with CNAME flattening, ALIAS or ANAME — Cloudflare's own DNS is free and does it.",
+    godaddy: "GoDaddy can't point a root domain at an external host. Connect www.yourdomain instead, or move DNS to a provider with CNAME flattening, ALIAS or ANAME.",
+    namecheap: "Namecheap doesn't support ALIAS at the root. Connect www.yourdomain instead, or move DNS to a provider with CNAME flattening, ALIAS or ANAME.",
   };
   return byProvider[dnsProvider.value] || "At the root (@), add an ALIAS or ANAME record to the target below. A plain CNAME won't work at the apex.";
 });

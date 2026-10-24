@@ -668,23 +668,6 @@ def _apex_routing_records(hostname: str, dns_target: str, apex_ipv4: tuple[str, 
     }]
 
 
-def _ownership_txt_records(cloudflare_hostname: dict[str, Any]) -> list[dict[str, str]]:
-    """Cloudflare's `_cf-custom-hostname` TXT, when it has issued one. Absent on some create responses and
-    present on every read, so a connect that starts without it picks it up on the first Verify."""
-    ownership = cloudflare_hostname.get("ownership_verification") or {}
-    name, value = str(ownership.get("name") or ""), str(ownership.get("value") or "")
-    if not name or not value:
-        return []
-    return [{
-        "type": str(ownership.get("type") or "TXT").upper(),
-        "name": name,
-        "value": value,
-        "note": "Proves the domain is yours. A subdomain proves that by its CNAME to us; a root domain has "
-                "no CNAME to point, so Cloudflare asks for this record instead. Without it the domain stays "
-                "'pending' no matter how long you wait.",
-    }]
-
-
 def custom_hostname_dns_records(
     cloudflare_hostname: dict[str, Any], *, hostname: str, dns_target: str, dcv_delegation_uuid: str | None = None,
     apex_ipv4: tuple[str, ...] = (), apex_ipv6: tuple[str, ...] = (),
@@ -703,15 +686,18 @@ def custom_hostname_dns_records(
             "name": f"_acme-challenge.{hostname}",
             "value": f"{hostname}.{dcv_delegation_uuid}.dcv.cloudflare.com",
         })
-        # AN APEX STILL HAS TO PROVE OWNERSHIP, and it cannot do it the usual way. Cloudflare treats the
-        # routing CNAME as the proof -- "custom hostname does not CNAME to this zone" is the literal
-        # verification error -- and an apex has no CNAME to point, only A records at anycast addresses it
-        # does not accept as evidence. So the ownership TXT is the only route, and leaving it out leaves
-        # the hostname `pending` forever while the certificate sits there `active`, which is exactly what
-        # coderbay.net did on 2026-10-23: nothing was wrong and nothing would ever have fixed itself.
-        # A subdomain needs none of this; its CNAME is the proof, so it is not asked for one.
-        if is_apex_domain(hostname):
-            records.extend(_ownership_txt_records(cloudflare_hostname))
+        # NO OWNERSHIP TXT FOR AN APEX, though Cloudflare offers one and it looks like the missing piece.
+        # It was added on 2026-10-23 for exactly that reason and removed the same day, because Cloudflare
+        # refuses to honour it in the only configuration we would ever show it in:
+        #
+        #   "The hostname is using Cloudflare and cannot be activated with an TXT or HTTP validation
+        #    token. To activate the custom hostname, the DNS target needs to point to the SaaS zone"
+        #
+        # An apex pointed at Cloudflare addresses IS "using Cloudflare", which disqualifies token
+        # validation; an apex flattened to the SaaS target proves ownership by that CNAME and never needs
+        # a token. There is no third case, so the record can only ever be a step a tenant completes and is
+        # still refused for -- which is worse than not showing it. The `ownership_verification` fallback
+        # below still applies when the zone has no DCV delegation.
         return records
     ownership = cloudflare_hostname.get("ownership_verification") or {}
     if ownership.get("name") and ownership.get("value"):
