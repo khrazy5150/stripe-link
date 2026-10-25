@@ -6642,21 +6642,22 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
-  # Emits X-Robots-Tag noindex,nofollow,noarchive on non-prod published pages so test pages can't be indexed
-  # (belt-and-suspenders over the noindex meta, and covers noarchive + every response). Created ONLY in
-  # non-prod so it can never attach to the prod pages distribution (the custom-domain proxy origin).
-  PagesNoIndexHeadersPolicy:
-    Type: AWS::CloudFront::ResponseHeadersPolicy
-    Condition: IsNonProd
-    Properties:
-      ResponseHeadersPolicyConfig:
-        Name: !Sub "${ProjectPrefix}-pages-noindex-${Environment}"
-        Comment: Keep non-prod published pages out of search engines.
-        CustomHeadersConfig:
-          Items:
-            - Header: X-Robots-Tag
-              Value: "noindex, nofollow, noarchive"
-              Override: true
+  # REMOVED 2026-10-25: a blanket X-Robots-Tag on the non-prod pages distribution.
+  #
+  # It read "non-prod published pages so test pages can't be indexed", which encoded the world before the
+  # three axes were separated. `dev` is a DEPLOYMENT; `test` is a Stripe MODE; indexing has always been a
+  # question about the mode. The dev stack serves live-mode Sites on verified custom domains -- that was
+  # decided deliberately -- and this policy stamped `noindex, nofollow, noarchive` with Override: true on
+  # every one of them. The renderer emitted `index,follow`, CloudFront overrode it, and crawlers take the
+  # more restrictive of the two: shop.coderbay.net and www.coderbay.net were silently de-indexed while the
+  # dashboard said "eligible". Found on www.coderbay.net, 2026-10-25.
+  #
+  # Nothing replaces it, because the per-page decision was always the real one and it is mode-aware:
+  # `page_robots_directive` grants index,follow only to a published page, in LIVE mode, on a verified
+  # custom domain, on an eligible Site, of an indexable page_type -- then the thin-content gate can still
+  # demote it. A platform-host or creator-host request is stamped noindex by the resolver
+  # (`route.noindex` -> the Worker), and test-mode page previews set their own header in test_page_serve.
+  # Prod never had this policy, so removing it is what makes the two deployments behave alike.
 
   PagesDistribution:
     Type: AWS::CloudFront::Distribution
@@ -6687,7 +6688,6 @@ Resources:
           # Non-prod (test/dev) = Managed-CachingDisabled so published pages are always fresh for iteration;
           # prod = Managed-CachingOptimized for edge performance (tuned separately).
           CachePolicyId: !If [IsNonProd, "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "658327ea-f89d-4fab-a63d-7e88639e58f6"]
-          ResponseHeadersPolicyId: !If [IsNonProd, !Ref PagesNoIndexHeadersPolicy, !Ref "AWS::NoValue"]
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 404
