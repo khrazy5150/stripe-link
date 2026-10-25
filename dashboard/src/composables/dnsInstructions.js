@@ -29,6 +29,87 @@ export const DNS_PROVIDERS = [
   { id: "other", label: "Other / full name", fqdn: true },
 ];
 
+/**
+ * Whose nameservers a domain is on, read from the domain itself.
+ *
+ * The provider picker is a manual `<select>` that defaults to Route 53, so a tenant who never touches it
+ * reads Route 53 advice whatever their DNS actually is -- and now that the advice DIFFERS in kind
+ * ("add an ALIAS" vs "you cannot do this at all"), a wrong default is worse than no advice. The
+ * nameservers say the answer outright, so ask them.
+ *
+ * Patterns are matched against the NS hostnames. Only providers whose advice we actually carry are
+ * listed; anything else falls through to `other`, which gives the generic apex instruction.
+ */
+const NS_PATTERNS = [
+  ["route53", /(^|\.)awsdns-\d+\.(com|net|org|co\.uk)\.?$/i],
+  ["cloudflare", /(^|\.)ns\.cloudflare\.com\.?$/i],
+  ["godaddy", /(^|\.)domaincontrol\.com\.?$/i],
+  ["namecheap", /(^|\.)registrar-servers\.com\.?$/i],
+];
+
+/** Providers that CANNOT point a root domain at an external host, verified against their documentation
+ *  on 2026-10-25 rather than guessed: Route 53's ALIAS targets only AWS resources, and GoDaddy has no
+ *  ALIAS or ANAME at all. Everything else is treated as capable, which is true of Cloudflare
+ *  (flattening), Namecheap (ALIAS on BasicDNS/FreeDNS/PremiumDNS), DNSimple, DNS Made Easy, NS1 and
+ *  Porkbun — and a wrong guess in that direction costs a tenant nothing, while the reverse told one to
+ *  abandon their root domain. */
+const APEX_INCAPABLE = new Set(["route53", "godaddy"]);
+
+export function detectProvider(nameservers) {
+  for (const ns of nameservers || []) {
+    const host = String(ns || "").trim().toLowerCase();
+    for (const [id, pattern] of NS_PATTERNS) {
+      if (pattern.test(host)) return id;
+    }
+  }
+  return "";
+}
+
+/** The domain's NS records, over DNS-over-HTTPS. Guidance only: a failure leaves the manual picker
+ *  exactly as it was, so the connect flow never depends on this answering. */
+export async function lookupNameservers(domain, { fetchFn = fetch } = {}) {
+  const name = String(domain || "").trim().replace(/\.$/, "");
+  if (!name || !name.includes(".")) return [];
+  try {
+    const response = await fetchFn(
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=NS`,
+      { headers: { Accept: "application/dns-json" } },
+    );
+    if (!response.ok) return [];
+    const body = await response.json();
+    return (body.Answer || []).filter((a) => a.type === 2).map((a) => String(a.data || ""));
+  } catch {
+    return [];                       // offline, blocked, CORS -- all mean "we do not know"
+  }
+}
+
+/**
+ * What to tell someone about to connect `domain`, before they connect it.
+ *
+ * The expensive moment is AFTER connecting: a Cloudflare hostname is minted, DNS records are published,
+ * and the tenant works through records that cannot ever verify (coderbay.net, 2026-10-23). Saying it
+ * first costs one DNS lookup.
+ */
+export function apexAdvice(domain, providerId) {
+  const name = String(domain || "").trim().toLowerCase().replace(/^\.+|\.+$/g, "");
+  const labels = name.split(".").filter(Boolean);
+  const isApex = labels.length > 0 && labels.length <= 2;      // deliberately simple; the server decides
+  if (!name || !isApex || !APEX_INCAPABLE.has(providerId)) return null;
+  const provider = dnsProvider(providerId);
+  return {
+    suggestion: `www.${name}`,
+    reason: providerId === "route53"
+      ? `${provider.label} can't point a root domain at an external host — its ALIAS records only target AWS resources, so ${name} has no way to reach us.`
+      : `${provider.label} has no ALIAS or ANAME record, so a root domain can't be pointed at an external host like ours.`,
+    // The redirect is the tenant's to set up, and what it takes differs sharply: GoDaddy has forwarding
+    // built in (and it now carries HTTPS automatically), while Route 53 has no redirect of its own --
+    // the usual S3 website bucket is HTTP-only, so an HTTPS redirect needs CloudFront and a certificate.
+    fix: providerId === "godaddy"
+      ? `Connect www.${name} instead — it works today — then add Domain Forwarding from ${name} to it in GoDaddy. Forwarding includes HTTPS automatically.`
+      : `Connect www.${name} instead — it works today. To send ${name} there as well, Route 53 needs something to redirect from: an S3 website bucket handles it over HTTP, and HTTPS needs CloudFront with a certificate.`,
+  };
+}
+
 export function dnsProvider(id) {
   return DNS_PROVIDERS.find((p) => p.id === id) || DNS_PROVIDERS[DNS_PROVIDERS.length - 1];
 }

@@ -292,9 +292,17 @@ domain to check yet.
 apex that is merely pointed at its shared anycast IPs (*"the DNS target needs to point to the SaaS
 zone"*), and doing so also disqualifies token validation. Reverted to empty the same day; see
 `SITE_OBJECT.md` Phase 2.6b. Apex works via the tenant's own CNAME flattening/ALIAS, or via Cloudflare's
-paid Apex Proxying add-on. **Open: should `www` be canonical for tenants whose registrar cannot do
-apex?** Today every apex connect makes `www` a 301 to the apex, which for those tenants points the only
-working hostname at the one that cannot serve.
+paid Apex Proxying add-on. **Decided 2026-10-25 — offer both routes, recommend managed DNS.**
+`plans/MANAGED_DNS.md` (PROPOSED, not built): we create the tenant's zone on our own Cloudflare account
+via API and they change two nameservers at their registrar, never logging in to Cloudflare. That removes
+the apex limit entirely — no SaaS custom hostname, no DCV, no apex proxying — and lets us repair a broken
+record instead of only reporting it. Its risk is that we then own their whole DNS, email included; §4 is
+the part to read. Shipped meanwhile: provider detection from the domain's nameservers, and a warning
+BEFORE connecting that offers `www.<domain>` to Route 53 and GoDaddy tenants.
+
+**Still open:** every apex connect makes `www` a 301 to the apex, which for a tenant whose registrar
+cannot do apex points the only working hostname at the one that cannot serve. `www.coderbay.net` is live
+proof — active certificate, redirecting into a 409.
 
 **Plan: `plans/DOMAIN_HEALTH_SWEEP.md`** (written 2026-10-23). Precondition for apex domains — the last
 open item on `SITE_OBJECT.md` Phase 2.6b.

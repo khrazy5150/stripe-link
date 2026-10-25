@@ -110,3 +110,71 @@ class DnsInstructionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderDetectionTests(unittest.TestCase):
+    """Reading the provider off the domain's own nameservers, instead of a `<select>` defaulting to
+    Route 53.
+
+    The default was harmless while every provider got the same advice. It stopped being harmless when the
+    advice started differing in KIND — "add an ALIAS record" versus "your provider cannot do this at
+    all" — because then a wrong default is not vague, it is confidently wrong in the expensive direction.
+    """
+
+    def _detect(self, nameservers):
+        script = f"""
+        import {{ detectProvider }} from {json.dumps(str(MODULE))};
+        console.log(JSON.stringify(detectProvider({json.dumps(nameservers)})));
+        """
+        result = subprocess.run(["node", "--input-type=module", "-e", script],
+                                capture_output=True, text=True, cwd=ROOT, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def _advice(self, domain, provider):
+        script = f"""
+        import {{ apexAdvice }} from {json.dumps(str(MODULE))};
+        console.log(JSON.stringify(apexAdvice({json.dumps(domain)}, {json.dumps(provider)})));
+        """
+        result = subprocess.run(["node", "--input-type=module", "-e", script],
+                                capture_output=True, text=True, cwd=ROOT, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def test_each_provider_is_recognised_from_its_nameservers(self):
+        # coderbay.net's real nameservers are the Route 53 case, verbatim.
+        self.assertEqual(self._detect(["ns-334.awsdns-41.com.", "ns-1297.awsdns-34.org.",
+                                       "ns-2027.awsdns-61.co.uk."]), "route53")
+        self.assertEqual(self._detect(["kim.ns.cloudflare.com.", "walt.ns.cloudflare.com."]), "cloudflare")
+        self.assertEqual(self._detect(["ns01.domaincontrol.com."]), "godaddy")
+        self.assertEqual(self._detect(["dns1.registrar-servers.com."]), "namecheap")
+
+    def test_an_unrecognised_provider_does_not_guess(self):
+        # Falls through to the generic apex instruction rather than asserting someone's DNS is Route 53.
+        self.assertEqual(self._detect(["a.iana-servers.net."]), "")
+        self.assertEqual(self._detect([]), "")
+
+    def test_an_apex_on_a_provider_that_cannot_is_warned_before_connecting(self):
+        advice = self._advice("coderbay.net", "route53")
+        self.assertEqual(advice["suggestion"], "www.coderbay.net")
+        self.assertIn("ALIAS", advice["reason"])
+        self.assertIn("www.coderbay.net", advice["fix"])
+
+    def test_godaddy_is_pointed_at_its_own_forwarding(self):
+        # It has one, and it carries HTTPS automatically — so for GoDaddy the redirect is genuinely easy.
+        self.assertIn("Domain Forwarding", self._advice("coderbay.net", "godaddy")["fix"])
+
+    def test_route53_is_not_promised_a_redirect_it_does_not_have(self):
+        # Route 53 has no redirect of its own, and the usual S3 answer is HTTP-only. Saying "just forward
+        # it" would be the third confidently-wrong instruction on this domain.
+        fix = self._advice("coderbay.net", "route53")["fix"]
+        self.assertIn("S3", fix)
+        self.assertIn("HTTPS needs CloudFront", fix)
+
+    def test_nothing_is_said_when_there_is_nothing_to_warn_about(self):
+        self.assertIsNone(self._advice("shop.coderbay.net", "route53"))   # a subdomain is fine anywhere
+        self.assertIsNone(self._advice("coderbay.net", "namecheap"))      # ALIAS at the root
+        self.assertIsNone(self._advice("coderbay.net", "cloudflare"))     # flattening
+        self.assertIsNone(self._advice("", "route53"))

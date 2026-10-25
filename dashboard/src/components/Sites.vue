@@ -321,6 +321,15 @@
                 <span>Your domain</span>
                 <input v-model.trim="domainForm.domain" type="text" placeholder="shop.yourbrand.com" autocapitalize="off" spellcheck="false" />
               </label>
+              <!-- Said BEFORE connecting. After it, a Cloudflare hostname exists and the tenant is working
+                   through records that can never verify -- which is exactly how coderbay.net went. -->
+              <div v-if="connectAdvice" class="keys-status-banner warning apex-advice">
+                <p>{{ connectAdvice.reason }}</p>
+                <p>{{ connectAdvice.fix }}</p>
+                <button type="button" class="secondary-action" @click="domainForm.domain = connectAdvice.suggestion">
+                  Use {{ connectAdvice.suggestion }}
+                </button>
+              </div>
               <label v-if="!siteHasHomepage" class="offer-field">
                 <span>Which page should the domain show?</span>
                 <select v-model="domainForm.homepage">
@@ -522,7 +531,7 @@ import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
-import { DNS_PROVIDERS, dnsRecordSteps } from "../composables/dnsInstructions";
+import { DNS_PROVIDERS, apexAdvice, detectProvider, dnsRecordSteps, lookupNameservers } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -876,6 +885,12 @@ async function attachPage() {
   }
 }
 const domainDiagnostics = ref({});
+// A connected domain gets the same treatment: the picker should open on the right provider rather than
+// on route53-by-default, which is what made a stale default dangerous in the first place.
+watch(() => editing.value?.hosting?.custom_domain, (domain) => {
+  providerDetected.value = false;
+  if (domain) detectDnsProvider(domain);
+}, { immediate: true });
 
 const dnsProviders = DNS_PROVIDERS;
 // LIVE-MODE only, and the reason is reputational, not infrastructural (corrected 2026-10-23). This read
@@ -895,6 +910,31 @@ function customDomainLabel(site) {
   return customDomainsEnabled.value ? "Not connected" : "Live mode only";
 }
 const dnsProvider = ref("route53");
+// Detected from the domain's own nameservers rather than guessed. The picker stays editable: detection
+// is guidance, and a tenant mid-migration may know better than their current NS records do.
+const providerDetected = ref(false);
+const connectAdvice = ref(null);
+let providerLookup = 0;
+
+async function detectDnsProvider(domain, { advise = false } = {}) {
+  const token = ++providerLookup;
+  const detected = detectProvider(await lookupNameservers(domain));
+  if (token !== providerLookup) return;          // a later keystroke already won
+  if (detected) {
+    dnsProvider.value = detected;
+    providerDetected.value = true;
+  }
+  connectAdvice.value = advise ? apexAdvice(domain, detected || dnsProvider.value) : null;
+}
+
+let adviceTimer = 0;
+watch(() => domainForm.domain, (domain) => {
+  connectAdvice.value = null;
+  clearTimeout(adviceTimer);
+  if (!domain || !domain.includes(".")) return;
+  // Debounced: this runs while someone is typing a domain name, one lookup per pause rather than per key.
+  adviceTimer = setTimeout(() => detectDnsProvider(domain, { advise: true }), 600);
+});
 const openStep = ref(0);
 const copied = ref("");
 const providerFqdn = computed(() => (dnsProviders.find((p) => p.id === dnsProvider.value) || {}).fqdn);
@@ -1392,6 +1432,9 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+.apex-advice p { margin: 0 0 0.5rem; }
+.apex-advice button { margin-top: 0.2rem; }
+
 /* An apex record set holds several addresses. They are ONE record, so they stack inside one step rather
    than becoming a second "create a record" instruction the provider would refuse. */
 .dns-values {
