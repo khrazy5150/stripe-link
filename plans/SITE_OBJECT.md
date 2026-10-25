@@ -349,9 +349,17 @@ a page-specific meta description. Read that plan alongside this section.
   - Namecheap sat in the "cannot" column here for two days on a guess, and was wrong. Telling a tenant to
     give up their root domain when their provider supports it is the same failure as the `@` instruction.
 - **For the two that cannot:** connect `www.<domain>` — it verifies normally, and `www.coderbay.net` went
-  active on the very connect the apex could not — and redirect the root to it. A Route 53 tenant can do
-  that redirect entirely inside AWS (S3 website bucket set to redirect, ALIAS apex → bucket; CloudFront +
-  ACM in front if the redirect itself must be HTTPS). Or move DNS to a provider from the first list.
+  active on the very connect the apex could not — and redirect the root to it. Or move DNS to a provider
+  from the first list.
+  **The S3-redirect-bucket trick is a trap worth spelling out**, because it is the first thing anyone
+  suggests for Route 53: alias the apex at an S3 website bucket configured to redirect. It works, and it
+  works *over HTTP only* — AWS: *"Amazon S3 website endpoints do not support HTTPS"*, and the endpoint
+  comparison table says plainly "Does not support SSL connections". So `http://example.com` redirects and
+  `https://example.com` fails at the TLS handshake, which in 2026 is most of the traffic: HTTPS-First
+  browsers, HSTS, and every https:// link anywhere. Making it real needs CloudFront + ACM in front — and
+  the bucket must be named exactly `example.com`, in a global namespace someone else may already hold.
+  At that point the tenant has stood up a certificate and a distribution to run a redirect, which is most
+  of the work of the next bullet spent on bouncing traffic rather than serving it.
 - **The one architecture that would remove the limit entirely, unbuilt:** serve tenant custom domains off
   OUR CloudFront distribution rather than through Cloudflare for SaaS — alternate domain name + ACM cert
   per tenant, hostname→Site routing in a CloudFront Function or Lambda@Edge. **CloudFront IS on Route
@@ -360,6 +368,8 @@ a page-specific meta description. Read that plan alongside this section.
   questions before anyone commits: whether Route 53 accepts an alias to a distribution in ANOTHER account
   (not established — the docs are silent and the console only lists your own), the 100-alternate-name
   soft limit per distribution, and running two serving paths at once. Not a config flip; a project.
+  Note the cross-account question disappears in the variant where the TENANT owns the distribution — but
+  so does the product, since provisioning CloudFront and ACM is not something a tenant will do.
 - **Open question this raises:** every apex connect provisions `www` as a 301 TO the apex. For a tenant
   whose provider cannot do apex at all, that is backwards — `www` is the only hostname that can serve, so
   it should be canonical and the apex should redirect to it. Inverting that is a product decision, not a
