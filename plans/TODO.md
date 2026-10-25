@@ -245,10 +245,26 @@ inert — every outbound call pins its own version (`stripe_client.STRIPE_API_VE
 hand-built requests). The fee read's pin is load-bearing and guarded by
 `tests/test_fee_read_api_version.py`: Basil (2025-03-31) removed `invoice.charge`, which that read needs.
 
-## ⭐⭐ HIGH — sandbox's custom-domain fallback origin points at the LEGACY stripe-cart app (found 2026-10-23)
+## ✅ DONE — sandbox's custom-domain fallback origin pointed at the LEGACY stripe-cart app (2026-10-23 → 2026-10-25)
 
-**One DNS record. Deleting stripe-cart would take sandbox custom domains with it, and nothing would have
-warned anyone** — which is the whole danger: it "just works" today.
+**Both halves are finished.** The DNS record was repointed on 2026-10-23, and the stale CloudFront alias
+was dropped on 2026-10-25. Verified after:
+
+```
+domains.jbay.be  ->  drjfn283z66uz  "jb stripe-link published pages dev"   correct
+domains.jbay.uk  ->  dlxn0y34f7dbz  "jb stripe-link published pages prod"  correct
+```
+
+Both now answer alike when hit directly — 403 from their own pages distribution, which is the intended
+inert response for a hostname that distribution carries no alias for. `E13P90HYFBFMQH` (stripe-cart)
+keeps `go.jbay.be` alone; that host is still live (`go.jbay.be/0Q8uS8GfNvU` → 200) and is not ours to
+retire. The certificate is a `*.jbay.be` wildcard, so removing one alias could not affect it, and the
+distribution is not CloudFormation-managed, so no stack will put the alias back.
+
+**The original finding, kept because the shape recurs:**
+
+**One DNS record. Deleting stripe-cart would have taken sandbox custom domains with it, and nothing would
+have warned anyone** — which was the whole danger: it "just worked".
 
 ```
 domains.jbay.uk  ->  dlxn0y34f7dbz   "jb stripe-link published pages prod"    correct
@@ -267,18 +283,20 @@ the fallback is never reached on the happy path. Verified 2026-10-23: `shop.code
 the normal flow: the request falls through to the OLD APPLICATION'S bucket under a tenant's own domain.
 Best case a 404; worse, another tenant's legacy page served from a live storefront hostname.
 
-**Fix: repoint `domains.jbay.be` -> `drjfn283z66uz.cloudfront.net`, proxied.** Mirrors prod's shape.
-Baseline before the change: `domains.jbay.uk` direct returns 403 (its distribution has no matching alias,
-which is the intended inert answer) while `domains.jbay.be` returned 404 from the legacy app. After, both
-should answer alike. Regression check: `shop.coderbay.net` and `quill.jbay.be` must stay 200.
+**Fix (done): repoint `domains.jbay.be` -> `drjfn283z66uz.cloudfront.net`, proxied.** Mirrors prod's
+shape. Before: `domains.jbay.uk` returned 403 while `domains.jbay.be` returned 404 from the legacy app.
+After: both 403, from their own pages distribution.
 
 **Do NOT delete `go.jbay.be`.** Still live: `go.jbay.be/0Q8uS8GfNvU` returned 200 on 2026-10-23, served by
 stripe-cart's Lambda@Edge from `tenants/{client_id}/{code}/index.html`. It is DNS-only (grey cloud)
 deliberately, to bypass stripe-link's Worker. That record belongs to the legacy app, not to this one.
 `go.jbay.uk` IS stripe-link's and IS dead (404 for a valid code) — remove it with the short-URL code.
 
-**Follow-up after the repoint:** drop `domains.jbay.be` from `d3v471h7qgmfcl`'s alias list so the legacy
-distribution stops claiming a hostname it no longer serves.
+**Follow-up (done 2026-10-25):** dropped `domains.jbay.be` from `d3v471h7qgmfcl`'s alias list. With DNS
+already repointed the alias attracted no traffic, so this was hygiene rather than a live fault — but a
+legacy distribution claiming a live sandbox hostname is exactly the thing that reads as load-bearing to
+whoever finds it next, and CloudFront refuses the same alternate domain name on two distributions, so it
+also blocked the pages distribution from ever claiming it.
 
 ## ⭐⭐ HIGH — a tenant's custom domain can stop working and nothing tells anyone (found 2026-10-23)
 
