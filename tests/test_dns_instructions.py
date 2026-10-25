@@ -196,11 +196,13 @@ class ProviderDetectionTests(unittest.TestCase):
         self.assertIn("Domain Forwarding", self._advice("coderbay.net", "godaddy")["fix"])
 
     def test_route53_is_not_promised_a_redirect_it_does_not_have(self):
-        # Route 53 has no redirect of its own, and the usual S3 answer is HTTP-only. Saying "just forward
-        # it" would be the third confidently-wrong instruction on this domain.
+        # Route 53 has no redirect of its own, so "just forward it" would be a confidently-wrong
+        # instruction. It names what actually answers HTTP, and points at the step that walks through it
+        # rather than compressing a four-resource recipe into a sentence.
         fix = self._advice("coderbay.net", "route53")["fix"]
-        self.assertIn("S3", fix)
-        self.assertIn("HTTPS needs CloudFront", fix)
+        self.assertIn("CloudFront", fix)
+        self.assertIn("answers HTTP", fix)
+        self.assertNotIn("S3", fix)
 
     def test_a_subdomain_under_a_multipart_tld_is_not_mistaken_for_an_apex(self):
         self.assertIsNone(self._advice("shop.example.co.uk", "route53"))
@@ -246,13 +248,42 @@ class ApexRedirectStepTests(unittest.TestCase):
         self.assertIn("Optional", step["note"])
         self.assertIn("works without this", step["note"])
 
-    def test_route53_gets_the_whole_recipe_including_why_s3_alone_is_not_enough(self):
-        lines = " ".join(self._step("www.coderbay.net", "route53")["instructions"])
+    def test_route53_gets_one_route_and_it_is_the_one_that_serves_https(self):
+        """S3 is deliberately absent.
+
+        Every guide online offers the S3-website-bucket redirect as the simple option, and it is a dead
+        end: those endpoints cannot serve HTTPS, and no business page is served over plain HTTP. Offering
+        two routes where one of them silently breaks `https://example.com` is worse than offering one.
+        """
+        step = self._step("www.coderbay.net", "route53")
+        lines = " ".join(step["instructions"])
         self.assertIn("us-east-1", lines)              # ACM region, the usual first mistake
         self.assertIn("CloudFront", lines)
         self.assertIn("Alias", lines)
-        # The trap, named: S3 website endpoints cannot serve HTTPS.
-        self.assertIn("cannot serve HTTPS", lines)
+        self.assertNotIn("S3", lines)
+        self.assertNotIn("bucket", lines.lower())
+
+    def test_the_cloudfront_function_is_handed_over_not_described(self):
+        # It is the one piece a tenant cannot reasonably guess, and the shape is exact -- AWS's own
+        # example returns {statusCode, statusDescription, headers:{location:{value}}}.
+        code = self._step("www.coderbay.net", "route53")["code"]
+        self.assertIn("function handler(event)", code)
+        self.assertIn("statusCode: 301", code)
+        self.assertIn("statusDescription: 'Moved Permanently'", code)
+        self.assertIn("headers: { location: { value: 'https://www.coderbay.net'", code)
+        self.assertIn("event.request.uri", code)
+
+    def test_the_function_preserves_the_query_string(self):
+        # On an ad platform this is not a nicety: dropping ?utm_source kills attribution for every
+        # visitor who typed the root instead of the www address.
+        code = self._step("www.coderbay.net", "route53")["code"]
+        self.assertIn("event.request.querystring", code)
+        self.assertIn("search", code)
+
+    def test_only_route53_carries_code(self):
+        # GoDaddy has a checkbox; handing it a CloudFront function would be noise.
+        for provider in ("godaddy", "cloudflare", "namecheap", "azure", ""):
+            self.assertEqual(self._step("www.coderbay.net", provider)["code"], "", provider)
 
     def test_godaddy_gets_its_own_feature_not_a_cloudfront_recipe(self):
         lines = " ".join(self._step("www.coderbay.net", "godaddy")["instructions"])

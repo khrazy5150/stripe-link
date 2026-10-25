@@ -148,12 +148,15 @@ export function apexAdvice(domain, providerId) {
           + `Use www.${name} instead.`,
     // What it then takes to send the root there as well differs sharply by provider, so do not flatten
     // it into "set up a redirect". GoDaddy has forwarding built in and it now carries HTTPS; Route 53
-    // has no redirect of its own, and the usual S3 website bucket is HTTP-only.
+    // has no redirect of its own and needs a CloudFront distribution with a certificate. The
+    // S3-website-bucket version that every guide suggests is deliberately not offered anywhere: those
+    // endpoints cannot serve HTTPS, and no business page is served over plain HTTP in 2026, so it is a
+    // dead end dressed up as the simple option.
     fix: providerId === "godaddy"
       ? `To send ${name} there too, add Domain Forwarding to www.${name} in GoDaddy — forwarding includes HTTPS automatically.`
       : providerId === "azure"
       ? `To send ${name} there too, you need something to redirect from — Azure Front Door or a small redirect app; Azure DNS cannot do it on its own.`
-      : `To send ${name} there too, Route 53 needs something to redirect from: an S3 website bucket handles it over HTTP, and HTTPS needs CloudFront with a certificate.`,
+      : `To send ${name} there too, Route 53 needs something that answers HTTP for it — a CloudFront distribution with a certificate and a redirect function. The domain panel walks you through it once www.${name} is connected.`,
   };
 }
 
@@ -183,9 +186,10 @@ export function apexRedirectStep(domain, providerId, dnsTarget) {
     route53: [
       `Route 53 has no redirect of its own, so the certificate and distribution below are what actually do the redirecting.`,
       `1. In AWS Certificate Manager, region us-east-1 (CloudFront requires that region), request a public certificate for ${apex}. Use DNS validation — Route 53 can create the validation record for you in one click.`,
-      `2. Create a CloudFront distribution with ${apex} as an Alternate domain name and that certificate. Either attach a CloudFront Function on viewer-request returning a 301 to https://${www}, or point it at an S3 bucket named exactly ${apex} with static website hosting set to "Redirect requests for an object".`,
-      `3. In Route 53, add an A record for ${apex} — Alias, target the CloudFront distribution.`,
-      `An S3 bucket on its own, with no CloudFront in front, also works — but only over http://. S3 website endpoints cannot serve HTTPS, so https://${apex} would fail outright.`,
+      `2. In CloudFront, create a distribution with ${apex} as an Alternate domain name and that certificate, and Viewer protocol policy set to "Redirect HTTP to HTTPS". Any Origin will do — the function below answers before CloudFront ever reaches it.`,
+      `3. CloudFront → Functions → create a function on JavaScript runtime 2.0, paste the code below, publish it, then associate it with the distribution's Default behavior on Viewer request.`,
+      `4. In Route 53, add an A record for ${apex} — Alias, target that CloudFront distribution. Add an AAAA the same way if you want IPv6.`,
+      `The function carries the path and query string across, so an ad landing on ${apex}/offer?utm_source=… keeps its tracking instead of arriving bare.`,
     ],
     azure: [
       `Azure DNS has no redirect of its own.`,
@@ -214,8 +218,24 @@ export function apexRedirectStep(domain, providerId, dnsTarget) {
     `If yours has no such feature, nothing in DNS will do it — a redirect is an HTTP response, so it needs something that answers HTTP and holds a certificate for ${apex}.`,
   ];
 
+  // The one part nobody can guess, so hand it over rather than describe it. Shape taken from AWS's own
+  // CloudFront Functions redirect example -- {statusCode, statusDescription, headers:{location:{value}}}
+  // -- and written ES5-plain so it runs on either runtime version.
+  const code = providerId === "route53" ? `async function handler(event) {
+  var qs = event.request.querystring;
+  var parts = [];
+  for (var k in qs) { parts.push(qs[k].value ? k + '=' + qs[k].value : k); }
+  var search = parts.length ? '?' + parts.join('&') : '';
+  return {
+    statusCode: 301,
+    statusDescription: 'Moved Permanently',
+    headers: { location: { value: 'https://${www}' + event.request.uri + search } }
+  };
+}` : "";
+
   return {
     optional: true,
+    code,
     stepLabel: `Send ${apex} here too`,
     instructions: byProvider[providerId] || generic,
     note: `Optional. ${www} works without this. Add it so someone who types ${apex} lands on your site `

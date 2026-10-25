@@ -360,6 +360,11 @@ a page-specific meta description. Read that plan alongside this section.
   the bucket must be named exactly `example.com`, in a global namespace someone else may already hold.
   At that point the tenant has stood up a certificate and a distribution to run a redirect, which is most
   of the work of the next bullet spent on bouncing traffic rather than serving it.
+  **So the product does not offer the S3 version at all** (2026-10-25). The dashboard's optional apex
+  step gives Route 53 tenants one route — ACM in us-east-1, a CloudFront distribution, a CloudFront
+  Function returning the 301 (handed over as copyable code, preserving path and query so ad tracking
+  survives), and an ALIAS at the root. Two routes where one silently breaks `https://` is worse than
+  one route that works.
 - **The one architecture that would remove the limit entirely, unbuilt:** serve tenant custom domains off
   OUR CloudFront distribution rather than through Cloudflare for SaaS — alternate domain name + ACM cert
   per tenant, hostname→Site routing in a CloudFront Function or Lambda@Edge. **CloudFront IS on Route

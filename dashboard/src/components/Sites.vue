@@ -372,6 +372,10 @@
                     <div class="dns-step-body">
                       <template v-if="rec.instructions">
                         <p v-for="(line, n) in rec.instructions" :key="n" class="field-note">{{ line }}</p>
+                        <div v-if="rec.code" class="dns-code">
+                          <pre><code>{{ rec.code }}</code></pre>
+                          <button type="button" class="copy-btn" @click="copy(rec.code)">{{ copied === rec.code ? 'Copied!' : 'Copy function' }}</button>
+                        </div>
                       </template>
                       <template v-else>
                       <p v-if="providerTip" class="field-note">{{ providerTip }}</p>
@@ -1446,6 +1450,26 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+/* The CloudFront function, handed over rather than described. It scrolls on its own so a long line
+   never widens the panel. */
+.dns-code {
+  margin-top: 0.5rem;
+}
+.dns-code pre {
+  margin: 0 0 0.3rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.dns-code code {
+  font-family: ui-monospace, monospace;
+  font-size: 1.1rem;
+  color: var(--text);
+  white-space: pre;
+}
+
 /* Never an outstanding task: this step is offered, not required, and the panel has to look like it. */
 .dns-step-header.optional .dns-step-title { font-weight: 500; }
 .dns-step-header.optional .dns-badge { opacity: 0.55; }
