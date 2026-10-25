@@ -22,9 +22,12 @@ export const DNS_PROVIDERS = [
   // `apexName` is what this provider's Name field wants for the zone apex. Empty string means LEAVE BLANK
   // and is deliberately distinct from undefined, which means "this provider takes full names".
   { id: "route53", label: "AWS Route 53", fqdn: false, apexName: "" },
+  { id: "azure", label: "Azure DNS", fqdn: false, apexName: "@" },
   { id: "cloudflare", label: "Cloudflare", fqdn: false, apexName: "@" },
+  { id: "googlecloud", label: "Google Cloud DNS", fqdn: true },
   { id: "godaddy", label: "GoDaddy", fqdn: false, apexName: "@" },
   { id: "namecheap", label: "Namecheap", fqdn: false, apexName: "@" },
+  { id: "digitalocean", label: "DigitalOcean", fqdn: false, apexName: "@" },
   { id: "cpanel", label: "cPanel", fqdn: true },
   { id: "other", label: "Other / full name", fqdn: true },
 ];
@@ -42,18 +45,30 @@ export const DNS_PROVIDERS = [
  */
 const NS_PATTERNS = [
   ["route53", /(^|\.)awsdns-\d+\.(com|net|org|co\.uk)\.?$/i],
+  ["azure", /(^|\.)azure-dns\.(com|net|org|info)\.?$/i],
   ["cloudflare", /(^|\.)ns\.cloudflare\.com\.?$/i],
+  ["googlecloud", /(^|\.)googledomains\.com\.?$/i],
   ["godaddy", /(^|\.)domaincontrol\.com\.?$/i],
   ["namecheap", /(^|\.)registrar-servers\.com\.?$/i],
+  ["digitalocean", /(^|\.)digitalocean\.com\.?$/i],
+  // A cPanel host usually runs its own vanity nameservers (ns1.somehost.com), so the NS name says
+  // nothing. These are the names cPanel itself publishes, and they are the only hint available from DNS
+  // alone -- the service ports (2082/2083, 2086/2087) are not reachable from a browser.
+  ["cpanel", /(^|\.)(cpanel|whm|webmail)\./i],
 ];
 
-/** Providers that CANNOT point a root domain at an external host, verified against their documentation
- *  on 2026-10-25 rather than guessed: Route 53's ALIAS targets only AWS resources, and GoDaddy has no
- *  ALIAS or ANAME at all. Everything else is treated as capable, which is true of Cloudflare
- *  (flattening), Namecheap (ALIAS on BasicDNS/FreeDNS/PremiumDNS), DNSimple, DNS Made Easy, NS1 and
- *  Porkbun — and a wrong guess in that direction costs a tenant nothing, while the reverse told one to
- *  abandon their root domain. */
-const APEX_INCAPABLE = new Set(["route53", "godaddy"]);
+/** Providers that CANNOT point a root domain at an external host. Verified against their own docs,
+ *  because a wrong entry here tells someone to abandon their root domain:
+ *    - Route 53  ALIAS targets only AWS resources.
+ *    - Azure DNS alias record sets reference Azure resources (Traffic Manager, CDN, Front Door, public
+ *                IPs), not arbitrary external hostnames.
+ *    - GoDaddy   no ALIAS or ANAME at all.
+ *  Everything else is treated as capable and shown the generic ALIAS instruction. That is right for
+ *  Cloudflare (flattening), Namecheap (ALIAS on Basic/Free/Premium DNS), DNSimple, DNS Made Easy, NS1 and
+ *  Porkbun, and it fails in the harmless direction for anything unclassified: the tenant looks for an
+ *  ALIAS option and does not find one, rather than being told to give up a domain that would have worked.
+ *  DigitalOcean and cPanel sit in that unclassified group deliberately -- not verified either way. */
+const APEX_INCAPABLE = new Set(["route53", "azure", "godaddy"]);
 
 export function detectProvider(nameservers) {
   for (const ns of nameservers || []) {
@@ -65,19 +80,51 @@ export function detectProvider(nameservers) {
   return "";
 }
 
-/** The domain's NS records, over DNS-over-HTTPS. Guidance only: a failure leaves the manual picker
- *  exactly as it was, so the connect flow never depends on this answering. */
+/** The registrable root of a hostname, so a lookup for `shop.example.co.uk` asks about `example.co.uk`. */
+export function rootDomain(domain) {
+  const parts = String(domain || "").toLowerCase().replace(/\.$/, "").split(".");
+  if (parts.length <= 2) return parts.join(".");
+  const lastTwo = parts.slice(-2).join(".");
+  return MULTIPART_TLDS.has(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
+}
+
+// Mirrors the server's list in domain/custom_domains.py so both sides agree on what an apex is.
+const MULTIPART_TLDS = new Set([
+  "co.uk", "org.uk", "gov.uk", "ac.uk", "me.uk", "net.uk", "ltd.uk", "plc.uk", "sch.uk",
+  "com.au", "net.au", "org.au", "edu.au", "gov.au", "co.nz", "net.nz", "org.nz",
+  "co.za", "org.za", "co.jp", "or.jp", "ne.jp", "com.br", "com.mx", "co.in", "com.sg", "com.hk", "com.tr",
+]);
+
+async function doh(name, type, fetchFn) {
+  const response = await fetchFn(
+    `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`,
+    { headers: { Accept: "application/dns-json" } },
+  );
+  if (!response.ok) return {};
+  return await response.json();
+}
+
+/**
+ * Who runs this domain's DNS, read from the domain itself.
+ *
+ * Asks on the REGISTRABLE ROOT, and falls back from NS to SOA. Both matter: an NS query for
+ * `shop.example.com` returns nothing, because the delegation lives at `example.com`; and where NS is
+ * filtered or empty, the SOA's primary nameserver still names the provider. The SOA usually arrives in
+ * the AUTHORITY section rather than the answer, so both are read.
+ *
+ * Guidance only. Every failure path returns "" and leaves the manual picker exactly as it was.
+ */
 export async function lookupNameservers(domain, { fetchFn = fetch } = {}) {
-  const name = String(domain || "").trim().replace(/\.$/, "");
-  if (!name || !name.includes(".")) return [];
+  const root = rootDomain(domain);
+  if (!root || !root.includes(".")) return [];
   try {
-    const response = await fetchFn(
-      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=NS`,
-      { headers: { Accept: "application/dns-json" } },
-    );
-    if (!response.ok) return [];
-    const body = await response.json();
-    return (body.Answer || []).filter((a) => a.type === 2).map((a) => String(a.data || ""));
+    const ns = await doh(root, "NS", fetchFn);
+    const fromNs = (ns.Answer || []).filter((a) => a.type === 2).map((a) => String(a.data || ""));
+    if (fromNs.length) return fromNs;
+    const soa = await doh(root, "SOA", fetchFn);
+    return [...(soa.Answer || []), ...(soa.Authority || [])]
+      .filter((a) => a.type === 6)
+      .map((a) => String(a.data || "").split(/\s+/)[0]);   // MNAME: the primary nameserver
   } catch {
     return [];                       // offline, blocked, CORS -- all mean "we do not know"
   }
@@ -92,31 +139,26 @@ export async function lookupNameservers(domain, { fetchFn = fetch } = {}) {
  */
 export function apexAdvice(domain, providerId) {
   const name = String(domain || "").trim().toLowerCase().replace(/^\.+|\.+$/g, "");
-  const labels = name.split(".").filter(Boolean);
-  const isApex = labels.length > 0 && labels.length <= 2;      // deliberately simple; the server decides
-  if (!name || !isApex || !APEX_INCAPABLE.has(providerId)) return null;
+  if (!name || !name.includes(".") || name !== rootDomain(name)) return null;
+  if (!APEX_INCAPABLE.has(providerId)) return null;
   const provider = dnsProvider(providerId);
   return {
     suggestion: `www.${name}`,
-    reason: providerId === "route53"
-      ? `${provider.label} can't point a root domain at an external host — its ALIAS records only target AWS resources, so ${name} has no way to reach us.`
-      : `${provider.label} has no ALIAS or ANAME record, so a root domain can't be pointed at an external host like ours.`,
-    // The redirect is the tenant's to set up, and what it takes differs sharply: GoDaddy has forwarding
-    // built in (and it now carries HTTPS automatically), while Route 53 has no redirect of its own --
-    // the usual S3 website bucket is HTTP-only, so an HTTPS redirect needs CloudFront and a certificate.
+    reason: `The apex domain (${name}) can't be pointed at an external host from ${provider.label}. `
+          + `Use www.${name} instead.`,
+    // What it then takes to send the root there as well differs sharply by provider, so do not flatten
+    // it into "set up a redirect". GoDaddy has forwarding built in and it now carries HTTPS; Route 53
+    // has no redirect of its own, and the usual S3 website bucket is HTTP-only.
     fix: providerId === "godaddy"
-      ? `Connect www.${name} instead — it works today — then add Domain Forwarding from ${name} to it in GoDaddy. Forwarding includes HTTPS automatically.`
-      : `Connect www.${name} instead — it works today. To send ${name} there as well, Route 53 needs something to redirect from: an S3 website bucket handles it over HTTP, and HTTPS needs CloudFront with a certificate.`,
+      ? `To send ${name} there too, add Domain Forwarding to www.${name} in GoDaddy — forwarding includes HTTPS automatically.`
+      : providerId === "azure"
+      ? `To send ${name} there too, you need something to redirect from — Azure Front Door or a small redirect app; Azure DNS cannot do it on its own.`
+      : `To send ${name} there too, Route 53 needs something to redirect from: an S3 website bucket handles it over HTTP, and HTTPS needs CloudFront with a certificate.`,
   };
 }
 
 export function dnsProvider(id) {
   return DNS_PROVIDERS.find((p) => p.id === id) || DNS_PROVIDERS[DNS_PROVIDERS.length - 1];
-}
-
-export function rootDomain(domain) {
-  const parts = String(domain || "").split(".");
-  return parts.length > 2 ? parts.slice(-2).join(".") : domain;
 }
 
 /** The Name field's value at `providerId`: the full hostname, the apex token, or the sub-label. */

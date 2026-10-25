@@ -196,13 +196,19 @@ class ProviderGuidanceTests(unittest.TestCase):
         return line[0]
 
     def test_providers_that_can_do_apex_are_told_how(self):
-        for provider in ("cloudflare", "namecheap"):
+        # Google Cloud DNS belongs here, not with Route 53: it HAS an apex ALIAS, reachable through
+        # gcloud or the API but not the Cloud console -- so the copy has to say where to find it rather
+        # than tell the tenant their provider cannot do it.
+        for provider in ("cloudflare", "namecheap", "googlecloud"):
             hint = self._hint_for(provider)
             self.assertIn("root", hint.lower(), provider)
             self.assertNotIn("Connect www", hint, provider)   # not sent away from their own domain
+        self.assertIn("gcloud", self._hint_for("googlecloud"))
 
     def test_providers_that_cannot_are_given_the_two_real_options(self):
-        for provider in ("route53", "godaddy"):
+        # Azure joined the list 2026-10-25: its alias record sets reference Azure resources (Traffic
+        # Manager, CDN, Front Door, public IPs), never an arbitrary external hostname.
+        for provider in ("route53", "godaddy", "azure"):
             hint = self._hint_for(provider)
             self.assertIn("www", hint, provider)
             self.assertIn("move DNS", hint, provider)

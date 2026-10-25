@@ -154,7 +154,17 @@ async function handleSiteHost(request, hostname, waitUntil) {
     const target = route.preserve_path
       ? route.location.replace(/\/$/, "") + url.pathname + url.search
       : route.location + url.search;
-    return Response.redirect(target, 301);
+    // 301 WITH A SHORT CACHE, not a bare 301. The status code is what crawlers read, and permanent is
+    // right for them -- it consolidates the canonical. Browsers read it differently: a 301 with no
+    // Cache-Control is cached indefinitely, so the redirect outlives the configuration that created it.
+    // Exactly that happened on 2026-10-25: www.coderbay.net 301'd to the apex while the apex was the
+    // connected domain, the tenant then disconnected the apex and connected www, and www served 200 to
+    // everyone EXCEPT the browsers that had already learned the redirect by heart. Every target here is
+    // tenant-editable, so none of them may be remembered forever.
+    return new Response(null, {
+      status: 301,
+      headers: { Location: target, "Cache-Control": "max-age=600" },
+    });
   }
   if (!route || route.type !== "origin_url" || !route.origin_url) {
     return notFound();

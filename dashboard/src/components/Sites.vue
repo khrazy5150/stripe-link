@@ -977,6 +977,8 @@ const apexHint = computed(() => {
   if (usingA) return "Your root domain uses plain A/AAAA records below — these work on any provider, including Route 53.";
   const byProvider = {
     cloudflare: "At the root (@), add a CNAME to the target below — Cloudflare flattens it automatically at the apex.",
+    azure: "Azure DNS alias records only point at Azure resources, so a root domain can't be pointed at an external host like ours. Connect www.yourdomain instead, or move DNS to a provider with CNAME flattening, ALIAS or ANAME.",
+    googlecloud: "Cloud DNS does support ALIAS at the root — but only through gcloud or the API, not the Cloud console. Create an ALIAS record at the apex pointing to the target below. It can't be combined with DNSSEC on the same zone.",
     route53: "Route 53 can't point a root domain at an external host like ours, and there is no workaround at Route 53 itself. Either connect www.yourdomain instead (it works today, and you can redirect the root to it), or move DNS to a provider with CNAME flattening, ALIAS or ANAME — Cloudflare's own DNS is free and does it.",
     godaddy: "GoDaddy can't point a root domain at an external host. Connect www.yourdomain instead, or move DNS to a provider with CNAME flattening, ALIAS or ANAME.",
     namecheap: "At the root (@), add an ALIAS record pointing to the target below — Namecheap supports ALIAS on BasicDNS, FreeDNS and PremiumDNS. Delete any A, AAAA, CNAME or URL-redirect record on @ first; they conflict.",
