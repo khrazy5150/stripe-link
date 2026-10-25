@@ -262,6 +262,9 @@ class ApexRedirectStepTests(unittest.TestCase):
         self.assertIn("Alias", lines)
         self.assertNotIn("S3", lines)
         self.assertNotIn("bucket", lines.lower())
+        # Requesting a second certificate for a domain that already has one is a quiet way to waste
+        # someone's afternoon on DNS validation they did not need.
+        self.assertIn("already exists", lines)
 
     def test_the_cloudfront_function_is_handed_over_not_described(self):
         # It is the one piece a tenant cannot reasonably guess, and the shape is exact -- AWS's own

@@ -185,7 +185,7 @@ export function apexRedirectStep(domain, providerId, dnsTarget) {
   const byProvider = {
     route53: [
       `Route 53 has no redirect of its own, so the certificate and distribution below are what actually do the redirecting.`,
-      `1. In AWS Certificate Manager, region us-east-1 (CloudFront requires that region), request a public certificate for ${apex}. Use DNS validation — Route 53 can create the validation record for you in one click.`,
+      `1. In AWS Certificate Manager, region us-east-1 (CloudFront requires that region), request a public certificate for ${apex}. If a certificate already exists for this domain, skip to the next step. Use DNS validation — Route 53 can create the validation record for you in one click.`,
       `2. In CloudFront, create a distribution with ${apex} as an Alternate domain name and that certificate, and Viewer protocol policy set to "Redirect HTTP to HTTPS". Any Origin will do — the function below answers before CloudFront ever reaches it.`,
       `3. CloudFront → Functions → create a function on JavaScript runtime 2.0, paste the code below, publish it, then associate it with the distribution's Default behavior on Viewer request.`,
       `4. In Route 53, add an A record for ${apex} — Alias, target that CloudFront distribution. Add an AAAA the same way if you want IPv6.`,
