@@ -363,13 +363,17 @@
                 <p v-if="apexHint" class="field-note apex-hint">{{ apexHint }}</p>
                 <div class="dns-accordion">
                   <div v-for="(rec, i) in displayRecords" :key="i" class="dns-step" :class="{ open: openStep === i }">
-                    <button type="button" class="dns-step-header" @click="openStep = openStep === i ? -1 : i">
+                    <button type="button" class="dns-step-header" :class="{ optional: rec.optional }" @click="openStep = openStep === i ? -1 : i">
                       <span class="dns-badge" :class="rec.badgeClass">{{ rec.badgeIcon }}</span>
                       <span class="dns-step-title">{{ rec.stepLabel }}</span>
                       <span class="dns-step-status" :class="rec.badgeClass">{{ rec.statusText }}</span>
                       <span class="dns-chevron">{{ openStep === i ? '▾' : '▸' }}</span>
                     </button>
                     <div class="dns-step-body">
+                      <template v-if="rec.instructions">
+                        <p v-for="(line, n) in rec.instructions" :key="n" class="field-note">{{ line }}</p>
+                      </template>
+                      <template v-else>
                       <p v-if="providerTip" class="field-note">{{ providerTip }}</p>
                       <div class="dns-field"><span class="dns-field-label">Type</span><code>{{ rec.type }}</code></div>
                       <div class="dns-field">
@@ -391,6 +395,7 @@
                         </span>
                       </div>
                       <p v-if="rec.valueNote" class="field-note">{{ rec.valueNote }}</p>
+                      </template>
                       <p v-if="rec.note" class="field-note">{{ rec.note }}</p>
                     </div>
                   </div>
@@ -531,7 +536,7 @@ import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
-import { DNS_PROVIDERS, apexAdvice, detectProvider, dnsRecordSteps, lookupNameservers } from "../composables/dnsInstructions";
+import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, lookupNameservers } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -949,7 +954,12 @@ const displayRecords = computed(() => {
   const domain = editing.value?.hosting?.custom_domain || "";
   const steps = dnsRecordSteps(editing.value?.domain_provisioning?.dns_records || [],
                                { domain, providerId: dnsProvider.value });
-  return steps.map((step) => {
+  // The optional tail step: make the apex land here. Appended rather than mixed in, because it is not a
+  // record we asked Cloudflare for and carries no pass/fail -- a badge on it would read as a failure on
+  // something the tenant was told was optional.
+  const redirect = apexRedirectStep(domain, dnsProvider.value,
+                                    editing.value?.domain_provisioning?.dns_target);
+  const rows = steps.map((step) => {
     // Diagnostics are keyed by the record's real hostname, so a grouped step reads the one verdict that
     // covers it -- the apex check asks whether the name answers with A/AAAA, not with which address.
     const diag = domainDiagnostics.value[step.recordName];
@@ -962,6 +972,8 @@ const displayRecords = computed(() => {
       statusText: resolved === true ? "Detected" : resolved === false ? (diag.note || "Not found yet") : "",
     };
   });
+  return redirect ? [...rows, { ...redirect, badgeClass: "idle", badgeIcon: "+", statusText: "Optional",
+                                values: [], type: "", displayName: "" }] : rows;
 });
 
 // An apex domain (example.com) can't hold a plain CNAME. Guidance depends on the provider (§2.6b).
@@ -1434,6 +1446,10 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+/* Never an outstanding task: this step is offered, not required, and the panel has to look like it. */
+.dns-step-header.optional .dns-step-title { font-weight: 500; }
+.dns-step-header.optional .dns-badge { opacity: 0.55; }
+
 .apex-advice p { margin: 0 0 0.5rem; }
 .apex-advice button { margin-top: 0.2rem; }
 

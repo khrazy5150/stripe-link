@@ -157,6 +157,72 @@ export function apexAdvice(domain, providerId) {
   };
 }
 
+/**
+ * The optional last step: make the apex land on the www hostname the tenant connected.
+ *
+ * Only offered when the connected domain IS `www.<root>`, which is the case where the root is left
+ * orphaned — a visitor who types `example.com` gets NXDOMAIN and concludes the business is gone. The
+ * site works without it, so this is never a failure state and never blocks verification.
+ *
+ * DNS CANNOT DO THIS, and the instructions have to say so or a tenant will go looking for a record type
+ * that does not exist. A redirect is an HTTP 301; it needs something that speaks HTTP and holds a
+ * certificate for the apex. What that something is differs completely by provider, which is why this is
+ * nine paragraphs rather than one.
+ *
+ * For providers that CAN point an apex at an external host, the better answer is offered first: serve
+ * the root directly instead of bouncing it. A redirect costs a round trip and splits the address.
+ */
+export function apexRedirectStep(domain, providerId, dnsTarget) {
+  const www = String(domain || "").trim().toLowerCase().replace(/\.$/, "");
+  if (!www.startsWith("www.")) return null;
+  const apex = www.slice(4);
+  if (!apex.includes(".")) return null;
+  const target = dnsTarget || "the target above";
+
+  const byProvider = {
+    route53: [
+      `Route 53 has no redirect of its own, so the certificate and distribution below are what actually do the redirecting.`,
+      `1. In AWS Certificate Manager, region us-east-1 (CloudFront requires that region), request a public certificate for ${apex}. Use DNS validation — Route 53 can create the validation record for you in one click.`,
+      `2. Create a CloudFront distribution with ${apex} as an Alternate domain name and that certificate. Either attach a CloudFront Function on viewer-request returning a 301 to https://${www}, or point it at an S3 bucket named exactly ${apex} with static website hosting set to "Redirect requests for an object".`,
+      `3. In Route 53, add an A record for ${apex} — Alias, target the CloudFront distribution.`,
+      `An S3 bucket on its own, with no CloudFront in front, also works — but only over http://. S3 website endpoints cannot serve HTTPS, so https://${apex} would fail outright.`,
+    ],
+    azure: [
+      `Azure DNS has no redirect of its own.`,
+      `Use Azure Front Door with a redirect rule to https://${www}, or any small service that answers HTTP and holds a certificate for ${apex}, then point ${apex} at it.`,
+    ],
+    godaddy: [
+      `1. GoDaddy → Domain Portfolio → your domain → DNS → Forwarding → Add Forwarding.`,
+      `2. Forward the root domain to https://${www} as a Permanent (301) redirect.`,
+      `GoDaddy applies HTTPS to forwarding automatically, so https://${apex} works too.`,
+    ],
+    namecheap: [
+      `Namecheap can serve the root DIRECTLY, which is better than redirecting: Advanced DNS → Add New Record → ALIAS Record, host @, value ${target}. Then connect ${apex} here instead of ${www}.`,
+      `If you would rather keep ${www} as your address: Advanced DNS → Add New Record → URL Redirect Record, host @, value https://${www}, type Permanent (301).`,
+    ],
+    cloudflare: [
+      `Cloudflare can serve the root DIRECTLY, which is better than redirecting: add a proxied CNAME at @ pointing to ${target} — Cloudflare flattens it at the apex. Then connect ${apex} here instead of ${www}.`,
+      `If you would rather keep ${www} as your address: Rules → Redirect Rules → Create rule, matching hostname ${apex}, redirecting to https://${www} with "Preserve path" on and status 301.`,
+    ],
+    googlecloud: [
+      `Cloud DNS can serve the root DIRECTLY, which is better than redirecting: create an ALIAS record at the apex pointing to ${target} — through gcloud or the API, as the Cloud console does not expose ALIAS. Then connect ${apex} here instead of ${www}.`,
+      `If you would rather keep ${www} as your address, you need something that answers HTTP for ${apex} — a load balancer with a redirect rule, or any redirect service — since DNS alone cannot redirect.`,
+    ],
+  };
+  const generic = [
+    `Most providers call this URL forwarding, a redirect rule, or a URL Redirect Record: send ${apex} to https://${www} as a permanent (301) redirect.`,
+    `If yours has no such feature, nothing in DNS will do it — a redirect is an HTTP response, so it needs something that answers HTTP and holds a certificate for ${apex}.`,
+  ];
+
+  return {
+    optional: true,
+    stepLabel: `Send ${apex} here too`,
+    instructions: byProvider[providerId] || generic,
+    note: `Optional. ${www} works without this. Add it so someone who types ${apex} lands on your site `
+        + `instead of an error.`,
+  };
+}
+
 export function dnsProvider(id) {
   return DNS_PROVIDERS.find((p) => p.id === id) || DNS_PROVIDERS[DNS_PROVIDERS.length - 1];
 }

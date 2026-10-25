@@ -211,3 +211,76 @@ class ProviderDetectionTests(unittest.TestCase):
         self.assertIsNone(self._advice("coderbay.net", "namecheap"))      # ALIAS at the root
         self.assertIsNone(self._advice("coderbay.net", "cloudflare"))     # flattening
         self.assertIsNone(self._advice("", "route53"))
+
+
+class ApexRedirectStepTests(unittest.TestCase):
+    """The optional last step: make the apex land on the www hostname the tenant connected.
+
+    Without it the root is orphaned — someone who types `example.com` gets NXDOMAIN and concludes the
+    business is gone, which is exactly the limbo a Route 53 tenant is left in after taking our advice to
+    connect `www`. It is OPTIONAL and has to read that way: the site works without it, and a step that
+    looks outstanding on a verified domain is a notice with no action behind it.
+    """
+
+    def _step(self, domain, provider, target="domains.jbay.be"):
+        script = f"""
+        import {{ apexRedirectStep }} from {json.dumps(str(MODULE))};
+        console.log(JSON.stringify(apexRedirectStep({json.dumps(domain)}, {json.dumps(provider)}, {json.dumps(target)})));
+        """
+        result = subprocess.run(["node", "--input-type=module", "-e", script],
+                                capture_output=True, text=True, cwd=ROOT, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def test_offered_only_when_the_apex_is_actually_orphaned(self):
+        self.assertIsNotNone(self._step("www.coderbay.net", "route53"))
+        # A connected apex already provisions its own www→apex redirect, and a plain subdomain has no
+        # orphaned root to rescue. Offering it there would be noise.
+        self.assertIsNone(self._step("coderbay.net", "route53"))
+        self.assertIsNone(self._step("shop.coderbay.net", "route53"))
+
+    def test_it_is_marked_optional_and_says_the_site_works_without_it(self):
+        step = self._step("www.coderbay.net", "route53")
+        self.assertTrue(step["optional"])
+        self.assertIn("Optional", step["note"])
+        self.assertIn("works without this", step["note"])
+
+    def test_route53_gets_the_whole_recipe_including_why_s3_alone_is_not_enough(self):
+        lines = " ".join(self._step("www.coderbay.net", "route53")["instructions"])
+        self.assertIn("us-east-1", lines)              # ACM region, the usual first mistake
+        self.assertIn("CloudFront", lines)
+        self.assertIn("Alias", lines)
+        # The trap, named: S3 website endpoints cannot serve HTTPS.
+        self.assertIn("cannot serve HTTPS", lines)
+
+    def test_godaddy_gets_its_own_feature_not_a_cloudfront_recipe(self):
+        lines = " ".join(self._step("www.coderbay.net", "godaddy")["instructions"])
+        self.assertIn("Forwarding", lines)
+        self.assertNotIn("CloudFront", lines)
+
+    def test_apex_capable_providers_are_offered_the_better_answer_first(self):
+        # Serving the root beats bouncing it. A tenant on Cloudflare or Namecheap connected www by
+        # choice or by accident; either way they should know the root can simply serve.
+        for provider in ("cloudflare", "namecheap", "googlecloud"):
+            first = self._step("www.coderbay.net", provider)["instructions"][0]
+            self.assertIn("DIRECTLY", first, provider)
+            self.assertIn("domains.jbay.be", first, provider)
+
+    def test_the_target_hostname_is_the_one_the_site_was_actually_given(self):
+        # Not a hardcoded jbay.uk: the two deployments hand out different fallback origins, and this
+        # step is read beside the CNAME row that names the real one.
+        first = self._step("www.coderbay.net", "cloudflare", "domains.jbay.uk")["instructions"][0]
+        self.assertIn("domains.jbay.uk", first)
+
+    def test_an_unknown_provider_is_told_the_truth_about_dns(self):
+        lines = " ".join(self._step("www.coderbay.net", "")["instructions"])
+        self.assertIn("301", lines)
+        # The sentence that stops someone hunting for a record type that does not exist.
+        self.assertIn("nothing in DNS will do it", lines)
+
+    def test_the_component_renders_it_without_a_pass_fail_badge(self):
+        vue = SITES_VUE.read_text(encoding="utf-8")
+        self.assertIn("apexRedirectStep", vue)
+        self.assertIn('statusText: "Optional"', vue)
+        self.assertIn("rec.instructions", vue)
