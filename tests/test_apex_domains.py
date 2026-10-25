@@ -169,3 +169,40 @@ class OwnershipTokenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderGuidanceTests(unittest.TestCase):
+    """Which provider can do apex is a claim about the outside world, so it is checkable and gets checked.
+
+    Verified 2026-10-25. The split is NOT "Cloudflare or nothing" -- it is whether the provider has
+    ALIAS/ANAME/CNAME-flattening at the apex:
+
+      works   Cloudflare (flattening), Namecheap (ALIAS on Basic/Free/Premium DNS), DNSimple, DNS Made
+              Easy, NS1, Porkbun
+      cannot  Route 53 -- its ALIAS targets only AWS resources, per AWS's own docs: "An alias record can
+              only redirect queries to selected AWS resources"; and GoDaddy, which has no ANAME/ALIAS.
+
+    Namecheap was in the "cannot" column here for two days on a guess. It is not, and telling a tenant to
+    give up their root domain when their provider supports it is the same failure as the `@` instruction:
+    confidently wrong, and expensive for the person following it.
+    """
+
+    SITES_VUE = (ROOT / "dashboard" / "src" / "components" / "Sites.vue").read_text(encoding="utf-8")
+
+    def _hint_for(self, provider):
+        block = self.SITES_VUE.split("const byProvider = {", 1)[1].split("};", 1)[0]
+        line = [ln for ln in block.splitlines() if ln.strip().startswith(f"{provider}:")]
+        self.assertEqual(len(line), 1, provider)
+        return line[0]
+
+    def test_providers_that_can_do_apex_are_told_how(self):
+        for provider in ("cloudflare", "namecheap"):
+            hint = self._hint_for(provider)
+            self.assertIn("root", hint.lower(), provider)
+            self.assertNotIn("Connect www", hint, provider)   # not sent away from their own domain
+
+    def test_providers_that_cannot_are_given_the_two_real_options(self):
+        for provider in ("route53", "godaddy"):
+            hint = self._hint_for(provider)
+            self.assertIn("www", hint, provider)
+            self.assertIn("move DNS", hint, provider)

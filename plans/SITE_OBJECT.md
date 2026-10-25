@@ -337,14 +337,29 @@ a page-specific meta description. Read that plan alongside this section.
   - Apex A records need addresses allocated to this SaaS zone by Cloudflare's **Apex Proxying** add-on.
     The parameters are declared, wired and tested; they are passed as EMPTY and `tests/test_apex_domains.py`
     holds them there by value, so re-adding the anycast pair fails in CI rather than at a registrar.
-- **What actually works today:** the tenant's own CNAME flattening / ALIAS / ANAME pointed at
-  `domains.jbay.{uk,be}`. Cloudflare DNS (free), DNSimple, DNS Made Easy, NS1. The apex must RESOLVE
-  THROUGH the SaaS target, not merely point at Cloudflare.
-- **What does not, and the honest answer for it:** Route 53, GoDaddy, Namecheap. Two options, both real:
-  connect `www.<domain>` — it verifies normally and `www.coderbay.net` went active on the same connect
-  that the apex could not — and redirect the root to it at the registrar; or move DNS to a provider with
-  flattening. `apexHint` now says exactly that per provider instead of promising "full Route 53 apex
-  support is coming".
+- **The split is not "Cloudflare or nothing"** — it is whether the tenant's provider can point an apex at
+  an external hostname. Verified 2026-10-25:
+  - **Works:** Cloudflare DNS (flattening, free), **Namecheap** (ALIAS on BasicDNS/FreeDNS/PremiumDNS),
+    DNSimple, DNS Made Easy, NS1, Porkbun. The apex must RESOLVE THROUGH `domains.jbay.{uk,be}`, not
+    merely point at Cloudflare.
+  - **Cannot:** **Route 53** and **GoDaddy**. Route 53's ALIAS exists and does work at an apex, which is
+    why this keeps getting misread — but AWS's own words are *"An alias record can only redirect queries
+    to selected AWS resources"*, and the list is CloudFront, S3, ELB, API Gateway, Global Accelerator and
+    friends. An external SaaS target is not on it. GoDaddy has no ANAME/ALIAS at all.
+  - Namecheap sat in the "cannot" column here for two days on a guess, and was wrong. Telling a tenant to
+    give up their root domain when their provider supports it is the same failure as the `@` instruction.
+- **For the two that cannot:** connect `www.<domain>` — it verifies normally, and `www.coderbay.net` went
+  active on the very connect the apex could not — and redirect the root to it. A Route 53 tenant can do
+  that redirect entirely inside AWS (S3 website bucket set to redirect, ALIAS apex → bucket; CloudFront +
+  ACM in front if the redirect itself must be HTTPS). Or move DNS to a provider from the first list.
+- **The one architecture that would remove the limit entirely, unbuilt:** serve tenant custom domains off
+  OUR CloudFront distribution rather than through Cloudflare for SaaS — alternate domain name + ACM cert
+  per tenant, hostname→Site routing in a CloudFront Function or Lambda@Edge. **CloudFront IS on Route
+  53's alias list**, so every Route 53 tenant could then alias their apex at us with no add-on and no
+  provider change. stripe-cart did exactly this shape with Lambda@Edge, so it is not speculative. Open
+  questions before anyone commits: whether Route 53 accepts an alias to a distribution in ANOTHER account
+  (not established — the docs are silent and the console only lists your own), the 100-alternate-name
+  soft limit per distribution, and running two serving paths at once. Not a config flip; a project.
 - **Open question this raises:** every apex connect provisions `www` as a 301 TO the apex. For a tenant
   whose provider cannot do apex at all, that is backwards — `www` is the only hostname that can serve, so
   it should be canonical and the apex should redirect to it. Inverting that is a product decision, not a

@@ -939,9 +939,9 @@ const apexHint = computed(() => {
     cloudflare: "At the root (@), add a CNAME to the target below — Cloudflare flattens it automatically at the apex.",
     route53: "Route 53 can't point a root domain at an external host like ours, and there is no workaround at Route 53 itself. Either connect www.yourdomain instead (it works today, and you can redirect the root to it), or move DNS to a provider with CNAME flattening, ALIAS or ANAME — Cloudflare's own DNS is free and does it.",
     godaddy: "GoDaddy can't point a root domain at an external host. Connect www.yourdomain instead, or move DNS to a provider with CNAME flattening, ALIAS or ANAME.",
-    namecheap: "Namecheap doesn't support ALIAS at the root. Connect www.yourdomain instead, or move DNS to a provider with CNAME flattening, ALIAS or ANAME.",
+    namecheap: "At the root (@), add an ALIAS record pointing to the target below — Namecheap supports ALIAS on BasicDNS, FreeDNS and PremiumDNS. Delete any A, AAAA, CNAME or URL-redirect record on @ first; they conflict.",
   };
-  return byProvider[dnsProvider.value] || "At the root (@), add an ALIAS or ANAME record to the target below. A plain CNAME won't work at the apex.";
+  return byProvider[dnsProvider.value] || "At the root (@), add an ALIAS or ANAME record pointing to the target below — a plain CNAME is not allowed at the apex. Providers that support it include Cloudflare, Namecheap, DNSimple, DNS Made Easy, NS1 and Porkbun.";
 });
 
 async function copy(text) {
