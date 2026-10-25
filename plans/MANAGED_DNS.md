@@ -1,6 +1,10 @@
 # Managed DNS — we run the tenant's zone, so their root domain just works
 
-**Status:** PROPOSED, not built. Written 2026-10-25.
+**Status:** P1 BUILT 2026-10-25 (`domain/managed_dns.py`, `tests/test_managed_dns.py`). The rest is
+BLOCKED on a Cloudflare token that can create zones — see §5. Written 2026-10-25.
+
+P1 is the safety gate, deliberately first: it is the only part whose failure cannot be undone, and it
+needs no Cloudflare access to build or to test.
 
 The tenant changes two nameservers at their registrar and never sees Cloudflare. We create the zone, write
 every record, and the apex serves — on Route 53 domains, GoDaddy domains, anything.
@@ -72,9 +76,46 @@ Smaller ones: NS changes take hours to propagate and the old provider keeps answ
 accumulate on our account (no documented free-plan cap, but it is worth confirming before the hundredth);
 and a domain already active in someone else's Cloudflare account cannot be added to ours.
 
+## 4b. Decisions taken before building (2026-10-25)
+
+**The zone is NOT part of the Site, and its lifecycle is not the Site's.** It gets its own record in
+`CustomDomainsTable`, keyed by domain, `document_type: "managed_zone"` — beside the `custom_domain` index
+records that already live there.
+
+The reason is disconnect. A tenant who disconnects their custom domain today loses `domain_provisioning`,
+and that is correct: it describes a Site's claim on a hostname. If the zone lived there, disconnecting
+would orphan a Cloudflare zone that is still authoritative for the tenant's entire domain — their mail
+included — with nothing in our data tracking it. **Disconnecting a Site must never delete a zone**, and
+the only way to guarantee that is for the zone not to be the Site's to delete.
+
+**No Cloudflare for SaaS custom hostname on a managed zone.** Once we hold the zone, the apex is a
+proxied record in a zone we control, flattening is automatic, Universal SSL covers `example.com` and
+`*.example.com`, and a Worker route on that zone sends requests through the same Worker the platform
+hosts use. Custom hostnames, DCV delegation and the ownership token all exist to make SOMEONE ELSE'S
+zone point at us; none of them apply when the zone is ours. The resolver still needs its
+`custom_domain` index record — that is how the Worker learns what to serve — so that path is unchanged.
+
+**The review gate compares, it does not trust.** Cloudflare's import scan is best-effort and says so. So
+the review does not display the scan's output and ask for a nod; it independently resolves the domain's
+MX, SPF, DKIM and DMARC over DoH and compares them against what the scan imported. A discrepancy blocks.
+This is the same rule the domain health sweep is built on: stored state and served reality are allowed to
+drift, so something has to compare them — and here the cost of not comparing is a tenant's email.
+
+**Absence of mail is the dangerous answer, not the safe one.** A domain with no MX found is either a
+domain with no mail, or a scan that missed it, and those look identical. They are told apart by asking
+DNS directly, which is why the comparison above is the gate rather than a nicety.
+
 ## 5. Open questions
 
-- **Zones per account** on our plan — confirm with Cloudflare before this scales.
+- **Zones per account** on our plan — confirm with Cloudflare before this scales. (Account currently
+  holds 3 zones, all Free: jbay.be, jbay.page, jbay.uk.)
+- **RESOLVED, and it is a prerequisite:** the existing Cloudflare API token **cannot create zones**.
+  Probed 2026-10-25: `POST /zones` returns *"Requires permission
+  com.cloudflare.api.account.zone.create to create zones for the selected account"*. It also cannot read
+  its own permission groups (403), so it is scoped to named zones — meaning it could not write DNS or
+  Worker routes on a tenant zone either, since that zone does not exist when the token is scoped.
+  Per §4 this wants a SEPARATE token rather than widening the existing one: the custom-hostname token
+  stays narrow, and the managed-DNS token's larger blast radius is visible as its own credential.
 - **Worker routes on a tenant zone**: we own the zone, so the API allows it, but the route must be added
   per zone and counts against route limits. Alternative is Orange-to-Orange with a custom hostname, which a
   third-party source says requires the two zones to be in *different* accounts — unverified, and moot if we
