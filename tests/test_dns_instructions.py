@@ -248,6 +248,60 @@ class ApexRedirectStepTests(unittest.TestCase):
         self.assertIn("Optional", step["note"])
         self.assertIn("works without this", step["note"])
 
+    def _node(self, expr):
+        script = f"""
+        import * as m from {json.dumps(str(MODULE))};
+        console.log(JSON.stringify({expr}));
+        """
+        result = subprocess.run(["node", "--input-type=module", "-e", script],
+                                capture_output=True, text=True, cwd=ROOT, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def test_the_walkthrough_closes_the_gaps_a_first_timer_actually_hit(self):
+        """Each of these is a place the author stopped, doing it by hand on 2026-10-25.
+
+        The instructions had been written for someone who already knows the AWS console. They are a
+        walkthrough now, which is a different thing: the console moves you between three services, and
+        every handoff is somewhere to get lost.
+        """
+        lines = " ".join(self._step("www.coderbay.net", "route53")["instructions"])
+        # The region has to be switched there AND back -- obvious to us, invisible to a first-timer, and
+        # leaving the console on us-east-1 makes every other resource they own look deleted.
+        self.assertIn("N. Virginia", lines)
+        self.assertIn("Switch the region back", lines)
+        # An empty required field with a format rule is where people freeze, so name it for them.
+        self.assertIn("redirect-coderbay-net-to-www", lines)
+        self.assertIn("cloudfront-js-2.0", lines)
+        # Publishing without associating is the silent failure: it looks finished and does nothing.
+        self.assertIn("Viewer request", lines)
+        self.assertIn("published but not associated", lines)
+        # The value carried between two services, and the exact Route 53 controls once you are there.
+        self.assertIn("Domain name (standard)", lines)
+        self.assertIn("Record name blank", lines)
+        self.assertIn("Alias to CloudFront distribution", lines)
+
+    def test_the_decisive_details_are_emphasised(self):
+        # A walkthrough where the one value that must be exact sits in the middle of a grey paragraph is
+        # a walkthrough that gets misread.
+        step = self._step("www.coderbay.net", "route53")
+        bold = {seg["text"] for line in step["instructions"]
+                for seg in self._node(f"m.emphasise({json.dumps(line)})") if seg["bold"]}
+        for decisive in ("us-east-1 / N. Virginia", "Issued", "Viewer request", "A",
+                         "Alias to CloudFront distribution", "cloudfront-js-2.0"):
+            self.assertIn(decisive, bold, decisive)
+
+    def test_emphasis_is_segments_not_markup(self):
+        # These strings interpolate a tenant's domain. The day one of them is parsed as markup instead of
+        # text, it stops being a styling choice.
+        self.assertEqual(self._node('m.emphasise("plain **bold** plain")'),
+                         [{"text": "plain ", "bold": False}, {"text": "bold", "bold": True},
+                          {"text": " plain", "bold": False}])
+        self.assertEqual(self._node('m.emphasise("")'), [])
+        self.assertEqual(self._node('m.emphasise("<script>x</script>")'),
+                         [{"text": "<script>x</script>", "bold": False}])
+
     def test_route53_gets_one_route_and_it_is_the_one_that_serves_https(self):
         """S3 is deliberately absent.
 

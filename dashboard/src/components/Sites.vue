@@ -371,7 +371,9 @@
                     </button>
                     <div class="dns-step-body">
                       <template v-if="rec.instructions">
-                        <p v-for="(line, n) in rec.instructions" :key="n" class="field-note">{{ line }}</p>
+                        <p v-for="(line, n) in rec.instructions" :key="n" class="field-note step-line">
+                          <template v-for="(seg, m) in emphasise(line)" :key="m"><strong v-if="seg.bold">{{ seg.text }}</strong><template v-else>{{ seg.text }}</template></template>
+                        </p>
                         <div v-if="rec.code" class="dns-code">
                           <pre><code>{{ rec.code }}</code></pre>
                           <button type="button" class="copy-btn" @click="copy(rec.code)">{{ copied === rec.code ? 'Copied!' : 'Copy function' }}</button>
@@ -540,7 +542,7 @@ import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
-import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, lookupNameservers } from "../composables/dnsInstructions";
+import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -1450,6 +1452,10 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+/* A walkthrough, not a caption: give the steps room to be read one at a time. */
+.step-line { margin-bottom: 0.55rem; line-height: 1.5; }
+.step-line strong { color: var(--text); }
+
 /* The CloudFront function, handed over rather than described. It scrolls on its own so a long line
    never widens the panel. */
 .dns-code {

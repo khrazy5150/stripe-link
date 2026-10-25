@@ -175,20 +175,37 @@ export function apexAdvice(domain, providerId) {
  * For providers that CAN point an apex at an external host, the better answer is offered first: serve
  * the root directly instead of bouncing it. A redirect costs a round trip and splits the address.
  */
+/**
+ * Split a line on `**bold**` into segments the template renders as text or <strong>.
+ *
+ * A walkthrough has two or three details that decide whether it works at all -- the console REGION, the
+ * record type, which event the function runs on -- and in a wall of grey paragraph text they are
+ * invisible. Done as segments rather than v-html: these strings are ours today, and the moment one of
+ * them interpolates a tenant's domain into markup that gets parsed, it is not a styling choice any more.
+ */
+export function emphasise(line) {
+  return String(line || "").split(/\*\*/).map((text, i) => ({ text, bold: i % 2 === 1 }))
+    .filter((seg) => seg.text !== "");
+}
+
 export function apexRedirectStep(domain, providerId, dnsTarget) {
   const www = String(domain || "").trim().toLowerCase().replace(/\.$/, "");
   if (!www.startsWith("www.")) return null;
   const apex = www.slice(4);
   if (!apex.includes(".")) return null;
   const target = dnsTarget || "the target above";
+  // The console rejects spaces and dots here, and an empty required field is where people stop.
+  const fnName = `redirect-${apex.replace(/\./g, "-")}-to-www`;
 
   const byProvider = {
     route53: [
-      `Route 53 has no redirect of its own, so the certificate and distribution below are what actually do the redirecting.`,
-      `1. In AWS Certificate Manager, region us-east-1 (CloudFront requires that region), request a public certificate for ${apex}. If a certificate already exists for this domain, skip to the next step. Use DNS validation — Route 53 can create the validation record for you in one click.`,
-      `2. In CloudFront, create a distribution with ${apex} as an Alternate domain name and that certificate, and Viewer protocol policy set to "Redirect HTTP to HTTPS". Any Origin will do — the function below answers before CloudFront ever reaches it.`,
-      `3. CloudFront → Functions → create a function on JavaScript runtime 2.0, paste the code below, publish it, then associate it with the distribution's Default behavior on Viewer request.`,
-      `4. In Route 53, add an A record for ${apex} — Alias, target that CloudFront distribution. Add an AAAA the same way if you want IPv6.`,
+      `Route 53 has no redirect of its own, so the certificate, distribution and function below are what actually do the redirecting. Six steps, and the AWS console moves you between three services.`,
+      `**1. Certificate.** In AWS Certificate Manager, first switch the console region (top right) to **us-east-1 / N. Virginia** — CloudFront accepts certificates from that region and no other. Request a public certificate for ${apex}. If one already exists for this domain, skip to step 2. Choose DNS validation; Route 53 can create the validation record for you in one click. Wait for Status to read **Issued** before going on.`,
+      `**2. Switch the region back** to the one you normally work in. CloudFront and Route 53 are global and do not care, but the console remembers us-east-1, and every other resource you own will look like it has vanished.`,
+      `**3. Distribution.** CloudFront → Create distribution. **Any Origin will do** — the function answers before CloudFront ever reaches it, so the origin is never contacted. Set Alternate domain name to **${apex}**, attach the certificate from step 1, and set Viewer protocol policy to **Redirect HTTP to HTTPS**.`,
+      `**4. Function.** CloudFront → Functions → Create function. The name field is required and rejects spaces — **${fnName}** works. Description: **301 redirect ${apex} to ${www}**. Runtime: **cloudfront-js-2.0**. Paste the code below, Save changes, then Publish.`,
+      `**5. Associate it.** On the published function's Associations (or the distribution's Behaviors → Default → Edit), add your distribution with Event type **Viewer request**. A function that is published but not associated does nothing, and nothing warns you.`,
+      `**6. Route 53.** First, on the distribution's General tab, copy **Domain name (standard)** — it looks like d1p1tvfq21mu6z.cloudfront.net; there is a copy icon beside it. Then Route 53 → Hosted zones → ${apex} → Create record. Leave **Record name blank**, Record type **A**, turn **Alias** on, choose **Alias to CloudFront distribution**, and paste that domain name. Repeat with type **AAAA** if you want IPv6.`,
       `The function carries the path and query string across, so an ad landing on ${apex}/offer?utm_source=… keeps its tracking instead of arriving bare.`,
     ],
     azure: [
