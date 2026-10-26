@@ -61,6 +61,7 @@ through this repository's own code, not curl.
 | zone `pending` → `active` | **3m30s**, not the 24h DNS lore predicts |
 | Universal SSL issued | **~2 min later**: Let's Encrypt, `CN=creditfix.cloud`, 90 days |
 | apex over HTTPS | **HTTP/2 200**, serving the Site's real page |
+| offboarding, exercised on the way out | export → restore registrar NS from the stored originals → delete zone → drop both documents. Account back to its own three zones, `www.coderbay.net` and `quill.jbay.be` untouched. |
 
 The three things that could not be proven against fakes, answered:
 
@@ -74,6 +75,18 @@ The three things that could not be proven against fakes, answered:
 served the new delegation while Cloudflare's own `1.1.1.1` still held the Route 53 one. The product is
 ready well before every resolver agrees, so the UI must say "propagating, this is normal" rather than
 treat a stale resolver as a failure. The health sweep must not report a zone mid-delegation as broken.
+
+**The export was broken and only a real zone showed it.** Cloudflare returns `ttl: 1` to mean
+*automatic*; exporting it literally gave every record a one-second TTL, which the tenant's next provider
+would honour and hammer their DNS with from the moment they left. The exit has to be IMPORTABLE, not
+merely complete — fixed, with `DEFAULT_EXPORT_TTL`.
+
+**Performance, measured rather than assumed** (the obvious suspicion was that managed DNS skips
+CloudFront caching — it does not, it uses the same path): all three serving routes are the same speed,
+and sandbox is slow because its pages distribution is deliberately `CachingDisabled` for fresh
+iteration, while prod is `CachingOptimized`. The largest single hop is the resolver Lambda at ~0.24s,
+cached 60s per edge by the Worker — amortised on a busy store, paid almost every view on a quiet one.
+Tune on prod or not at all.
 
 **Least privilege bit back, correctly.** The token cannot read certificate packs — `Zone | SSL and
 Certificates | Read` was deliberately not requested — so certificate progress is polled from the

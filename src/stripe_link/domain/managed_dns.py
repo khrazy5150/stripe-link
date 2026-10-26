@@ -28,6 +28,11 @@ SCHEMA_VERSION = "2026-05-29"
 # What a record is FOR, which is what decides how loudly its absence is reported. The categories are
 # deliberately coarse: a tenant reviewing this screen cannot evaluate an MX hostname, but they can
 # answer "do you send email from this domain".
+# What an exported record gets when Cloudflare says "automatic" (ttl: 1). Five minutes is short enough
+# that a tenant can still change their mind quickly after leaving, and long enough that no resolver
+# treats it as pathological.
+DEFAULT_EXPORT_TTL = 300
+
 MAIL = "mail"
 SERVING = "serving"
 VERIFICATION = "verification"
@@ -303,7 +308,12 @@ def zone_export(records: Iterable[dict[str, Any]], domain: str) -> str:
         name = str(record.get("name") or "").rstrip(".")
         record_type = str(record.get("type") or "").upper()
         content = str(record.get("content") or record.get("value") or "")
-        ttl = int(record.get("ttl") or 300) or 300
+        # CLOUDFLARE'S ttl:1 MEANS "AUTOMATIC", NOT ONE SECOND. Found by exporting a real zone on
+        # 2026-10-25: every record came out with a 1-second TTL, which another provider would honour
+        # literally and hammer the tenant's DNS from the moment they left. An export is the exit this
+        # feature promises, so it has to be importable, not merely complete.
+        ttl = int(record.get("ttl") or 0)
+        ttl = DEFAULT_EXPORT_TTL if ttl <= 1 else ttl
         if not name or not record_type or not content:
             continue
         value = content

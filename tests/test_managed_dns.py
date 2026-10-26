@@ -249,6 +249,21 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(mail_provider([ZONE_FILE_MX["content"]]), "Google Workspace")
         self.assertEqual(mail_discrepancies([ZONE_FILE_MX], [GOOGLE_MX[0]]), [])
 
+    def test_cloudflares_automatic_ttl_is_not_exported_as_one_second(self):
+        """Found by exporting a real zone, not by reading the API docs: Cloudflare returns `ttl: 1` to
+        mean AUTOMATIC. Emitting that literally gives every record a 1-second TTL at the tenant's next
+        provider, which honours it and hammers their DNS from the moment they leave. An export is the
+        exit this feature promises; it has to be importable, not merely complete."""
+        out = zone_export([{"type": "A", "name": "example.com", "content": "192.0.2.1", "ttl": 1}],
+                          "example.com")
+        self.assertIn("example.com.\t300\tIN\tA\t192.0.2.1", out)
+        self.assertNotIn("\t1\tIN\t", out)
+
+    def test_a_real_ttl_is_preserved(self):
+        out = zone_export([{"type": "A", "name": "example.com", "content": "192.0.2.1", "ttl": 3600}],
+                          "example.com")
+        self.assertIn("\t3600\tIN\tA\t", out)
+
     def test_incomplete_records_are_skipped_rather_than_emitted_broken(self):
         out = zone_export([{"type": "A", "name": "", "content": "203.0.113.1"}, WEB], "example.com")
         self.assertEqual(len([ln for ln in out.splitlines() if not ln.startswith(";")]), 1)
