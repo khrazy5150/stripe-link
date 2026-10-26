@@ -243,6 +243,7 @@ class StopTests(unittest.TestCase):
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
              patch.object(managed_dns_api, "list_zone_dns_records",
                           side_effect=lister, return_value=[MX, WEB]) as listed, \
+             patch.object(managed_dns_api, "_detach_from_site"), \
              patch.object(managed_dns_api, "delete_zone") as deleted:
             response = managed_dns_api.stop(event("DELETE", query={"domain": "example.com"}),
                                             FakeSites(), "site_1", repo=zones)
@@ -257,6 +258,24 @@ class StopTests(unittest.TestCase):
         self.assertEqual(payload["restore_name_servers"], ["ns-1.awsdns-01.com", "ns-2.awsdns-02.net"])
         deleted.assert_called_once()
         self.assertEqual(zones.deleted, ["example.com"])
+
+    def test_leaving_also_detaches_the_site(self):
+        """Deleting the zone stops the domain serving; it does not stop the SITE claiming it.
+
+        Without this the Site goes on saying "Connected & verified", stays index-eligible, keeps a
+        resolver index record pointing at a zone that no longer exists -- and the panel renders the
+        custom-hostname screen instead of the managed-DNS flow, which is how it was found.
+        """
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "active"}])
+        with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")), \
+             patch.object(managed_dns_api, "list_zone_dns_records", return_value=[WEB]), \
+             patch.object(managed_dns_api, "delete_zone"), \
+             patch.object(managed_dns_api, "_detach_from_site") as detached:
+            managed_dns_api.stop(event("DELETE", query={"domain": "example.com"}), FakeSites(),
+                                 "site_1", repo=zones)
+        detached.assert_called_once()
+        self.assertEqual(detached.call_args.args[0], "example.com")
 
     def test_a_failed_export_aborts_the_delete(self):
         """A tenant leaving must leave WITH their DNS. Deleting a zone we could not export turns 'you

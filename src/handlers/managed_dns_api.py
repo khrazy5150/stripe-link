@@ -248,6 +248,55 @@ def _activate(record, *, api_token, worker_script) -> bool:
     return done
 
 
+def _detach_from_site(domain: str, tenant_id: str, sites_repository, site_id) -> None:
+    """Undo what `_attach_to_site` did. The mirror image, and it was missing.
+
+    Deleting the zone stops the domain serving; it does not stop the SITE claiming it. Without this the
+    Site goes on saying "Connected & verified", stays index-eligible, keeps a resolver index record
+    pointing at a zone that no longer exists, and -- because the panel renders the connected branch when
+    `hosting.custom_domain` is set -- shows the custom-hostname screen instead of the managed-DNS flow.
+    Found that way, 2026-10-26.
+
+    The re-publish matters for the same reason it matters on an ordinary disconnect: `on_custom_domain`
+    is baked into each published artifact -- canonical, robots, whether external link cards are real
+    anchors -- so an artifact published while the domain was live keeps serving those claims from the
+    platform host after the domain is gone.
+    """
+    from handlers.sites import _put_site_index_records, _recompute_eligibility, _republish_site_pages
+    from stripe_link.domain.documents import validate_site
+    from stripe_link.repositories.documents import custom_domains_index_repository, pages_repository
+
+    site = sites_repository.get(tenant_id, site_id)
+    if not site or str((site.get("hosting") or {}).get("custom_domain") or "") != domain:
+        return                      # a Site that never claimed this domain has nothing to give back
+    now = int(time.time())
+    hosting = site.get("hosting") or {}
+    hosting["custom_domain"] = None
+    hosting["type"] = "platform"
+    hosting.pop("verification", None)
+    site["hosting"] = hosting
+    site.pop("domain_provisioning", None)
+    _recompute_eligibility(site, tenant_id, now)
+    site["updated_at"] = now
+    try:
+        validate_site(site)
+        saved = sites_repository.put(site)
+    except Exception:  # noqa: BLE001 - the zone is already gone; leaving the Site attached is the worse half
+        logger.exception("managed dns: could not detach %s from site %s", domain, site_id)
+        return
+    _put_site_index_records(saved)
+    try:
+        # `site_index_records` only EMITS a custom-domain record when one is connected, so the stale one
+        # has to be removed by name -- otherwise the edge keeps an entry for a hostname we no longer hold.
+        custom_domains_index_repository().delete(tenant_id, domain)
+    except Exception:  # noqa: BLE001
+        logger.exception("managed dns: could not drop the index record for %s", domain)
+    try:
+        _republish_site_pages(tenant_id, saved, pages_repository(mode="live"), mode="live")
+    except Exception:  # noqa: BLE001
+        logger.exception("managed dns: re-publish after detaching %s failed", domain)
+
+
 def stop(event, sites_repository, site_id, *, repo=None):
     """Hand the domain back: export every record, then delete the zone.
 
@@ -280,6 +329,8 @@ def stop(event, sites_repository, site_id, *, repo=None):
     except CustomDomainError as exc:
         return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
     repo.delete(tenant_id, domain)
+    # Both halves, in this order: the zone is gone, so the Site must stop claiming the domain too.
+    _detach_from_site(domain, tenant_id, sites_repository, site_id)
     return json_response({
         "deleted": True,
         "zone_file": export,
