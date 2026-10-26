@@ -167,7 +167,21 @@ def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]
     # Reasons to stop that are not "a specific record is missing". Each is a case where the comparison
     # itself cannot be trusted, which is worse than a known gap: a known gap can be shown and fixed.
     contradictions: list[str] = []
-    if not observed_complete:
+    if imported == [] and (live["mx"] or live["spf"] or live["dmarc"] or live["dkim"]):
+        # THE IMPORT CAME BACK EMPTY for a domain that demonstrably has records. Seen on juniorbay.net,
+        # 2026-10-26: Cloudflare's scan returned nothing while live DNS served MX, SPF and DMARC.
+        #
+        # This is its own condition and not just "some records are missing", because the repair cannot
+        # rescue it. We can copy across what we can SEE, and DNS does not let us enumerate a zone: mail
+        # lives at known names, but subdomains do not. A tenant whose import came back empty may have a
+        # dozen hostnames we have no way to discover, and moving the nameservers would take every one of
+        # them down while the screen said the mail was handled.
+        contradictions.append(
+            "We could not read this domain's existing DNS -- the import came back empty even though the "
+            "domain is clearly in use. Moving the nameservers now would take down anything we cannot "
+            "see, so this needs a look before it goes ahead."
+        )
+    elif not observed_complete:
         contradictions.append(
             "We could not read this domain's live mail records just now, so there is nothing to check "
             "the import against. Try again in a moment."
@@ -185,6 +199,14 @@ def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]
     provider = mail_provider(live["mx"] or shape["mx"])
     if contradictions:
         prompt = contradictions[0]
+    elif missing:
+        # The BLOCKED prompt has to describe the discrepancy, not the import. It used to fall through to
+        # the counting branches and produce "We found 0 DNS records, including mail." -- two facts from
+        # two different sources welded into one contradictory sentence.
+        prompt = (f"Your live DNS publishes {len(missing)} mail record"
+                  f"{'' if len(missing) == 1 else 's'} that our import of this domain did not pick up. "
+                  "They are listed below. We will not move the nameservers until they are in place, "
+                  "because moving without them would stop your mail.")
     elif provider:
         prompt = (f"We found {len(imported)} DNS records. Mail is handled by {provider}. "
                   "Anything missing from this list will stop working when you change nameservers.")

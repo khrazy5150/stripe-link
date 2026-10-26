@@ -399,7 +399,12 @@
                   <!-- Re-checking alone can never clear this: Cloudflare's import scan runs once, so
                        the same zone compared against the same live DNS gives the same answer forever.
                        Copying the records across is the action that actually resolves it. -->
-                  <button type="button" class="primary-action" :disabled="managedBusy" @click="startManagedDns(true)">
+                  <!-- Offered only when the import was PARTIAL. An empty import cannot be repaired by
+                       copying: we can copy what we can see, and DNS does not let us enumerate a zone --
+                       mail lives at known names, subdomains do not. Offering it there would clear the
+                       block and move a tenant whose other hostnames we never discovered. -->
+                  <button v-if="!managedReview.contradictions?.length" type="button" class="primary-action"
+                          :disabled="managedBusy" @click="startManagedDns(true)">
                     {{ managedBusy ? "Copying…" : "Copy these records across for me" }}
                   </button>
                   <button type="button" class="secondary-action" :disabled="managedBusy" @click="startManagedDns(false)">

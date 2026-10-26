@@ -533,3 +533,41 @@ class ImportableRecordTests(unittest.TestCase):
         # and the serving records are ours to write.
         from stripe_link.domain.managed_dns import importable_records
         self.assertEqual(importable_records([WEB], []), [])
+
+
+class EmptyImportTests(unittest.TestCase):
+    """Cloudflare's import returning NOTHING for a domain that plainly has records.
+
+    Seen on juniorbay.net, 2026-10-26: the scan produced zero while live DNS served MX, SPF and DMARC.
+    It is its own condition rather than "some records are missing", because the repair cannot rescue it.
+    We copy what we can SEE, and DNS does not let us enumerate a zone -- mail lives at known names,
+    subdomains do not. A tenant whose import came back empty may have a dozen hostnames we have no way
+    to discover, and moving the nameservers would take every one of them down while the screen said the
+    mail was handled.
+    """
+
+    LIVE_MAIL = [{"type": "MX", "name": "example.com", "content": "10 inbound-smtp.us-east-1.amazonaws.com"},
+                 {"type": "TXT", "name": "example.com", "content": "v=spf1 include:amazonses.com ~all"}]
+
+    def test_an_empty_import_blocks_on_its_own_terms(self):
+        summary = review([], self.LIVE_MAIL, observed_complete=True)
+        self.assertTrue(summary["blocked"])
+        self.assertTrue(summary["contradictions"])
+        self.assertIn("could not read this domain's existing DNS", summary["confirm_prompt"])
+
+    def test_an_empty_import_on_a_domain_with_no_mail_is_not_a_contradiction(self):
+        # A genuinely empty domain -- the creditfix.cloud case -- is allowed through, as before.
+        summary = review([], [], observed_complete=True)
+        self.assertFalse(summary["blocked"])
+        self.assertFalse(summary["contradictions"])
+
+    def test_a_partial_import_describes_the_discrepancy_not_the_count(self):
+        """It used to fall through to the counting branches and produce "We found 0 DNS records,
+        including mail." -- two facts from two different sources welded into one sentence that
+        contradicted itself."""
+        summary = review([{"type": "A", "name": "example.com", "content": "203.0.113.1"}],
+                         [{"type": "A", "name": "example.com", "content": "203.0.113.1"},
+                          *self.LIVE_MAIL], observed_complete=True)
+        self.assertTrue(summary["blocked"])
+        self.assertIn("did not pick up", summary["confirm_prompt"])
+        self.assertNotIn("including mail", summary["confirm_prompt"])
