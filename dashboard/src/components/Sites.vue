@@ -336,6 +336,14 @@
               </label>
               <!-- Two routes, recommended but never forced: a tenant whose IT owns their DNS must still
                    be able to decline and connect a domain the ordinary way. -->
+              <!-- A choice has to be unmakeable. Picking a card hid both of them, so the only way back
+                   was a hard refresh -- and the tenant had already typed their domain. Offered only
+                   while nothing has been created yet: once a zone exists, backing out is "Move this
+                   domain elsewhere", which is a different and heavier thing. -->
+              <p v-if="dnsChoice && managedState === CHOOSE" class="field-note dns-chosen">
+                <strong>{{ dnsChoice === 'managed' ? 'Let us handle the DNS' : 'Keep your DNS where it is' }}</strong>
+                <button type="button" class="link-button" @click="dnsChoice = ''">Change</button>
+              </p>
               <div v-if="domainForm.domain && !dnsChoice" class="dns-choice">
                 <button type="button" class="dns-choice-card" @click="dnsChoice = 'managed'">
                   <strong>Let us handle the DNS</strong>
@@ -1164,7 +1172,12 @@ async function detectDnsProvider(domain, { advise = false } = {}) {
     dnsProvider.value = detected;
     providerDetected.value = true;
   }
-  connectAdvice.value = advise ? apexAdvice(domain, detected || dnsProvider.value) : null;
+  // ONLY WHEN ASKED. This used to assign `null` on the else branch, so the other caller -- the watcher
+  // that detects the provider for an ALREADY-CONNECTED domain -- silently wiped advice about the domain
+  // being typed. Both calls share `providerLookup`, so whichever landed second won, and after a
+  // successful managed run the connected-domain watcher always landed second: the apex warning simply
+  // never appeared again. Found by someone looking for it on purpose, 2026-10-26.
+  if (advise) connectAdvice.value = apexAdvice(domain, detected || dnsProvider.value);
 }
 
 let adviceTimer = 0;
@@ -1681,6 +1694,13 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+.dns-chosen { display: flex; align-items: center; gap: 0.6rem; margin: 0.5rem 0; }
+.link-button {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font-weight: 600; font-size: inherit;
+}
+.link-button:hover { text-decoration: underline; }
+
 .managed-waiting { display: flex; align-items: center; gap: 0.5rem; }
 .managed-spinner {
   flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border-radius: 50%;

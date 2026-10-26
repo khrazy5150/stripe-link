@@ -156,6 +156,33 @@ class PanelOrderTests(unittest.TestCase):
         self.assertIn("editing.value = { ...fresh }", poll)
 
 
+class AdviceLifetimeTests(unittest.TestCase):
+    def test_a_detection_call_that_was_not_asked_to_advise_leaves_advice_alone(self):
+        """The apex warning stopped appearing at all, and the cause was a shared lookup token.
+
+        `detectDnsProvider` assigned `null` on its else branch, so the OTHER caller -- the watcher that
+        detects the provider for an already-connected domain -- wiped advice about the domain being
+        typed. Both share `providerLookup`, so whichever landed second won; after a successful managed
+        run the connected-domain watcher always landed second.
+        """
+        fn = SITES_VUE.split("async function detectDnsProvider", 1)[1].split("\n}", 1)[0]
+        self.assertIn("if (advise) connectAdvice.value", fn)
+        self.assertNotIn("connectAdvice.value = advise ?", fn)
+
+
+class ReversibleChoiceTests(unittest.TestCase):
+    def test_a_choice_can_be_unmade(self):
+        """Picking a card hid both of them, so the only way back was a hard refresh — after the tenant
+        had already typed their domain."""
+        self.assertIn('@click="dnsChoice = \'\'"', SITES_VUE)
+        self.assertIn("dns-chosen", SITES_VUE)
+
+    def test_only_while_nothing_has_been_created(self):
+        # Once a zone exists, backing out is "Move this domain elsewhere" -- a different, heavier thing
+        # that deletes a zone and hands back a file, not a toggle.
+        self.assertIn('v-if="dnsChoice && managedState === CHOOSE"', SITES_VUE)
+
+
 class WwwGuardTests(unittest.TestCase):
     """Typing `www.example.com` and choosing managed DNS.
 
