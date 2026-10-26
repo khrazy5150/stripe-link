@@ -34,17 +34,33 @@
 #   7. Run this script and paste it.
 # ---------------------------------------------------------------------------------------------------
 #
-# Usage:  ./deploy/cloudflare-dns-token.sh [dev|prod]
+# ONE TOKEN, TWO SECRETS. Each stack creates and grants its own secret, so there are two to populate --
+# but the value can be the same, and for the existing custom-hostname token it already is (verified
+# 2026-10-25: identical in both). There is one Cloudflare account and a managed-DNS token must be scoped
+# to all zones in order to create new ones, so a dev token can already reach a prod tenant's zone:
+# separate values would isolate the CREDENTIAL, not the data. Worth it only if you want to revoke dev
+# without a prod outage; pass `dev` and `prod` separately with different tokens if so.
+#
+# `all` prompts once and writes both, which also stops the two drifting -- a rotation applied to one
+# secret and not the other fails on exactly one code path, days later.
+#
+# Usage:  ./deploy/cloudflare-dns-token.sh [dev|prod|all]
 #
 set -euo pipefail
 
-ENVIRONMENT="${1:-dev}"
+TARGET="${1:-all}"
+case "${TARGET}" in
+  dev|prod) ENVIRONMENTS=("${TARGET}") ;;
+  all)      ENVIRONMENTS=(dev prod) ;;
+  *) echo "Usage: $0 [dev|prod|all]" >&2; exit 1 ;;
+esac
 REGION="${AWS_REGION:-us-west-2}"
 PROJECT_PREFIX="${PROJECT_PREFIX:-jb}"
-SECRET_ID="${CLOUDFLARE_DNS_TOKEN_SECRET_NAME:-${PROJECT_PREFIX}-cloudflare-dns-token-${ENVIRONMENT}}"
 
 echo "Managed DNS Cloudflare token -> Secrets Manager"
-echo "  secret : ${SECRET_ID}"
+for env in "${ENVIRONMENTS[@]}"; do
+  echo "  secret : ${CLOUDFLARE_DNS_TOKEN_SECRET_NAME:-${PROJECT_PREFIX}-cloudflare-dns-token-${env}}"
+done
 echo "  region : ${REGION}"
 echo
 
@@ -89,12 +105,23 @@ else
   echo "      CLOUDFLARE_ACCOUNT_ID=<your account id> ./deploy/cloudflare-dns-token.sh ${ENVIRONMENT}"
 fi
 
-aws secretsmanager put-secret-value \
-  --secret-id "${SECRET_ID}" \
-  --secret-string "${TOKEN}" \
-  --region "${REGION}" \
-  --query 'VersionId' --output text >/dev/null
+for env in "${ENVIRONMENTS[@]}"; do
+  SECRET_ID="${CLOUDFLARE_DNS_TOKEN_SECRET_NAME:-${PROJECT_PREFIX}-cloudflare-dns-token-${env}}"
+  if aws secretsmanager put-secret-value \
+      --secret-id "${SECRET_ID}" \
+      --secret-string "${TOKEN}" \
+      --region "${REGION}" \
+      --query 'VersionId' --output text >/dev/null 2>&1; then
+    echo "==> Stored in ${SECRET_ID}"
+  else
+    # The usual cause, and worth saying rather than printing an AWS error: the stack that owns this
+    # secret has not been deployed since CloudflareDnsTokenSecret was added, so it does not exist yet.
+    echo "    Could not write ${SECRET_ID}." >&2
+    echo "    If that secret does not exist yet, deploy the stack once and re-run:" >&2
+    echo "      ./deploy/deploy.sh ${env}" >&2
+  fi
+done
 
-echo "==> Stored. It is read at RUNTIME, so no redeploy is needed for the value itself."
-echo "    A stack deploy IS needed once, to create the secret and hand its ARN to the functions:"
-echo "      ./deploy/deploy.sh ${ENVIRONMENT}"
+echo
+echo "The value is read at RUNTIME, so rotating it later needs no redeploy. A stack deploy is needed"
+echo "only once per environment, to create the secret and hand its ARN to the functions."
