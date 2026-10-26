@@ -33,6 +33,7 @@ from stripe_link.domain.cloudflare_zones import (
     delete_zone,
     get_zone,
     list_zone_dns_records,
+    scan_zone_records,
     worker_route_patterns,
 )
 from stripe_link.domain.custom_domains import (CustomDomainError, assert_valid_domain,
@@ -121,6 +122,7 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
             list_records_fn=lambda zid: list_zone_dns_records(zid, api_token=api_token),
             observe_fn=observe_mail_records,
             observe_ns_fn=observe_name_servers,
+            scan_fn=lambda zid: scan_zone_records(zid, api_token=api_token),
             repository=repo, site_id=site_id,
         )
     except CustomDomainError as exc:
@@ -140,6 +142,12 @@ def _recheck(record, tenant_id, domain, api_token, repo, *, repair=False):
     """
     zone_id = str(record.get("zone_id") or "")
     try:
+        # Re-scan before re-comparing: "Check again" should mean Cloudflare looks again, not just that
+        # we re-read what it found the first time.
+        try:
+            scan_zone_records(zone_id, api_token=api_token)
+        except CustomDomainError:
+            pass
         imported = list_zone_dns_records(zone_id, api_token=api_token)
         observed, complete = observe_mail_records(domain)
         if repair:

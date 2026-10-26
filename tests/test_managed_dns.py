@@ -473,6 +473,33 @@ class PriorNameServerTests(unittest.TestCase):
         self.assertEqual(prior_name_servers(["isla.ns.cloudflare.com"], ["kobe.ns.cloudflare.com"]), [])
         self.assertEqual(prior_name_servers([], []), [])
 
+    def test_the_import_is_requested_rather_than_assumed(self):
+        """Creating a zone imports nothing. Without this call the review compares live DNS against an
+        empty list, so every domain with mail blocks forever and the repair cannot help."""
+        from stripe_link.domain.managed_dns import provision
+        order = []
+        provision(tenant_id="t1", domain="example.com", now=1,
+                  create_zone_fn=lambda d: order.append("create") or {"id": "z1", "status": "pending"},
+                  scan_fn=lambda zid: order.append("scan"),
+                  list_records_fn=lambda zid: order.append("list") or [],
+                  observe_fn=lambda d: ([], True),
+                  repository=FakeZoneRepo())
+        self.assertEqual(order, ["create", "scan", "list"])
+
+    def test_a_failed_scan_does_not_stop_provisioning(self):
+        # The zone exists either way, and the review catches the empty import -- which is the correct
+        # outcome, and a better one than a 500 with a zone already created on our account.
+        from stripe_link.domain.managed_dns import provision
+        repo = FakeZoneRepo()
+        result = provision(tenant_id="t1", domain="example.com", now=1,
+                           create_zone_fn=lambda d: {"id": "z1", "status": "pending"},
+                           scan_fn=lambda zid: (_ for _ in ()).throw(RuntimeError("scan down")),
+                           list_records_fn=lambda zid: [],
+                           observe_fn=lambda d: ([], True),
+                           repository=repo)
+        self.assertFalse(result["review"]["blocked"])    # no mail anywhere, so nothing to protect
+        self.assertEqual(len(repo.saved), 1)
+
     def test_they_are_captured_before_the_zone_exists(self):
         """Afterwards is too late: the delegation may already be ours, and the question "where did this
         domain point?" then has no answer left anywhere."""

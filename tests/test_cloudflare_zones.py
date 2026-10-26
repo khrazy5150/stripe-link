@@ -18,6 +18,7 @@ from stripe_link.domain.cloudflare_zones import (
     delete_zone,
     get_zone,
     list_zone_dns_records,
+    scan_zone_records,
     worker_route_patterns,
 )
 from stripe_link.domain.custom_domains import CustomDomainError
@@ -189,3 +190,31 @@ class ErrorContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScanTests(unittest.TestCase):
+    """Creating a zone does not import anything, whatever `jump_start` claims.
+
+    Measured 2026-10-26 on juniorbay.net, a domain with 41 records in Route 53: the zone came back with
+    ZERO and was still zero many minutes later. Calling the scan endpoint on that same empty zone added
+    21 immediately -- MX and SPF among them. The import was never broken; we were never asking for it.
+
+    That mattered more than a missing feature. The review compares the import against live DNS, so an
+    import that is always empty makes every domain with mail block forever, and the repair that is
+    supposed to rescue a partial import cannot rescue a total absence.
+    """
+
+    def test_the_scan_is_a_call_we_make(self):
+        opener = FakeOpener({("POST", f"{BASE}/zones/z1/dns_records/scan"):
+                             ok({"recs_added": 21, "total_records_parsed": 21})})
+        result = scan_zone_records("z1", api_token="tok", opener=opener)
+        self.assertEqual(result["recs_added"], 21)
+        self.assertEqual(opener.calls[0][0], "POST")
+
+    def test_a_failed_scan_surfaces_rather_than_looking_like_an_empty_domain(self):
+        # The caller swallows it so provisioning continues, but the review then sees an empty import and
+        # blocks -- which is the right outcome and only works if this raises rather than returning {}.
+        opener = FakeOpener({("POST", f"{BASE}/zones/z1/dns_records/scan"):
+                             {"success": False, "errors": [{"message": "scan unavailable"}]}})
+        with self.assertRaises(CustomDomainError):
+            scan_zone_records("z1", api_token="tok", opener=opener)

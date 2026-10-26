@@ -92,6 +92,35 @@ Tune on prod or not at all.
 Certificates | Read` was deliberately not requested — so certificate progress is polled from the
 endpoint rather than the API. Worth knowing before someone adds the permission to "fix" it.
 
+## 2c. The import does not happen by itself (2026-10-26)
+
+`create_zone(..., jump_start: true)` is documented to scan the domain and import what it finds. **It
+does not.** A zone created for `juniorbay.net` — 41 records in Route 53 — came back with **zero**, and
+was still zero many minutes later. Calling `POST /zones/{id}/dns_records/scan` on that same empty zone
+added **21 immediately** (12 A, 2 CNAME, 2 MX, 5 TXT). The import was never broken; nothing was asking
+for it.
+
+This mattered far more than a missing convenience, because the whole review is a comparison against the
+import:
+
+- an import that is always empty makes **every domain with mail block forever**;
+- and the repair that rescues a *partial* import cannot rescue a *total* absence, because mail lives at
+  known names and subdomains do not.
+
+So the scan is now an explicit call, on provision and again on "Check again" — a tenant pressing that
+should mean Cloudflare looks again, not that we re-read what it found the first time.
+
+**21 of 41 is the ceiling, and the remaining 20 are the point.** They are the random-hash CNAMEs that
+ACM validation and DKIM leave behind, which no scan can enumerate because DNS has no way to list a zone.
+A tenant with those will always have an incomplete import, and the honest long-term answer is to accept
+a **zone file** — Route 53 and every serious provider can export one, and it is the only artefact that
+describes a zone completely. Until then the empty-import block stands as the backstop.
+
+The deprecated endpoint carries a notice pointing at an async `/dns_settings/scan/trigger` pair, which
+this token cannot use (*"Method not allowed for this authentication scheme"*). When that changes, swap
+it in `scan_zone_records` — the review compares against whatever the scan returns and does not care how
+it arrived.
+
 ## 3. What this buys beyond apex
 
 - **One nameserver change instead of four records**, and nothing to mistype. Most support load on custom

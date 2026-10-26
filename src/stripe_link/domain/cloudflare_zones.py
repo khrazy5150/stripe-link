@@ -71,6 +71,26 @@ def create_zone(domain: str, *, account_id: str, api_token: str, opener=None) ->
     )
 
 
+def scan_zone_records(zone_id: str, *, api_token: str, opener=None) -> dict[str, Any]:
+    """Ask Cloudflare to look up the domain's existing records and add them to the zone.
+
+    THIS IS THE IMPORT. `jump_start: true` on zone creation is documented to do it and, measured on
+    2026-10-26, does not: a zone created for juniorbay.net -- a domain with 41 records in Route 53 --
+    came back with zero, and was still zero many minutes later. Calling this endpoint on that same empty
+    zone added 21 records immediately, MX and SPF among them. The scan works; we were never asking.
+
+    The endpoint carries a deprecation notice in favour of an async `/dns_settings/scan/trigger` pair,
+    which this token cannot use ("Method not allowed for this authentication scheme"). When that changes,
+    swap it here -- the review compares against whatever this returns and does not care how it arrived.
+
+    Best-effort by nature, which is why it is the START of the review and not the end: a scan queries
+    well-known names, so it cannot find the random-hash CNAMEs that ACM validation and DKIM leave behind.
+    21 of 41 on that domain, and the missing 20 are exactly the ones nothing can enumerate.
+    """
+    return cloudflare_account_request("POST", f"/zones/{zone_id}/dns_records/scan",
+                                      api_token=api_token, opener=opener)
+
+
 def get_zone(zone_id: str, *, api_token: str, opener=None) -> dict[str, Any]:
     """The zone as Cloudflare currently sees it -- `status` is how we learn the nameserver change landed.
     Asked rather than inferred, for the same reason the health sweep asks: Cloudflare is watching the

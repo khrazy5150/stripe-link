@@ -374,7 +374,8 @@ def zone_state(zone: dict[str, Any]) -> str:
 
 
 def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_records_fn,
-              observe_fn, repository, site_id: str = "", observe_ns_fn=None) -> dict[str, Any]:
+              observe_fn, repository, site_id: str = "", observe_ns_fn=None,
+              scan_fn=None) -> dict[str, Any]:
     """Create the zone, read what the import found, compare it with live DNS, and record the zone.
 
     **The zone is created before the review can run, and that is safe.** Cloudflare's import scan only
@@ -396,6 +397,12 @@ def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_rec
     prior, _ = observe_ns_fn(domain) if observe_ns_fn else ((), False)
     zone = create_zone_fn(domain)
     zone_id = str(zone.get("id") or "")
+    # ASK for the import. Creating the zone does not perform one, whatever `jump_start` claims.
+    if scan_fn:
+        try:
+            scan_fn(zone_id)
+        except Exception:  # noqa: BLE001 - a failed scan leaves an empty zone, which the review catches
+            pass
     imported = list(list_records_fn(zone_id) or [])
     observed, observed_complete = observe_fn(domain)
     summary = review(imported, observed, observed_complete=bool(observed_complete))
