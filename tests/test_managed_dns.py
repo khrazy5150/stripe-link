@@ -256,3 +256,70 @@ class ExportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeZoneRepo:
+    def __init__(self):
+        self.saved = []
+
+    def put(self, document):
+        self.saved.append(dict(document))
+        return document
+
+
+class ProvisionTests(unittest.TestCase):
+    """Create the zone, read the import, compare it with live DNS, record the zone."""
+
+    ZONE = {"id": "z1", "status": "pending",
+            "name_servers": ["kim.ns.cloudflare.com", "walt.ns.cloudflare.com"]}
+
+    def _provision(self, imported, observed, complete=True, zone=None):
+        from stripe_link.domain.managed_dns import provision
+        repo = FakeZoneRepo()
+        result = provision(
+            tenant_id="t1", domain="example.com", now=1_000,
+            create_zone_fn=lambda d: zone or self.ZONE,
+            list_records_fn=lambda zid: imported,
+            observe_fn=lambda d: (observed, complete),
+            repository=repo,
+        )
+        return result, repo
+
+    def test_a_clean_comparison_hands_over_the_nameservers(self):
+        records = [*GOOGLE_MX, SPF, WEB]
+        result, repo = self._provision(records, records)
+        self.assertFalse(result["review"]["blocked"])
+        self.assertEqual(result["name_servers"], ["kim.ns.cloudflare.com", "walt.ns.cloudflare.com"])
+        self.assertEqual(repo.saved[0]["zone_id"], "z1")
+
+    def test_a_blocked_review_withholds_the_nameservers(self):
+        """The only irreversible step in the flow. Once those four lines are followed the domain answers
+        from here and the old provider stops, so they are what the gate actually holds back — not the
+        zone, which changes nothing on the internet by existing."""
+        result, _ = self._provision([WEB], [WEB, *GOOGLE_MX])
+        self.assertTrue(result["review"]["blocked"])
+        self.assertEqual(result["name_servers"], [])
+        self.assertTrue(result["review"]["missing"])
+
+    def test_the_zone_is_recorded_even_when_the_review_blocks(self):
+        """It exists on our account from the moment it is created, and a zone nobody is tracking is the
+        thing this design exists to never have. Recording it is also what makes either next step
+        possible: retry the comparison, or abandon and delete."""
+        _, repo = self._provision([WEB], [WEB, *GOOGLE_MX])
+        self.assertEqual(len(repo.saved), 1)
+        self.assertEqual(repo.saved[0]["domain"], "example.com")
+        self.assertTrue(repo.saved[0]["review"]["blocked"])
+        self.assertTrue(repo.saved[0]["review"]["missing"])
+
+    def test_a_failed_live_lookup_blocks_rather_than_reading_as_no_mail(self):
+        result, repo = self._provision([WEB], [], complete=False)
+        self.assertTrue(result["review"]["blocked"])
+        self.assertEqual(result["name_servers"], [])
+        self.assertTrue(repo.saved[0]["review"]["blocked"])
+
+    def test_the_stored_record_is_the_zone_not_the_site(self):
+        _, repo = self._provision([WEB], [WEB])
+        saved = repo.saved[0]
+        self.assertEqual(saved["document_type"], "managed_zone")
+        self.assertEqual(saved["tenant_id"], "t1")
+        self.assertNotIn("site_id", saved)      # a zone outlives any one Site's claim on the hostname

@@ -1,7 +1,17 @@
 # Managed DNS — we run the tenant's zone, so their root domain just works
 
-**Status:** P1 BUILT 2026-10-25 (`domain/managed_dns.py`, `tests/test_managed_dns.py`). The rest is
-BLOCKED on a Cloudflare token that can create zones — see §5. Written 2026-10-25.
+**Status:** P1 + P2 BUILT 2026-10-25. Written 2026-10-25.
+
+| | |
+|---|---|
+| P1 — the mail-safety gate | `domain/managed_dns.py` · `tests/test_managed_dns.py` |
+| P2 — zone provisioning | `domain/cloudflare_zones.py` · `managed_zones_repository` · `managed_dns.provision()` |
+| P3 — activation (serving records, Worker route, index record) | not built |
+| P4 — the dashboard flow | not built |
+| P5 — offboarding UI over `zone_export` / `delete_zone` | not built |
+
+Every Cloudflare call takes an injected `opener`, so P2 is fully tested against fakes. **It cannot run
+live yet**: the token has no `com.cloudflare.api.account.zone.create` (§5).
 
 P1 is the safety gate, deliberately first: it is the only part whose failure cannot be undone, and it
 needs no Cloudflare access to build or to test.

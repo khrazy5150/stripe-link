@@ -256,6 +256,42 @@ def zone_state(zone: dict[str, Any]) -> str:
     return str((zone or {}).get("status") or "unknown").strip().lower()
 
 
+def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_records_fn,
+              observe_fn, repository) -> dict[str, Any]:
+    """Create the zone, read what the import found, compare it with live DNS, and record the zone.
+
+    **The zone is created before the review can run, and that is safe.** Cloudflare's import scan only
+    happens as part of zone creation, so there is no way to see what it found first. A created zone
+    changes nothing on the internet: the tenant's nameservers still point at their old provider and will
+    until they act. What the review gates is the INSTRUCTIONS -- a blocked review simply never shows the
+    nameservers, so the switch that would matter cannot happen.
+
+    **The record is written even when the review blocks.** The zone exists on our account from this
+    moment, and a zone nobody is tracking is the thing we are trying never to have. Writing it is also
+    what makes the next step possible in either direction: retry the comparison, or abandon and delete.
+
+    `observe_fn(domain)` returns `(records, complete)` -- the caller's independent lookup and whether it
+    actually succeeded. The flag is passed straight through to `review`, which requires it, because
+    "found no mail" and "could not ask" are opposite answers that both arrive as an empty list.
+    """
+    zone = create_zone_fn(domain)
+    zone_id = str(zone.get("id") or "")
+    imported = list(list_records_fn(zone_id) or [])
+    observed, observed_complete = observe_fn(domain)
+    summary = review(imported, observed, observed_complete=bool(observed_complete))
+    record = managed_zone_record(tenant_id, domain, zone, now)
+    record["review"] = {"blocked": summary["blocked"], "missing": summary["missing"],
+                        "checked_at": int(now)}
+    repository.put(record)
+    return {
+        "zone": record,
+        "review": summary,
+        # Withheld until the comparison is clean. These four lines are the only irreversible thing in the
+        # flow -- once they are followed, the domain answers from here and the old provider stops.
+        "name_servers": [] if summary["blocked"] else record["name_servers"],
+    }
+
+
 def zone_export(records: Iterable[dict[str, Any]], domain: str) -> str:
     """Every record as a zone file the tenant can hand to any other provider.
 

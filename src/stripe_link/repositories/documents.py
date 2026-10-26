@@ -1744,6 +1744,26 @@ def notifications_repository(table: Any | None = None, *, mode: str | None = Non
     )
 
 
+def managed_zones_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Tenant DNS zones we host on our Cloudflare account (plans/MANAGED_DNS.md).
+
+    Shares `CustomDomainsTable` with the `custom_domain` index records -- same key shape, different
+    document type, so they sit beside each other as `MANAGED_ZONE#<domain>` and `CUSTOM_DOMAIN#<domain>`.
+
+    NOT on the Site, and that is the whole point. `domain_provisioning` describes a Site's claim on a
+    hostname and is thrown away when the tenant disconnects, which is right. A zone is not that: it stays
+    authoritative for the entire domain -- their mail included -- until they move their nameservers back.
+    Had it lived on the Site, disconnecting would orphan a zone still answering for someone's business,
+    with nothing left in our data pointing at it.
+    """
+    return DynamoDocumentRepository(
+        os.environ.get("CUSTOM_DOMAINS_TABLE", ""),
+        document_type="managed_zone",
+        id_field="domain",
+        table=table,
+    )
+
+
 def refund_requests_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("NOTIFICATIONS_TABLE", ""),

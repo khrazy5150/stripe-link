@@ -37,6 +37,10 @@ SETUP_AND_IDENTITY = {
     "availability_exceptions_repository",
     "legal_pages_repository",            # one set of terms
     "custom_domains_index_repository",   # live-only by nature
+    # A DNS zone is a property of the DOMAIN, not of a set of books. There is no test-mode example.com:
+    # the nameservers either point at us or they do not, and custom domains are live-only anyway
+    # (_reject_non_live_site). Scoping it would invent a second zone that cannot exist.
+    "managed_zones_repository",
     "abuse_reports_repository",          # the platform's queue, not a tenant's books
     "purchase_throttles_repository",     # an abuse gate counts attempts, not sales
     "routes_repository",                 # a shareable link resolves to a page in either mode
