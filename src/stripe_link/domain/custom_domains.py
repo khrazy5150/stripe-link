@@ -2,9 +2,18 @@ import json
 import os
 import re
 from typing import Any
-from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+
+# `urllib.request` IS NOT IMPORTED AT MODULE LEVEL, and `urllib.error` follows it down. Together they
+# cost 131ms and pull in 66 modules -- email, http.client, ssl -- measured 2026-10-25. This module's
+# pure helpers (normalize_domain, route_target, is_apex_domain...) are imported on the hot path of every
+# custom-domain request, and none of them make an HTTP call. Paying for a network stack to format a
+# hostname is the cold-start tax that made the resolver slow. Same pattern `repositories/documents.py`
+# already uses for boto3: the heavy import happens in the function that needs it.
+def _http():
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
+    return HTTPError, Request, urlopen
 
 
 class CustomDomainError(Exception):
@@ -453,6 +462,7 @@ def cloudflare_request(
     data: dict[str, Any] | None = None,
     opener=None,
 ) -> dict[str, Any]:
+    HTTPError, Request, urlopen = _http()
     opener = opener or urlopen
     url = f"{CLOUDFLARE_API_BASE}/zones/{zone_id}{path}"
     headers = {
@@ -548,6 +558,7 @@ def validation_record_from_hostname(cloudflare_hostname: dict[str, Any]) -> dict
 def dns_record_matches(name: str, record_type: str, expected_value: str, *, opener=None) -> bool:
     if not name or not expected_value:
         return False
+    _, Request, urlopen = _http()
     opener = opener or urlopen
     url = f"{DNS_OVER_HTTPS_URL}?{urlencode({'name': name, 'type': record_type})}"
     request = Request(url, headers={"Accept": "application/dns-json"}, method="GET")
@@ -583,6 +594,7 @@ def resolve_records(name: str, record_type: str, *, opener=None) -> tuple[list[s
     """
     if not name:
         return [], False
+    _, Request, urlopen = _http()
     opener = opener or urlopen
     url = f"{DNS_OVER_HTTPS_URL}?{urlencode({'name': name, 'type': record_type})}"
     request = Request(url, headers={"Accept": "application/dns-json"}, method="GET")
@@ -645,6 +657,7 @@ def _dns_has_records(name: str, record_type: str, *, opener=None) -> bool:
     entry (e.g. a TXT where a CNAME is required)."""
     if not name:
         return False
+    _, Request, urlopen = _http()
     opener = opener or urlopen
     url = f"{DNS_OVER_HTTPS_URL}?{urlencode({'name': name, 'type': record_type})}"
     request = Request(url, headers={"Accept": "application/dns-json"}, method="GET")

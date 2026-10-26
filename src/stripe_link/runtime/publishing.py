@@ -48,7 +48,7 @@ from stripe_link.domain.documents import (
     validate_route,
     validate_site,
 )
-from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
+from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path, public_url
 from stripe_link.domain.bnpl import messaging_method_types
 from stripe_link.domain.composition import composition_forbids_indexing, composition_key
 from stripe_link.domain.reviews import in_mode as reviews_in_mode
@@ -877,10 +877,7 @@ def artifact_targets(
     return targets
 
 
-def public_url(domain: str, key: str) -> str:
-    if not domain:
-        return ""
-    return f"https://{domain.rstrip('/')}/{key}"
+
 
 
 def register_page_route(routes_repository: Any, page: dict[str, Any]) -> bool:

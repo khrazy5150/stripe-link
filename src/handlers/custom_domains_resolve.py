@@ -11,8 +11,10 @@ from stripe_link.repositories.documents import experiments_repository
 from stripe_link.domain.custom_domains import (
     creator_host_key, normalize_domain, normalize_route_path, route_target)
 from stripe_link.repositories.documents import RepositoryError, custom_domains_index_repository
-from stripe_link.runtime.artifacts import artifact_paths
-from stripe_link.runtime.publishing import public_url
+# public_url comes from `artifacts`, NOT `publishing`. It is the same three-line function, and importing
+# it from publishing cost 383ms of cold start on the hot path of every custom domain (measured
+# 2026-10-25) to pull in a publish pipeline this handler never runs.
+from stripe_link.runtime.artifacts import artifact_paths, public_url
 
 # A root-level well-known file (robots.txt, sitemap.xml, or an IndexNow key) — served from a sibling artifact
 # under the homepage page_id. Single path segment only: no directories, no traversal.

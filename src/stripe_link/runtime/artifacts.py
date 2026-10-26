@@ -24,3 +24,17 @@ def artifact_paths(tenant_id: str, page_id: str, slug: str = "", context: str = 
 
 def cloudfront_path(s3_key: str) -> str:
     return f"/{s3_key.lstrip('/')}"
+
+
+def public_url(domain: str, key: str) -> str:
+    """The public https URL for a published artifact key.
+
+    LIVES HERE, not in runtime/publishing, because of what importing it costs. It is three lines of
+    string formatting, and `publishing` pulls in the whole publish pipeline -- documents, composition,
+    funnels, reviews, upsell pages: 383ms and 205 modules, measured 2026-10-25. The custom-domain
+    resolver imported it for this one function and paid that on every cold start, on the hot path of
+    every custom domain we serve. `publishing` re-exports it, so existing callers are unaffected.
+    """
+    if not domain:
+        return ""
+    return f"https://{domain.rstrip('/')}/{key}"
