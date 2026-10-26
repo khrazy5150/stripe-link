@@ -323,7 +323,10 @@
               </label>
               <!-- Said BEFORE connecting. After it, a Cloudflare hostname exists and the tenant is working
                    through records that can never verify -- which is exactly how coderbay.net went. -->
-              <div v-if="connectAdvice" class="keys-status-banner warning apex-advice">
+              <!-- Suppressed once managed DNS is chosen. There the apex is exactly what works -- it is
+                   the whole reason the option exists -- so "use www instead" is not merely redundant,
+                   it talks the tenant out of the thing they just chose. It did, on 2026-10-26. -->
+              <div v-if="connectAdvice && dnsChoice !== 'managed'" class="keys-status-banner warning apex-advice">
                 <p>{{ connectAdvice.reason }}</p>
                 <p>{{ connectAdvice.fix }}</p>
                 <button type="button" class="secondary-action" @click="domainForm.domain = connectAdvice.suggestion">

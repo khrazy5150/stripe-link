@@ -436,6 +436,20 @@ _MULTIPART_TLDS = frozenset({
 })
 
 
+def registrable_root(domain: str) -> str:
+    """The name a zone is created for, and the name a registrar knows: `www.example.co.uk` ->
+    `example.co.uk`.
+
+    Managed DNS serves the apex and www from ONE zone, so whatever a tenant types, the zone is the root.
+    Mirrors `rootDomain` in dashboard/src/composables/dnsInstructions.js, off the same TLD list -- the
+    two agree because they answer the same question in two places, not because either is authoritative.
+    """
+    labels = [part for part in str(domain or "").strip().lower().rstrip(".").split(".") if part]
+    if len(labels) <= 2:
+        return ".".join(labels)
+    return ".".join(labels[-3:] if ".".join(labels[-2:]) in _MULTIPART_TLDS else labels[-2:])
+
+
 def is_apex_domain(domain: str) -> bool:
     """True if `domain` is a registrable apex (e.g. example.com, example.co.uk) rather than a subdomain. Apex
     can't hold the routing CNAME (DNS forbids CNAME-at-apex), so it isn't supported until 2.6b."""

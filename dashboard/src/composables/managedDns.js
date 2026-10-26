@@ -1,3 +1,5 @@
+import { rootDomain } from "./dnsInstructions.js";
+
 /**
  * The managed-DNS flow's shape, kept out of the component (plans/MANAGED_DNS.md P4).
  *
@@ -32,7 +34,11 @@ export function managedDnsState(zone, review) {
  * Registered domains rather than about their hosted zone -- a distinction that costs an hour if you get
  * it wrong, because the hosted zone has an NS record that looks like the thing to edit and is not.
  */
-export function nameserverInstructions(providerId, domain) {
+export function nameserverInstructions(providerId, typed) {
+  // The REGISTRABLE ROOT, never what was typed. Nameservers belong to the registered domain, and there
+  // is no registered domain called `www.example.com` -- sending someone to look for one in Route 53's
+  // Registered domains list is sending them to find nothing.
+  const domain = rootDomain(typed);
   const byProvider = {
     route53: [
       `Route 53 → **Registered domains** → ${domain} → **Actions → Edit name servers**.`,

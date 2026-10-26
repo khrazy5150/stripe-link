@@ -101,6 +101,20 @@ class StartTests(unittest.TestCase):
         created.assert_not_called()
         self.assertTrue(body_of(response)["already_started"])
 
+    def test_a_www_domain_creates_a_zone_for_the_root(self):
+        """Managed DNS serves the apex AND www from one zone, so the zone is the registrable root
+        whatever was typed. Asking Cloudflare for a zone literally named `www.example.com` is asking for
+        something it will not create on this plan."""
+        zones = FakeZones()
+        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
+             patch.object(managed_dns_api, "create_zone", return_value=ZONE) as created, \
+             patch.object(managed_dns_api, "list_zone_dns_records", return_value=[]), \
+             patch.object(managed_dns_api, "observe_mail_records", return_value=([], True)):
+            managed_dns_api.start(event(body={"domain": "www.example.com"}), FakeSites(), "site_1",
+                                  repo=zones)
+        self.assertEqual(created.call_args.args[0], "example.com")
+        self.assertIn((TENANT, "example.com"), zones.docs)
+
     def test_an_invalid_domain_never_reaches_cloudflare(self):
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
              patch.object(managed_dns_api, "create_zone") as created:
@@ -121,8 +135,12 @@ class StatusTests(unittest.TestCase):
     def _status(self, zone_status, stored_status="pending"):
         zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
                             "status": stored_status}])
+        # The Site attachment is stubbed here so these assertions are about the CLOUDFLARE wiring only;
+        # it has its own tests below, and running it against the minimal fixture would test the Site
+        # validator rather than this.
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb-router-dev")), \
              patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": zone_status}), \
+             patch.object(managed_dns_api, "_attach_to_site", return_value=True), \
              patch.object(managed_dns_api, "create_dns_record") as rec, \
              patch.object(managed_dns_api, "create_worker_route") as route:
             response = managed_dns_api.status(event("GET", query={"domain": "example.com"}),
@@ -151,6 +169,36 @@ class StatusTests(unittest.TestCase):
         self.assertEqual([c.args[1] for c in route.call_args_list],
                          ["example.com/*", "*.example.com/*"])
         self.assertEqual(zones.docs[(TENANT, "example.com")]["status"], "active")
+
+    def test_activation_attaches_the_domain_to_the_site(self):
+        """THE HALF THAT WAS MISSING. Cloudflare records and Worker routes get a request to our edge;
+        they do not tell the edge what to answer with. Without the Site attachment there is no
+        custom_domain index record, and a tenant who did everything right -- zone active, certificate
+        issued, nameservers changed -- gets a 404 on their own domain. That is exactly what the first
+        run through the UI produced."""
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "pending"}])
+        with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")), \
+             patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "active"}), \
+             patch.object(managed_dns_api, "create_dns_record"), \
+             patch.object(managed_dns_api, "create_worker_route"), \
+             patch.object(managed_dns_api, "_attach_to_site", return_value=True) as attached:
+            managed_dns_api.status(event("GET", query={"domain": "example.com"}), FakeSites(),
+                                   "site_1", repo=zones)
+        attached.assert_called_once()
+
+    def test_a_failed_attachment_is_not_reported_as_activated(self):
+        # Half-wired must not read as done: the zone would serve 404 while the screen said "live".
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "pending"}])
+        with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")), \
+             patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "active"}), \
+             patch.object(managed_dns_api, "create_dns_record"), \
+             patch.object(managed_dns_api, "create_worker_route"), \
+             patch.object(managed_dns_api, "_attach_to_site", return_value=False):
+            response = managed_dns_api.status(event("GET", query={"domain": "example.com"}),
+                                              FakeSites(), "site_1", repo=zones)
+        self.assertFalse(body_of(response)["activated"])
 
     def test_an_already_active_zone_is_not_rewired_on_every_poll(self):
         _, rec, route, _ = self._status("active", stored_status="active")

@@ -96,6 +96,30 @@ class MailSummaryTests(unittest.TestCase):
         self.assertIn("stop and tell us", node('m.mailSummary({mail:{present:false}})'))
 
 
+class RootDomainTests(unittest.TestCase):
+    """Nameservers belong to the REGISTERED domain. There is no registered domain called
+    `www.example.com`, so sending someone to find one in Route 53's Registered domains list sends them
+    to find nothing — which is what the first real run did."""
+
+    def test_the_registrar_instruction_names_the_root_whatever_was_typed(self):
+        for typed in ("www.creditfix.cloud", "creditfix.cloud", "shop.creditfix.cloud"):
+            line = node(f'm.nameserverInstructions("route53", {json.dumps(typed)})')[0]
+            self.assertIn("creditfix.cloud", line)
+            self.assertNotIn("www.creditfix.cloud", line, typed)
+
+    def test_a_multipart_tld_is_not_truncated_to_the_public_suffix(self):
+        line = node('m.nameserverInstructions("route53", "shop.example.co.uk")')[0]
+        self.assertIn("example.co.uk", line)
+
+
+class ApexAdviceTests(unittest.TestCase):
+    def test_the_apex_warning_is_suppressed_once_managed_dns_is_chosen(self):
+        """There the apex is exactly what works — it is the whole reason the option exists — so "use www
+        instead" does not merely duplicate, it talks the tenant out of the thing they just chose. It did,
+        on the first run through the UI."""
+        self.assertIn("connectAdvice && dnsChoice !== 'managed'", SITES_VUE)
+
+
 class WiringTests(unittest.TestCase):
     def test_the_component_renders_every_state(self):
         # Named once: `<script setup>` exposes the imported constants to the template, so the state

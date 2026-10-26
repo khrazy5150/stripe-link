@@ -35,7 +35,9 @@ from stripe_link.domain.cloudflare_zones import (
     list_zone_dns_records,
     worker_route_patterns,
 )
-from stripe_link.domain.custom_domains import CustomDomainError, assert_valid_domain, normalize_domain, observe_mail_records
+from stripe_link.domain.custom_domains import (CustomDomainError, assert_valid_domain,
+                                               normalize_domain, observe_mail_records,
+                                               registrable_root)
 from stripe_link.repositories.documents import managed_zones_repository
 
 logger = logging.getLogger(__name__)
@@ -66,7 +68,12 @@ def start(event, sites_repository, site_id, *, repo=None):
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
 
-    domain = normalize_domain(body.get("domain"))
+    # THE ZONE IS THE REGISTRABLE ROOT, always. A tenant who types www.example.com means "my website",
+    # and managed DNS serves the apex AND www from one zone -- but Cloudflare would have been asked to
+    # create a zone literally named `www.example.com`, which is not a thing it will do on this plan.
+    # Found on the first UI run, where the apex warning (itself wrong in this flow) talked someone into
+    # typing the www form.
+    domain = registrable_root(normalize_domain(body.get("domain")))
     try:
         assert_valid_domain(domain)
     except CustomDomainError as exc:
@@ -127,6 +134,8 @@ def status(event, sites_repository, site_id, *, repo=None):
     activated = False
     if state == "active" and previous != "active":
         activated = _activate(record, api_token=api_token, worker_script=worker_script)
+        # Both halves, and the second is the one that makes the domain serve rather than 404.
+        activated = _attach_to_site(record, sites_repository, site_id) and activated
         record["activated_at"] = int(time.time())
     if record["status"] != previous or activated:
         repo.put(record)
@@ -140,6 +149,57 @@ def status(event, sites_repository, site_id, *, repo=None):
         # served the old nameservers. Reporting that as a fault would be reporting DNS working normally.
         "propagating": state != "active",
     })
+
+
+def _attach_to_site(record, sites_repository, site_id) -> bool:
+    """Make the Site actually SERVE this domain.
+
+    THE HALF THAT WAS MISSING. Cloudflare records and Worker routes get a request to our edge; they do
+    not tell the edge what to answer with. That is the `custom_domain` index record, and without it a
+    tenant who did everything right -- zone active, certificate issued, nameservers changed -- gets a
+    404 on their own domain. Found on the first run through the UI, 2026-10-26, after the scripted
+    version passed because the test wrote that record by hand.
+
+    Mirrors what `check_domain` does on first verification, through the same helpers rather than a
+    second copy of the rules: hosting + verification, an IndexNow key, recomputed eligibility, the index
+    records, and a re-publish so canonical/robots attach to pages published before the domain existed.
+    """
+    from handlers.sites import (_put_site_index_records, _recompute_eligibility, _republish_site_pages,
+                                generate_indexnow_key)
+    from stripe_link.domain.documents import validate_site
+    from stripe_link.repositories.documents import pages_repository
+
+    tenant_id, domain = record.get("tenant_id") or "", record.get("domain") or ""
+    site = sites_repository.get(tenant_id, site_id)
+    if not site:
+        logger.warning("managed dns: no Site %s to attach %s to", site_id, domain)
+        return False
+    now = int(time.time())
+    hosting = site.get("hosting") or {}
+    hosting["custom_domain"] = domain
+    hosting["type"] = "custom"
+    # `managed_dns`, not `cloudflare_saas`: there is no custom hostname here and nothing to re-verify.
+    # Cloudflare is authoritative for the zone, so the delegation going active IS the verification.
+    hosting["verification"] = {"verified": True, "method": "managed_dns", "verified_at": now}
+    site["hosting"] = hosting
+    seo = dict(site.get("seo") or {})
+    if not seo.get("indexnow_key"):
+        seo["indexnow_key"] = generate_indexnow_key()
+        site["seo"] = seo
+    _recompute_eligibility(site, tenant_id, now)
+    site["updated_at"] = now
+    try:
+        validate_site(site)
+        saved = sites_repository.put(site)
+    except Exception:  # noqa: BLE001 - a bad Site must not leave the zone half-wired and silent
+        logger.exception("managed dns: could not attach %s to site %s", domain, site_id)
+        return False
+    _put_site_index_records(saved)
+    try:
+        _republish_site_pages(tenant_id, saved, pages_repository(mode="live"), mode="live")
+    except Exception:  # noqa: BLE001 - the domain serves either way; republish only refreshes metadata
+        logger.exception("managed dns: re-publish after attaching %s failed", domain)
+    return True
 
 
 def _activate(record, *, api_token, worker_script) -> bool:
