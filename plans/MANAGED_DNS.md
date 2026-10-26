@@ -121,6 +121,42 @@ this token cannot use (*"Method not allowed for this authentication scheme"*). W
 it in `scan_zone_records` — the review compares against whatever the scan returns and does not care how
 it arrived.
 
+## 2d. Measured: the scan got 11 of 39, and the count hid it (2026-10-26)
+
+A full record-by-record diff of `juniorbay.net` — Route 53 against the finished Cloudflare zone —
+settles what the scan is actually worth. Route 53 holds **41** record sets, of which **39** are
+importable (NS and SOA are Cloudflare's to supply). The zone ended up with **41 records**.
+
+The numbers match and they are not the same records. **28 of the 39 never arrived:**
+
+| Not imported | Count | Why |
+|---|---|---|
+| `*._domainkey` CNAMEs | 15 | SES DKIM selectors are 32-char random hashes — unenumerable |
+| ACM validation CNAMEs | 2 | `_<hash>` names — likewise |
+| `AAAA` ALIAS records | 5 | the scan asked for A and never asked for AAAA |
+| `A` ALIAS records | 5 | `builder`, `source`, `stream`, `www` and the apex resolved to nothing |
+| ordinary CNAME | 1 | `dog-video` — a plain name the scan simply missed |
+
+The count came back to 41 because **an ALIAS imports as a frozen list of resolved IPs**: four ALIAS
+records expanded into 32 A records (12 for `api`, 12 for `app`, 8 for `images`). That padding is itself
+a latent fault — CloudFront's address ranges rotate, and a frozen A record keeps pointing at an address
+that eventually stops serving that distribution. Those five hostnames want to be CNAMEs to the
+distribution, or proxied records of ours; what they are now is a snapshot with a shelf life.
+
+**The dangerous part is that the review called this clean.** `blocked: false`, `missing: []`, with 15
+DKIM records absent. The gate is not wrong — it compares the import against *what we can observe*, and
+a random DKIM selector is observable by neither side — but "nothing I could check is missing" had been
+rendering as "nothing is missing". Unsigned mail is the worst possible failure to hide this way: it does
+not bounce, it goes to spam quietly, days later, with nothing pointing back at a nameserver change.
+
+So `review()` now returns **`cannot_verify`** — the gaps we can name but not fetch — shown on the
+confirm step as the action it requires ("copy every record whose name contains `_domainkey`"). It is
+deliberately *not* part of `blocked`: we cannot fetch those records, so no retry could ever clear it and
+the tenant would be stuck on a screen with no way forward.
+
+This is now the strongest argument for the **zone file** import in §2c. A scan cannot be fixed into
+completeness; 11 of 39 is what a scan is.
+
 ## 3. What this buys beyond apex
 
 - **One nameserver change instead of four records**, and nothing to mistype. Most support load on custom

@@ -23,6 +23,7 @@ from stripe_link.domain.managed_dns import (
     managed_zone_record,
     review,
     serving_records,
+    stored_review,
     zone_export,
     zone_state,
 )
@@ -598,3 +599,90 @@ class EmptyImportTests(unittest.TestCase):
         self.assertTrue(summary["blocked"])
         self.assertIn("did not pick up", summary["confirm_prompt"])
         self.assertNotIn("including mail", summary["confirm_prompt"])
+
+
+class StoredReviewTests(unittest.TestCase):
+    """The counts the panel reads, and the one writer that produces them.
+
+    Seen on juniorbay.net, 2026-10-26: the confirm screen read "0 records imported · none of them mail"
+    directly above "We found 41 DNS records, including mail." Both numbers came from the same review.
+    Only one of them had been written down -- `provision` stored a three-key verdict while the re-check
+    stored a richer one, so a freshly provisioned zone had no counts and the panel rendered `undefined`
+    as zero. These tests hold the two writers to the same shape.
+    """
+
+    SES_MAIL = [
+        {"type": "MX", "name": "example.com", "content": "10 inbound-smtp.us-east-1.amazonaws.com"},
+        {"type": "TXT", "name": "example.com", "content": "v=spf1 include:amazonses.com ~all"},
+        {"type": "TXT", "name": "_dmarc.example.com", "content": "v=DMARC1; p=quarantine"},
+    ]
+
+    def _summary(self):
+        web = [{"type": "A", "name": f"h{i}.example.com", "content": "203.0.113.1"} for i in range(38)]
+        return review([*self.SES_MAIL, *web], self.SES_MAIL, observed_complete=True)
+
+    def test_the_stored_count_matches_the_count_in_the_prompt(self):
+        summary = self._summary()
+        stored = stored_review(summary, now=1)
+        self.assertEqual(stored["records"], 41)
+        self.assertIn("41 DNS records", stored["prompt"])
+        self.assertEqual(stored["mail_count"], 3)
+
+    def test_provision_stores_the_same_shape_as_a_recheck(self):
+        """The drift that caused the contradiction: two writers, one of them short of four fields."""
+        summary = self._summary()
+        fresh = stored_review(summary, now=1)
+        rechecked = stored_review(summary, {"confirmed_at": 7}, now=1)
+        self.assertEqual(set(fresh), set(rechecked))
+        self.assertEqual(fresh["confirmed_at"], 0)
+        self.assertEqual(rechecked["confirmed_at"], 7)   # a confirmation survives a re-check
+
+    def test_ses_is_named_rather_than_counted(self):
+        self.assertEqual(mail_provider(["10 inbound-smtp.us-east-1.amazonaws.com"]), "Amazon SES")
+        self.assertEqual(mail_provider(["10 feedback-smtp.us-west-2.amazonses.com"]), "Amazon SES")
+
+    def test_a_plain_ec2_mx_is_not_claimed_as_ses(self):
+        # `amazonaws.com` alone would claim every MX that happens to be hosted on EC2.
+        self.assertEqual(mail_provider(["10 mail.ec2-1-2-3-4.compute.amazonaws.com"]), "")
+
+
+class UnverifiableDkimTests(unittest.TestCase):
+    """DKIM is the hole in this design, and the review has to say so out loud.
+
+    Measured on juniorbay.net, 2026-10-26: 15 `_domainkey` CNAMEs in Route 53, zero found by Cloudflare's
+    scan, zero found by our probe, and `missing` therefore empty. The review called that clean. It was
+    not clean, it was unexamined -- and unsigned mail does not bounce, it goes to spam quietly days
+    later with nothing pointing back at a nameserver change.
+    """
+
+    SES_MAIL = StoredReviewTests.SES_MAIL
+
+    def test_mail_with_no_imported_dkim_says_so(self):
+        summary = review(self.SES_MAIL, self.SES_MAIL, observed_complete=True)
+        self.assertEqual(len(summary["cannot_verify"]), 1)
+        self.assertIn("_domainkey", summary["cannot_verify"][0])
+        self.assertIn("Amazon SES", summary["cannot_verify"][0])
+
+    def test_it_does_not_block(self):
+        """A block has to be clearable. We cannot fetch these records, so no amount of retrying would
+        ever turn it green -- the tenant would be stuck on a screen with no way forward, which is the
+        dead end the repair path exists to remove."""
+        summary = review(self.SES_MAIL, self.SES_MAIL, observed_complete=True)
+        self.assertFalse(summary["blocked"])
+
+    def test_imported_dkim_is_not_warned_about(self):
+        # Notices only when actionable: nothing to do here, so nothing is said.
+        dkim = {"type": "CNAME", "name": "abc123._domainkey.example.com",
+                "content": "abc123.dkim.amazonses.com"}
+        summary = review([*self.SES_MAIL, dkim], self.SES_MAIL, observed_complete=True)
+        self.assertEqual(summary["cannot_verify"], [])
+
+    def test_a_domain_with_no_mail_is_not_warned_about(self):
+        summary = review([{"type": "A", "name": "example.com", "content": "203.0.113.1"}], [],
+                         observed_complete=True)
+        self.assertEqual(summary["cannot_verify"], [])
+
+    def test_the_note_survives_into_the_stored_verdict(self):
+        """It is shown on the confirm step, and the confirm step is reached again after a reload."""
+        summary = review(self.SES_MAIL, self.SES_MAIL, observed_complete=True)
+        self.assertEqual(stored_review(summary, now=1)["cannot_verify"], summary["cannot_verify"])

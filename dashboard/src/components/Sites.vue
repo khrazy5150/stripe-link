@@ -426,6 +426,11 @@
                   <p class="field-note">Check this against your own DNS before going on. Anything we did
                     not import will stop working when you change your nameservers, and some records —
                     DKIM keys and validation records with random names — cannot be discovered by looking.</p>
+                  <!-- The one gap we can NAME. Not part of `blocked`, because we cannot fetch these
+                       records and so could never turn the block green -- see `_unverifiable_mail`. -->
+                  <div v-if="managedCannotVerify.length" class="keys-status-banner warning">
+                    <p v-for="note in managedCannotVerify" :key="note">{{ note }}</p>
+                  </div>
                   <div class="button-row">
                     <button type="button" class="primary-action" :disabled="managedBusy" @click="confirmManagedDns">
                       {{ managedBusy ? "Checking…" : "That looks right — show me the nameservers" }}
@@ -1097,6 +1102,10 @@ async function loadManagedDns(siteId) {
 
 watch(() => editing.value?.site_id, (siteId) => loadManagedDns(siteId), { immediate: true });
 const managedMail = computed(() => mailSummary(managedReview.value));
+// Read from the ZONE first: after a reload the live summary is gone and only the stored verdict remains,
+// and the whole point of this notice is that it is still there the second time they look at the screen.
+const managedCannotVerify = computed(() =>
+  managedZone.value?.review?.cannot_verify || managedReview.value?.cannot_verify || []);
 const managedSteps = computed(() =>
   nameserverInstructions(dnsProvider.value, domainForm.domain || editing.value?.hosting?.custom_domain || ""));
 const managedWaiting = computed(() => waitingMessage(managedWaitedFor.value));

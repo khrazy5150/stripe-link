@@ -50,6 +50,10 @@ _MAIL_PROVIDERS = (
     ("iCloud Mail", ("mail.icloud.com",)),
     ("Namecheap Private Email", ("privateemail.com",)),
     ("Amazon WorkMail", ("awsapps.com",)),
+    # SES is two different hosts depending on direction: `inbound-smtp.<region>.amazonaws.com` receives,
+    # `feedback-smtp.<region>.amazonses.com` handles bounces. Matched on the subdomain rather than on
+    # `amazonaws.com`, which would claim every MX that happens to be hosted on EC2.
+    ("Amazon SES", ("inbound-smtp.", "amazonses.com")),
     ("Zoho/Other", ()),
 )
 
@@ -141,6 +145,38 @@ def mail_discrepancies(imported: Iterable[dict[str, Any]],
     return missing
 
 
+def _unverifiable_mail(provider: str, has_mail: bool, imported_shape: dict[str, Any]) -> list[str]:
+    """Mail records we can neither find nor rule out, named so the tenant can go and look.
+
+    DKIM is the hole in this whole design and it cannot be closed from here. A DKIM record lives at
+    `<selector>._domainkey.<domain>`, and the selector is chosen by the mail provider: Google uses
+    `google`, Microsoft `selector1`/`selector2`, and Amazon SES uses a 32-character random hash. DNS has
+    no way to list the names under a zone, so a random selector is undiscoverable by lookup -- and
+    Cloudflare's import scan guesses from the same kind of list we do, so it misses them too.
+
+    Measured on juniorbay.net, 2026-10-26: 15 `_domainkey` CNAMEs in Route 53, zero found by the scan,
+    zero found by our probe, and `missing` therefore empty. The review called that clean. It was not
+    clean; it was unexamined, and the difference matters because unsigned mail does not bounce -- it
+    goes to spam quietly, days later, with nothing pointing back at a nameserver change.
+
+    So this is deliberately NOT part of `blocked`. A block has to be clearable, and we cannot clear
+    this one: we cannot fetch the records, so no amount of retrying would ever turn it green, and the
+    tenant would be stuck at a screen with no way forward. It is instead a specific instruction shown on
+    the confirm step -- the one thing we know to be unchecked, phrased as the action it requires.
+    """
+    notes: list[str] = []
+    if not has_mail or imported_shape.get("dkim"):
+        return notes
+    signer = provider or "your mail provider"
+    notes.append(
+        f"No DKIM records came across in the import. {signer} almost certainly publishes them, and "
+        "their names are random, so neither our check nor Cloudflare's scan can find them by looking. "
+        "Open your current DNS, copy every record whose name contains \"_domainkey\", and add them here "
+        "before you change your nameservers -- otherwise your mail will start going to spam."
+    )
+    return notes
+
+
 def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]], *,
            observed_complete: bool) -> dict[str, Any]:
     """The gate. Returns what to show, and whether the nameserver change may be offered at all.
@@ -197,6 +233,7 @@ def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]
 
     has_mail = bool(live["mx"]) or bool(shape["mx"])
     provider = mail_provider(live["mx"] or shape["mx"])
+    cannot_verify = _unverifiable_mail(provider, has_mail, shape)
     if contradictions:
         prompt = contradictions[0]
     elif missing:
@@ -231,8 +268,37 @@ def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]
         },
         "missing": missing,
         "contradictions": contradictions,
+        "cannot_verify": cannot_verify,
         "blocked": bool(missing) or bool(contradictions),
         "confirm_prompt": prompt,
+    }
+
+
+def stored_review(summary: dict[str, Any], previous: dict[str, Any] | None = None, *,
+                  now: int) -> dict[str, Any]:
+    """What the review found, reduced to what the zone record keeps.
+
+    ONE writer, called from both places that store a verdict. It used to be a private helper beside the
+    re-check while `provision` wrote its own three-key version, and the two drifted exactly as far as
+    the fields the newer one added: a freshly provisioned zone stored no counts, so the panel read
+    `undefined` for them and rendered "0 records imported, none of them mail" directly above a prompt
+    from the same review saying it had found 41 including mail. Both numbers were honestly computed.
+    Only one of them had been written down.
+    """
+    previous = previous or {}
+    mail = summary.get("mail") or {}
+    buckets = summary.get("records") or {}
+    return {
+        "blocked": summary["blocked"],
+        "missing": summary["missing"],
+        "checked_at": int(now),
+        "records": sum(len(v) for v in buckets.values()),
+        "mail_count": len(buckets.get(MAIL) or []),
+        "provider": mail.get("provider") or "",
+        "prompt": summary.get("confirm_prompt") or "",
+        # Carried so the confirm step says the same thing after a reload as it did when it was computed.
+        "cannot_verify": list(summary.get("cannot_verify") or []),
+        "confirmed_at": previous.get("confirmed_at") or 0,
     }
 
 
@@ -408,8 +474,7 @@ def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_rec
     summary = review(imported, observed, observed_complete=bool(observed_complete))
     record = managed_zone_record(tenant_id, domain, zone, now, site_id=site_id,
                                  observed_name_servers=prior)
-    record["review"] = {"blocked": summary["blocked"], "missing": summary["missing"],
-                        "checked_at": int(now)}
+    record["review"] = stored_review(summary, now=int(now))
     repository.put(record)
     return {
         "zone": record,
