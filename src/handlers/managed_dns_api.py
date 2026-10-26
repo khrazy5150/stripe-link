@@ -106,9 +106,13 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
     repo = repo or managed_zones_repository()
     existing = _zone_for(tenant_id, domain, repo)
     if existing:
-        # Idempotent. A second POST is a tenant who refreshed, not a second zone -- and creating one
-        # would leave the first orphaned on our account with their nameservers possibly pointing at it.
-        return json_response({"zone": existing, "already_started": True})
+        # Idempotent in the sense that matters -- no second zone, because that would orphan the first
+        # while the tenant's nameservers may already point at it -- but NOT a no-op. It used to return
+        # the bare zone with no review, so the blocked screen's "Check again" handed back `review: null`,
+        # the state computed to DELEGATE, and the gate was silently dropped on the one path that exists
+        # to re-run it.
+        return _recheck(existing, tenant_id, domain, api_token, repo,
+                        repair=bool(body.get("repair")))
 
     try:
         result = managed_dns.provision(
@@ -123,6 +127,41 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
         return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
     return json_response({"zone": result["zone"], "review": result["review"],
                           "name_servers": result["name_servers"], "site_id": site_id}, status_code=201)
+
+
+def _recheck(record, tenant_id, domain, api_token, repo, *, repair=False):
+    """Re-run the mail comparison on a zone that already exists, optionally repairing the import first.
+
+    BLOCKED MUST BE RECOVERABLE. Cloudflare's scan runs once at zone creation, so a gap it left can
+    never close on its own -- re-checking the same zone against the same live DNS gives the same answer
+    forever, and the tenant's only way out would be to abandon the zone. `repair` copies the mail records
+    their live DNS already serves into the zone we hold, which is the one action that can actually clear
+    the block, and then re-compares.
+    """
+    zone_id = str(record.get("zone_id") or "")
+    try:
+        imported = list_zone_dns_records(zone_id, api_token=api_token)
+        observed, complete = observe_mail_records(domain)
+        if repair:
+            for dns_record in managed_dns.importable_records(observed, imported):
+                try:
+                    create_dns_record(zone_id, dns_record, api_token=api_token)
+                except CustomDomainError as exc:
+                    if "already exists" not in (exc.message or "").lower():
+                        logger.warning("managed dns: repair of %s on %s failed: %s",
+                                       dns_record.get("name"), domain, exc.message)
+            imported = list_zone_dns_records(zone_id, api_token=api_token)
+        summary = managed_dns.review(imported, observed, observed_complete=bool(complete))
+    except CustomDomainError as exc:
+        return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
+
+    record["review"] = {"blocked": summary["blocked"], "missing": summary["missing"],
+                        "checked_at": int(time.time())}
+    repo.put(record)
+    return json_response({
+        "zone": record, "review": summary, "already_started": True,
+        "name_servers": [] if summary["blocked"] else (record.get("name_servers") or []),
+    })
 
 
 def status(event, sites_repository, site_id, *, mode="test", repo=None):

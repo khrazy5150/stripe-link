@@ -396,9 +396,17 @@
                       <li v-for="m in managedReview.missing" :key="m">{{ m }}</li>
                     </ul>
                   </div>
-                  <button type="button" class="secondary-action" :disabled="managedBusy" @click="startManagedDns">
+                  <!-- Re-checking alone can never clear this: Cloudflare's import scan runs once, so
+                       the same zone compared against the same live DNS gives the same answer forever.
+                       Copying the records across is the action that actually resolves it. -->
+                  <button type="button" class="primary-action" :disabled="managedBusy" @click="startManagedDns(true)">
+                    {{ managedBusy ? "Copying…" : "Copy these records across for me" }}
+                  </button>
+                  <button type="button" class="secondary-action" :disabled="managedBusy" @click="startManagedDns(false)">
                     Check again
                   </button>
+                  <p class="field-note">Copying takes what your live DNS already serves and puts it in
+                    the zone we hold, so nothing changes about where your mail goes.</p>
                 </template>
 
                 <template v-else-if="managedState === DELEGATE">
@@ -1043,11 +1051,11 @@ const managedSteps = computed(() =>
   nameserverInstructions(dnsProvider.value, domainForm.domain || editing.value?.hosting?.custom_domain || ""));
 const managedWaiting = computed(() => waitingMessage(managedWaitedFor.value));
 
-async function startManagedDns() {
+async function startManagedDns(repair = false) {
   managedError.value = "";
   managedBusy.value = true;
   try {
-    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain);
+    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain, repair);
     managedZone.value = res.zone || null;
     managedReview.value = res.review || null;
     managedNameServers.value = res.name_servers || [];

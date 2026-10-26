@@ -214,6 +214,50 @@ def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]
     }
 
 
+def importable_records(observed: Iterable[dict[str, Any]],
+                       imported: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The live mail records the import missed, as Cloudflare create payloads.
+
+    BLOCKED HAS TO BE RECOVERABLE. Cloudflare's scan runs once, at zone creation, so re-checking can
+    never clear a gap it left -- a tenant told "your MX is missing" would be stuck there forever, and
+    the only way on would be to abandon the zone. We hold the zone, and we can see exactly what their
+    live DNS serves, so the honest offer is to copy it across.
+
+    Only MAIL records, and only ones that are genuinely absent. This is repairing the import, not taking
+    over authorship of their zone: web records are the tenant's to decide and the serving records are
+    ours to write.
+    """
+    have = {(str(r.get("type") or "").upper(), str(r.get("name") or "").rstrip(".").lower(),
+             _host(str(r.get("content") or r.get("value") or "")))
+            for r in imported or []}
+    out: list[dict[str, Any]] = []
+    for record in observed or []:
+        if classify_record(record) != MAIL:
+            continue
+        record_type = str(record.get("type") or "").upper()
+        name = str(record.get("name") or "").rstrip(".").lower()
+        content = str(record.get("content") or record.get("value") or "").strip()
+        if not (record_type and name and content):
+            continue
+        if (record_type, name, _host(content)) in have:
+            continue
+        if record_type == "MX":
+            # Both shapes reach here, as they do in the exporter: a DoH answer carries the priority
+            # inside the content ("1 aspmx.l.google.com"), a Cloudflare record carries it alongside.
+            # Defaulting to 10 when one was actually given would reorder someone's mail delivery while
+            # still looking like a correct MX.
+            parts = content.split()
+            priority = record.get("priority")
+            if priority is None and len(parts) > 1 and parts[0].isdigit():
+                priority = int(parts[0])
+            priority = 10 if priority is None else int(priority)
+            out.append({"type": "MX", "name": name, "content": _host(content), "priority": priority,
+                        "ttl": 1})
+        else:
+            out.append({"type": record_type, "name": name, "content": content, "ttl": 1})
+    return out
+
+
 def serving_records(domain: str, placeholder_ip: str = "192.0.2.1") -> list[dict[str, Any]]:
     """The records WE add once the zone is ours: the apex and www, both proxied.
 

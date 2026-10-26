@@ -95,13 +95,7 @@ class StartTests(unittest.TestCase):
     def test_a_second_call_does_not_create_a_second_zone(self):
         """A tenant refreshing the page is not a request for another zone — and creating one would
         orphan the first on our account while their nameservers may already point at it."""
-        seeded = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
-                             "status": "pending"}])
-        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
-             patch.object(managed_dns_api, "create_zone") as created:
-            response = managed_dns_api.start(event(body={"domain": "example.com"}), FakeSites(),
-                                             "site_1", repo=seeded)
-        created.assert_not_called()
+        response, _, _ = self._existing([WEB], [WEB])
         self.assertTrue(body_of(response)["already_started"])
 
     def test_a_www_domain_creates_a_zone_for_the_root(self):
@@ -117,6 +111,60 @@ class StartTests(unittest.TestCase):
                                   mode="live", repo=zones)
         self.assertEqual(created.call_args.args[0], "example.com")
         self.assertIn((TENANT, "example.com"), zones.docs)
+
+    def _existing(self, imported, observed, repair=False):
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "pending", "name_servers": ["kim.ns.cloudflare.com"]}])
+        created = []
+        with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")), \
+             patch.object(managed_dns_api, "create_zone") as new_zone, \
+             patch.object(managed_dns_api, "list_zone_dns_records", return_value=imported), \
+             patch.object(managed_dns_api, "observe_mail_records", return_value=(observed, True)), \
+             patch.object(managed_dns_api, "create_dns_record",
+                          side_effect=lambda z, r, **kw: created.append(r)):
+            body = {"domain": "example.com"}
+            if repair:
+                body["repair"] = True
+            response = managed_dns_api.start(event(body=body), FakeSites(), "site_1",
+                                             mode="live", repo=zones)
+        new_zone.assert_not_called()
+        return response, created, zones
+
+    def test_check_again_actually_re_checks(self):
+        """It used to return the bare zone with no review, so the blocked screen's one way forward set
+        `review: null`, the state computed to DELEGATE, and the gate was silently dropped on the single
+        path that exists to re-run it."""
+        response, _, _ = self._existing([WEB], [WEB, MX])
+        payload = body_of(response)
+        self.assertTrue(payload["already_started"])
+        self.assertTrue(payload["review"]["blocked"])
+        self.assertEqual(payload["name_servers"], [])
+
+    def test_a_cleared_block_hands_over_the_nameservers(self):
+        response, _, _ = self._existing([WEB, MX], [WEB, MX])
+        payload = body_of(response)
+        self.assertFalse(payload["review"]["blocked"])
+        self.assertEqual(payload["name_servers"], ["kim.ns.cloudflare.com"])
+
+    def test_repair_copies_the_missing_mail_records_into_the_zone(self):
+        """Blocked has to be RECOVERABLE. Cloudflare's scan runs once at creation, so re-checking the
+        same zone against the same live DNS gives the same answer forever -- without this the tenant's
+        only way out of a blocked review is to abandon the zone."""
+        _, created, _ = self._existing([WEB], [WEB, MX], repair=True)
+        self.assertEqual([r["type"] for r in created], ["MX"])
+        self.assertEqual(created[0]["content"], "aspmx.l.google.com")
+        self.assertEqual(created[0]["priority"], 1)
+
+    def test_repair_does_not_author_their_web_records(self):
+        # Repairing the import is not taking over the zone: web records are the tenant's to decide and
+        # the serving records are ours to write.
+        _, created, _ = self._existing([], [{"type": "A", "name": "example.com",
+                                             "content": "203.0.113.9"}], repair=True)
+        self.assertEqual(created, [])
+
+    def test_the_recheck_is_recorded_on_the_zone(self):
+        _, _, zones = self._existing([WEB], [WEB, MX])
+        self.assertTrue(zones.docs[(TENANT, "example.com")]["review"]["blocked"])
 
     def test_an_invalid_domain_never_reaches_cloudflare(self):
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
