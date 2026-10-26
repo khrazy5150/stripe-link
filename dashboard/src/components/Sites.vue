@@ -341,7 +341,80 @@
                 <small v-if="!pages.length" class="field-note">This Site has no landing pages yet. Create and publish a landing page first, then connect your domain.</small>
                 <small v-else class="field-note">The homepage must be published for the domain to serve it.</small>
               </label>
-              <div class="button-row">
+              <!-- Two routes, recommended but never forced: a tenant whose IT owns their DNS must still
+                   be able to decline and connect a domain the ordinary way. -->
+              <div v-if="domainForm.domain && !dnsChoice" class="dns-choice">
+                <button type="button" class="dns-choice-card" @click="dnsChoice = 'managed'">
+                  <strong>Let us handle the DNS</strong>
+                  <small>You change two nameservers at your registrar, once. Your root domain works on
+                    any provider, and we can fix records for you later.</small>
+                  <em>Recommended</em>
+                </button>
+                <button type="button" class="dns-choice-card" @click="dnsChoice = 'own'">
+                  <strong>Keep your DNS where it is</strong>
+                  <small>You add a few records yourself. Your root domain only works if your provider
+                    supports ALIAS, ANAME or CNAME flattening.</small>
+                </button>
+              </div>
+
+              <div v-if="dnsChoice === 'managed'" class="managed-dns">
+                <div v-if="managedError" class="keys-status-banner error">{{ managedError }}</div>
+
+                <template v-if="managedState === CHOOSE">
+                  <p class="field-note">We will create the zone and read what is in it before anything
+                    changes. Your nameservers stay where they are until you say so.</p>
+                  <button type="button" class="primary-action" :disabled="managedBusy" @click="startManagedDns">
+                    {{ managedBusy ? "Reading your DNS…" : "Read my DNS records" }}
+                  </button>
+                </template>
+
+                <!-- The gate. Shown instead of the nameservers, never beside them. -->
+                <template v-else-if="managedState === BLOCKED">
+                  <div class="keys-status-banner warning">
+                    <p><strong>We are not ready to move this domain yet.</strong></p>
+                    <p>{{ managedReview.confirm_prompt }}</p>
+                    <ul v-if="managedReview.missing?.length">
+                      <li v-for="m in managedReview.missing" :key="m">{{ m }}</li>
+                    </ul>
+                  </div>
+                  <button type="button" class="secondary-action" :disabled="managedBusy" @click="startManagedDns">
+                    Check again
+                  </button>
+                </template>
+
+                <template v-else-if="managedState === DELEGATE">
+                  <p class="field-note">{{ managedMail }}</p>
+                  <p v-for="(line, n) in managedSteps" :key="n" class="field-note step-line">
+                    <template v-for="(seg, m) in emphasise(line)" :key="m"><strong v-if="seg.bold">{{ seg.text }}</strong><template v-else>{{ seg.text }}</template></template>
+                  </p>
+                  <div class="dns-field" v-for="ns in managedNameServers" :key="ns">
+                    <span class="dns-field-label">NS</span>
+                    <code>{{ ns }}</code>
+                    <button type="button" class="copy-btn" @click="copy(ns)">{{ copied === ns ? 'Copied!' : 'Copy' }}</button>
+                  </div>
+                  <p class="field-note">{{ managedWaiting }}</p>
+                </template>
+
+                <template v-else-if="managedState === LIVE">
+                  <div class="keys-status-banner success">
+                    <strong>{{ managedZone.domain }} is live.</strong> Your root domain and www both serve
+                    this Site, with a certificate we renew for you.
+                  </div>
+                  <button type="button" class="secondary-action" :disabled="managedBusy" @click="leaveManagedDns">
+                    {{ managedBusy ? "Releasing…" : "Move this domain elsewhere" }}
+                  </button>
+                  <p class="field-note">You will get a zone file of every record, and the nameservers to
+                    put back. Your domain keeps working until you change them.</p>
+                </template>
+              </div>
+
+              <div v-if="managedRestoreTo.length" class="keys-status-banner info">
+                <p>Your zone file has downloaded. To finish moving away, set these nameservers at your
+                  registrar:</p>
+                <p v-for="ns in managedRestoreTo" :key="ns"><code>{{ ns }}</code></p>
+              </div>
+
+              <div v-if="dnsChoice !== 'managed'" class="button-row">
                 <button type="button" class="primary-action" :disabled="domainBusy || !domainForm.domain || (!siteHasHomepage && !domainForm.homepage)" @click="connectDomain">
                   {{ domainBusy ? "Connecting…" : "Connect domain" }}
                 </button>
@@ -537,12 +610,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
+import { BLOCKED, CHOOSE, DELEGATE, LIVE, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -844,6 +918,91 @@ function hoursForSave(rows) {
 }
 
 const domainForm = reactive({ domain: "", homepage: "" });
+
+// ---- Managed DNS (plans/MANAGED_DNS.md P4) --------------------------------------------------------
+// Offered to everyone and recommended, but never the only way: a tenant whose IT department owns their
+// DNS must still be able to decline and connect a domain the ordinary way.
+const dnsChoice = ref("");               // "" until they pick; "managed" | "own"
+const managedZone = ref(null);
+const managedReview = ref(null);
+const managedNameServers = ref([]);
+const managedBusy = ref(false);
+const managedError = ref("");
+const managedWaitedFor = ref(0);
+let managedPoll = 0;
+let managedStartedAt = 0;
+
+const managedState = computed(() => managedDnsState(managedZone.value, managedReview.value));
+const managedMail = computed(() => mailSummary(managedReview.value));
+const managedSteps = computed(() =>
+  nameserverInstructions(dnsProvider.value, domainForm.domain || editing.value?.hosting?.custom_domain || ""));
+const managedWaiting = computed(() => waitingMessage(managedWaitedFor.value));
+
+async function startManagedDns() {
+  managedError.value = "";
+  managedBusy.value = true;
+  try {
+    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain);
+    managedZone.value = res.zone || null;
+    managedReview.value = res.review || null;
+    managedNameServers.value = res.name_servers || [];
+    if (managedState.value === DELEGATE) beginManagedPolling();
+  } catch (err) {
+    managedError.value = err?.message || "Could not start managed DNS.";
+  } finally {
+    managedBusy.value = false;
+  }
+}
+
+function beginManagedPolling() {
+  clearInterval(managedPoll);
+  managedStartedAt = managedStartedAt || Date.now();
+  // Every 15s. The delegation landed in 3m30s on the first live run, so this is a handful of calls --
+  // and it STOPS at `live`, because a poll that runs forever on a forgotten tab is a cost nobody sees.
+  managedPoll = setInterval(pollManagedDns, 15000);
+  pollManagedDns();
+}
+
+async function pollManagedDns() {
+  const domain = managedZone.value?.domain;
+  if (!domain) return;
+  managedWaitedFor.value = Math.round((Date.now() - managedStartedAt) / 1000);
+  try {
+    const res = await store.managedDnsStatus(editing.value.site_id, domain);
+    managedZone.value = res.zone || managedZone.value;
+    if (res.status === "active") {
+      clearInterval(managedPoll);
+      managedPoll = 0;
+      await store.load();
+    }
+  } catch { /* a failed poll is a poll; the next one answers */ }
+}
+
+async function leaveManagedDns() {
+  managedBusy.value = true;
+  managedError.value = "";
+  try {
+    const res = await store.stopManagedDns(editing.value.site_id, managedZone.value.domain);
+    // The zone file is the exit this feature promises, so it is handed over as a file rather than shown
+    // in a box someone has to select and copy correctly.
+    const blob = new Blob([res.zone_file || ""], { type: "text/plain" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${managedZone.value.domain}.zone`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    managedRestoreTo.value = res.restore_name_servers || [];
+    managedZone.value = null;
+    managedReview.value = null;
+  } catch (err) {
+    managedError.value = err?.message || "Could not release this domain.";
+  } finally {
+    managedBusy.value = false;
+  }
+}
+const managedRestoreTo = ref([]);
+
+onBeforeUnmount(() => clearInterval(managedPoll));
 const domainBusy = ref(false);
 const domainError = ref("");
 
@@ -1452,6 +1611,20 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+/* Two routes, side by side, so neither reads as the fallback. */
+.dns-choice { display: flex; gap: 0.8rem; margin: 0.6rem 0; flex-wrap: wrap; }
+.dns-choice-card {
+  flex: 1 1 15rem; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.8rem 0.9rem; border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--panel); color: var(--text);
+}
+.dns-choice-card:hover { border-color: var(--accent); }
+.dns-choice-card small { color: var(--muted); line-height: 1.45; }
+.dns-choice-card em { font-style: normal; font-size: 1.1rem; color: var(--accent); font-weight: 600; }
+.managed-dns { margin-top: 0.6rem; }
+.managed-dns ul { margin: 0.4rem 0 0 1.1rem; }
+
 /* A walkthrough, not a caption: give the steps room to be read one at a time. */
 .step-line { margin-bottom: 0.55rem; line-height: 1.5; }
 .step-line strong { color: var(--text); }

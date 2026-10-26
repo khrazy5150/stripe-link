@@ -164,6 +164,21 @@ export const useSitesStore = defineStore("sites", {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain/check`, { method: "POST" });
       return { site: this._replace(res.site), status: res.status, hint: res.hint, diagnostics: res.diagnostics || [] };
     },
+    // Managed DNS (plans/MANAGED_DNS.md). Three calls for three moments; the zone is keyed by DOMAIN
+    // rather than by Site, because it outlives any one Site's claim on that hostname.
+    async startManagedDns(siteId, domain) {
+      return apiRequest(`/sites/${encodeURIComponent(siteId)}/managed-dns`,
+                        { method: "POST", body: { domain } });
+    },
+    async managedDnsStatus(siteId, domain) {
+      return apiRequest(
+        `/sites/${encodeURIComponent(siteId)}/managed-dns?domain=${encodeURIComponent(domain)}`);
+    },
+    async stopManagedDns(siteId, domain) {
+      return apiRequest(
+        `/sites/${encodeURIComponent(siteId)}/managed-dns?domain=${encodeURIComponent(domain)}`,
+        { method: "DELETE" });
+    },
     async checkSocialLinks(siteId) {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/social/check`, { method: "POST" });
       return { site: this._replace(res.site), checked: res.checked || 0, backlinkHost: res.backlink_host || "" };

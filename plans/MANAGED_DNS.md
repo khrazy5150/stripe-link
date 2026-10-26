@@ -7,8 +7,8 @@
 | P1 — the mail-safety gate | `domain/managed_dns.py` · `custom_domains.observe_mail_records` · `tests/test_managed_dns.py` |
 | P2 — zone provisioning | `domain/cloudflare_zones.py` · `managed_zones_repository` · `managed_dns.provision()` |
 | P3 — activation + API | **DONE**: proven on a live domain, now behind `POST/GET/DELETE /sites/{site_id}/managed-dns` (`handlers/managed_dns_api.py`) |
-| P4 — the dashboard flow | not built |
-| P5 — offboarding UI over `zone_export` / `delete_zone` | not built |
+| P4 — the dashboard flow | **DONE**: `composables/managedDns.js` + the Sites panel, four server-decided states |
+| P5 — offboarding | **DONE**: "Move this domain elsewhere" downloads the zone file and shows the nameservers to restore |
 
 Every Cloudflare call takes an injected `opener`, so P2 is fully tested against fakes. **It cannot run
 live yet**: the token has no `com.cloudflare.api.account.zone.create` (§5).
