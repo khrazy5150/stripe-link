@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| P1 — the mail-safety gate | `domain/managed_dns.py` · `tests/test_managed_dns.py` |
+| P1 — the mail-safety gate | `domain/managed_dns.py` · `custom_domains.observe_mail_records` · `tests/test_managed_dns.py` |
 | P2 — zone provisioning | `domain/cloudflare_zones.py` · `managed_zones_repository` · `managed_dns.provision()` |
-| P3 — activation (serving records, Worker route, index record) | not built |
+| P3 — activation | **PROVEN END TO END** on a live domain; handler wiring remains |
 | P4 — the dashboard flow | not built |
 | P5 — offboarding UI over `zone_export` / `delete_zone` | not built |
 
@@ -48,6 +48,36 @@ tenant to learn a new control panel.
 **Note what disappears.** No Cloudflare for SaaS custom hostname. No ownership TXT. No DCV CNAME. No apex
 proxying add-on. The whole class of problems from 2026-10-23 is a property of pointing *someone else's*
 zone at us; when we hold the zone, the apex is just a proxied record and CNAME flattening is automatic.
+
+## 2b. Proven on a real domain, 2026-10-25
+
+`creditfix.cloud` — registered through Route 53, never used, no records of any kind. Every step ran
+through this repository's own code, not curl.
+
+| step | result |
+|---|---|
+| zone created, scan imported, review run | `blocked: false` — genuinely no mail, so **allowed**, which is the distinction §4b turns on |
+| nameservers changed at the registrar | `isla`/`kobe.ns.cloudflare.com` |
+| zone `pending` → `active` | **3m30s**, not the 24h DNS lore predicts |
+| Universal SSL issued | **~2 min later**: Let's Encrypt, `CN=creditfix.cloud`, 90 days |
+| apex over HTTPS | **HTTP/2 200**, serving the Site's real page |
+
+The three things that could not be proven against fakes, answered:
+
+1. **A Worker route on a tenant zone does intercept.** The apex served before the certificate existed,
+   over plain HTTP, which also isolated routing from TLS while diagnosing.
+2. **Both route patterns are required.** `*.example.com/*` never matches the apex; one pattern would
+   have produced a dead root and a working `www`, reading as a DNS fault.
+3. **The `192.0.2.1` placeholder stays invisible.** Never contacted — the Worker answers first.
+
+**What a tenant actually waits for is TLD delegation caching, not us.** Within minutes Google and Quad9
+served the new delegation while Cloudflare's own `1.1.1.1` still held the Route 53 one. The product is
+ready well before every resolver agrees, so the UI must say "propagating, this is normal" rather than
+treat a stale resolver as a failure. The health sweep must not report a zone mid-delegation as broken.
+
+**Least privilege bit back, correctly.** The token cannot read certificate packs — `Zone | SSL and
+Certificates | Read` was deliberately not requested — so certificate progress is polled from the
+endpoint rather than the API. Worth knowing before someone adds the permission to "fix" it.
 
 ## 3. What this buys beyond apex
 

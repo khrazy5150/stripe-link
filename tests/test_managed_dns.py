@@ -323,3 +323,97 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(saved["document_type"], "managed_zone")
         self.assertEqual(saved["tenant_id"], "t1")
         self.assertNotIn("site_id", saved)      # a zone outlives any one Site's claim on the hostname
+
+
+class ObserveMailRecordsTests(unittest.TestCase):
+    """The independent half of the gate: what DNS says right now, asked directly.
+
+    `_dns_has_records` next door returns False for both "nothing there" and "the lookup fell over". For
+    mail those are opposite answers — one means the domain has no email, the other means we do not know —
+    and acting on the first while the second is true is how a tenant's mail disappears.
+    """
+
+    def _fake(self, answers):
+        """answers: {(name, type): payload}. A missing key is a lookup that did not answer."""
+        import json as _json
+        from urllib.parse import parse_qs, urlparse
+
+        class Resp:
+            def __init__(self, payload):
+                self._p = _json.dumps(payload).encode()
+
+            def read(self):
+                return self._p
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def opener(request, timeout=10):
+            q = parse_qs(urlparse(request.full_url).query)
+            key = (q["name"][0], q["type"][0])
+            if key not in answers:
+                raise OSError("resolver did not answer")
+            return Resp(answers[key])
+        return opener
+
+    def test_a_domain_with_no_mail_reports_empty_and_complete(self):
+        # The state creditfix.cloud was actually in: Route 53, nothing published. Allowed, not blocked.
+        from stripe_link.domain.custom_domains import observe_mail_records
+        noerror = {"Status": 0, "Answer": []}
+        answers = {("example.com", "MX"): noerror, ("example.com", "TXT"): noerror,
+                   ("_dmarc.example.com", "TXT"): noerror}
+        answers.update({(f"{s}._domainkey.example.com", "TXT"): noerror for s in
+                        ("google", "default", "selector1", "selector2", "k1", "k2", "mail", "dkim",
+                         "s1", "s2", "zoho", "protonmail", "fm1", "mandrill", "sendgrid")})
+        records, complete = observe_mail_records("example.com", opener=self._fake(answers))
+        self.assertEqual(records, [])
+        self.assertTrue(complete)
+
+    def test_a_failed_mx_lookup_marks_the_picture_incomplete(self):
+        from stripe_link.domain.custom_domains import observe_mail_records
+        # MX absent from the fake = the resolver did not answer. Everything else is fine, and it still
+        # must not read as "no mail": `complete` is what review() refuses on.
+        answers = {("example.com", "TXT"): {"Status": 0, "Answer": []},
+                   ("_dmarc.example.com", "TXT"): {"Status": 0, "Answer": []}}
+        _, complete = observe_mail_records("example.com", opener=self._fake(answers))
+        self.assertFalse(complete)
+
+    def test_servfail_is_not_an_empty_answer(self):
+        from stripe_link.domain.custom_domains import resolve_records
+        values, answered = resolve_records("example.com", "MX",
+                                           opener=self._fake({("example.com", "MX"): {"Status": 2}}))
+        self.assertEqual(values, [])
+        self.assertFalse(answered)
+
+    def test_nxdomain_counts_as_answered(self):
+        # The resolver spoke and said the name does not exist. That is knowledge, not a failure.
+        from stripe_link.domain.custom_domains import resolve_records
+        values, answered = resolve_records("nope.example.com", "MX",
+                                           opener=self._fake({("nope.example.com", "MX"): {"Status": 3}}))
+        self.assertEqual(values, [])
+        self.assertTrue(answered)
+
+    def test_a_failed_dkim_probe_does_not_spoil_the_picture(self):
+        """DKIM selectors are arbitrary labels that cannot be enumerated, so these are guesses. Treating
+        a guess that did not answer as a gap would block every tenant on a slow resolver."""
+        from stripe_link.domain.custom_domains import observe_mail_records
+        answers = {("example.com", "MX"): {"Status": 0, "Answer": [{"data": "1 aspmx.l.google.com."}]},
+                   ("example.com", "TXT"): {"Status": 0, "Answer": []},
+                   ("_dmarc.example.com", "TXT"): {"Status": 0, "Answer": []}}
+        records, complete = observe_mail_records("example.com", opener=self._fake(answers))
+        self.assertTrue(complete)                       # every DKIM probe failed, and that is fine
+        self.assertEqual([r["type"] for r in records], ["MX"])
+
+    def test_what_it_finds_feeds_the_gate_unchanged(self):
+        from stripe_link.domain.custom_domains import observe_mail_records
+        answers = {("example.com", "MX"): {"Status": 0, "Answer": [{"data": "1 aspmx.l.google.com."}]},
+                   ("example.com", "TXT"): {"Status": 0,
+                                            "Answer": [{"data": '"v=spf1 include:_spf.google.com ~all"'}]},
+                   ("_dmarc.example.com", "TXT"): {"Status": 0, "Answer": []}}
+        observed, complete = observe_mail_records("example.com", opener=self._fake(answers))
+        summary = review([WEB], observed, observed_complete=complete)
+        self.assertTrue(summary["blocked"])             # the scan missed all of it
+        self.assertEqual(summary["mail"]["provider"], "Google Workspace")

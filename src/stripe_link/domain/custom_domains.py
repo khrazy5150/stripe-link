@@ -564,6 +564,82 @@ def dns_record_matches(name: str, record_type: str, expected_value: str, *, open
     return False
 
 
+# Selectors worth trying when looking for DKIM. The list CANNOT be complete -- a selector is an arbitrary
+# label chosen by whoever set the mail up, and there is no way to enumerate them over DNS. That is the
+# same blind spot Cloudflare's import scan has, and why `managed_dns.review()` still asks the tenant
+# rather than treating a clean comparison as proof.
+_COMMON_DKIM_SELECTORS = ("google", "default", "selector1", "selector2", "k1", "k2", "mail", "dkim",
+                          "s1", "s2", "zoho", "protonmail", "fm1", "mandrill", "sendgrid")
+
+
+def resolve_records(name: str, record_type: str, *, opener=None) -> tuple[list[str], bool]:
+    """(values, answered) for one name/type over DNS-over-HTTPS.
+
+    `answered` is the whole reason this exists beside `_dns_has_records`, which returns False for both
+    "nothing there" and "the lookup fell over". For mail those are opposite answers: one means the domain
+    has no email, the other means we do not know, and acting on the first when the second is true is how
+    a tenant's mail disappears. NOERROR and NXDOMAIN both count as answered -- the resolver spoke. A
+    SERVFAIL, a timeout or an exception does not.
+    """
+    if not name:
+        return [], False
+    opener = opener or urlopen
+    url = f"{DNS_OVER_HTTPS_URL}?{urlencode({'name': name, 'type': record_type})}"
+    request = Request(url, headers={"Accept": "application/dns-json"}, method="GET")
+    try:
+        with opener(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - network, DNS or JSON: all mean we did not get an answer
+        return [], False
+    status = payload.get("Status")
+    if status not in (0, 3):                      # 0 NOERROR, 3 NXDOMAIN
+        return [], False
+    values = [str(a.get("data") or "").strip() for a in payload.get("Answer") or []]
+    return [v for v in values if v], True
+
+
+def observe_mail_records(domain: str, *, opener=None) -> tuple[list[dict[str, str]], bool]:
+    """What this domain's mail looks like RIGHT NOW, asked of DNS directly.
+
+    The independent half of `managed_dns.review()`: Cloudflare's import scan is compared against this,
+    and anything live but unimported blocks the nameserver change.
+
+    Returns `(records, complete)`. `complete` is False if ANY lookup failed to answer -- not just the MX
+    one -- because a partial picture compared against an import produces a confident-looking result built
+    on a gap. DKIM is best-effort by nature: selectors are arbitrary labels and cannot be enumerated, so
+    a missing uncommon selector will not be seen here any more than the scan sees it.
+    """
+    name = str(domain or "").strip().lower().rstrip(".")
+    if not name or "." not in name:
+        return [], False
+    records: list[dict[str, str]] = []
+    complete = True
+
+    mx, answered = resolve_records(name, "MX", opener=opener)
+    complete = complete and answered
+    for value in mx:
+        records.append({"type": "MX", "name": name, "content": value})
+
+    txt, answered = resolve_records(name, "TXT", opener=opener)
+    complete = complete and answered
+    for value in txt:
+        records.append({"type": "TXT", "name": name, "content": value.strip('"')})
+
+    dmarc, answered = resolve_records(f"_dmarc.{name}", "TXT", opener=opener)
+    complete = complete and answered
+    for value in dmarc:
+        records.append({"type": "TXT", "name": f"_dmarc.{name}", "content": value.strip('"')})
+
+    for selector in _COMMON_DKIM_SELECTORS:
+        host = f"{selector}._domainkey.{name}"
+        values, answered = resolve_records(host, "TXT", opener=opener)
+        # A failed DKIM probe does NOT spoil the picture: these are guesses, and treating a guess that
+        # did not answer as a gap would block every tenant on a slow resolver.
+        for value in values:
+            records.append({"type": "TXT", "name": host, "content": value.strip('"')})
+    return records, complete
+
+
 def _dns_has_records(name: str, record_type: str, *, opener=None) -> bool:
     """True if ANY record of `record_type` exists at `name` (value ignored) — used to detect a wrong-type
     entry (e.g. a TXT where a CNAME is required)."""
