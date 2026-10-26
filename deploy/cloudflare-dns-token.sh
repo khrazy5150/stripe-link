@@ -14,14 +14,22 @@
 #   1. cloudflare.com -> log in -> the profile icon, top right -> "My Profile"
 #   2. "API Tokens" in the left menu -> "Create Token" -> "Create Custom Token" ("Get started")
 #   3. Name it something you will recognise in a year, e.g. "junior-bay-managed-dns"
-#   4. Permissions -- three rows, added with "+ Add more":
-#        Account | Zone        | Edit      <- this is the one that allows creating zones
-#        Zone    | DNS         | Edit
-#        Zone    | Workers Routes | Edit
+#   4. Permissions -- the left dropdown is the RESOURCE TYPE, the middle one is the permission. All
+#      three rows are "Zone" on the left; there is no account-scoped "Zone" permission, which is the
+#      opposite of what this file said until 2026-10-25:
+#        Zone | Zone           | Edit   <- "write access to zone management", i.e. creating them
+#        Zone | DNS            | Edit
+#        Zone | Workers Routes | Edit
+#      Optional fourth row, only so this script can run its check below:
+#        Account | Account Settings | Read
+#      The middle dropdown is a filter box -- type "zone" rather than scrolling; the list is long and
+#      "Zone" sorts after every "Zero Trust" entry, right at the bottom.
 #   5. Account Resources : Include -> your account
 #      Zone Resources    : Include -> All zones from an account -> your account
 #      (NOT "Specific zone": a tenant's zone does not exist yet when you write this, so naming zones
-#       here would lock the token out of every zone it is being created to manage.)
+#       here would lock the token out of every zone it is being created to manage. This is also what
+#       makes a zone-scoped permission able to create a zone at all -- the policy has to cover zones
+#       that do not exist when it is written.)
 #   6. Continue -> Create Token -> copy the value. Cloudflare shows it ONCE.
 #   7. Run this script and paste it.
 # ---------------------------------------------------------------------------------------------------
@@ -69,13 +77,16 @@ if [[ -n "${ACCOUNT_ID}" ]]; then
     --data "{\"name\":\"not a valid domain\",\"account\":{\"id\":\"${ACCOUNT_ID}\"},\"type\":\"full\"}" \
     "https://api.cloudflare.com/client/v4/zones" || true)"
   if grep -q "zone.create" <<<"${PROBE}"; then
-    echo "    This token CANNOT create zones -- it is missing Account | Zone | Edit." >&2
-    echo "    Add that permission in the Cloudflare dashboard and run this again. Not stored." >&2
+    echo "    This token CANNOT create zones -- it is missing  Zone | Zone | Edit  with" >&2
+    echo "    Zone Resources set to 'All zones from an account'. Add that and run this again." >&2
+    echo "    Not stored." >&2
     exit 1
   fi
   echo "    Zone-create permission looks present."
 else
-  echo "    Could not read the account list; storing without the zone-create probe."
+  echo "    Could not read the account list (the token has no Account Settings:Read), so the"
+  echo "    zone-create check was SKIPPED -- the token is stored unverified. To check it, re-run with"
+  echo "      CLOUDFLARE_ACCOUNT_ID=<your account id> ./deploy/cloudflare-dns-token.sh ${ENVIRONMENT}"
 fi
 
 aws secretsmanager put-secret-value \

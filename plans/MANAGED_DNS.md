@@ -143,6 +143,12 @@ that fails.
   Worker routes on a tenant zone either, since that zone does not exist when the token is scoped.
   Per §4 this wants a SEPARATE token rather than widening the existing one: the custom-hostname token
   stays narrow, and the managed-DNS token's larger blast radius is visible as its own credential.
+  **The permission is `Zone | Zone | Edit`, not an account-scoped one** — Cloudflare's permission
+  reference has no account-scoped "Zone" group; the account-looking string in the error
+  (`com.cloudflare.api.account.zone.create`) is the zone RESOURCE scope, not an account permission. What
+  makes a zone-scoped permission able to create a zone is Zone Resources = *all zones in the account*,
+  since the policy has to cover zones that do not exist when it is written. Setup lives in
+  `deploy/cloudflare-dns-token.sh`, which probes before storing.
 - **Worker routes on a tenant zone**: we own the zone, so the API allows it, but the route must be added
   per zone and counts against route limits. Alternative is Orange-to-Orange with a custom hostname, which a
   third-party source says requires the two zones to be in *different* accounts — unverified, and moot if we

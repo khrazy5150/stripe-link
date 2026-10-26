@@ -351,7 +351,7 @@ Resources:
     Condition: HasCloudflareZone
     Properties:
       Name: !Sub "${ProjectPrefix}-cloudflare-dns-token-${Environment}"
-      Description: Cloudflare API token for MANAGED DNS (Account:Zone:Edit + Zone:DNS:Edit + Zone:Workers Routes:Edit, all zones). Populate via ./deploy/cloudflare-dns-token.sh. See plans/MANAGED_DNS.md.
+      Description: Cloudflare API token for MANAGED DNS (Zone:Zone:Edit + Zone:DNS:Edit + Zone:Workers Routes:Edit, Zone Resources = all zones in the account). Populate via ./deploy/cloudflare-dns-token.sh. See plans/MANAGED_DNS.md.
       SecretString: "PLACEHOLDER-SET-VIA-put-secret-value"
 
   StripeKeysEncryptionKey:
