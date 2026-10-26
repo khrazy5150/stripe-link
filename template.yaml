@@ -193,6 +193,10 @@ Parameters:
     Type: String
     Default: domains.jbay.uk
     Description: Hostname tenants CNAME their custom subdomain to (the Cloudflare for SaaS fallback origin, on the dedicated jbay.uk zone).
+  CloudflareAccountId:
+    Type: String
+    Default: ""
+    Description: Cloudflare ACCOUNT id, for creating tenant DNS zones (plans/MANAGED_DNS.md). One value for both environments - the zones differ, the account does not. Empty disables managed DNS cleanly.
   CloudflareApexIpv4:
     Type: String
     Default: ""
@@ -1565,6 +1569,11 @@ Resources:
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
+          # Managed DNS. Here rather than in Globals because this function is the only consumer, and the
+          # worker script name is DERIVED rather than configured -- it must match what
+          # setup-cloudflare-custom-domain-worker.sh uploads, and two places to spell it is one too many.
+          CLOUDFLARE_ACCOUNT_ID: !Ref CloudflareAccountId
+          CLOUDFLARE_WORKER_SCRIPT: !Sub "${ProjectPrefix}-custom-domain-router-${Environment}"
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           PAGES_TABLE: !Ref PagesTable
           SITES_TABLE: !Ref SitesTable
@@ -1600,7 +1609,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
-                Resource: !Ref CloudflareApiTokenSecret
+                Resource:
+                  - !Ref CloudflareApiTokenSecret
+                  # Managed DNS reads a SEPARATE token: it can create zones and rewrite any tenant's
+                  # records, so it is a different credential from the custom-hostname one above.
+                  - !Ref CloudflareDnsTokenSecret
           - !Ref AWS::NoValue
         # Read the platform Stripe secret to pull a connected account's live verification status.
         - !If
@@ -1624,6 +1637,25 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: rate(1 day)
+        # Managed DNS (plans/MANAGED_DNS.md): start it, poll it, hand the domain back.
+        SitesManagedDnsStart:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/managed-dns
+            Method: POST
+        SitesManagedDnsStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/managed-dns
+            Method: GET
+        SitesManagedDnsStop:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/managed-dns
+            Method: DELETE
         SitesConnectDomain:
           Type: Api
           Properties:
@@ -2391,8 +2423,11 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
           # Reached only through `handlers.sites`, which this imports for subdomain provisioning and
-          # which now dispatches the domain health sweep. Declared because tests/envreach.py
-          # over-approximates on purpose: a few bytes of env var beats a runtime NameError.
+          # which now dispatches both the domain health sweep and the managed-DNS endpoints. Declared
+          # because tests/envreach.py over-approximates on purpose: a few bytes of env var beats a
+          # runtime NameError.
+          CLOUDFLARE_ACCOUNT_ID: !Ref CloudflareAccountId
+          CLOUDFLARE_WORKER_SCRIPT: !Sub "${ProjectPrefix}-custom-domain-router-${Environment}"
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
           PAGES_TABLE: !Ref PagesTable

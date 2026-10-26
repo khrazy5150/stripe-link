@@ -80,6 +80,11 @@ else
   PARAMETER_OVERRIDES+=("CustomDomainTargetHost=domains.jbay.be")
 fi
 
+# Managed DNS (plans/MANAGED_DNS.md): the Cloudflare ACCOUNT that tenant zones are created on. One value
+# for both environments -- the zones differ per environment, the account does not. Empty disables managed
+# DNS cleanly, the same way an empty AiImageApiBase disables image generation.
+PARAMETER_OVERRIDES+=("CloudflareAccountId=c7b1afadd7f220d780f4f742a12aef16")
+
 # Apex custom domains (plans/SITE_OBJECT.md 2.6b). CloudflareApexIpv4/IPV6 ARE DELIBERATELY UNSET, and the
 # reason is the kind that gets rediscovered the hard way, so it is written down here rather than only in
 # the plan.

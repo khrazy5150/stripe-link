@@ -242,6 +242,18 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
             return connect_domain(event, repository, site_id)
         if method == "DELETE" and resource.endswith("/domain"):
             return disconnect_domain(event, repository, site_id, mode=mode)
+    if site_id and resource.endswith("/managed-dns"):
+        # Imported on the route, not at module level: this handler is also the scheduled domain-health
+        # sweep's entry point, and that path has no business paying for the Cloudflare zone client.
+        from handlers.managed_dns_api import handle as handle_managed_dns
+
+        gate = _reject_non_live_site(repository.get(tenant_id_from_event(event) or "", site_id) or {})
+        if gate is not None and method != "DELETE":
+            # Same rule as a custom domain: a TEST-mode Site must not take a real domain, for the
+            # reputational reason `_reject_non_live_site` gives. Teardown stays open in any mode, because
+            # handing a domain back must never be the thing that is blocked.
+            return gate
+        return handle_managed_dns(event, repository, site_id, method)
     if method == "POST":
         gate = require_capability(event, "sites", tenant_repo)
         if gate is not None:
