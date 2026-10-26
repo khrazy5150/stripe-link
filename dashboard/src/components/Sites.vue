@@ -414,6 +414,28 @@
                     the zone we hold, so nothing changes about where your mail goes.</p>
                 </template>
 
+                <!-- THE CONFIRM STEP. A clean review used to go straight to the nameservers, so the
+                     summary of what we imported was computed and shown to nobody -- the one screen that
+                     tells a tenant what we are about to become responsible for. -->
+                <template v-else-if="managedState === REVIEW">
+                  <div class="keys-status-banner info">
+                    <p><strong>{{ importSummary(managedZone) }}</strong></p>
+                    <p>{{ managedZone.review?.prompt || managedReview?.confirm_prompt }}</p>
+                  </div>
+                  <p class="field-note">{{ managedMail }}</p>
+                  <p class="field-note">Check this against your own DNS before going on. Anything we did
+                    not import will stop working when you change your nameservers, and some records —
+                    DKIM keys and validation records with random names — cannot be discovered by looking.</p>
+                  <div class="button-row">
+                    <button type="button" class="primary-action" :disabled="managedBusy" @click="confirmManagedDns">
+                      {{ managedBusy ? "Checking…" : "That looks right — show me the nameservers" }}
+                    </button>
+                    <button type="button" class="secondary-action" :disabled="managedBusy" @click="leaveManagedDns">
+                      Cancel
+                    </button>
+                  </div>
+                </template>
+
                 <template v-else-if="managedState === DELEGATE">
                   <p class="field-note">{{ managedMail }}</p>
                   <p v-for="(line, n) in managedSteps" :key="n" class="field-note step-line">
@@ -693,7 +715,7 @@ import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
-import { BLOCKED, CHOOSE, DELEGATE, LIVE, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
+import { BLOCKED, CHOOSE, DELEGATE, LIVE, REVIEW, importSummary, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
 import { rootDomain } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
@@ -1061,8 +1083,8 @@ async function loadManagedDns(siteId) {
     managedZone.value = res.zone;
     // The stored verdict comes back with the zone, so a blocked review survives a reload instead of
     // falling through to the nameserver screen.
-    managedReview.value = res.review?.blocked ? { ...res.review, confirm_prompt: res.review.prompt
-      || "We are not ready to move this domain yet. Re-check to see what is still outstanding." } : null;
+    managedReview.value = res.review ? { ...res.review,
+      confirm_prompt: res.review.prompt || "" } : null;
     managedNameServers.value = res.zone.name_servers || [];
     dnsChoice.value = "managed";
     // The box showed its `shop.yourbrand.com` placeholder while the banner underneath said the domain
@@ -1079,11 +1101,17 @@ const managedSteps = computed(() =>
   nameserverInstructions(dnsProvider.value, domainForm.domain || editing.value?.hosting?.custom_domain || ""));
 const managedWaiting = computed(() => waitingMessage(managedWaitedFor.value));
 
-async function startManagedDns(repair = false) {
+function confirmManagedDns() {
+  // Re-runs the comparison and records the confirmation together: agreeing to what we found five
+  // minutes ago is not the same as agreeing to what is there now.
+  return startManagedDns(false, true);
+}
+
+async function startManagedDns(repair = false, confirm = false) {
   managedError.value = "";
   managedBusy.value = true;
   try {
-    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain, repair);
+    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain, repair, confirm);
     managedZone.value = res.zone || null;
     managedReview.value = res.review || null;
     managedNameServers.value = res.name_servers || [];

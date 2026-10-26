@@ -70,12 +70,15 @@ class StartTests(unittest.TestCase):
             return managed_dns_api.start(event(body={"domain": "example.com"}), FakeSites(), "site_1",
                                          repo=zones), zones
 
-    def test_a_clean_comparison_hands_over_the_nameservers(self):
+    def test_a_clean_comparison_still_withholds_the_nameservers_until_confirmed(self):
+        """Clean is not the same as agreed. The nameserver change is the one irreversible instruction,
+        and a tenant should read what we imported before taking it -- the summary used to be computed
+        and shown to nobody because a clean review skipped straight past it."""
         response, zones = self._start([WEB, MX], [WEB, MX])
         self.assertEqual(response["statusCode"], 201)
         payload = body_of(response)
         self.assertFalse(payload["review"]["blocked"])
-        self.assertEqual(payload["name_servers"], ["kim.ns.cloudflare.com", "walt.ns.cloudflare.com"])
+        self.assertEqual(payload["name_servers"], [])
         self.assertIn((TENANT, "example.com"), zones.docs)
 
     def test_a_missed_mx_withholds_them(self):
@@ -112,7 +115,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(created.call_args.args[0], "example.com")
         self.assertIn((TENANT, "example.com"), zones.docs)
 
-    def _existing(self, imported, observed, repair=False):
+    def _existing(self, imported, observed, repair=False, confirm=False):
         zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
                             "status": "pending", "name_servers": ["kim.ns.cloudflare.com"]}])
         created = []
@@ -125,6 +128,8 @@ class StartTests(unittest.TestCase):
             body = {"domain": "example.com"}
             if repair:
                 body["repair"] = True
+            if confirm:
+                body["confirm"] = True
             response = managed_dns_api.start(event(body=body), FakeSites(), "site_1",
                                              mode="live", repo=zones)
         new_zone.assert_not_called()
@@ -140,11 +145,24 @@ class StartTests(unittest.TestCase):
         self.assertTrue(payload["review"]["blocked"])
         self.assertEqual(payload["name_servers"], [])
 
-    def test_a_cleared_block_hands_over_the_nameservers(self):
+    def test_a_cleared_block_still_waits_for_the_tenant_to_confirm(self):
         response, _, _ = self._existing([WEB, MX], [WEB, MX])
         payload = body_of(response)
         self.assertFalse(payload["review"]["blocked"])
+        self.assertEqual(payload["name_servers"], [])
+
+    def test_confirming_is_what_releases_them(self):
+        response, _, zones = self._existing([WEB, MX], [WEB, MX], confirm=True)
+        payload = body_of(response)
         self.assertEqual(payload["name_servers"], ["kim.ns.cloudflare.com"])
+        # Recorded on the ZONE: a confirmation that lives in one browser tab is not a confirmation.
+        self.assertTrue(zones.docs[(TENANT, "example.com")]["review"]["confirmed_at"])
+
+    def test_confirming_cannot_release_a_blocked_review(self):
+        # The button does not exist on that screen, but the endpoint is the thing that must refuse.
+        response, _, zones = self._existing([WEB], [WEB, MX], confirm=True)
+        self.assertEqual(body_of(response)["name_servers"], [])
+        self.assertFalse(zones.docs[(TENANT, "example.com")]["review"]["confirmed_at"])
 
     def test_repair_copies_the_missing_mail_records_into_the_zone(self):
         """Blocked has to be RECOVERABLE. Cloudflare's scan runs once at creation, so re-checking the

@@ -168,9 +168,11 @@ export const useSitesStore = defineStore("sites", {
     // rather than by Site, because it outlives any one Site's claim on that hostname.
     // `repair` copies the mail records live DNS serves into the zone we hold. It is the only thing that
     // can clear a blocked review, because Cloudflare's import scan runs once and never re-runs.
-    async startManagedDns(siteId, domain, repair = false) {
-      return apiRequest(`/sites/${encodeURIComponent(siteId)}/managed-dns`,
-                        { method: "POST", body: repair ? { domain, repair: true } : { domain } });
+    async startManagedDns(siteId, domain, repair = false, confirm = false) {
+      const body = { domain };
+      if (repair) body.repair = true;
+      if (confirm) body.confirm = true;
+      return apiRequest(`/sites/${encodeURIComponent(siteId)}/managed-dns`, { method: "POST", body });
     },
     // `domain` is optional on purpose: the panel asks WITHOUT one when it is reconstituting its state
     // on load, because not knowing the domain is exactly the situation a returning tenant is in.

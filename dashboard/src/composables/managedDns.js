@@ -15,6 +15,7 @@ import { rootDomain } from "./dnsInstructions.js";
 
 export const CHOOSE = "choose";
 export const BLOCKED = "blocked";
+export const REVIEW = "review";
 export const DELEGATE = "delegate";
 export const LIVE = "live";
 
@@ -24,7 +25,22 @@ export function managedDnsState(zone, review) {
   // `blocked` is the server's verdict, and it is re-read on every poll rather than remembered: a tenant
   // who adds the missing MX and retries must be able to move on without starting over.
   if (review && review.blocked) return BLOCKED;
+  // READ BEFORE DELEGATE. A clean review used to go straight to the nameservers, so the summary of what
+  // we had imported was computed and then shown to nobody -- the one screen that tells a tenant what we
+  // are about to take responsibility for. Confirmation lives on the ZONE, so it survives a reload.
+  if (!zone.review || !zone.review.confirmed_at) return REVIEW;
   return DELEGATE;
+}
+
+/** What we read, in a sentence a tenant can check against their own DNS. */
+export function importSummary(zone) {
+  const r = (zone && zone.review) || {};
+  const records = r.records || 0;
+  const mail = r.mail_count || 0;
+  const parts = [`${records} record${records === 1 ? "" : "s"} imported`];
+  parts.push(mail ? `${mail} of them mail` : "none of them mail");
+  if (r.provider) parts.push(r.provider);
+  return parts.join(" · ");
 }
 
 /**

@@ -31,11 +31,15 @@ class StateTests(unittest.TestCase):
         if subprocess.run(["node", "--version"], capture_output=True).returncode != 0:
             raise unittest.SkipTest("node is not available")
 
-    def test_the_four_states_come_from_the_server(self):
+    def test_the_five_states_come_from_the_server(self):
         self.assertEqual(node("m.managedDnsState(null, null)"), "choose")
         self.assertEqual(node('m.managedDnsState({zone_id:"z"}, {blocked:true})'), "blocked")
+        # Unconfirmed is REVIEW, not delegate: the tenant reads what was imported before we hand over
+        # the one irreversible instruction.
         self.assertEqual(node('m.managedDnsState({zone_id:"z",status:"pending"}, {blocked:false})'),
-                         "delegate")
+                         "review")
+        self.assertEqual(node('m.managedDnsState({zone_id:"z",status:"pending",'
+                              'review:{confirmed_at:1}}, {blocked:false})'), "delegate")
         self.assertEqual(node('m.managedDnsState({zone_id:"z",status:"active"}, {blocked:false})'),
                          "live")
 
@@ -259,6 +263,46 @@ class ExitBannerTests(unittest.TestCase):
         self.assertIn("they are the ones\n                    this domain used before us", SITES_VUE)
 
 
+class ConfirmStepTests(unittest.TestCase):
+    """A clean review used to go straight to the nameservers.
+
+    The summary of what we had imported was computed and then shown to nobody — the one screen that
+    tells a tenant what we are about to take responsibility for. "There is no message about how many
+    records there are", and there wasn't: it only ever appeared when the review objected.
+    """
+
+    def test_a_clean_review_stops_to_be_read(self):
+        self.assertEqual(node('m.managedDnsState({zone_id:"z",status:"pending",'
+                              'review:{blocked:false}}, {blocked:false})'), "review")
+
+    def test_and_moves_on_once_confirmed(self):
+        self.assertEqual(node('m.managedDnsState({zone_id:"z",status:"pending",'
+                              'review:{blocked:false,confirmed_at:1}}, {blocked:false})'), "delegate")
+
+    def test_the_confirmation_lives_on_the_zone_not_in_the_tab(self):
+        # A confirmation that survives only in one browser tab is not a confirmation — reload and the
+        # tenant would be asked again, or worse, waved through.
+        self.assertIn("zone.review.confirmed_at", node_source())
+
+    def test_the_summary_says_what_was_read(self):
+        self.assertEqual(node('m.importSummary({review:{records:21,mail_count:5,'
+                              'provider:"Google Workspace"}})'),
+                         "21 records imported · 5 of them mail · Google Workspace")
+        self.assertEqual(node('m.importSummary({review:{records:3,mail_count:0}})'),
+                          "3 records imported · none of them mail")
+
+    def test_the_screen_warns_about_what_cannot_be_discovered(self):
+        # The limit is real and the tenant is the only one who can cover it: DKIM keys and validation
+        # records have random names, and DNS cannot list a zone.
+        review = SITES_VUE.split("managedState === REVIEW", 1)[1].split("managedState === DELEGATE", 1)[0]
+        self.assertIn("cannot be discovered", review)
+        self.assertIn("Cancel", review)
+
+
+def node_source():
+    return (ROOT / "dashboard" / "src" / "composables" / "managedDns.js").read_text(encoding="utf-8")
+
+
 class ExplicitWatchTests(unittest.TestCase):
     """Nothing is happening until the tenant changes the nameservers.
 
@@ -294,7 +338,9 @@ class VerdictSurvivesReloadTests(unittest.TestCase):
     def test_the_stored_review_comes_back_with_the_zone(self):
         """The third door onto the same bypass. `status` returned no review, so a reload dropped a
         BLOCKED verdict, the state fell through to DELEGATE, and the gate was skipped by pressing F5."""
-        self.assertIn("res.review?.blocked", SITES_VUE)
+        # The whole review now comes back, not just whether it objected -- the counts are what the
+        # confirm screen is made of, and they have to survive a reload too.
+        self.assertIn("managedReview.value = res.review ?", SITES_VUE)
 
     def test_the_endpoint_carries_it(self):
         import pathlib

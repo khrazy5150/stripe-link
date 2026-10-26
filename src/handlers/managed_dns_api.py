@@ -113,7 +113,8 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
         # the state computed to DELEGATE, and the gate was silently dropped on the one path that exists
         # to re-run it.
         return _recheck(existing, tenant_id, domain, api_token, repo,
-                        repair=bool(body.get("repair")))
+                        repair=bool(body.get("repair")),
+                        confirm=bool(body.get("confirm")))
 
     try:
         result = managed_dns.provision(
@@ -127,11 +128,30 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
         )
     except CustomDomainError as exc:
         return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
+    # NOT handed over yet, even when the review is clean: the tenant reads what we found first. The
+    # summary used to be computed and then shown only if it objected, so a clean read skipped straight
+    # to the nameservers and nobody ever saw what we had imported.
     return json_response({"zone": result["zone"], "review": result["review"],
-                          "name_servers": result["name_servers"], "site_id": site_id}, status_code=201)
+                          "name_servers": [], "site_id": site_id}, status_code=201)
 
 
-def _recheck(record, tenant_id, domain, api_token, repo, *, repair=False):
+def _stored_review(summary, previous):
+    """What the review found, kept on the zone. The counts are the point: a tenant who reloads must be
+    able to see what we read before agreeing to it, and `blocked` alone cannot tell them that."""
+    mail = summary.get("mail") or {}
+    return {
+        "blocked": summary["blocked"],
+        "missing": summary["missing"],
+        "checked_at": int(time.time()),
+        "records": sum(len(v) for v in (summary.get("records") or {}).values()),
+        "mail_count": len((summary.get("records") or {}).get("mail") or []),
+        "provider": mail.get("provider") or "",
+        "prompt": summary.get("confirm_prompt") or "",
+        "confirmed_at": previous.get("confirmed_at") or 0,
+    }
+
+
+def _recheck(record, tenant_id, domain, api_token, repo, *, repair=False, confirm=False):
     """Re-run the mail comparison on a zone that already exists, optionally repairing the import first.
 
     BLOCKED MUST BE RECOVERABLE. Cloudflare's scan runs once at zone creation, so a gap it left can
@@ -163,12 +183,16 @@ def _recheck(record, tenant_id, domain, api_token, repo, *, repair=False):
     except CustomDomainError as exc:
         return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
 
-    record["review"] = {"blocked": summary["blocked"], "missing": summary["missing"],
-                        "checked_at": int(time.time())}
+    record["review"] = _stored_review(summary, record.get("review") or {})
+    if confirm and not summary["blocked"]:
+        # The tenant has read what we found and said go. Recorded on the ZONE so it survives a reload
+        # and a different browser -- a confirmation that lives in one tab is not a confirmation.
+        record["review"]["confirmed_at"] = int(time.time())
     repo.put(record)
     return json_response({
         "zone": record, "review": summary, "already_started": True,
-        "name_servers": [] if summary["blocked"] else (record.get("name_servers") or []),
+        "name_servers": [] if (summary["blocked"] or not record["review"].get("confirmed_at"))
+                        else (record.get("name_servers") or []),
     })
 
 
