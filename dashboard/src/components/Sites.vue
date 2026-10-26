@@ -323,16 +323,6 @@
               </label>
               <!-- Said BEFORE connecting. After it, a Cloudflare hostname exists and the tenant is working
                    through records that can never verify -- which is exactly how coderbay.net went. -->
-              <!-- Suppressed once managed DNS is chosen. There the apex is exactly what works -- it is
-                   the whole reason the option exists -- so "use www instead" is not merely redundant,
-                   it talks the tenant out of the thing they just chose. It did, on 2026-10-26. -->
-              <div v-if="connectAdvice && dnsChoice !== 'managed'" class="keys-status-banner warning apex-advice">
-                <p>{{ connectAdvice.reason }}</p>
-                <p>{{ connectAdvice.fix }}</p>
-                <button type="button" class="secondary-action" @click="domainForm.domain = connectAdvice.suggestion">
-                  Use {{ connectAdvice.suggestion }}
-                </button>
-              </div>
               <label v-if="!siteHasHomepage" class="offer-field">
                 <span>Which page should the domain show?</span>
                 <select v-model="domainForm.homepage">
@@ -360,10 +350,28 @@
                 </button>
               </div>
 
+              <!-- AFTER the two cards, deliberately. Typing an AWS domain used to fire this warning
+                   before a tenant had chosen anything, so the first thing they read was an intimidating
+                   "you can't do that" about a limitation one of the two cards removes entirely. Offer
+                   the choice first; qualify the second option afterwards. It vanishes once managed DNS
+                   is chosen, because there the apex is exactly what works. -->
+              <div v-if="connectAdvice && dnsChoice !== 'managed'" class="keys-status-banner warning apex-advice">
+                <p><strong>If you keep your DNS where it is:</strong> {{ connectAdvice.reason }}</p>
+                <p>{{ connectAdvice.fix }}</p>
+                <button type="button" class="secondary-action" @click="domainForm.domain = connectAdvice.suggestion">
+                  Use {{ connectAdvice.suggestion }}
+                </button>
+              </div>
+
               <div v-if="dnsChoice === 'managed'" class="managed-dns">
                 <div v-if="managedError" class="keys-status-banner error">{{ managedError }}</div>
 
                 <template v-if="managedState === CHOOSE">
+                  <p v-if="managedNarrowedFrom" class="field-note managed-narrowed">
+                    Managed DNS covers your whole domain, so we will set up
+                    <strong>{{ domainForm.domain }}</strong> — that includes
+                    <strong>{{ managedNarrowedFrom }}</strong>. Both will serve this Site.
+                  </p>
                   <p class="field-note">We will create the zone and read what is in it before anything
                     changes. Your nameservers stay where they are until you say so.</p>
                   <button type="button" class="primary-action" :disabled="managedBusy" @click="startManagedDns">
@@ -395,7 +403,13 @@
                     <code>{{ ns }}</code>
                     <button type="button" class="copy-btn" @click="copy(ns)">{{ copied === ns ? 'Copied!' : 'Copy' }}</button>
                   </div>
-                  <p class="field-note">{{ managedWaiting }}</p>
+                  <!-- A line of grey text is indistinguishable from a page that has stopped doing
+                       anything. The spinner is the only thing on screen saying the app is still
+                       watching, which is what a tenant is actually asking when they stare at this. -->
+                  <p class="field-note managed-waiting"><span class="managed-spinner" aria-hidden="true"></span>
+                    <span>{{ managedWaiting }}</span></p>
+                  <p class="field-note">Checked {{ managedChecks }} time{{ managedChecks === 1 ? '' : 's' }}
+                    — you can close this and come back; it keeps running.</p>
                 </template>
 
                 <template v-else-if="managedState === LIVE">
@@ -620,6 +634,7 @@ import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
 import { BLOCKED, CHOOSE, DELEGATE, LIVE, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
+import { rootDomain } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -932,10 +947,28 @@ const managedNameServers = ref([]);
 const managedBusy = ref(false);
 const managedError = ref("");
 const managedWaitedFor = ref(0);
+const managedChecks = ref(0);
 let managedPoll = 0;
 let managedStartedAt = 0;
 
 const managedState = computed(() => managedDnsState(managedZone.value, managedReview.value));
+
+// MANAGED DNS IS ALWAYS THE WHOLE DOMAIN. The server already normalises -- `www.example.com` creates a
+// zone for `example.com` -- but a backstop the screen contradicts is a backstop that confuses: the box
+// would keep saying www while the nameserver step, the banner and the live domain all said the root.
+// So the choice rewrites the field to the root and says why, before anything is created.
+const managedRoot = computed(() => rootDomain(domainForm.domain || ""));
+const managedNarrowedFrom = ref("");
+
+watch(dnsChoice, (choice) => {
+  managedNarrowedFrom.value = "";
+  if (choice !== "managed") return;
+  const typed = (domainForm.domain || "").trim().toLowerCase();
+  if (typed && managedRoot.value && typed !== managedRoot.value) {
+    managedNarrowedFrom.value = typed;
+    domainForm.domain = managedRoot.value;
+  }
+});
 
 // RECONSTITUTED ON LOAD, not only on the click that started it. A tenant who begins the flow and closes
 // the tab has a zone on our account and their nameservers already changed; without this they come back
@@ -949,6 +982,7 @@ async function loadManagedDns(siteId) {
   managedNameServers.value = [];
   managedRestoreTo.value = [];
   managedStartedAt = 0;
+  managedChecks.value = 0;
   if (!siteId) return;
   try {
     const res = await store.managedDnsStatus(siteId);
@@ -956,6 +990,9 @@ async function loadManagedDns(siteId) {
     managedZone.value = res.zone;
     managedNameServers.value = res.zone.name_servers || [];
     dnsChoice.value = "managed";
+    // The box showed its `shop.yourbrand.com` placeholder while the banner underneath said the domain
+    // was live -- which reads as "nothing is connected" and "it is connected" at the same time.
+    if (!domainForm.domain) domainForm.domain = res.zone.domain || "";
     if (res.status !== "active") beginManagedPolling();
   } catch { /* 404 means no zone for this Site, which is the ordinary case */ }
 }
@@ -998,10 +1035,15 @@ async function pollManagedDns() {
   try {
     const res = await store.managedDnsStatus(editing.value.site_id, domain);
     managedZone.value = res.zone || managedZone.value;
+    managedChecks.value += 1;
     if (res.status === "active") {
       clearInterval(managedPoll);
       managedPoll = 0;
+      // Re-read the SITE too: activation attaches the domain to it server-side, and without this the
+      // panel keeps rendering from a copy taken before that happened.
       await store.load();
+      const fresh = store.sites.find((site) => site.site_id === editing.value?.site_id);
+      if (fresh) editing.value = { ...fresh };
     }
   } catch { /* a failed poll is a poll; the next one answers */ }
 }
@@ -1639,6 +1681,16 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--muted);
 }
+.managed-waiting { display: flex; align-items: center; gap: 0.5rem; }
+.managed-spinner {
+  flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border-radius: 50%;
+  border: 2px solid var(--line-strong); border-top-color: var(--accent);
+  animation: managed-spin 0.9s linear infinite;
+}
+@keyframes managed-spin { to { transform: rotate(360deg); } }
+/* Someone watching a nameserver change for ten minutes does not need it animating at them. */
+@media (prefers-reduced-motion: reduce) { .managed-spinner { animation: none; } }
+
 /* Two routes, side by side, so neither reads as the fallback. */
 .dns-choice { display: flex; gap: 0.8rem; margin: 0.6rem 0; flex-wrap: wrap; }
 .dns-choice-card {

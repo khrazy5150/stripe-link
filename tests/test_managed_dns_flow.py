@@ -120,6 +120,72 @@ class ApexAdviceTests(unittest.TestCase):
         self.assertIn("connectAdvice && dnsChoice !== 'managed'", SITES_VUE)
 
 
+class PanelOrderTests(unittest.TestCase):
+    """Three things a first organic run surfaced, none of which a test could have predicted."""
+
+    def test_the_apex_warning_comes_after_the_two_choices(self):
+        """Typing an AWS domain fired it before the tenant had chosen anything, so the first thing they
+        read was an intimidating "you can't do that" about a limitation one of the two cards removes
+        entirely. Offer the choice first; qualify the second option afterwards."""
+        cards = SITES_VUE.index("dnsChoice = 'own'")
+        warning = SITES_VUE.index("connectAdvice && dnsChoice !== 'managed'")
+        self.assertLess(cards, warning)
+
+    def test_the_warning_is_framed_as_being_about_the_other_choice(self):
+        self.assertIn("If you keep your DNS where it is:", SITES_VUE)
+
+    def test_the_wait_looks_like_it_is_working(self):
+        """A line of grey text is indistinguishable from a page that has stopped doing anything, which
+        is exactly what a tenant staring at it is trying to find out."""
+        self.assertIn("managed-spinner", SITES_VUE)
+        self.assertIn("managedChecks", SITES_VUE)
+        # Someone watching a nameserver change for ten minutes does not need it animating at them.
+        self.assertIn("prefers-reduced-motion", SITES_VUE)
+
+    def test_the_connected_domain_stays_in_the_box(self):
+        """It showed its `shop.yourbrand.com` placeholder while the banner underneath said the domain was
+        live -- reading as "nothing is connected" and "it is connected" at once."""
+        load = SITES_VUE.split("async function loadManagedDns", 1)[1].split("watch(", 1)[0]
+        self.assertIn("domainForm.domain = res.zone.domain", load)
+
+    def test_the_site_is_re_read_once_the_domain_attaches(self):
+        # Activation attaches the domain server-side; without this the panel keeps rendering from a copy
+        # taken before that happened, and never notices it is connected.
+        poll = SITES_VUE.split("async function pollManagedDns", 1)[1].split("async function", 1)[0]
+        self.assertIn("store.load()", poll)
+        self.assertIn("editing.value = { ...fresh }", poll)
+
+
+class WwwGuardTests(unittest.TestCase):
+    """Typing `www.example.com` and choosing managed DNS.
+
+    The server already normalises to the registrable root, so nothing breaks — but a backstop the screen
+    contradicts is a backstop that confuses. The box would keep saying www while the nameserver step,
+    the banner and the live domain all said the root, and the tenant would have no idea which of the two
+    the product thought it was doing.
+    """
+
+    def test_choosing_managed_rewrites_a_subdomain_to_the_root(self):
+        self.assertIn("domainForm.domain = managedRoot.value", SITES_VUE)
+        self.assertIn("watch(dnsChoice", SITES_VUE)
+
+    def test_it_says_why_rather_than_silently_editing_what_they_typed(self):
+        """Silently changing someone's input is its own small betrayal; saying what happened costs one
+        line and makes the rest of the flow legible."""
+        self.assertIn("managedNarrowedFrom", SITES_VUE)
+        self.assertIn("covers your whole domain", SITES_VUE)
+
+    def test_the_note_clears_when_they_switch_back(self):
+        watcher = SITES_VUE.split("watch(dnsChoice", 1)[1].split("});", 1)[0]
+        self.assertIn('managedNarrowedFrom.value = ""', watcher)
+        self.assertIn('if (choice !== "managed") return', watcher)
+
+    def test_an_apex_is_left_exactly_as_typed(self):
+        # The common case must not acquire a note about something that did not happen.
+        watcher = SITES_VUE.split("watch(dnsChoice", 1)[1].split("});", 1)[0]
+        self.assertIn("typed !== managedRoot.value", watcher)
+
+
 class WiringTests(unittest.TestCase):
     def test_the_component_renders_every_state(self):
         # Named once: `<script setup>` exposes the imported constants to the template, so the state
