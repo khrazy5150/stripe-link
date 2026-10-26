@@ -136,46 +136,76 @@ def mail_discrepancies(imported: Iterable[dict[str, Any]],
     return missing
 
 
-def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]]) -> dict[str, Any]:
+def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]], *,
+           observed_complete: bool) -> dict[str, Any]:
     """The gate. Returns what to show, and whether the nameserver change may be offered at all.
 
     `blocked` is not advisory. A missing mail record found BEFORE the switch is a non-event — add it and
     carry on. Found after, it is the tenant's business email, and the repair takes as long as DNS takes
     to propagate twice.
+
+    **`observed_complete` has no default, on purpose.** An empty `observed` means one of two opposite
+    things — we asked and this domain genuinely has no mail, or we could not ask — and only the caller
+    knows which. Inferring "no mail" from silence is how our own failed lookup becomes a tenant's outage,
+    and it is the same mistake the health sweep refuses to make when Cloudflare is unreachable. Requiring
+    the flag means the safe-looking answer cannot be reached by forgetting something.
     """
     imported = list(imported or [])
     observed = list(observed or [])
-    missing = mail_discrepancies(imported, observed)
+    missing = mail_discrepancies(imported, observed) if observed_complete else []
     shape = _mail_shape(imported)
     live = _mail_shape(observed)
     buckets: dict[str, list[dict[str, Any]]] = {MAIL: [], SERVING: [], VERIFICATION: [], OTHER: []}
     for record in imported:
         buckets[classify_record(record)].append(record)
 
+    # Reasons to stop that are not "a specific record is missing". Each is a case where the comparison
+    # itself cannot be trusted, which is worse than a known gap: a known gap can be shown and fixed.
+    contradictions: list[str] = []
+    if not observed_complete:
+        contradictions.append(
+            "We could not read this domain's live mail records just now, so there is nothing to check "
+            "the import against. Try again in a moment."
+        )
+    elif live["spf"] and not live["mx"]:
+        # A domain publishing SPF is a domain that sends mail. Finding one with no MX anywhere is not a
+        # mail-less domain, it is an incomplete answer -- and it is exactly the shape a partial lookup
+        # takes, because SPF is one TXT at the apex while MX enumeration is what fails.
+        contradictions.append(
+            "This domain publishes an SPF record but no MX was found. Mail is almost certainly set up "
+            "here and the record list is incomplete."
+        )
+
     has_mail = bool(live["mx"]) or bool(shape["mx"])
+    provider = mail_provider(live["mx"] or shape["mx"])
+    if contradictions:
+        prompt = contradictions[0]
+    elif provider:
+        prompt = (f"We found {len(imported)} DNS records. Mail is handled by {provider}. "
+                  "Anything missing from this list will stop working when you change nameservers.")
+    elif has_mail:
+        prompt = (f"We found {len(imported)} DNS records, including mail. "
+                  "Anything missing from this list will stop working when you change nameservers.")
+    else:
+        # Not an error, and not a warning dressed as one: plenty of domains are web-only, or keep mail on
+        # a different name entirely. It is a question only the tenant can answer, so ask it plainly once.
+        prompt = (f"We found {len(imported)} DNS records and no mail records at all. That is normal for "
+                  "a domain that does not receive email — but if yours does, stop here and tell us, "
+                  "because moving the nameservers would take it offline.")
     return {
         "records": buckets,
         "mail": {
             "present": has_mail,
-            "provider": mail_provider(live["mx"] or shape["mx"]),
+            "provider": provider,
             "mx_count": len(shape["mx"]),
             "spf": shape["spf"],
             "dmarc": shape["dmarc"],
             "dkim": shape["dkim"],
         },
         "missing": missing,
-        "blocked": bool(missing),
-        # Said even when nothing is missing, because the scan cannot prove a negative and the tenant is
-        # the only one who knows what this domain does. A clean comparison lowers the risk; it does not
-        # remove it.
-        "confirm_prompt": (
-            f"We found {len(imported)} DNS records. "
-            + (f"Mail is handled by {mail_provider(live['mx'] or shape['mx'])}. "
-               if mail_provider(live["mx"] or shape["mx"]) else
-               ("Mail records were found. " if has_mail else
-                "NO mail records were found — if this domain receives email, stop here and tell us. "))
-            + "Anything missing from this list will stop working when you change nameservers."
-        ),
+        "contradictions": contradictions,
+        "blocked": bool(missing) or bool(contradictions),
+        "confirm_prompt": prompt,
     }
 
 

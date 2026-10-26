@@ -95,7 +95,7 @@ class DiscrepancyTests(unittest.TestCase):
     def test_a_clean_import_blocks_nothing(self):
         imported = [*GOOGLE_MX, SPF, DMARC, DKIM, WEB]
         self.assertEqual(mail_discrepancies(imported, imported), [])
-        self.assertFalse(review(imported, imported)["blocked"])
+        self.assertFalse(review(imported, imported, observed_complete=True)["blocked"])
 
     def test_an_mx_the_scan_missed_blocks_the_switch(self):
         # The failure this exists for. Found before the nameserver change it is a non-event; found after,
@@ -104,7 +104,7 @@ class DiscrepancyTests(unittest.TestCase):
         observed = [WEB, SPF, *GOOGLE_MX]
         missing = mail_discrepancies(imported, observed)
         self.assertEqual(missing, ["MX alt1.aspmx.l.google.com", "MX aspmx.l.google.com"])
-        self.assertTrue(review(imported, observed)["blocked"])
+        self.assertTrue(review(imported, observed, observed_complete=True)["blocked"])
 
     def test_a_missed_dkim_selector_blocks_too(self):
         # Cloudflare's docs name non-default DKIM selectors specifically: they cannot be enumerated
@@ -125,17 +125,42 @@ class DiscrepancyTests(unittest.TestCase):
 
 
 class ReviewScreenTests(unittest.TestCase):
-    def test_no_mail_found_is_called_out_as_the_dangerous_answer(self):
-        """A domain with no MX is either a domain with no mail or a scan that missed it, and the two look
-        identical. The screen says so instead of reading as an all-clear."""
-        summary = review([WEB], [WEB])
+    def test_a_domain_with_genuinely_no_mail_is_not_blocked(self):
+        """Plenty of domains are web-only, or keep mail on a different name entirely. That is a normal
+        state, not a fault, so it asks once and lets them through rather than standing in the way."""
+        summary = review([WEB], [WEB], observed_complete=True)
+        self.assertFalse(summary["blocked"])
         self.assertFalse(summary["mail"]["present"])
-        self.assertIn("NO mail records were found", summary["confirm_prompt"])
+        self.assertIn("no mail records at all", summary["confirm_prompt"])
         self.assertIn("stop here", summary["confirm_prompt"])
+
+    def test_a_failed_lookup_is_not_allowed_to_look_like_no_mail(self):
+        """The hole this gate would otherwise have. An empty `observed` means one of two OPPOSITE things
+        — the domain has no mail, or we could not ask — and only the caller knows which. Inferring "no
+        mail" from silence is how our own failed lookup becomes a tenant's outage. `observed_complete`
+        has no default so the safe-looking answer cannot be reached by forgetting it."""
+        summary = review([WEB], [], observed_complete=False)
+        self.assertTrue(summary["blocked"])
+        self.assertIn("could not read", summary["confirm_prompt"])
+        # And it must not quietly report a clean comparison it never performed.
+        self.assertEqual(summary["missing"], [])
+        self.assertTrue(summary["contradictions"])
+
+    def test_the_flag_is_required_so_it_cannot_be_forgotten(self):
+        with self.assertRaises(TypeError):
+            review([WEB], [WEB])          # type: ignore[call-arg]
+
+    def test_spf_without_mx_is_treated_as_an_incomplete_answer(self):
+        """A domain publishing SPF is a domain that sends mail. SPF-and-no-MX is not a mail-less domain,
+        it is a partial lookup — and it is exactly the shape a partial lookup takes, because SPF is one
+        TXT at the apex while MX enumeration is the part that fails."""
+        summary = review([WEB, SPF], [WEB, SPF], observed_complete=True)
+        self.assertTrue(summary["blocked"])
+        self.assertIn("SPF record but no MX", summary["confirm_prompt"])
 
     def test_a_recognised_provider_is_named_in_the_prompt(self):
         imported = [*GOOGLE_MX, SPF, WEB]
-        summary = review(imported, imported)
+        summary = review(imported, imported, observed_complete=True)
         self.assertEqual(summary["mail"]["provider"], "Google Workspace")
         self.assertIn("Google Workspace", summary["confirm_prompt"])
 
@@ -143,12 +168,12 @@ class ReviewScreenTests(unittest.TestCase):
         # The scan cannot prove a negative, and the tenant is the only one who knows what the domain
         # does. A clean comparison lowers the risk; it does not remove it.
         imported = [*GOOGLE_MX, SPF, WEB]
-        self.assertIn("will stop working", review(imported, imported)["confirm_prompt"])
+        self.assertIn("will stop working", review(imported, imported, observed_complete=True)["confirm_prompt"])
 
     def test_records_are_grouped_so_mail_can_be_shown_apart(self):
-        summary = review([*GOOGLE_MX, SPF, WEB,
-                          {"type": "TXT", "name": "example.com",
-                           "content": "google-site-verification=x"}], [])
+        imported = [*GOOGLE_MX, SPF, WEB,
+                    {"type": "TXT", "name": "example.com", "content": "google-site-verification=x"}]
+        summary = review(imported, imported, observed_complete=True)
         self.assertEqual(len(summary["records"][MAIL]), 3)
         self.assertEqual(len(summary["records"][SERVING]), 1)
         self.assertEqual(len(summary["records"][VERIFICATION]), 1)

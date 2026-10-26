@@ -101,9 +101,26 @@ MX, SPF, DKIM and DMARC over DoH and compares them against what the scan importe
 This is the same rule the domain health sweep is built on: stored state and served reality are allowed to
 drift, so something has to compare them — and here the cost of not comparing is a tenant's email.
 
-**Absence of mail is the dangerous answer, not the safe one.** A domain with no MX found is either a
-domain with no mail, or a scan that missed it, and those look identical. They are told apart by asking
-DNS directly, which is why the comparison above is the gate rather than a nicety.
+**Absence of mail does NOT block — a failed lookup does** (refined 2026-10-25, on the right question:
+*what are the solutions when absence is found?*). Three states hide behind "no MX", and flattening them
+is what makes a gate either useless or infuriating:
+
+| state | what it means | what we do |
+|---|---|---|
+| asked, found nothing | web-only domain, or mail lives on another name | **allow**, after asking once |
+| asked, found an MX the scan missed | the case this gate exists for | **block**, naming the record |
+| could not ask | our lookup failed, not their DNS | **block**, and say it is ours |
+
+The third was the hole. An empty result means one of two opposite things and only the caller knows
+which, so `review()` takes `observed_complete` as a **required** keyword with no default: the
+safe-looking answer cannot be reached by forgetting an argument. Inferring "no mail" from silence is how
+our own failed lookup becomes a tenant's outage, and it is the same mistake `DOMAIN_HEALTH_SWEEP.md`
+refuses to make when Cloudflare is unreachable.
+
+**One contradiction blocks on its own: SPF present, no MX.** A domain publishing SPF is a domain that
+sends mail, so that pair is not a mail-less domain — it is a partial answer. And it is precisely the
+shape a partial answer takes, because SPF is a single TXT at the apex while MX enumeration is the part
+that fails.
 
 ## 5. Open questions
 
