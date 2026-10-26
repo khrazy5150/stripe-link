@@ -203,6 +203,11 @@ def status(event, sites_repository, site_id, *, mode="test", repo=None):
         "zone": record,
         "status": state,
         "activated": activated,
+        # THE STORED VERDICT, carried on every poll. Without it a reload showed the nameservers for a
+        # zone whose review had blocked: `status` returned no review, the state fell through to
+        # DELEGATE, and the gate was bypassed by pressing F5. Third door onto the same bypass, after
+        # "Check again" and the empty-review response from `start`.
+        "review": record.get("review") or {},
         # Said on every poll while pending, because the honest answer to "why isn't it working yet" is
         # almost always someone else's cache. Resolvers pick up a new delegation at their own pace: on
         # the first real run Google and Quad9 had it within minutes while Cloudflare's own 1.1.1.1 still

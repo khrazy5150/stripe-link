@@ -259,6 +259,50 @@ class ExitBannerTests(unittest.TestCase):
         self.assertIn("they are the ones\n                    this domain used before us", SITES_VUE)
 
 
+class ExplicitWatchTests(unittest.TestCase):
+    """Nothing is happening until the tenant changes the nameservers.
+
+    Polling used to begin the moment they appeared, which asserted progress nobody had made and offered
+    no way to stop or back out. It also made the panel claim "you can close this and come back; it keeps
+    running", which was never true -- an interval dies with the page.
+    """
+
+    def test_watching_starts_off(self):
+        self.assertIn("const managedWatching = ref(false)", SITES_VUE)
+
+    def test_the_tenant_says_when_they_are_ready(self):
+        self.assertIn("I've updated my nameservers", SITES_VUE)
+        self.assertIn('v-if="!managedWatching"', SITES_VUE)
+
+    def test_there_is_a_way_back_out(self):
+        # Cancel goes through the normal exit, which deletes the zone -- nothing has been delegated yet,
+        # so abandoning is the correct outcome rather than leaving an orphan on our account.
+        delegate = SITES_VUE.split("managedState === DELEGATE", 1)[1].split("managedState === LIVE", 1)[0]
+        self.assertIn("leaveManagedDns", delegate)
+        self.assertIn("Cancel", delegate)
+
+    def test_and_a_way_to_stop_checking(self):
+        self.assertIn("stopManagedWatching", SITES_VUE)
+
+    def test_the_promise_matches_what_actually_happens(self):
+        # An interval dies with the page; saying otherwise is a small lie that costs trust later.
+        self.assertIn("stops when you close the page", SITES_VUE)
+        self.assertNotIn("it keeps running", SITES_VUE)
+
+
+class VerdictSurvivesReloadTests(unittest.TestCase):
+    def test_the_stored_review_comes_back_with_the_zone(self):
+        """The third door onto the same bypass. `status` returned no review, so a reload dropped a
+        BLOCKED verdict, the state fell through to DELEGATE, and the gate was skipped by pressing F5."""
+        self.assertIn("res.review?.blocked", SITES_VUE)
+
+    def test_the_endpoint_carries_it(self):
+        import pathlib
+        api = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+               / "managed_dns_api.py").read_text(encoding="utf-8")
+        self.assertIn('"review": record.get("review") or {}', api)
+
+
 class WiringTests(unittest.TestCase):
     def test_the_component_renders_every_state(self):
         # Named once: `<script setup>` exposes the imported constants to the template, so the state

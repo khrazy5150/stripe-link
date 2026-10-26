@@ -427,10 +427,24 @@
                   <!-- A line of grey text is indistinguishable from a page that has stopped doing
                        anything. The spinner is the only thing on screen saying the app is still
                        watching, which is what a tenant is actually asking when they stare at this. -->
-                  <p class="field-note managed-waiting"><span class="managed-spinner" aria-hidden="true"></span>
-                    <span>{{ managedWaiting }}</span></p>
-                  <p class="field-note">Checked {{ managedChecks }} time{{ managedChecks === 1 ? '' : 's' }}
-                    — you can close this and come back; it keeps running.</p>
+                  <!-- The tenant says when they have done it. Polling used to begin the moment the
+                       nameservers appeared, which asserted progress nobody had made yet and gave no way
+                       to stop. -->
+                  <div v-if="!managedWatching" class="button-row">
+                    <button type="button" class="primary-action" @click="beginManagedPolling">
+                      I've updated my nameservers
+                    </button>
+                    <button type="button" class="secondary-action" :disabled="managedBusy" @click="leaveManagedDns">
+                      {{ managedBusy ? "Cancelling…" : "Cancel" }}
+                    </button>
+                  </div>
+                  <template v-else>
+                    <p class="field-note managed-waiting"><span class="managed-spinner" aria-hidden="true"></span>
+                      <span>{{ managedWaiting }}</span></p>
+                    <p class="field-note">Checked {{ managedChecks }} time{{ managedChecks === 1 ? '' : 's' }}
+                      — this stops when you close the page; reopen it and press the button again.</p>
+                    <button type="button" class="secondary-action" @click="stopManagedWatching">Stop checking</button>
+                  </template>
                 </template>
 
                 <template v-else-if="managedState === LIVE">
@@ -994,6 +1008,9 @@ const managedBusy = ref(false);
 const managedError = ref("");
 const managedWaitedFor = ref(0);
 const managedChecks = ref(0);
+// Whether we are actively checking. Starts false: the tenant tells us when they have changed the
+// nameservers, rather than the screen assuming they are about to.
+const managedWatching = ref(false);
 let managedPoll = 0;
 let managedStartedAt = 0;
 
@@ -1036,17 +1053,23 @@ async function loadManagedDns(siteId) {
   managedLeft.value = false;
   managedStartedAt = 0;
   managedChecks.value = 0;
+  managedWatching.value = false;
   if (!siteId) return;
   try {
     const res = await store.managedDnsStatus(siteId);
     if (!res?.zone) return;
     managedZone.value = res.zone;
+    // The stored verdict comes back with the zone, so a blocked review survives a reload instead of
+    // falling through to the nameserver screen.
+    managedReview.value = res.review?.blocked ? { ...res.review, confirm_prompt: res.review.prompt
+      || "We are not ready to move this domain yet. Re-check to see what is still outstanding." } : null;
     managedNameServers.value = res.zone.name_servers || [];
     dnsChoice.value = "managed";
     // The box showed its `shop.yourbrand.com` placeholder while the banner underneath said the domain
     // was live -- which reads as "nothing is connected" and "it is connected" at the same time.
     if (!domainForm.domain) domainForm.domain = res.zone.domain || "";
-    if (res.status !== "active") beginManagedPolling();
+    // Deliberately NOT polling here. Nothing is happening until the tenant changes the nameservers,
+    // and a spinner that starts before they have begun asserts progress nobody made.
   } catch { /* 404 means no zone for this Site, which is the ordinary case */ }
 }
 
@@ -1064,7 +1087,7 @@ async function startManagedDns(repair = false) {
     managedZone.value = res.zone || null;
     managedReview.value = res.review || null;
     managedNameServers.value = res.name_servers || [];
-    if (managedState.value === DELEGATE) beginManagedPolling();
+    // Same here: the nameservers are shown, and the tenant says when they have set them.
   } catch (err) {
     managedError.value = err?.message || "Could not start managed DNS.";
   } finally {
@@ -1072,7 +1095,14 @@ async function startManagedDns(repair = false) {
   }
 }
 
+function stopManagedWatching() {
+  clearInterval(managedPoll);
+  managedPoll = 0;
+  managedWatching.value = false;
+}
+
 function beginManagedPolling() {
+  managedWatching.value = true;
   clearInterval(managedPoll);
   managedStartedAt = managedStartedAt || Date.now();
   // Every 15s. The delegation landed in 3m30s on the first live run, so this is a handful of calls --
@@ -1090,8 +1120,7 @@ async function pollManagedDns() {
     managedZone.value = res.zone || managedZone.value;
     managedChecks.value += 1;
     if (res.status === "active") {
-      clearInterval(managedPoll);
-      managedPoll = 0;
+      stopManagedWatching();
       // Re-read the SITE too: activation attaches the domain to it server-side, and without this the
       // panel keeps rendering from a copy taken before that happened.
       await store.load();
