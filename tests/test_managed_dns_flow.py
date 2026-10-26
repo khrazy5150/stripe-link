@@ -213,6 +213,37 @@ class WwwGuardTests(unittest.TestCase):
         self.assertIn("typed !== managedRoot.value", watcher)
 
 
+class ConnectedBranchTests(unittest.TestCase):
+    """A managed domain IS connected, so it lands in the connected branch — which used to offer the
+    custom-hostname Disconnect.
+
+    That button clears the Site and leaves the Cloudflare zone on our account with the tenant's
+    nameservers still pointing at it: the orphan this feature spent a day learning not to make, reached
+    by the most obvious button on the screen.
+    """
+
+    def test_a_managed_domain_is_recognised_from_the_site(self):
+        # Off the Site, not off `managedZone`: the Site is what the connected branch renders from and is
+        # authoritative the moment the panel loads, while the zone arrives a request later.
+        self.assertIn('verification?.method || "") === "managed_dns"', SITES_VUE)
+
+    def test_it_is_offered_the_right_exit(self):
+        branch = SITES_VUE.split('v-if="isManagedDomain"', 1)[1].split('v-if="!isManagedDomain', 1)[0]
+        self.assertIn("Move this domain elsewhere", branch)
+        self.assertIn("leaveManagedDns", branch)
+
+    def test_the_custom_hostname_disconnect_is_withheld_from_it(self):
+        self.assertIn('v-if="!isManagedDomain" class="button-row"', SITES_VUE)
+        self.assertIn('v-if="!isManagedDomain && !editing.hosting.verification?.verified"', SITES_VUE)
+
+    def test_leaving_returns_the_panel_to_a_usable_state(self):
+        # The Site is detached server-side; without re-reading it the panel keeps rendering the
+        # connected branch for a domain it no longer has.
+        leave = SITES_VUE.split("async function leaveManagedDns", 1)[1].split("\n}", 1)[0]
+        for expected in ("store.load()", "editing.value = { ...fresh }", 'dnsChoice.value = ""'):
+            self.assertIn(expected, leave, expected)
+
+
 class WiringTests(unittest.TestCase):
     def test_the_component_renders_every_state(self):
         # Named once: `<script setup>` exposes the imported constants to the template, so the state

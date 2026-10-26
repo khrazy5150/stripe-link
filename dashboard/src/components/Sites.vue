@@ -451,7 +451,21 @@
                 <div><dt>Domain</dt><dd class="font-mono">{{ editing.hosting.custom_domain }}</dd></div>
                 <div><dt>Status</dt><dd>{{ domainStatusLabel }}</dd></div>
               </dl>
-              <div v-if="!editing.hosting.verification?.verified" class="domain-dns">
+              <!-- A MANAGED domain is connected too, so it lands in this branch -- and this branch used
+                   to offer the custom-hostname Disconnect, which clears the Site and leaves the zone on
+                   our account with the tenant's nameservers still pointing at it. That is the orphan
+                   this feature spent the day learning not to make. Managed domains get their own exit. -->
+              <div v-if="isManagedDomain" class="managed-dns">
+                <div v-if="managedError" class="keys-status-banner error">{{ managedError }}</div>
+                <p class="field-note">We run the DNS for this domain. Your root domain and www both serve
+                  this Site, with a certificate we renew for you.</p>
+                <button type="button" class="secondary-action" :disabled="managedBusy" @click="leaveManagedDns">
+                  {{ managedBusy ? "Releasing…" : "Move this domain elsewhere" }}
+                </button>
+                <p class="field-note">You will get a zone file of every record, and the nameservers to
+                  put back. Your domain keeps working until you change them.</p>
+              </div>
+              <div v-if="!isManagedDomain && !editing.hosting.verification?.verified" class="domain-dns">
                 <div class="dns-provider-row">
                   <label for="dns-provider">Add these at your DNS provider:</label>
                   <select id="dns-provider" v-model="dnsProvider">
@@ -505,7 +519,7 @@
                   </div>
                 </div>
               </div>
-              <div class="button-row">
+              <div v-if="!isManagedDomain" class="button-row">
                 <button v-if="!editing.hosting.verification?.verified" type="button" class="primary-action" :disabled="domainBusy" @click="checkDomain">
                   {{ domainBusy ? "Checking…" : "Verify domain" }}
                 </button>
@@ -965,6 +979,12 @@ const managedState = computed(() => managedDnsState(managedZone.value, managedRe
 // zone for `example.com` -- but a backstop the screen contradicts is a backstop that confuses: the box
 // would keep saying www while the nameserver step, the banner and the live domain all said the root.
 // So the choice rewrites the field to the root and says why, before anything is created.
+// Whether the CONNECTED domain is one we run the DNS for. Read off the Site, not off `managedZone`,
+// because the Site is what the connected branch renders from and it is authoritative the moment the
+// panel loads -- `managedZone` arrives a request later.
+const isManagedDomain = computed(() =>
+  (editing.value?.hosting?.verification?.method || "") === "managed_dns");
+
 const managedRoot = computed(() => rootDomain(domainForm.domain || ""));
 const managedNarrowedFrom = ref("");
 
@@ -1072,6 +1092,13 @@ async function leaveManagedDns() {
     managedRestoreTo.value = res.restore_name_servers || [];
     managedZone.value = null;
     managedReview.value = null;
+    dnsChoice.value = "";
+    domainForm.domain = "";
+    // The Site is detached server-side now, so re-read it -- otherwise the panel keeps rendering the
+    // connected branch for a domain it no longer has.
+    await store.load();
+    const fresh = store.sites.find((site) => site.site_id === editing.value?.site_id);
+    if (fresh) editing.value = { ...fresh };
   } catch (err) {
     managedError.value = err?.message || "Could not release this domain.";
   } finally {
