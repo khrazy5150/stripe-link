@@ -489,3 +489,47 @@ class PriorNameServerTests(unittest.TestCase):
                   repository=repo)
         self.assertEqual(order, ["observe", "create"])
         self.assertEqual(repo.saved[0]["original_name_servers"], ["ns-1.awsdns-01.com"])
+
+
+class ImportableRecordTests(unittest.TestCase):
+    """What "Copy these records across for me" would actually write.
+
+    It filters out what the zone already has — the question is what counts as "already has". The key
+    used to be `_host(content)` for every type, and `_host` takes the last whitespace token, so every
+    SPF record ending `~all` produced the same key. A tenant whose SPF the import missed would have had
+    it silently skipped as already present: the repair copies nothing, the review stays blocked, and the
+    dead end the repair exists to remove comes straight back.
+    """
+
+    SPF_GOOGLE = {"type": "TXT", "name": "example.com", "content": "v=spf1 include:_spf.google.com ~all"}
+    SPF_MAILGUN = {"type": "TXT", "name": "example.com", "content": "v=spf1 include:mailgun.org ~all"}
+    MX_DOH = {"type": "MX", "name": "example.com", "content": "1 aspmx.l.google.com"}
+    MX_CF = {"type": "MX", "name": "example.com", "content": "aspmx.l.google.com", "priority": 1}
+
+    def test_a_record_already_in_the_zone_is_not_copied_twice(self):
+        from stripe_link.domain.managed_dns import importable_records
+        self.assertEqual(importable_records([self.SPF_GOOGLE], [self.SPF_GOOGLE]), [])
+
+    def test_two_txt_records_sharing_a_last_token_are_not_confused(self):
+        from stripe_link.domain.managed_dns import importable_records
+        copied = importable_records([self.SPF_MAILGUN], [self.SPF_GOOGLE])
+        self.assertEqual([r["content"] for r in copied], ["v=spf1 include:mailgun.org ~all"])
+
+    def test_the_same_mx_in_either_shape_counts_as_present(self):
+        """Its priority arrives inside the content from DoH and alongside it from Cloudflare, so the
+        host is what identifies it — the same mail server at a different priority is still one server."""
+        from stripe_link.domain.managed_dns import importable_records
+        self.assertEqual(importable_records([self.MX_DOH], [self.MX_CF]), [])
+
+    def test_a_different_mx_host_is_copied(self):
+        from stripe_link.domain.managed_dns import importable_records
+        copied = importable_records(
+            [{"type": "MX", "name": "example.com", "content": "5 alt.aspmx.l.google.com"}], [self.MX_CF])
+        self.assertEqual([(r["content"], r["priority"]) for r in copied],
+                         [("alt.aspmx.l.google.com", 5)])
+
+    def test_only_mail_is_copied(self):
+        # Repairing the import is not taking over authorship: web records are the tenant's to decide,
+        # and the serving records are ours to write.
+        from stripe_link.domain.managed_dns import importable_records
+        self.assertEqual(importable_records([WEB], []), [])

@@ -214,6 +214,24 @@ def review(imported: Iterable[dict[str, Any]], observed: Iterable[dict[str, Any]
     }
 
 
+def _dedupe_key(record: dict[str, Any]) -> tuple[str, str, str]:
+    """What makes two records the same record, for deciding whether one is already there.
+
+    MX compares on the HOST alone -- its priority arrives inside the content from a DoH answer and
+    alongside it from Cloudflare, and the same mail server at a different priority is still the same
+    mail server, not a second one to add.
+
+    Everything else compares on the FULL content, which `_host` is no substitute for: it takes the last
+    whitespace token, so every SPF record ending `~all` produced the same key. A tenant whose SPF the
+    import missed would have it silently skipped as "already present" -- the repair would copy nothing,
+    the review would stay blocked, and the dead end this function exists to remove would be back.
+    """
+    record_type = str(record.get("type") or "").strip().upper()
+    name = str(record.get("name") or "").rstrip(".").lower()
+    content = str(record.get("content") or record.get("value") or "").strip()
+    return (record_type, name, _host(content) if record_type == "MX" else content)
+
+
 def importable_records(observed: Iterable[dict[str, Any]],
                        imported: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """The live mail records the import missed, as Cloudflare create payloads.
@@ -227,9 +245,7 @@ def importable_records(observed: Iterable[dict[str, Any]],
     over authorship of their zone: web records are the tenant's to decide and the serving records are
     ours to write.
     """
-    have = {(str(r.get("type") or "").upper(), str(r.get("name") or "").rstrip(".").lower(),
-             _host(str(r.get("content") or r.get("value") or "")))
-            for r in imported or []}
+    have = {_dedupe_key(r) for r in imported or []}
     out: list[dict[str, Any]] = []
     for record in observed or []:
         if classify_record(record) != MAIL:
@@ -239,7 +255,7 @@ def importable_records(observed: Iterable[dict[str, Any]],
         content = str(record.get("content") or record.get("value") or "").strip()
         if not (record_type and name and content):
             continue
-        if (record_type, name, _host(content)) in have:
+        if _dedupe_key(record) in have:
             continue
         if record_type == "MX":
             # Both shapes reach here, as they do in the exporter: a DoH answer carries the priority
