@@ -433,10 +433,21 @@
                 </template>
               </div>
 
-              <div v-if="managedRestoreTo.length" class="keys-status-banner info">
-                <p>Your zone file has downloaded. To finish moving away, set these nameservers at your
-                  registrar:</p>
-                <p v-for="ns in managedRestoreTo" :key="ns"><code>{{ ns }}</code></p>
+              <div v-if="managedLeft" class="keys-status-banner info">
+                <p>Your zone file has downloaded — it holds every record, in a format any DNS provider
+                  can import.</p>
+                <template v-if="managedRestoreTo.length">
+                  <p>To finish moving away, set these nameservers at your registrar — they are the ones
+                    this domain used before us:</p>
+                  <p v-for="ns in managedRestoreTo" :key="ns"><code>{{ ns }}</code></p>
+                </template>
+                <!-- Empty is a real answer, not a missing one. If the domain was already delegated to
+                     us when the zone was created, nobody recorded where it used to point, and offering
+                     our own nameservers as the "restore" would be the one answer guaranteed not to
+                     help. Say so instead. -->
+                <p v-else>We do not have this domain's previous nameservers on file, so your registrar
+                  or new DNS provider is the place to get them. Until you change them, the domain will
+                  stop resolving — the zone here is gone.</p>
               </div>
 
               <div v-if="dnsChoice !== 'managed'" class="button-row">
@@ -1009,6 +1020,7 @@ async function loadManagedDns(siteId) {
   managedReview.value = null;
   managedNameServers.value = [];
   managedRestoreTo.value = [];
+  managedLeft.value = false;
   managedStartedAt = 0;
   managedChecks.value = 0;
   if (!siteId) return;
@@ -1090,6 +1102,7 @@ async function leaveManagedDns() {
     link.click();
     URL.revokeObjectURL(link.href);
     managedRestoreTo.value = res.restore_name_servers || [];
+    managedLeft.value = true;
     managedZone.value = null;
     managedReview.value = null;
     dnsChoice.value = "";
@@ -1106,6 +1119,9 @@ async function leaveManagedDns() {
   }
 }
 const managedRestoreTo = ref([]);
+// Separate from the list, because an EMPTY list is itself something to report -- the banner has to
+// appear either way once they have left.
+const managedLeft = ref(false);
 
 onBeforeUnmount(() => clearInterval(managedPoll));
 const domainBusy = ref(false);

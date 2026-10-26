@@ -37,7 +37,7 @@ from stripe_link.domain.cloudflare_zones import (
 )
 from stripe_link.domain.custom_domains import (CustomDomainError, assert_valid_domain,
                                                normalize_domain, observe_mail_records,
-                                               registrable_root)
+                                               observe_name_servers, registrable_root)
 from stripe_link.repositories.documents import managed_zones_repository
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ def _zone_for_site(tenant_id: str, site_id: str, repo):
     return None
 
 
-def start(event, sites_repository, site_id, *, repo=None):
+def start(event, sites_repository, site_id, *, mode="test", repo=None):
     """Create the zone and return the review. The nameservers come back only if the review is clean."""
     try:
         body = parse_json_body(event)
@@ -116,6 +116,7 @@ def start(event, sites_repository, site_id, *, repo=None):
             create_zone_fn=lambda d: create_zone(d, account_id=account_id, api_token=api_token),
             list_records_fn=lambda zid: list_zone_dns_records(zid, api_token=api_token),
             observe_fn=observe_mail_records,
+            observe_ns_fn=observe_name_servers,
             repository=repo, site_id=site_id,
         )
     except CustomDomainError as exc:
@@ -124,7 +125,7 @@ def start(event, sites_repository, site_id, *, repo=None):
                           "name_servers": result["name_servers"], "site_id": site_id}, status_code=201)
 
 
-def status(event, sites_repository, site_id, *, repo=None):
+def status(event, sites_repository, site_id, *, mode="test", repo=None):
     """Where the delegation has got to, and — once Cloudflare says `active` — the wiring that makes the
     domain serve.
 
@@ -155,7 +156,7 @@ def status(event, sites_repository, site_id, *, repo=None):
     if state == "active" and previous != "active":
         activated = _activate(record, api_token=api_token, worker_script=worker_script)
         # Both halves, and the second is the one that makes the domain serve rather than 404.
-        activated = _attach_to_site(record, sites_repository, site_id) and activated
+        activated = _attach_to_site(record, sites_repository, site_id, mode) and activated
         record["activated_at"] = int(time.time())
     if record["status"] != previous or activated:
         repo.put(record)
@@ -171,7 +172,7 @@ def status(event, sites_repository, site_id, *, repo=None):
     })
 
 
-def _attach_to_site(record, sites_repository, site_id) -> bool:
+def _attach_to_site(record, sites_repository, site_id, mode: str) -> bool:
     """Make the Site actually SERVE this domain.
 
     THE HALF THAT WAS MISSING. Cloudflare records and Worker routes get a request to our edge; they do
@@ -216,7 +217,7 @@ def _attach_to_site(record, sites_repository, site_id) -> bool:
         return False
     _put_site_index_records(saved)
     try:
-        _republish_site_pages(tenant_id, saved, pages_repository(mode="live"), mode="live")
+        _republish_site_pages(tenant_id, saved, pages_repository(mode=mode), mode=mode)
     except Exception:  # noqa: BLE001 - the domain serves either way; republish only refreshes metadata
         logger.exception("managed dns: re-publish after attaching %s failed", domain)
     return True
@@ -248,7 +249,7 @@ def _activate(record, *, api_token, worker_script) -> bool:
     return done
 
 
-def _detach_from_site(domain: str, tenant_id: str, sites_repository, site_id) -> None:
+def _detach_from_site(domain: str, tenant_id: str, sites_repository, site_id, mode: str) -> None:
     """Undo what `_attach_to_site` did. The mirror image, and it was missing.
 
     Deleting the zone stops the domain serving; it does not stop the SITE claiming it. Without this the
@@ -292,12 +293,12 @@ def _detach_from_site(domain: str, tenant_id: str, sites_repository, site_id) ->
     except Exception:  # noqa: BLE001
         logger.exception("managed dns: could not drop the index record for %s", domain)
     try:
-        _republish_site_pages(tenant_id, saved, pages_repository(mode="live"), mode="live")
+        _republish_site_pages(tenant_id, saved, pages_repository(mode=mode), mode=mode)
     except Exception:  # noqa: BLE001
         logger.exception("managed dns: re-publish after detaching %s failed", domain)
 
 
-def stop(event, sites_repository, site_id, *, repo=None):
+def stop(event, sites_repository, site_id, *, mode="test", repo=None):
     """Hand the domain back: export every record, then delete the zone.
 
     THE EXPORT COMES FIRST and its failure aborts the delete. A tenant leaving must leave with their DNS;
@@ -330,7 +331,7 @@ def stop(event, sites_repository, site_id, *, repo=None):
         return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
     repo.delete(tenant_id, domain)
     # Both halves, in this order: the zone is gone, so the Site must stop claiming the domain too.
-    _detach_from_site(domain, tenant_id, sites_repository, site_id)
+    _detach_from_site(domain, tenant_id, sites_repository, site_id, mode)
     return json_response({
         "deleted": True,
         "zone_file": export,
@@ -338,12 +339,19 @@ def stop(event, sites_repository, site_id, *, repo=None):
     })
 
 
-def handle(event, sites_repository, site_id, method):
-    """Route one managed-dns request. Called from `handlers.sites`, which owns the API resources."""
+def handle(event, sites_repository, site_id, method, mode="test"):
+    """Route one managed-dns request. Called from `handlers.sites`, which owns the API resources.
+
+    `mode` is the STRIPE mode, read from the request by the caller and threaded through rather than
+    assumed. It is not the deployment: `dev` and `prod` are stacks, `test` and `live` are Stripe's
+    books, and the two are independent axes. The Site repository and every re-publish below have to be
+    told which books they are working in -- a hardcoded "live" here would read the right documents on a
+    live Site by luck and the wrong ones the moment that stopped being the only case.
+    """
     if method == "POST":
-        return start(event, sites_repository, site_id)
+        return start(event, sites_repository, site_id, mode=mode)
     if method == "GET":
-        return status(event, sites_repository, site_id)
+        return status(event, sites_repository, site_id, mode=mode)
     if method == "DELETE":
-        return stop(event, sites_repository, site_id)
+        return stop(event, sites_repository, site_id, mode=mode)
     return error_response("Unsupported method.", status_code=405, code="method_not_allowed")

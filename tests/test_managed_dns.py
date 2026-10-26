@@ -442,3 +442,50 @@ class ObserveMailRecordsTests(unittest.TestCase):
         summary = review([WEB], observed, observed_complete=complete)
         self.assertTrue(summary["blocked"])             # the scan missed all of it
         self.assertEqual(summary["mail"]["provider"], "Google Workspace")
+
+
+class PriorNameServerTests(unittest.TestCase):
+    """What a departing tenant is handed, and the one field that decides whether they can leave.
+
+    `original_name_servers` used to come straight from Cloudflare's create response, which reports what
+    CLOUDFLARE saw. Re-provision a domain already delegated to us -- a retry, or a second run after a
+    teardown -- and it faithfully records our own nameservers as the "originals". The exit then tells a
+    tenant to restore the nameservers they are trying to leave, which is the single answer guaranteed
+    not to help. Seen on creditfix.cloud, 2026-10-26.
+    """
+
+    def test_what_was_observed_live_wins(self):
+        from stripe_link.domain.managed_dns import prior_name_servers
+        self.assertEqual(
+            prior_name_servers(["ns-1.awsdns-01.com", "NS-2.awsdns-02.net."],
+                               ["kim.ns.cloudflare.com"]),
+            ["ns-1.awsdns-01.com", "ns-2.awsdns-02.net"])
+
+    def test_cloudflares_view_is_the_fallback_when_the_lookup_failed(self):
+        from stripe_link.domain.managed_dns import prior_name_servers
+        self.assertEqual(prior_name_servers([], ["ns-9.awsdns-09.org"]), ["ns-9.awsdns-09.org"])
+
+    def test_our_own_nameservers_are_never_an_answer(self):
+        """Empty is a REAL answer and has to stay reachable. If the domain was already ours when the
+        zone was created, nobody recorded where it used to point, and saying so beats handing back our
+        own and calling it a restore."""
+        from stripe_link.domain.managed_dns import prior_name_servers
+        self.assertEqual(prior_name_servers(["isla.ns.cloudflare.com"], ["kobe.ns.cloudflare.com"]), [])
+        self.assertEqual(prior_name_servers([], []), [])
+
+    def test_they_are_captured_before_the_zone_exists(self):
+        """Afterwards is too late: the delegation may already be ours, and the question "where did this
+        domain point?" then has no answer left anywhere."""
+        from stripe_link.domain.managed_dns import provision
+        order = []
+        repo = FakeZoneRepo()
+        provision(tenant_id="t1", domain="example.com", now=1,
+                  create_zone_fn=lambda d: order.append("create") or {
+                      "id": "z1", "status": "pending", "name_servers": ["a.ns.cloudflare.com"],
+                      "original_name_servers": ["isla.ns.cloudflare.com"]},
+                  list_records_fn=lambda zid: [],
+                  observe_fn=lambda d: ([], True),
+                  observe_ns_fn=lambda d: (order.append("observe") or ["ns-1.awsdns-01.com"], True),
+                  repository=repo)
+        self.assertEqual(order, ["observe", "create"])
+        self.assertEqual(repo.saved[0]["original_name_servers"], ["ns-1.awsdns-01.com"])

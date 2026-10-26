@@ -244,6 +244,21 @@ class ConnectedBranchTests(unittest.TestCase):
             self.assertIn(expected, leave, expected)
 
 
+class ExitBannerTests(unittest.TestCase):
+    def test_it_appears_even_when_the_originals_are_unknown(self):
+        """An empty list is something to REPORT, not a reason to say nothing. The banner is gated on
+        having left, not on having nameservers to offer."""
+        self.assertIn("managedLeft", SITES_VUE)
+        self.assertIn('v-if="managedLeft"', SITES_VUE)
+
+    def test_it_says_so_rather_than_offering_our_own(self):
+        self.assertIn("do not have this domain's previous nameservers on file", SITES_VUE)
+        self.assertIn("the zone here is gone", SITES_VUE)
+
+    def test_known_originals_are_presented_as_what_they_are(self):
+        self.assertIn("they are the ones\n                    this domain used before us", SITES_VUE)
+
+
 class WiringTests(unittest.TestCase):
     def test_the_component_renders_every_state(self):
         # Named once: `<script setup>` exposes the imported constants to the template, so the state

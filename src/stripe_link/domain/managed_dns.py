@@ -232,8 +232,28 @@ def serving_records(domain: str, placeholder_ip: str = "192.0.2.1") -> list[dict
     ]
 
 
+# Our own nameservers, which are never an answer to "what should I put back".
+_OURS = ("ns.cloudflare.com",)
+
+
+def prior_name_servers(observed: Iterable[str], cloudflare_reported: Iterable[str]) -> list[str]:
+    """The nameservers a tenant had BEFORE us, or an empty list when we genuinely do not know.
+
+    Empty is a real answer and has to stay reachable. If a domain was already delegated to us when the
+    zone was created -- a re-provision, or a retry after a teardown -- then nobody recorded where it
+    used to point, and the honest response on the way out is "we do not have these" rather than handing
+    back our own and calling it a restore.
+    """
+    for source in (observed, cloudflare_reported):
+        kept = [str(ns).strip().rstrip(".").lower() for ns in (source or []) if str(ns).strip()]
+        kept = [ns for ns in kept if not any(ns.endswith(ours) for ours in _OURS)]
+        if kept:
+            return sorted(set(kept))
+    return []
+
+
 def managed_zone_record(tenant_id: str, domain: str, zone: dict[str, Any], now: int,
-                       site_id: str = "") -> dict[str, Any]:
+                       site_id: str = "", observed_name_servers: Iterable[str] = ()) -> dict[str, Any]:
     """The stored record, which lives beside the custom-domain index and NOT on the Site.
 
     A Site's `domain_provisioning` describes its claim on a hostname and is discarded when the tenant
@@ -249,7 +269,10 @@ def managed_zone_record(tenant_id: str, domain: str, zone: dict[str, Any], now: 
         "domain": name,
         "zone_id": str(zone.get("id") or ""),
         "name_servers": [str(ns).lower() for ns in (zone.get("name_servers") or [])],
-        "original_name_servers": [str(ns).lower() for ns in (zone.get("original_name_servers") or [])],
+        # What they had BEFORE us -- observed live if we could, Cloudflare's view otherwise, and empty
+        # when both are already ours. See `prior_name_servers`.
+        "original_name_servers": prior_name_servers(observed_name_servers,
+                                                    zone.get("original_name_servers") or []),
         "status": zone_state(zone),
         "created_at": int(now),
         # WHICH SITE STARTED THIS, which is provenance and not ownership -- the zone still outlives any
@@ -269,7 +292,7 @@ def zone_state(zone: dict[str, Any]) -> str:
 
 
 def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_records_fn,
-              observe_fn, repository, site_id: str = "") -> dict[str, Any]:
+              observe_fn, repository, site_id: str = "", observe_ns_fn=None) -> dict[str, Any]:
     """Create the zone, read what the import found, compare it with live DNS, and record the zone.
 
     **The zone is created before the review can run, and that is safe.** Cloudflare's import scan only
@@ -286,12 +309,16 @@ def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_rec
     actually succeeded. The flag is passed straight through to `review`, which requires it, because
     "found no mail" and "could not ask" are opposite answers that both arrive as an empty list.
     """
+    # BEFORE the zone exists. Once it does, the delegation may already be ours and the question
+    # "where did this domain point?" has no answer left anywhere.
+    prior, _ = observe_ns_fn(domain) if observe_ns_fn else ((), False)
     zone = create_zone_fn(domain)
     zone_id = str(zone.get("id") or "")
     imported = list(list_records_fn(zone_id) or [])
     observed, observed_complete = observe_fn(domain)
     summary = review(imported, observed, observed_complete=bool(observed_complete))
-    record = managed_zone_record(tenant_id, domain, zone, now, site_id=site_id)
+    record = managed_zone_record(tenant_id, domain, zone, now, site_id=site_id,
+                                 observed_name_servers=prior)
     record["review"] = {"blocked": summary["blocked"], "missing": summary["missing"],
                         "checked_at": int(now)}
     repository.put(record)

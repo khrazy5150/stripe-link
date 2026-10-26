@@ -253,7 +253,7 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
             # reputational reason `_reject_non_live_site` gives. Teardown stays open in any mode, because
             # handing a domain back must never be the thing that is blocked.
             return gate
-        return handle_managed_dns(event, repository, site_id, method)
+        return handle_managed_dns(event, repository, site_id, method, mode)
     if method == "POST":
         gate = require_capability(event, "sites", tenant_repo)
         if gate is not None:

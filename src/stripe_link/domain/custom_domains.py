@@ -624,6 +624,21 @@ def resolve_records(name: str, record_type: str, *, opener=None) -> tuple[list[s
     return [v for v in values if v], True
 
 
+def observe_name_servers(domain: str, *, opener=None) -> tuple[list[str], bool]:
+    """The domain's CURRENT nameservers, asked of DNS directly. `(nameservers, answered)`.
+
+    Read before a zone is created, because afterwards it is too late to know: Cloudflare reports
+    `original_name_servers` from what IT saw, so re-provisioning a domain already delegated to us
+    records us as the original. A departing tenant would then be handed our own nameservers as the ones
+    to "restore", which is the one answer guaranteed not to help them leave.
+    """
+    root = registrable_root(domain)
+    if not root:
+        return [], False
+    values, answered = resolve_records(root, "NS", opener=opener)
+    return [v.strip().rstrip(".").lower() for v in values if v.strip()], answered
+
+
 def observe_mail_records(domain: str, *, opener=None) -> tuple[list[dict[str, str]], bool]:
     """What this domain's mail looks like RIGHT NOW, asked of DNS directly.
 

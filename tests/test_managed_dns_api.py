@@ -114,7 +114,7 @@ class StartTests(unittest.TestCase):
              patch.object(managed_dns_api, "list_zone_dns_records", return_value=[]), \
              patch.object(managed_dns_api, "observe_mail_records", return_value=([], True)):
             managed_dns_api.start(event(body={"domain": "www.example.com"}), FakeSites(), "site_1",
-                                  repo=zones)
+                                  mode="live", repo=zones)
         self.assertEqual(created.call_args.args[0], "example.com")
         self.assertIn((TENANT, "example.com"), zones.docs)
 
@@ -147,7 +147,7 @@ class StatusTests(unittest.TestCase):
              patch.object(managed_dns_api, "create_dns_record") as rec, \
              patch.object(managed_dns_api, "create_worker_route") as route:
             response = managed_dns_api.status(event("GET", query={"domain": "example.com"}),
-                                              FakeSites(), "site_1", repo=zones)
+                                              FakeSites(), "site_1", mode="live", repo=zones)
         return response, rec, route, zones
 
     def test_pending_says_it_is_propagating_rather_than_failing(self):
@@ -187,7 +187,7 @@ class StatusTests(unittest.TestCase):
              patch.object(managed_dns_api, "create_worker_route"), \
              patch.object(managed_dns_api, "_attach_to_site", return_value=True) as attached:
             managed_dns_api.status(event("GET", query={"domain": "example.com"}), FakeSites(),
-                                   "site_1", repo=zones)
+                                   "site_1", mode="live", repo=zones)
         attached.assert_called_once()
 
     def test_a_failed_attachment_is_not_reported_as_activated(self):
@@ -200,7 +200,7 @@ class StatusTests(unittest.TestCase):
              patch.object(managed_dns_api, "create_worker_route"), \
              patch.object(managed_dns_api, "_attach_to_site", return_value=False):
             response = managed_dns_api.status(event("GET", query={"domain": "example.com"}),
-                                              FakeSites(), "site_1", repo=zones)
+                                              FakeSites(), "site_1", mode="live", repo=zones)
         self.assertFalse(body_of(response)["activated"])
 
     def test_an_already_active_zone_is_not_rewired_on_every_poll(self):
@@ -216,20 +216,20 @@ class StatusTests(unittest.TestCase):
                             "status": "pending", "site_id": "site_1"}])
         with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")), \
              patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "pending"}):
-            response = managed_dns_api.status(event("GET"), FakeSites(), "site_1", repo=zones)
+            response = managed_dns_api.status(event("GET"), FakeSites(), "site_1", mode="live", repo=zones)
         self.assertEqual(body_of(response)["zone"]["domain"], "example.com")
 
     def test_another_sites_zone_is_not_offered_up(self):
         zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
                             "status": "pending", "site_id": "site_OTHER"}])
         with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")):
-            response = managed_dns_api.status(event("GET"), FakeSites(), "site_1", repo=zones)
+            response = managed_dns_api.status(event("GET"), FakeSites(), "site_1", mode="live", repo=zones)
         self.assertEqual(response["statusCode"], 404)
 
     def test_an_unknown_domain_is_a_404_not_a_crash(self):
         with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")):
             response = managed_dns_api.status(event("GET", query={"domain": "nope.com"}),
-                                              FakeSites(), "site_1", repo=FakeZones())
+                                              FakeSites(), "site_1", mode="live", repo=FakeZones())
         self.assertEqual(response["statusCode"], 404)
 
 
@@ -246,7 +246,7 @@ class StopTests(unittest.TestCase):
              patch.object(managed_dns_api, "_detach_from_site"), \
              patch.object(managed_dns_api, "delete_zone") as deleted:
             response = managed_dns_api.stop(event("DELETE", query={"domain": "example.com"}),
-                                            FakeSites(), "site_1", repo=zones)
+                                            FakeSites(), "site_1", mode="live", repo=zones)
         return response, deleted, zones, listed
 
     def test_leaving_returns_the_zone_file_and_the_old_nameservers(self):
@@ -273,7 +273,7 @@ class StopTests(unittest.TestCase):
              patch.object(managed_dns_api, "delete_zone"), \
              patch.object(managed_dns_api, "_detach_from_site") as detached:
             managed_dns_api.stop(event("DELETE", query={"domain": "example.com"}), FakeSites(),
-                                 "site_1", repo=zones)
+                                 "site_1", mode="live", repo=zones)
         detached.assert_called_once()
         self.assertEqual(detached.call_args.args[0], "example.com")
 
@@ -286,6 +286,29 @@ class StopTests(unittest.TestCase):
         self.assertEqual(zones.deleted, [])                       # still ours, still tracked
 
 
+class ModeTests(unittest.TestCase):
+    """`live` is a STRIPE MODE; `dev` and `prod` are deployments. Independent axes.
+
+    `_attach_to_site` and `_detach_from_site` both re-publish the Site's pages, and a hardcoded "live"
+    there would read the right documents on a live Site by luck and the wrong ones the moment that
+    stopped being the only case. The mode is read from the request and threaded through.
+    """
+
+    def test_the_router_hands_the_mode_down(self):
+        seen = {}
+        with patch.object(managed_dns_api, "start",
+                          side_effect=lambda e, r, s, mode="test", **kw: seen.setdefault("mode", mode)):
+            managed_dns_api.handle(event(), FakeSites(), "site_1", "POST", "live")
+        self.assertEqual(seen["mode"], "live")
+
+    def test_nothing_in_the_module_hardcodes_a_mode(self):
+        import pathlib
+        source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                  / "managed_dns_api.py").read_text(encoding="utf-8")
+        self.assertNotIn('mode="live"', source)
+        self.assertNotIn("mode='live'", source)
+
+
 class RoutingTests(unittest.TestCase):
     def test_the_sites_handler_dispatches_all_three_methods(self):
         import handlers.sites as sites
@@ -293,7 +316,7 @@ class RoutingTests(unittest.TestCase):
         seen = []
         with patch.object(sites, "sites_repository", return_value=FakeSites()), \
              patch("handlers.managed_dns_api.handle",
-                   side_effect=lambda e, r, s, m: seen.append(m) or {"statusCode": 200, "body": "{}"}):
+                   side_effect=lambda e, r, s, m, mode="test": seen.append(m) or {"statusCode": 200, "body": "{}"}):
             for method in ("POST", "GET", "DELETE"):
                 sites.handler({"httpMethod": method, "resource": "/sites/{site_id}/managed-dns",
                                "pathParameters": {"site_id": "site_1"},
