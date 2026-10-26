@@ -323,6 +323,7 @@ Globals:
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClientId
         CLOUDFLARE_ZONE_ID: !Ref CloudflareZoneId
         CLOUDFLARE_API_TOKEN_SECRET_ARN: !If [HasCloudflareZone, !Ref CloudflareApiTokenSecret, ""]
+        CLOUDFLARE_DNS_TOKEN_SECRET_ARN: !If [HasCloudflareZone, !Ref CloudflareDnsTokenSecret, ""]
         CUSTOM_DOMAIN_TARGET_HOST: !Ref CustomDomainTargetHost
         # Static A/AAAA IPs for apex proxying (plans/SITE_OBJECT.md §2.6b). Empty until Cloudflare apex
         # proxying is procured; then apex domains switch from ALIAS/flattening guidance to plain A/AAAA records.
@@ -337,6 +338,20 @@ Resources:
     Properties:
       Name: !Sub "${ProjectPrefix}-cloudflare-api-token-${Environment}"
       Description: Cloudflare API token (Zone:SSL and Certificates:Edit + Zone:Custom Hostname:Edit scope) used to manage custom hostnames for tenant custom domains. Populate the real value after deployment via `aws secretsmanager put-secret-value`.
+      SecretString: "PLACEHOLDER-SET-VIA-put-secret-value"
+
+  # SEPARATE from CloudflareApiTokenSecret above, and the separation is the security control rather than
+  # tidiness. That token mints custom hostnames and is read on every connect, Verify and health sweep:
+  # wide reach through the code, narrow power. This one creates zones and edits DNS across all of them,
+  # so it can rewrite any tenant's records, mail included: narrow reach, wide power. Folding the second
+  # permission into the first would hand that power to every path that merely checks a certificate.
+  # Create it with ./deploy/cloudflare-dns-token.sh after the stack exists.
+  CloudflareDnsTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasCloudflareZone
+    Properties:
+      Name: !Sub "${ProjectPrefix}-cloudflare-dns-token-${Environment}"
+      Description: Cloudflare API token for MANAGED DNS (Account:Zone:Edit + Zone:DNS:Edit + Zone:Workers Routes:Edit, all zones). Populate via ./deploy/cloudflare-dns-token.sh. See plans/MANAGED_DNS.md.
       SecretString: "PLACEHOLDER-SET-VIA-put-secret-value"
 
   StripeKeysEncryptionKey:
