@@ -142,6 +142,22 @@ class WiringTests(unittest.TestCase):
         self.assertIn("dnsChoice = 'own'", SITES_VUE)
         self.assertIn('v-if="dnsChoice !== \'managed\'"', SITES_VUE)
 
+    def test_the_panel_reconstitutes_an_in_progress_zone_on_load(self):
+        """Without this a tenant who closes the tab mid-flow comes back to a blank "choose" screen --
+        with a zone on our account and their nameservers already changed, and nothing on screen to
+        finish it or undo it. The exit existed in the API and was unreachable from the UI."""
+        self.assertIn("loadManagedDns", SITES_VUE)
+        self.assertIn("watch(() => editing.value?.site_id", SITES_VUE)
+        # Asked WITHOUT a domain, because not knowing it is the returning tenant's situation.
+        self.assertIn("store.managedDnsStatus(siteId)", SITES_VUE)
+        self.assertIn("domain = \"\"", STORE)
+
+    def test_switching_sites_does_not_carry_the_previous_zone_across(self):
+        load = SITES_VUE.split("async function loadManagedDns", 1)[1].split("watch(", 1)[0]
+        for cleared in ("managedZone.value = null", "managedReview.value = null",
+                        "clearInterval(managedPoll)"):
+            self.assertIn(cleared, load, cleared)
+
     def test_polling_stops_when_the_zone_goes_live(self):
         # A poll that runs forever on a forgotten tab is a cost nobody sees.
         self.assertIn("clearInterval(managedPoll)", SITES_VUE)

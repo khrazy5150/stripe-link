@@ -55,6 +55,25 @@ def _zone_for(tenant_id: str, domain: str, repo):
     return repo.get(tenant_id, domain)
 
 
+def _zone_for_site(tenant_id: str, site_id: str, repo):
+    """The in-progress zone for a Site, found WITHOUT being told the domain.
+
+    This is what the panel asks on load, and it has to work without a domain because not knowing the
+    domain is the whole situation: a tenant who started the flow and closed the tab has a zone on our
+    account and their nameservers already moved, and nothing on the screen to show it. Tenant-scoped
+    query, so it is one partition read rather than a scan.
+    """
+    try:
+        zones = repo.list_for_tenant(tenant_id)
+    except Exception:  # noqa: BLE001 - a panel that cannot look this up must still render
+        logger.exception("managed dns: could not list zones for %s", tenant_id)
+        return None
+    for zone in zones or []:
+        if str(zone.get("site_id") or "") == site_id:
+            return zone
+    return None
+
+
 def start(event, sites_repository, site_id, *, repo=None):
     """Create the zone and return the review. The nameservers come back only if the review is clean."""
     try:
@@ -97,7 +116,7 @@ def start(event, sites_repository, site_id, *, repo=None):
             create_zone_fn=lambda d: create_zone(d, account_id=account_id, api_token=api_token),
             list_records_fn=lambda zid: list_zone_dns_records(zid, api_token=api_token),
             observe_fn=observe_mail_records,
-            repository=repo,
+            repository=repo, site_id=site_id,
         )
     except CustomDomainError as exc:
         return error_response(exc.message, status_code=exc.status_code, code="cloudflare_error")
@@ -118,9 +137,10 @@ def status(event, sites_repository, site_id, *, repo=None):
         return error_response("tenant_id is required.", code="missing_tenant")
     repo = repo or managed_zones_repository()
     domain = normalize_domain((event.get("queryStringParameters") or {}).get("domain"))
-    record = _zone_for(tenant_id, domain, repo) if domain else None
+    # Asked with a domain while polling, and WITHOUT one when the panel is reconstituting its state.
+    record = _zone_for(tenant_id, domain, repo) if domain else _zone_for_site(tenant_id, site_id, repo)
     if not record:
-        return error_response("No managed zone for this domain.", status_code=404, code="not_found")
+        return error_response("No managed zone for this Site.", status_code=404, code="not_found")
 
     account_id, api_token, worker_script = _config()
     try:

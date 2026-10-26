@@ -332,12 +332,22 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(result["name_servers"], [])
         self.assertTrue(repo.saved[0]["review"]["blocked"])
 
-    def test_the_stored_record_is_the_zone_not_the_site(self):
+    def test_the_stored_record_is_keyed_by_domain_not_by_site(self):
+        """The invariant is about the KEY, not about which fields exist.
+
+        This used to assert `site_id` was absent, as a proxy for "the zone is not the Site's". The
+        proxy stopped being true when the panel needed to find an in-progress zone on load — a tenant
+        who closes the tab mid-flow has a zone and moved nameservers and nothing on screen. So the Site
+        is recorded as PROVENANCE. What still must hold is that the zone is addressed by domain and
+        lives in its own document, so disconnecting a Site cannot delete a zone that is still
+        authoritative for someone's mail.
+        """
         _, repo = self._provision([WEB], [WEB])
         saved = repo.saved[0]
         self.assertEqual(saved["document_type"], "managed_zone")
+        self.assertEqual(saved["domain"], "example.com")
         self.assertEqual(saved["tenant_id"], "t1")
-        self.assertNotIn("site_id", saved)      # a zone outlives any one Site's claim on the hostname
+        self.assertIn("site_id", saved)
 
 
 class ObserveMailRecordsTests(unittest.TestCase):

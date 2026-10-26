@@ -936,6 +936,31 @@ let managedPoll = 0;
 let managedStartedAt = 0;
 
 const managedState = computed(() => managedDnsState(managedZone.value, managedReview.value));
+
+// RECONSTITUTED ON LOAD, not only on the click that started it. A tenant who begins the flow and closes
+// the tab has a zone on our account and their nameservers already changed; without this they come back
+// to a blank "choose" screen with no way to see it, finish it, or undo it. Asked without a domain,
+// because not knowing the domain is precisely the situation they are in.
+async function loadManagedDns(siteId) {
+  clearInterval(managedPoll);
+  managedPoll = 0;
+  managedZone.value = null;
+  managedReview.value = null;
+  managedNameServers.value = [];
+  managedRestoreTo.value = [];
+  managedStartedAt = 0;
+  if (!siteId) return;
+  try {
+    const res = await store.managedDnsStatus(siteId);
+    if (!res?.zone) return;
+    managedZone.value = res.zone;
+    managedNameServers.value = res.zone.name_servers || [];
+    dnsChoice.value = "managed";
+    if (res.status !== "active") beginManagedPolling();
+  } catch { /* 404 means no zone for this Site, which is the ordinary case */ }
+}
+
+watch(() => editing.value?.site_id, (siteId) => loadManagedDns(siteId), { immediate: true });
 const managedMail = computed(() => mailSummary(managedReview.value));
 const managedSteps = computed(() =>
   nameserverInstructions(dnsProvider.value, domainForm.domain || editing.value?.hosting?.custom_domain || ""));

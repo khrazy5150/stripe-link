@@ -232,7 +232,8 @@ def serving_records(domain: str, placeholder_ip: str = "192.0.2.1") -> list[dict
     ]
 
 
-def managed_zone_record(tenant_id: str, domain: str, zone: dict[str, Any], now: int) -> dict[str, Any]:
+def managed_zone_record(tenant_id: str, domain: str, zone: dict[str, Any], now: int,
+                       site_id: str = "") -> dict[str, Any]:
     """The stored record, which lives beside the custom-domain index and NOT on the Site.
 
     A Site's `domain_provisioning` describes its claim on a hostname and is discarded when the tenant
@@ -251,6 +252,12 @@ def managed_zone_record(tenant_id: str, domain: str, zone: dict[str, Any], now: 
         "original_name_servers": [str(ns).lower() for ns in (zone.get("original_name_servers") or [])],
         "status": zone_state(zone),
         "created_at": int(now),
+        # WHICH SITE STARTED THIS, which is provenance and not ownership -- the zone still outlives any
+        # Site's claim on the hostname. It is here because the panel has to be able to FIND an
+        # in-progress zone on load: a tenant who starts the flow and closes the tab would otherwise come
+        # back to a blank "choose" screen with a zone already created and their nameservers already
+        # moved, and no way to see or undo it.
+        "site_id": str(site_id or ""),
     }
 
 
@@ -262,7 +269,7 @@ def zone_state(zone: dict[str, Any]) -> str:
 
 
 def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_records_fn,
-              observe_fn, repository) -> dict[str, Any]:
+              observe_fn, repository, site_id: str = "") -> dict[str, Any]:
     """Create the zone, read what the import found, compare it with live DNS, and record the zone.
 
     **The zone is created before the review can run, and that is safe.** Cloudflare's import scan only
@@ -284,7 +291,7 @@ def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_rec
     imported = list(list_records_fn(zone_id) or [])
     observed, observed_complete = observe_fn(domain)
     summary = review(imported, observed, observed_complete=bool(observed_complete))
-    record = managed_zone_record(tenant_id, domain, zone, now)
+    record = managed_zone_record(tenant_id, domain, zone, now, site_id=site_id)
     record["review"] = {"blocked": summary["blocked"], "missing": summary["missing"],
                         "checked_at": int(now)}
     repository.put(record)

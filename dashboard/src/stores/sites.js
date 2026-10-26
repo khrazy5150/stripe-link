@@ -170,9 +170,11 @@ export const useSitesStore = defineStore("sites", {
       return apiRequest(`/sites/${encodeURIComponent(siteId)}/managed-dns`,
                         { method: "POST", body: { domain } });
     },
-    async managedDnsStatus(siteId, domain) {
-      return apiRequest(
-        `/sites/${encodeURIComponent(siteId)}/managed-dns?domain=${encodeURIComponent(domain)}`);
+    // `domain` is optional on purpose: the panel asks WITHOUT one when it is reconstituting its state
+    // on load, because not knowing the domain is exactly the situation a returning tenant is in.
+    async managedDnsStatus(siteId, domain = "") {
+      const query = domain ? `?domain=${encodeURIComponent(domain)}` : "";
+      return apiRequest(`/sites/${encodeURIComponent(siteId)}/managed-dns${query}`);
     },
     async stopManagedDns(siteId, domain) {
       return apiRequest(

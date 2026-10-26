@@ -38,6 +38,9 @@ class FakeZones:
         d = self.docs.get((tenant_id, domain))
         return dict(d) if d else None
 
+    def list_for_tenant(self, tenant_id):
+        return [dict(d) for (t, _), d in self.docs.items() if t == tenant_id]
+
     def put(self, document):
         self.docs[(document["tenant_id"], document["domain"])] = dict(document)
         return document
@@ -204,6 +207,24 @@ class StatusTests(unittest.TestCase):
         _, rec, route, _ = self._status("active", stored_status="active")
         rec.assert_not_called()
         route.assert_not_called()
+
+    def test_the_panel_can_find_an_in_progress_zone_without_knowing_the_domain(self):
+        """What a returning tenant needs. Someone who starts the flow and closes the tab has a zone on
+        our account and their nameservers already moved; asking by domain is useless because not knowing
+        the domain is exactly their situation."""
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "pending", "site_id": "site_1"}])
+        with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")), \
+             patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "pending"}):
+            response = managed_dns_api.status(event("GET"), FakeSites(), "site_1", repo=zones)
+        self.assertEqual(body_of(response)["zone"]["domain"], "example.com")
+
+    def test_another_sites_zone_is_not_offered_up(self):
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "pending", "site_id": "site_OTHER"}])
+        with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")):
+            response = managed_dns_api.status(event("GET"), FakeSites(), "site_1", repo=zones)
+        self.assertEqual(response["statusCode"], 404)
 
     def test_an_unknown_domain_is_a_404_not_a_crash(self):
         with patch.object(managed_dns_api, "_config", return_value=("a", "t", "s")):
