@@ -438,3 +438,20 @@ class OfferedOnlyAfterCheckingTests(unittest.TestCase):
         """It runs while someone is typing, so an earlier slow answer must not overwrite a later one --
         the same guard the provider lookup already needed."""
         self.assertIn("if (token !== detectionLookup) return;", SITES_VUE)
+
+
+class ApexAdviceNeedsARealDetectionTests(unittest.TestCase):
+    """The apex warning must come from what we DETECTED, never from the dropdown's default.
+
+    Found on a real screen, 2026-10-27: conflictcenter.org, hosted on Bluehost, was told its apex
+    "can't be pointed at an external host from AWS Route 53". `dnsProvider` defaults to "route53" because
+    it seeds the instructions dropdown, and the advice call fell back to it whenever detection returned
+    nothing -- which is every provider outside the nine NS patterns, plus any domain typed before a
+    lookup had run. A preference had become a factual claim about someone else's domain.
+    """
+
+    def test_advice_is_computed_from_the_detection_alone(self):
+        self.assertIn("connectAdvice.value = apexAdvice(domain, detected);", SITES_VUE)
+
+    def test_the_fallback_to_the_default_provider_is_gone(self):
+        self.assertNotIn("apexAdvice(domain, detected || dnsProvider.value)", SITES_VUE)

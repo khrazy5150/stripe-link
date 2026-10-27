@@ -1410,7 +1410,16 @@ async function detectDnsProvider(domain, { advise = false } = {}) {
   // being typed. Both calls share `providerLookup`, so whichever landed second won, and after a
   // successful managed run the connected-domain watcher always landed second: the apex warning simply
   // never appeared again. Found by someone looking for it on purpose, 2026-10-26.
-  if (advise) connectAdvice.value = apexAdvice(domain, detected || dnsProvider.value);
+  // DETECTED, never the fallback. `dnsProvider` defaults to "route53" and is a PREFERENCE -- it seeds
+  // the instructions dropdown and the tenant can change it. Falling back to it here turned that default
+  // into a factual claim about someone else's domain: conflictcenter.org, on Bluehost, was told its apex
+  // "can't be pointed at an external host from AWS Route 53". Every provider outside the nine NS
+  // patterns got the same message, and so did a domain typed before any lookup had run.
+  //
+  // Unknown now means silent, which is the direction the APEX_INCAPABLE table is already documented to
+  // fail in: a tenant looks for an ALIAS option and does not find one, rather than being told to give
+  // up a root domain that would have worked.
+  if (advise) connectAdvice.value = apexAdvice(domain, detected);
 }
 
 let adviceTimer = 0;
