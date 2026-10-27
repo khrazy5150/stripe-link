@@ -24,6 +24,7 @@ from stripe_link.domain.managed_dns import (
     review,
     serving_records,
     stored_review,
+    unmovable_provider,
     zone_export,
     zone_state,
 )
@@ -686,3 +687,43 @@ class UnverifiableDkimTests(unittest.TestCase):
         """It is shown on the confirm step, and the confirm step is reached again after a reload."""
         summary = review(self.SES_MAIL, self.SES_MAIL, observed_complete=True)
         self.assertEqual(stored_review(summary, now=1)["cannot_verify"], summary["cannot_verify"])
+
+
+class UnmovableProviderTests(unittest.TestCase):
+    """Which nameservers mean "we will not take this zone".
+
+    The handler tests cover the decision; this covers the matcher, because a false positive here turns a
+    tenant away from a domain that would have worked and a false negative moves a zone whose apex
+    records we cannot see.
+    """
+
+    def test_route53_across_all_four_tlds(self):
+        for ns in ("ns-9.awsdns-01.com", "ns-677.awsdns-20.net",
+                   "ns-1146.awsdns-15.org", "ns-1785.awsdns-31.co.uk"):
+            self.assertEqual(unmovable_provider([ns])[0], "route53", ns)
+
+    def test_azure_across_its_tlds(self):
+        for ns in ("ns1-01.azure-dns.com", "ns2-01.azure-dns.net",
+                   "ns3-01.azure-dns.org", "ns4-01.azure-dns.info"):
+            self.assertEqual(unmovable_provider([ns])[0], "azure", ns)
+
+    def test_a_trailing_dot_and_case_do_not_hide_it(self):
+        self.assertEqual(unmovable_provider(["NS-9.AWSDNS-01.COM."])[0], "route53")
+
+    def test_one_gated_nameserver_among_others_is_enough(self):
+        # A half-migrated domain still answers from Route 53 for some queries.
+        self.assertEqual(unmovable_provider(["kim.ns.cloudflare.com", "ns-9.awsdns-01.com"])[0], "route53")
+
+    def test_providers_we_can_move_are_not_claimed(self):
+        for ns in ("ns01.domaincontrol.com", "kim.ns.cloudflare.com", "dns1.registrar-servers.com",
+                   "ns1.digitalocean.com", "ns-cloud-a1.googledomains.com"):
+            self.assertEqual(unmovable_provider([ns]), ("", ""), ns)
+
+    def test_a_merely_aws_hosted_nameserver_is_not_route53(self):
+        """`awsdns-` is the marker, not `aws`. Someone running their own BIND on EC2 under a name like
+        ns1.aws.example.com is not on Route 53 and their zone moves fine."""
+        self.assertEqual(unmovable_provider(["ns1.aws.example.com"]), ("", ""))
+
+    def test_nothing_known_is_not_a_refusal_on_its_own(self):
+        # Silence is handled by `eligibility`'s unreadable branch, which has the context to refuse.
+        self.assertEqual(unmovable_provider([]), ("", ""))

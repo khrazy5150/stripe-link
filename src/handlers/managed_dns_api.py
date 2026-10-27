@@ -75,6 +75,37 @@ def _zone_for_site(tenant_id: str, site_id: str, repo):
     return None
 
 
+def _detect(domain: str) -> dict:
+    """Read live DNS and decide whether we may offer to take this domain over. CREATES NOTHING.
+
+    This is what "Read my DNS records" now does, and all it does. It used to create the Cloudflare zone,
+    scan it, and present the result -- so a tenant pressing a button labelled "read" had a zone made for
+    them before anyone had decided they should have one, and the panel's own copy ("We will create the
+    zone and read what is in it") had to admit it.
+
+    Two lookups, both of which already existed for other callers: who answers for this domain, and what
+    its mail looks like. Neither writes anything anywhere.
+    """
+    name_servers, ns_known = observe_name_servers(domain)
+    observed, mail_complete = observe_mail_records(domain)
+    verdict = managed_dns.eligibility(
+        name_servers=name_servers, name_servers_known=ns_known,
+        # ANY mail-shaped record, not MX alone -- `observe_mail_records` returns MX, SPF, DMARC and the
+        # DKIM selectors it could guess, so a send-only domain with SPF and no MX still counts.
+        mail_present=bool(observed), mail_complete=bool(mail_complete),
+    )
+    return {
+        **verdict,
+        "name_servers": name_servers,
+        "mail": {
+            "present": bool(observed),
+            "records": len(observed),
+            "provider": managed_dns.mail_provider(
+                [r.get("content") or "" for r in observed if str(r.get("type") or "").upper() == "MX"]),
+        },
+    }
+
+
 def start(event, sites_repository, site_id, *, mode="test", repo=None):
     """Create the zone and return the review. The nameservers come back only if the review is clean."""
     try:
@@ -115,6 +146,18 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
         return _recheck(existing, tenant_id, domain, api_token, repo,
                         repair=bool(body.get("repair")),
                         confirm=bool(body.get("confirm")))
+
+    # DETECT BEFORE CREATING, on every path. The plain button press stops here and returns the verdict;
+    # only an explicit `import` goes on to make a zone.
+    verdict = _detect(domain)
+    if not body.get("import"):
+        return json_response({"detected": True, "site_id": site_id, **verdict})
+    if not verdict["eligible"]:
+        # The UI does not offer the button in this case, so reaching here means something bypassed it.
+        # The gate lives on the server for the same reason every other one does: a check the client can
+        # skip is not a check.
+        return error_response(f"{verdict['headline']} {verdict['detail']}",
+                              status_code=409, code="not_eligible")
 
     try:
         result = managed_dns.provision(

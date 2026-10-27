@@ -157,6 +157,49 @@ the tenant would be stuck on a screen with no way forward.
 This is now the strongest argument for the **zone file** import in §2c. A scan cannot be fixed into
 completeness; 11 of 39 is what a scan is.
 
+## 2e. Who is offered this at all (2026-10-27) — DECIDED AND BUILT
+
+§2d established that the import cannot be made complete. The response is not a better scan; it is a
+narrower door. **"Read my DNS records" now reads and stops**, creating nothing, and a verdict decides
+what is offered next:
+
+| Condition | What we offer | Why |
+|---|---|---|
+| Any mail-shaped record | Custom domain only | Becoming responsible for mail we cannot fully enumerate |
+| Nameservers are Route 53 or Azure DNS | Custom domain only | Alias records can be neither exported nor seen |
+| Either lookup failed | Nothing yet — try again | Silence is not evidence of safety |
+| Anything else | A choice, managed DNS recommended | The zone is movable and checkable |
+
+**Mail is tested on any mail-shaped record, not on MX.** A send-only domain — transactional mail out,
+nothing in — publishes SPF and DKIM and no MX. Moving one breaks outbound signing, which fails quietly:
+the mail is accepted and filed as spam days later.
+
+**The provider gate asks who answers, not what the zone holds, and that is forced on us.** The question
+worth asking is "does this zone contain alias records?" and DNS refuses to answer it. Measured on
+juniorbay.net, 2026-10-27:
+
+```
+Route 53:            A api.juniorbay.net  ->  ALIAS d2kf8qmzcoo3jx.cloudfront.net
+An outside resolver: api.juniorbay.net    ->  99.84.215.94, 99.84.215.95   (no CNAME, no hint)
+```
+
+ALIAS is resolved server-side; from outside it is indistinguishable from a plain A record. So we cannot
+detect what we would be dropping, and the provider's identity is the only signal there is. Route 53 and
+Azure both invented proprietary alias types *because* standard DNS forbids a CNAME at the apex — which
+is why the same two providers that cannot point an apex at an external host are the two whose zones
+cannot be moved. One cause, surfacing twice.
+
+**Detection runs before anything is created**, which removes the apology `provision()` used to carry: a
+zone was made, then assessed. A tenant we turn away now never has one.
+
+**The review gate stays** as defence in depth. The two checks run at different moments against different
+sources — detection reads live DNS, the review compares live DNS against the import — so the review
+still fires if mail appears between them, or if Cloudflare's scan sees what our probe missed.
+
+Consequence worth naming: with every tenant currently on Route 53, **managed DNS has no users under
+this rule**. It is a forward-looking path, and the apex→www guidance in the custom-domain flow is what
+actually carries the load.
+
 ## 3. What this buys beyond apex
 
 - **One nameserver change instead of four records**, and nothing to mistype. Most support load on custom

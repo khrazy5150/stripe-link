@@ -77,6 +77,89 @@ def mail_provider(mx_values: Iterable[str]) -> str:
     return ""
 
 
+# Providers whose zones we will not take over, however clean the import looks.
+#
+# Route 53 and Azure DNS both answer an apex with a PROPRIETARY alias type -- Route 53 `ALIAS`, Azure
+# `alias record set` -- because standard DNS forbids a CNAME there. That has two consequences, and
+# together they are the whole reason this gate exists:
+#
+#   1. Those records have no portable representation. A BIND export cannot express them and neither
+#      can our scan, so they cannot be carried across by any import we could build.
+#   2. They are INVISIBLE from outside. Measured on juniorbay.net, 2026-10-27: Route 53 reports
+#      `A api.juniorbay.net -> ALIAS d2kf8qmzcoo3jx.cloudfront.net`, while every outside resolver sees
+#      plain A records and no CNAME at all.
+#
+# So we cannot even detect what we would be dropping -- which is why this gates on WHO ANSWERS rather
+# than on what the zone contains. "Does this zone have alias records?" is the question we would rather
+# ask and the one DNS refuses to answer.
+_UNMOVABLE_PROVIDERS = (
+    ("route53", "Amazon Route 53", ("awsdns-",)),
+    ("azure", "Azure DNS", ("azure-dns.",)),
+)
+
+
+def unmovable_provider(name_servers: Iterable[str]) -> tuple[str, str]:
+    """`(id, label)` when these nameservers belong to a provider we refuse to move, else `("", "")`."""
+    for value in name_servers or []:
+        host = str(value or "").strip().lower().rstrip(".")
+        for provider_id, label, markers in _UNMOVABLE_PROVIDERS:
+            if any(marker in host for marker in markers):
+                return provider_id, label
+    return "", ""
+
+
+def eligibility(*, name_servers: Iterable[str], name_servers_known: bool,
+                mail_present: bool, mail_complete: bool) -> dict[str, Any]:
+    """May we offer to take this domain's DNS over? Decided from live DNS, BEFORE anything is created.
+
+    This runs instead of the old ordering, where a zone was created and the risk assessed afterwards --
+    `provision` used to argue that was safe because the tenant's nameservers had not moved, which was
+    true and still left us holding a zone for a domain we were about to refuse. Deciding first means a
+    tenant we turn away never has one made for them at all.
+
+    **Both unreadable cases refuse.** A failed mail lookup and a failed nameserver lookup are the same
+    mistake wearing different clothes: an empty answer that reads as "nothing to worry about". We cannot
+    rule out mail we could not see, and we cannot rule out Route 53 if we never learned who answers, so
+    silence is a refusal here rather than a pass. Same rule as `review(observed_complete=...)`.
+    """
+    provider_id, label = unmovable_provider(name_servers)
+    if not mail_complete or not name_servers_known:
+        return {
+            "eligible": False, "reason": "unreadable", "provider": provider_id,
+            "headline": "We could not read this domain's DNS just now.",
+            "detail": "That is usually temporary. Try again in a moment — we will not offer to move a "
+                      "domain we cannot see, because the records we would miss are the ones that matter.",
+        }
+    if mail_present:
+        # MAIL IS THE HARD STOP, and it is tested on any mail-shaped record rather than on MX alone.
+        # A send-only domain -- transactional mail through SES or similar, nothing inbound -- publishes
+        # SPF and DKIM and NO MX. Moving one silently breaks outbound signing, which fails the same way
+        # as losing an MX but quietly: the mail is accepted, then filed as spam days later.
+        return {
+            "eligible": False, "reason": "mail", "provider": provider_id,
+            "headline": "This domain handles email, so we will not move its DNS.",
+            "detail": "Taking over a domain's DNS means becoming responsible for its mail, and the "
+                      "records that carry mail -- DKIM keys especially -- have random names that no "
+                      "scan can discover. Keep your DNS where it is and connect this domain with a "
+                      "single record instead; nothing about your email changes.",
+        }
+    if provider_id:
+        return {
+            "eligible": False, "reason": "provider", "provider": provider_id,
+            "headline": f"{label} zones cannot be moved safely.",
+            "detail": f"{label} points a root domain at a service using its own alias records, and "
+                      "those cannot be read from outside or copied anywhere else — we would have no "
+                      "way to know what we had dropped. Keep your DNS where it is and connect this "
+                      "domain with a record you add yourself.",
+        }
+    return {
+        "eligible": True, "reason": "", "provider": "",
+        "headline": "This domain looks safe to move.",
+        "detail": "No mail records, and your DNS provider's zone can be copied across. We will read "
+                  "what is there and show you everything we find before anything changes.",
+    }
+
+
 def classify_record(record: dict[str, Any]) -> str:
     """What this record is for. Mail is the category that gates; the rest are informational."""
     record_type = str(record.get("type") or "").strip().upper()

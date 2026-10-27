@@ -340,7 +340,7 @@
                    was a hard refresh -- and the tenant had already typed their domain. Offered only
                    while nothing has been created yet: once a zone exists, backing out is "Move this
                    domain elsewhere", which is a different and heavier thing. -->
-              <p v-if="dnsChoice && managedState === CHOOSE" class="field-note dns-chosen">
+              <p v-if="dnsChoice && (managedState === CHOOSE || managedState === DETECTED)" class="field-note dns-chosen">
                 <strong>{{ dnsChoice === 'managed' ? 'Let us handle the DNS' : 'Keep your DNS where it is' }}</strong>
                 <button type="button" class="link-button" @click="dnsChoice = ''">Change</button>
               </p>
@@ -380,11 +380,36 @@
                     <strong>{{ domainForm.domain }}</strong> — that includes
                     <strong>{{ managedNarrowedFrom }}</strong>. Both will serve this Site.
                   </p>
-                  <p class="field-note">We will create the zone and read what is in it before anything
-                    changes. Your nameservers stay where they are until you say so.</p>
-                  <button type="button" class="primary-action" :disabled="managedBusy" @click="startManagedDns">
+                  <!-- Says only what the button does. It used to promise "we will create the zone and
+                       read what is in it", which was honest about the old behaviour and the reason that
+                       behaviour was wrong: nothing should be created to answer a question. -->
+                  <p class="field-note">We will look up this domain's public DNS and tell you what we
+                    find. Nothing is created and nothing changes.</p>
+                  <button type="button" class="primary-action" :disabled="managedBusy" @click="readMyDns">
                     {{ managedBusy ? "Reading your DNS…" : "Read my DNS records" }}
                   </button>
+                </template>
+
+                <!-- READ, THEN DECIDE. The verdict is the server's -- the same check runs again on the
+                     import, because a gate the client can skip is not a gate. -->
+                <template v-else-if="managedState === DETECTED">
+                  <div :class="['keys-status-banner', managedDetection.eligible ? 'info' : 'warning']">
+                    <p><strong>{{ managedDetection.headline }}</strong></p>
+                    <p>{{ managedDetection.detail }}</p>
+                  </div>
+                  <p class="field-note">{{ managedFound }}</p>
+                  <div class="button-row">
+                    <button v-if="managedDetection.eligible" type="button" class="primary-action"
+                            :disabled="managedBusy" @click="importManagedDns">
+                      {{ managedBusy ? "Importing…" : "Import my DNS records" }}
+                    </button>
+                    <button v-else type="button" class="primary-action" @click="keepOwnDns">
+                      Keep my DNS where it is
+                    </button>
+                    <button type="button" class="secondary-action" :disabled="managedBusy" @click="cancelDetection">
+                      Cancel
+                    </button>
+                  </div>
                 </template>
 
                 <!-- The gate. Shown instead of the nameservers, never beside them. -->
@@ -720,7 +745,7 @@ import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
-import { BLOCKED, CHOOSE, DELEGATE, LIVE, REVIEW, importSummary, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
+import { BLOCKED, CHOOSE, DELEGATE, DETECTED, LIVE, REVIEW, detectionSummary, importSummary, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
 import { rootDomain } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
@@ -1030,6 +1055,9 @@ const domainForm = reactive({ domain: "", homepage: "" });
 const dnsChoice = ref("");               // "" until they pick; "managed" | "own"
 const managedZone = ref(null);
 const managedReview = ref(null);
+// What reading their DNS told us, before anything exists. Null until they press the button, and cleared
+// the moment they import or back out -- it describes a decision in progress, not a thing we hold.
+const managedDetection = ref(null);
 const managedNameServers = ref([]);
 const managedBusy = ref(false);
 const managedError = ref("");
@@ -1041,7 +1069,9 @@ const managedWatching = ref(false);
 let managedPoll = 0;
 let managedStartedAt = 0;
 
-const managedState = computed(() => managedDnsState(managedZone.value, managedReview.value));
+const managedState = computed(() =>
+  managedDnsState(managedZone.value, managedReview.value, managedDetection.value));
+const managedFound = computed(() => detectionSummary(managedDetection.value));
 
 // MANAGED DNS IS ALWAYS THE WHOLE DOMAIN. The server already normalises -- `www.example.com` creates a
 // zone for `example.com` -- but a backstop the screen contradicts is a backstop that confuses: the box
@@ -1116,11 +1146,54 @@ function confirmManagedDns() {
   return startManagedDns(false, true);
 }
 
+/** Reads live DNS and stops. Creates nothing -- the verdict decides what we then offer. */
+async function readMyDns() {
+  managedError.value = "";
+  managedBusy.value = true;
+  try {
+    managedDetection.value = await store.startManagedDns(editing.value.site_id, domainForm.domain);
+  } catch (err) {
+    managedError.value = err?.message || "Could not read this domain's DNS.";
+  } finally {
+    managedBusy.value = false;
+  }
+}
+
+/** The explicit second step. Only reachable when the read said this domain is safe to move. */
+async function importManagedDns() {
+  managedError.value = "";
+  managedBusy.value = true;
+  try {
+    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain, { import: true });
+    managedZone.value = res.zone || null;
+    managedReview.value = res.review || null;
+    managedNameServers.value = res.name_servers || [];
+    managedDetection.value = null;
+  } catch (err) {
+    managedError.value = err?.message || "Could not import this domain's DNS.";
+  } finally {
+    managedBusy.value = false;
+  }
+}
+
+/** Backing out of the read. No zone exists yet, so there is nothing to stop -- only something to forget. */
+function cancelDetection() {
+  managedDetection.value = null;
+  managedError.value = "";
+}
+
+/** Turned away by the read: the other route is the answer, so take them straight there. */
+function keepOwnDns() {
+  managedDetection.value = null;
+  managedError.value = "";
+  dnsChoice.value = "own";
+}
+
 async function startManagedDns(repair = false, confirm = false) {
   managedError.value = "";
   managedBusy.value = true;
   try {
-    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain, repair, confirm);
+    const res = await store.startManagedDns(editing.value.site_id, domainForm.domain, { repair, confirm });
     managedZone.value = res.zone || null;
     managedReview.value = res.review || null;
     managedNameServers.value = res.name_servers || [];
@@ -1184,6 +1257,7 @@ async function leaveManagedDns() {
     managedLeft.value = true;
     managedZone.value = null;
     managedReview.value = null;
+    managedDetection.value = null;
     dnsChoice.value = "";
     domainForm.domain = "";
     // The Site is detached server-side now, so re-read it -- otherwise the panel keeps rendering the
@@ -1305,6 +1379,9 @@ async function detectDnsProvider(domain, { advise = false } = {}) {
 let adviceTimer = 0;
 watch(() => domainForm.domain, (domain) => {
   connectAdvice.value = null;
+  // A verdict is about ONE domain. Editing the box after reading would otherwise leave "safe to move"
+  // sitting above a different name than the one it was decided for.
+  managedDetection.value = null;
   clearTimeout(adviceTimer);
   if (!domain || !domain.includes(".")) return;
   // Debounced: this runs while someone is typing a domain name, one lookup per pause rather than per key.

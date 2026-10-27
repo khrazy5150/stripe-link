@@ -168,10 +168,15 @@ export const useSitesStore = defineStore("sites", {
     // rather than by Site, because it outlives any one Site's claim on that hostname.
     // `repair` copies the mail records live DNS serves into the zone we hold. It is the only thing that
     // can clear a blocked review, because Cloudflare's import scan runs once and never re-runs.
-    async startManagedDns(siteId, domain, repair = false, confirm = false) {
+    // ONE endpoint, three intents. Without `import` it only READS live DNS and creates nothing, which
+    // is what the "Read my DNS records" button does; `repair` and `confirm` act on a zone that already
+    // exists. Kept as one action because it is one resource -- splitting it into three near-identical
+    // wrappers would hide that they all POST to the same place.
+    async startManagedDns(siteId, domain, opts = {}) {
       const body = { domain };
-      if (repair) body.repair = true;
-      if (confirm) body.confirm = true;
+      if (opts.repair) body.repair = true;
+      if (opts.confirm) body.confirm = true;
+      if (opts.import) body.import = true;
       return apiRequest(`/sites/${encodeURIComponent(siteId)}/managed-dns`, { method: "POST", body });
     },
     // `domain` is optional on purpose: the panel asks WITHOUT one when it is reconstituting its state

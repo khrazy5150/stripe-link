@@ -8,19 +8,25 @@ import { rootDomain } from "./dnsInstructions.js";
  * does not": a mail record the import missed, a delegation half the internet can see.
  *
  *   choose     -> nothing started; offer managed DNS or keeping their own DNS
+ *   detected   -> live DNS has been READ and nothing created; the verdict decides what is offered
  *   blocked    -> the zone exists, and the mail comparison refuses to hand over the nameservers
  *   delegate   -> nameservers issued; waiting for the tenant to change them, then for resolvers
  *   live       -> Cloudflare sees the delegation; the apex serves
  */
 
 export const CHOOSE = "choose";
+export const DETECTED = "detected";
 export const BLOCKED = "blocked";
 export const REVIEW = "review";
 export const DELEGATE = "delegate";
 export const LIVE = "live";
 
-export function managedDnsState(zone, review) {
-  if (!zone || !zone.zone_id) return CHOOSE;
+export function managedDnsState(zone, review, detection) {
+  // READ, THEN DECIDE. A detection exists only between pressing "Read my DNS" and either importing or
+  // backing out, and no zone exists yet in that window -- which is the point of the window. The button
+  // used to create the zone and assess it afterwards, so a tenant we were about to turn away already
+  // had one.
+  if (!zone || !zone.zone_id) return detection ? DETECTED : CHOOSE;
   if (zone.status === "active") return LIVE;
   // `blocked` is the server's verdict, and it is re-read on every poll rather than remembered: a tenant
   // who adds the missing MX and retries must be able to move on without starting over.
@@ -109,5 +115,23 @@ export function mailSummary(review) {
   if (mail.spf) parts.push("SPF");
   if (mail.dmarc) parts.push("DMARC");
   if ((mail.dkim || []).length) parts.push(`${mail.dkim.length} DKIM key${mail.dkim.length === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+/** What we found while deciding, in one line a tenant can check. */
+export function detectionSummary(detection) {
+  if (!detection) return "";
+  const parts = [];
+  const mail = detection.mail || {};
+  if (mail.present) {
+    parts.push(mail.provider
+      ? `Email handled by ${mail.provider}`
+      : `${mail.records} mail record${mail.records === 1 ? "" : "s"} found`);
+  } else {
+    parts.push("No mail records found");
+  }
+  if ((detection.name_servers || []).length) {
+    parts.push(`${detection.name_servers.length} nameserver${detection.name_servers.length === 1 ? "" : "s"}`);
+  }
   return parts.join(" · ");
 }

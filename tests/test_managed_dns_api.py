@@ -22,6 +22,11 @@ MX = {"type": "MX", "name": "example.com", "content": "aspmx.l.google.com", "pri
 WEB = {"type": "A", "name": "example.com", "content": "203.0.113.1"}
 ZONE = {"id": "z1", "status": "pending", "name_servers": ["kim.ns.cloudflare.com", "walt.ns.cloudflare.com"],
         "original_name_servers": ["ns-1.awsdns-01.com"]}
+# A detection verdict that says "go ahead", for tests about what happens AFTER the gate.
+ELIGIBLE = {"eligible": True, "reason": "", "provider": "", "headline": "", "detail": "",
+            "name_servers": ["ns1.domaincontrol.com"], "mail": {"present": False, "records": 0}}
+GODADDY = ["ns01.domaincontrol.com", "ns02.domaincontrol.com"]
+ROUTE53 = ["ns-9.awsdns-01.com", "ns-1785.awsdns-31.co.uk"]
 
 
 class FakeSites:
@@ -62,13 +67,20 @@ def body_of(response):
 
 class StartTests(unittest.TestCase):
     def _start(self, imported, observed, complete=True, zones=None):
+        """The IMPORT half of the flow, with the eligibility gate stubbed open.
+
+        `import: True` is required now: a plain POST reads live DNS and creates nothing. `_detect` is
+        patched rather than fed, so each of these tests exercises the review gate alone -- the detection
+        gate has its own class below, and a test that had to satisfy both would fail for two reasons and
+        tell you neither."""
         zones = zones or FakeZones()
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb-router-dev")), \
              patch.object(managed_dns_api, "create_zone", return_value=ZONE), \
              patch.object(managed_dns_api, "list_zone_dns_records", return_value=imported), \
+             patch.object(managed_dns_api, "_detect", return_value=ELIGIBLE), \
              patch.object(managed_dns_api, "observe_mail_records", return_value=(observed, complete)):
-            return managed_dns_api.start(event(body={"domain": "example.com"}), FakeSites(), "site_1",
-                                         repo=zones), zones
+            return managed_dns_api.start(event(body={"domain": "example.com", "import": True}),
+                                         FakeSites(), "site_1", repo=zones), zones
 
     def test_a_clean_comparison_still_withholds_the_nameservers_until_confirmed(self):
         """Clean is not the same as agreed. The nameserver change is the one irreversible instruction,
@@ -83,7 +95,12 @@ class StartTests(unittest.TestCase):
 
     def test_a_missed_mx_withholds_them(self):
         """The only irreversible step in the flow, and so the only thing the gate needs to hold back.
-        The zone still exists and is still recorded — it changes nothing until the nameservers move."""
+        The zone still exists and is still recorded — it changes nothing until the nameservers move.
+
+        DEFENCE IN DEPTH, now that detection refuses a domain with mail before any zone is created. The
+        two checks run at different moments against different sources -- detection reads live DNS, the
+        review compares live DNS against the import -- so this still fires when mail appears between
+        them, or when Cloudflare's scan sees something our probe did not."""
         response, zones = self._start([WEB], [WEB, MX])
         payload = body_of(response)
         self.assertTrue(payload["review"]["blocked"])
@@ -109,9 +126,10 @@ class StartTests(unittest.TestCase):
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
              patch.object(managed_dns_api, "create_zone", return_value=ZONE) as created, \
              patch.object(managed_dns_api, "list_zone_dns_records", return_value=[]), \
+             patch.object(managed_dns_api, "_detect", return_value=ELIGIBLE), \
              patch.object(managed_dns_api, "observe_mail_records", return_value=([], True)):
-            managed_dns_api.start(event(body={"domain": "www.example.com"}), FakeSites(), "site_1",
-                                  mode="live", repo=zones)
+            managed_dns_api.start(event(body={"domain": "www.example.com", "import": True}),
+                                  FakeSites(), "site_1", mode="live", repo=zones)
         self.assertEqual(created.call_args.args[0], "example.com")
         self.assertIn((TENANT, "example.com"), zones.docs)
 
@@ -392,3 +410,74 @@ class RoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DetectTests(unittest.TestCase):
+    """Reading a domain must create nothing, and the verdict must be the server's.
+
+    The button said "Read my DNS records" and created a Cloudflare zone, scanned it, and assessed the
+    result -- so a tenant we were about to turn away already had a zone made for them, and the panel's
+    own copy had to admit it ("We will create the zone and read what is in it"). Detection now happens
+    first, from live DNS alone.
+    """
+
+    def _detect(self, *, name_servers, mail, ns_known=True, mail_complete=True, body=None):
+        zones = FakeZones()
+        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
+             patch.object(managed_dns_api, "create_zone") as created, \
+             patch.object(managed_dns_api, "scan_zone_records") as scanned, \
+             patch.object(managed_dns_api, "observe_name_servers", return_value=(name_servers, ns_known)), \
+             patch.object(managed_dns_api, "observe_mail_records", return_value=(mail, mail_complete)):
+            response = managed_dns_api.start(event(body=body or {"domain": "example.com"}),
+                                             FakeSites(), "site_1", repo=zones)
+        return response, created, scanned, zones
+
+    def test_reading_creates_nothing(self):
+        response, created, scanned, zones = self._detect(name_servers=GODADDY, mail=[])
+        created.assert_not_called()
+        scanned.assert_not_called()
+        self.assertEqual(zones.docs, {})
+        self.assertTrue(body_of(response)["detected"])
+
+    def test_a_movable_domain_is_offered(self):
+        response, _, _, _ = self._detect(name_servers=GODADDY, mail=[])
+        self.assertTrue(body_of(response)["eligible"])
+
+    def test_mail_refuses_whatever_the_provider(self):
+        response, _, _, _ = self._detect(name_servers=GODADDY, mail=[MX])
+        payload = body_of(response)
+        self.assertFalse(payload["eligible"])
+        self.assertEqual(payload["reason"], "mail")
+
+    def test_spf_with_no_mx_still_refuses(self):
+        """A send-only domain -- transactional mail out, nothing in -- publishes SPF and DKIM and NO MX.
+        Gating on MX alone would move it and break outbound signing, which fails quietly: the mail is
+        accepted and then filed as spam days later."""
+        spf = {"type": "TXT", "name": "example.com", "content": "v=spf1 include:amazonses.com ~all"}
+        response, _, _, _ = self._detect(name_servers=GODADDY, mail=[spf])
+        self.assertFalse(body_of(response)["eligible"])
+        self.assertEqual(body_of(response)["reason"], "mail")
+
+    def test_route53_refuses_even_with_no_mail(self):
+        """ALIAS records cannot be exported OR seen from outside, so a clean-looking Route 53 zone is
+        not evidence of anything -- measured on juniorbay.net, where Route 53 reports ALIAS targets and
+        every outside resolver sees plain A records."""
+        response, _, _, _ = self._detect(name_servers=ROUTE53, mail=[])
+        payload = body_of(response)
+        self.assertFalse(payload["eligible"])
+        self.assertEqual(payload["reason"], "provider")
+        self.assertEqual(payload["provider"], "route53")
+
+    def test_an_unreadable_lookup_refuses_rather_than_passes(self):
+        response, _, _, _ = self._detect(name_servers=[], mail=[], ns_known=False)
+        self.assertFalse(body_of(response)["eligible"])
+        self.assertEqual(body_of(response)["reason"], "unreadable")
+
+    def test_importing_an_ineligible_domain_is_refused_server_side(self):
+        """The UI does not offer the button, so reaching here means something bypassed it. A check the
+        client can skip is not a check."""
+        response, created, _, zones = self._detect(
+            name_servers=ROUTE53, mail=[], body={"domain": "example.com", "import": True})
+        self.assertEqual(response["statusCode"], 409)
+        created.assert_not_called()
+        self.assertEqual(zones.docs, {})

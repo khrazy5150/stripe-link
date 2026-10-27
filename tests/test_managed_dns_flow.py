@@ -184,7 +184,7 @@ class ReversibleChoiceTests(unittest.TestCase):
     def test_only_while_nothing_has_been_created(self):
         # Once a zone exists, backing out is "Move this domain elsewhere" -- a different, heavier thing
         # that deletes a zone and hands back a file, not a toggle.
-        self.assertIn('v-if="dnsChoice && managedState === CHOOSE"', SITES_VUE)
+        self.assertIn('v-if="dnsChoice && (managedState === CHOOSE || managedState === DETECTED)"', SITES_VUE)
 
 
 class WwwGuardTests(unittest.TestCase):
