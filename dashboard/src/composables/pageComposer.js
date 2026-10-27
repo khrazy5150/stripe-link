@@ -161,6 +161,35 @@ export function pageCompositionKey(page, offer, deriveKey) {
 //
 // `undefined` rather than "" for the optional fields: the page document is cleaned before it is sent, so an
 // omitted key means "nothing here" while an empty string would persist as authored-but-blank.
+/**
+ * The catalog_grid section, or null when there is nothing to embed.
+ *
+ * Shared because TWO shapes need it now. Offer-less pages (storefront, category) have always had one; a
+ * Roundup has an OFFER, so it never passed through `offerlessSections` and arrived with no grid at all —
+ * and `catalog_grid` is `ui: "internal"`, so the tenant could not add one either.
+ *
+ * No collection_id, no grid. Not a defensive check: the Collection is the grid's source of truth, and a
+ * catalog_grid with neither a collection_id nor inline items resolves to an empty grid that renders
+ * nothing — persisting one would persist a blank section.
+ */
+export function catalogGridSection(state) {
+  const grid = (state || {}).catalog_grid || {};
+  if (!grid.collection_id) return null;
+  // Blank boxes are not authored copy. Keeping them would persist "" for every entry the tenant skipped,
+  // and an empty string is authored-but-blank — it would suppress the fallback to the page's own words.
+  const copy = Object.fromEntries(
+    Object.entries(grid.entry_copy || {}).filter(([, value]) => String(value || "").trim()));
+  return {
+    id: "catalog-grid",
+    type: "catalog_grid",
+    collection_id: grid.collection_id,
+    heading: grid.heading || undefined,
+    // "" means "whatever the Collection says", which is the same precedence the publisher applies.
+    layout: grid.layout || undefined,
+    entry_copy: Object.keys(copy).length ? copy : undefined,
+  };
+}
+
 export function offerlessSections(shape, state) {
   if (!shape) return [];
   const brandHero = state.brand_hero || {};
@@ -181,18 +210,8 @@ export function offerlessSections(shape, state) {
     });
     return sections;
   }
-  const grid = state.catalog_grid || {};
-  // No collection_id, no grid. Not a defensive check: the Collection is the grid's source of truth, and a
-  // catalog_grid with neither a collection_id nor inline items resolves to an empty grid that renders
-  // nothing — persisting one would persist a blank section.
-  if (grid.collection_id) {
-    sections.push({
-      id: "catalog-grid",
-      type: "catalog_grid",
-      collection_id: grid.collection_id,
-      heading: grid.heading || undefined,
-    });
-  }
+  const grid = catalogGridSection(state);
+  if (grid) sections.push(grid);
   return sections;
 }
 
@@ -214,6 +233,8 @@ export function offerlessState(page) {
     catalog_grid: {
       collection_id: grid.collection_id || "",
       heading: grid.heading || "",
+      layout: grid.layout || "",
+      entry_copy: { ...(grid.entry_copy || {}) },
     },
     seller_profile: {
       heading: profile.heading || "",

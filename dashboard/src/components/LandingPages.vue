@@ -2840,7 +2840,7 @@ import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, goalChrome } from "../composables/pageComposer";
+import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, catalogGridSection, goalChrome } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -3368,7 +3368,9 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 // Mirrors HERO_TAGLINE_MAX_LENGTH in domain/documents.py -- a slogan has to fit ONE line on a phone, which
 // is where nearly all of this traffic is. Pinned by a test so the two cannot drift.
 const HERO_TAGLINE_MAX = 40;
-const LEAD_COMPOSITION_TYPES = new Set(["lead_capture", "lead_call", "lead_bridge", "lead_social"]);
+const LEAD_COMPOSITION_TYPES = new Set([
+  "lead_capture", "lead_call", "lead_bridge", "lead_social", "lead_event", "lead_roundup",
+]);
 const LEAD_COMPOSITIONS = {
   capture_email: "lead_capture",
   capture_phone: "lead_capture",
@@ -3376,6 +3378,12 @@ const LEAD_COMPOSITIONS = {
   call_number: "lead_call",
   external_url: "lead_bridge",
   social_redirect: "lead_social",
+  // `register_event` was missing until 2026-10-27 and fell through to the "lead_capture" default, so the
+  // builder composed every webinar page as a plain squeeze page while the renderer composed it as
+  // `lead_event`. The comment above claimed a test pinned this map; the test only checked that the
+  // LOOKUP was written, never that the two maps agreed. It does now.
+  register_event: "lead_event",
+  roundup: "lead_roundup",
 };
 
 function offerIsTipJar(offer) {
@@ -5326,7 +5334,7 @@ async function createCategory() {
   }
 }
 
-function startBuilderFromWizard() {
+async function startBuilderFromWizard() {
   wizardError.value = "";
   const page = draftPage.value;
   if (!page) {
@@ -5336,6 +5344,7 @@ function startBuilderFromWizard() {
   populateBuilderFromPage(page);
   seedGoalElements(form.goal);
   seedShapeElements();
+  if (!(await seedRoundupCollection())) return;
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   pendingSiteAttach.value = selectedSiteId.value;  // attach this offer page to the chosen Site on first save
@@ -5369,6 +5378,12 @@ function seedGoalElements(goal) {
 // so seeding one would put the same block on the page twice.
 const SHAPE_SEEDS = {
   lead_social: ["social_links", "link_cards"],
+  // A Roundup's grid is seeded separately (it needs a Collection minted first). These two are the words:
+  // the introduction and the how-these-were-chosen note. Without them the page is a bare list, which the
+  // 150-word thin-content gate publishes `noindex` -- and ranking is the only thing a Roundup is for
+  // (plans/ROUNDUP_PAGES.md §6). Seeded EMPTY, like every other scaffold, so nothing is put in the
+  // tenant's mouth; builderSections() drops them again if they are never filled.
+  lead_roundup: ["content_block"],
 };
 
 // Hand a freshly created OFFER-LESS page straight to the builder, with its goal's content scaffolds already
@@ -5394,6 +5409,42 @@ function seedShapeElements() {
   for (const type of SHAPE_SEEDS[builderOfferType.value] || []) {
     if (builder.elements.some((element) => element.type === type)) continue;
     builder.elements.push(newElement(type));
+  }
+}
+
+/**
+ * Give a brand-new Roundup the grid it is entirely made of.
+ *
+ * `catalog_grid` is `ui: "internal"` -- it never appears in the Add-content menu, it arrives with the
+ * page. Offer-less pages get theirs from the storefront wizard; a Roundup HAS an offer, so it took the
+ * ordinary landing-page path and arrived with no grid, no Collection, and no way for the tenant to add
+ * either. The page was unreachable in the product while every piece behind it worked.
+ *
+ * The Collection is minted FIRST and the page embeds it by id, exactly as the storefront flow does: the
+ * Collection is the grid's source of truth, and a page embedding an id that was never saved resolves to
+ * an empty grid. Starts `manual` with no members -- the tenant picks pages in the builder -- which is
+ * also the only rule a counted headline is offered on, since `all` membership moves on its own.
+ *
+ * Returns false only when the mint failed, so the caller can stop rather than open a builder onto a grid
+ * that cannot resolve.
+ */
+async function seedRoundupCollection() {
+  if (builderOfferType.value !== "lead_roundup") return true;
+  if (builder.catalog_grid.collection_id) return true;          // editing one that already has its own
+  try {
+    const saved = await collectionsStore.save({
+      document_type: "collection",
+      site_id: selectedSiteId.value || "",
+      name: form.name || selectedOffer.value?.name || "Roundup",
+      rule: "manual",
+      members: [],
+      presentation: { layout: "listicle" },
+    });
+    builder.catalog_grid.collection_id = saved.collection_id;
+    return true;
+  } catch (error) {
+    wizardError.value = error.message || "Could not create the list for this page.";
+    return false;
   }
 }
 
@@ -5739,6 +5790,13 @@ function builderSectionCandidates(intent) {
   // is only a default -- `orderSections` places them by their slots (brand_hero -> identity/10,
   // seller_profile -> identity/20, catalog_grid -> what/30), which is the order the wizard wrote them in.
   sections.push(...offerlessSections(builder.offerless, builder));
+  // A ROUNDUP's grid. It has an offer, so `offerlessSections` above emits nothing for it — and
+  // `catalog_grid` is ui:"internal", so the tenant cannot add one by hand. Without this the page the
+  // whole shape is made of simply never existed (plans/ROUNDUP_PAGES.md §8).
+  if (!builder.offerless && builderOfferType.value === "lead_roundup") {
+    const grid = catalogGridSection(builder);
+    if (grid) sections.push(grid);
+  }
   if (builder.countdown.enabled) {
     sections.push({
       id: "countdown",

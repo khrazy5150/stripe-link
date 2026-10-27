@@ -95,6 +95,15 @@ class BuilderParityTests(unittest.TestCase):
         # disagreed with the CTA's derivation whenever the intent came from the product.
         self.assertIn('offerIntent(offer) === "lead_gen"', body)
         self.assertIn("LEAD_COMPOSITIONS[action]", body)
+        # And the MAP itself, not just the lookup. `register_event` was absent from the JS copy from the
+        # day it shipped until 2026-10-27: it fell through to the "lead_capture" default, so the builder
+        # composed a webinar page as a squeeze page while the renderer composed it as `lead_event`. This
+        # test's comment already claimed to pin the map; checking only that the lookup was written is how
+        # a mirror drifts in plain sight.
+        from stripe_link.domain.composition import LEAD_COMPOSITIONS
+        js_map = re.search(r"const LEAD_COMPOSITIONS = \{(.*?)\n\};", BUILDER, re.S).group(1)
+        mirrored = dict(re.findall(r"^  (\w+): \"(\w+)\",", js_map, re.M))
+        self.assertEqual(mirrored, dict(LEAD_COMPOSITIONS))
         # No longer returns a literal "lead_gen": the ACTION picks one of four shapes, with the capture
         # page as the fallback so an offer that names no action still never gets a checkout page.
         self.assertIn('|| "lead_capture"', body)

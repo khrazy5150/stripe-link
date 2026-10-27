@@ -142,8 +142,16 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(BUILDER.count('v-model="breadcrumbOn"'), 1)
 
     def test_the_default_mirrors_the_server(self):
-        self.assertIn('LEAD_COMPOSITION_TYPES = new Set(["lead_capture", "lead_call", "lead_bridge", "lead_social"])',
-                      BUILDER)
+        """The MEMBERS, not the literal line. Pinned as a string, this broke the day the set grew a member
+        and wrapped onto two lines -- a formatting change failing a test about mirroring, while the real
+        drift it was meant to catch (`register_event` missing from the JS map for its whole life) sat
+        there passing."""
+        import re
+
+        from stripe_link.domain.composition import LEAD_COMPOSITIONS
+
+        block = re.search(r"const LEAD_COMPOSITION_TYPES = new Set\(\[(.*?)\]\);", BUILDER, re.S).group(1)
+        self.assertEqual(set(re.findall(r'"(\w+)"', block)), set(LEAD_COMPOSITIONS.values()))
 
     def test_the_builder_default_consults_the_goal_too(self):
         """Otherwise the preview shows a trail the published page will not have, which is the exact

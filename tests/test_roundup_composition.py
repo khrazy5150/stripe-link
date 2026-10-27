@@ -114,3 +114,69 @@ class WhatTheListingPageCarriesTests(unittest.TestCase):
     def test_it_offers_no_call_to_action_of_its_own(self):
         """There is no single thing to do on a Roundup — each entry has its own destination."""
         self.assertEqual(RULES["offer_types"]["lead_roundup"]["allowed_ctas"], [])
+
+
+class TheWizardMustSeedTheGridTests(unittest.TestCase):
+    """A Roundup is made of its grid, and nothing used to give it one.
+
+    `catalog_grid` is `ui: "internal"` — it never appears in the Add-content menu, it arrives with the
+    page. Offer-less pages get theirs from the storefront wizard. A Roundup HAS an offer, so it took the
+    ordinary landing-page path and arrived with no grid, no Collection, and no way for the tenant to add
+    either: the page the whole shape is made of simply never existed, while every piece behind it worked.
+
+    Source assertions, because this is Vue. The behaviour they stand for is the creation flow.
+    """
+
+    BUILDER = ""
+    COMPOSER = ""
+
+    @classmethod
+    def setUpClass(cls):
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+        cls.BUILDER = (root / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+        cls.COMPOSER = (root / "composables" / "pageComposer.js").read_text(encoding="utf-8")
+
+    def test_the_collection_is_minted_before_the_builder_opens(self):
+        """The Collection is the grid's source of truth; a page embedding an id that was never saved
+        resolves to an empty grid."""
+        self.assertIn("async function seedRoundupCollection()", self.BUILDER)
+        self.assertIn("if (!(await seedRoundupCollection())) return;", self.BUILDER)
+
+    def test_it_starts_manual_so_the_count_can_be_offered(self):
+        block = self.BUILDER.split("async function seedRoundupCollection()", 1)[1].split("\n}", 1)[0]
+        self.assertIn('rule: "manual"', block)
+        self.assertIn('layout: "listicle"', block)
+
+    def test_a_failed_mint_stops_rather_than_opening_an_empty_grid(self):
+        block = self.BUILDER.split("async function seedRoundupCollection()", 1)[1].split("\n}", 1)[0]
+        self.assertIn("return false;", block)
+
+    def test_the_grid_is_emitted_on_save_for_a_roundup(self):
+        """`offerlessSections` emits nothing for a page that HAS an offer, which is why this is separate."""
+        self.assertIn('builderOfferType.value === "lead_roundup"', self.BUILDER)
+        self.assertIn("catalogGridSection(builder)", self.BUILDER)
+
+    def test_both_shapes_share_one_grid_emitter(self):
+        """Two copies of this is the drift pattern this codebase keeps paying for."""
+        self.assertIn("export function catalogGridSection(state)", self.COMPOSER)
+        self.assertIn("const grid = catalogGridSection(state);", self.COMPOSER)
+
+    def test_blank_entry_boxes_are_not_persisted_as_authored_copy(self):
+        """An empty string is authored-but-blank — it would suppress the fallback to the page's own words."""
+        block = self.COMPOSER.split("export function catalogGridSection(state)", 1)[1].split("\n}", 1)[0]
+        self.assertIn("String(value || \"\").trim()", block)
+
+    def test_the_layout_and_copy_round_trip(self):
+        """Write-only fields are lost on reload, which reads as the builder discarding the tenant's work."""
+        state = self.COMPOSER.split("export function offerlessState(page)", 1)[1]
+        self.assertIn('layout: grid.layout || ""', state)
+        self.assertIn("entry_copy: { ...(grid.entry_copy || {}) }", state)
+
+    def test_the_page_is_seeded_with_words_not_just_a_list(self):
+        """A bare list is under 150 words, and the thin-content gate publishes that `noindex` — which is
+        the one thing a Roundup exists not to be."""
+        seeds = self.BUILDER.split("const SHAPE_SEEDS = {", 1)[1].split("};", 1)[0]
+        self.assertIn("lead_roundup", seeds)
+        self.assertIn("content_block", seeds)

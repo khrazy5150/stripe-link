@@ -1,6 +1,6 @@
 # Roundup pages
 
-**Status:** **P1–P4 SHIPPED** 2026-10-27. One gap remains: nothing seeds a Roundup's grid at creation — see §8. Design agreed with the author 2026-10-27.
+**Status:** **COMPLETE — P1–P4 SHIPPED** 2026-10-27, creation flow included. Design agreed with the author 2026-10-27.
 
 A Roundup is a **non-transacting listing page**: an ordered set of the tenant's own landing pages, each
 rendered as an entry with an image, a short pitch and a link through to that page, under a headline that
@@ -366,10 +366,23 @@ compares an inline grid against the same grid migrated to a Collection. That tes
 present in one mode and not the other makes a migration that changes nothing look like one that
 changes something. All three modes now emit the same item shape.
 
-**STILL TO BUILD before a tenant can make one unaided:** `catalog_grid` is `ui: "internal"`, so it
-never appears in the Add-content menu — it arrives with the page. Offer-less pages get theirs from the
-storefront wizard. **A Roundup has an offer, so nothing currently seeds its grid or mints its
-Collection.** That creation flow is the last gap, and it is the wizard's job, not the builder's.
+**P4c — the creation flow. SHIPPED 2026-10-27.** `catalog_grid` is `ui: "internal"` and arrives with
+the page; offer-less pages get theirs from the storefront wizard, and a Roundup has an offer, so it
+took the ordinary landing-page path and arrived with no grid, no Collection and no way to add either.
+The page the whole shape is made of never existed, while every piece behind it worked.
+
+`seedRoundupCollection()` now mints a `manual` Collection with `layout: listicle` before the builder
+opens, exactly as the storefront flow mints its own, and returns false on failure so the builder never
+opens onto a grid that cannot resolve. `builderSectionCandidates` emits the grid for a roundup; both
+shapes share one `catalogGridSection()` emitter, and `layout` and `entry_copy` round-trip through
+`offerlessState` so neither is write-only. `SHAPE_SEEDS` seeds a `content_block` for the same reason
+the link-in-bio page needed its seeds: a bare list is under 150 words and publishes `noindex`.
+
+**A drift found on the way, unrelated to Roundup and older:** the builder's `LEAD_COMPOSITIONS` mirror
+was missing `register_event` from the day it shipped, so it fell through to the `lead_capture`
+default — the builder composed every webinar page as a squeeze page while the renderer composed it
+as `lead_event`. The comment above the map claimed a test pinned it; the test only checked that the
+LOOKUP was written. Both maps are now compared member by member.
 
 ---
 
