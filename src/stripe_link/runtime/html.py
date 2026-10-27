@@ -1421,6 +1421,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-catalog-row .sl-catalog-card::before{content:counter(sl-catalog);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;line-height:1;color:var(--sl-price-amount);min-width:2.2rem;text-align:right}",
     "    .sl-catalog-row .sl-catalog-card img{aspect-ratio:1/1;width:12rem}",
     "    .sl-catalog-row .sl-catalog-price{margin:0.4rem 0 0}",
+    "    .sl-catalog-pitch{margin:0.3rem 0 0;font-size:1.5rem;line-height:1.5;color:var(--sl-content-text)}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
     "      .sl-catalog-row .sl-catalog-card img{grid-column:1/-1;width:100%}}",
@@ -7897,6 +7898,24 @@ def render_catalog_grid(
         if not image:
             product = first_offer_product(offer, products_by_id)
             image = str((product.get("images") or [""])[0] if product else "")
+        # THE PITCH, listicle only. A card is a glance and a row is a read: the grid and masonry layouts
+        # stay as they were. Optional, with a fallback, because "very little design" is the goal -- a
+        # tenant who writes nothing still gets a working page (plans/ROUNDUP_PAGES.md open question 2).
+        #
+        # Keyed by PAGE, not offer: the tenant picked a page, and two pages can serve one offer. Falls
+        # back to the offer's own subheadline, then the product's description -- the same ladder
+        # `hero_copy` climbs, so an entry reads as its own page's hero does.
+        pitch_html = ""
+        if layout == "listicle":
+            page_id = str((item or {}).get("page_id") or "")
+            pitch = str((section.get("entry_copy") or {}).get(page_id) or "").strip()
+            if not pitch:
+                pitch = str(presentation.get("subheadline") or "").strip()
+            if not pitch:
+                fallback_product = first_offer_product(offer, products_by_id)
+                pitch = str((fallback_product or {}).get("description") or "").strip()
+            if pitch:
+                pitch_html = f'<p class="sl-catalog-pitch">{escape(pitch)}</p>'
         price_html = ""
         try:
             resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
@@ -7906,6 +7925,7 @@ def render_catalog_grid(
         inner = "\n".join(line for line in [
             (f"        {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
             f'        <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
+            (f"        {pitch_html}" if pitch_html else ""),
             (f"        {price_html}" if price_html else ""),
         ] if line)
         slug = str((item or {}).get("slug") or "").strip()

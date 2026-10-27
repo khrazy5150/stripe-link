@@ -552,6 +552,23 @@
                     <span>Hero Headline</span>
                     <input :value="builder.headline" type="text" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
                   </label>
+                  <!-- STRUCTURES, not finished claims. `{count}` and `{year}` are filled in at publish, so
+                       the number stays true as the list grows; the hook is the tenant's to write. -->
+                  <div v-if="isRoundupPage" class="builder-headline-patterns">
+                    <small class="field-note">
+                      Start from a pattern — <code>{count}</code> becomes the number of items in your list
+                      and <code>{year}</code> the current year, both kept up to date every time you publish.
+                    </small>
+                    <div class="builder-chip-row">
+                      <button
+                        v-for="pattern in roundupHeadlinePatterns"
+                        :key="pattern"
+                        type="button"
+                        class="secondary-action builder-chip"
+                        @click="builder.headline = pattern"
+                      >{{ pattern }}</button>
+                    </div>
+                  </div>
                   <label class="offer-field">
                     <span>Hero Subheadline</span>
                     <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
@@ -762,6 +779,19 @@
                 <!-- Membership is NOT editable here on purpose: the Collection this grid embeds is the source
                      of truth, and the publisher re-resolves it against the Site route map on every publish.
                      Editing the list in two places would let the page and the Collection disagree. -->
+                <label class="offer-field">
+                  <span>Layout</span>
+                  <select v-model="builder.catalog_grid.layout">
+                    <option value="">Use the collection's setting</option>
+                    <option value="grid">Grid — even cards</option>
+                    <option value="masonry">Masonry — tiles of different heights</option>
+                    <option value="listicle">List — one per row, numbered</option>
+                  </select>
+                  <small class="field-note">
+                    Masonry is for browsing: it fills column by column, so the order reads down each column
+                    rather than across. Pick List when the order matters.
+                  </small>
+                </label>
                 <small class="field-note">
                   Which products appear here comes from this page's collection, and the grid refreshes itself
                   every time you publish — a new product page on this Site shows up on its own.
@@ -769,6 +799,22 @@
                     This page has no collection yet, so the grid will not render.
                   </template>
                 </small>
+                <!-- Optional on purpose: a tenant who writes nothing still gets a working page, because each
+                     entry falls back to its own page's subheadline and then its product description. -->
+                <div v-if="roundupEntries.length" class="builder-repeat-list">
+                  <span class="field-label">What to say about each one (optional)</span>
+                  <label v-for="entry in roundupEntries" :key="entry.page_id" class="offer-field">
+                    <span>{{ entry.name }}</span>
+                    <textarea
+                      v-model.trim="builder.catalog_grid.entry_copy[entry.page_id]"
+                      rows="2"
+                      placeholder="Why this one made the list"
+                    ></textarea>
+                  </label>
+                  <small class="field-note">
+                    Leave any of these blank and we use that page's own subheadline instead.
+                  </small>
+                </div>
             </template>
 
             <template v-else-if="sectionEditor.row.editor === 'seller_profile'">
@@ -2805,6 +2851,7 @@ import { useCouponsStore } from "../stores/coupons";
 import { searchableItemText } from "../composables/offerItems";
 import { filterRows } from "../composables/indexedList";
 import { stagesFromSavedOffer } from "../composables/purchaseFlow";
+import compositionRules from "../../../src/stripe_link/composition_rules.json";
 import { useCollectionsStore } from "../stores/collections";
 import SettingsAccordion from "./shared/SettingsAccordion.vue";
 import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
@@ -3056,6 +3103,24 @@ const selectedOfferIsSocialPage = computed(() =>
   selectedOffer.value?.lead_capture_action === "social_redirect"
   || selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
+// A Roundup lists this Site's own pages under a headline that counts itself (plans/ROUNDUP_PAGES.md).
+const isRoundupPage = computed(() => builderOffer.value?.lead_capture_action === "roundup");
+// Read from the SHARED rules file the Python composer uses, so the builder cannot offer a pattern the
+// publisher would not expand.
+const roundupHeadlinePatterns = computed(() => compositionRules.roundup_headlines || []);
+// The entries a pitch can be written for: this grid's Collection members, named. Only MANUAL collections
+// have an authored order to write against -- an `all` collection's membership moves on its own, so a
+// paragraph pinned to one of its pages would outlive the reason it was written.
+const roundupEntries = computed(() => {
+  const collectionId = builder.catalog_grid.collection_id;
+  if (!collectionId || !isRoundupPage.value) return [];
+  const collection = (collectionsStore.collections || []).find((c) => c.collection_id === collectionId);
+  if (!collection || (collection.rule || "manual") !== "manual") return [];
+  return (collection.members || []).map((pageId) => {
+    const page = (pages.value || []).find((p) => p.page_id === pageId);
+    return { page_id: pageId, name: page?.name || pageId };
+  });
+});
 // Which lead action this page's offer performs. The cta TYPE cannot say: one type ("email") backs three.
 // The CTA types that wear the shared panel (render_cta_panel): a phone number, a destination host, a
 // filename. `email` is the inline form and `buy` is the price card -- neither is a panel.
@@ -4246,6 +4311,11 @@ function defaultBuilderForm() {
     catalog_grid: {
       collection_id: "",
       heading: "",
+      // "" means "whatever the Collection says" -- the section only overrides when it has an opinion,
+      // which is the same precedence resolve_category_grids applies at publish.
+      layout: "",
+      // page_id -> the tenant's pitch for that entry. Keyed by PAGE because that is what they picked.
+      entry_copy: {},
     },
     seller_profile: {
       heading: "",

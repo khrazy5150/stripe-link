@@ -388,12 +388,15 @@ def _collection_grid_items(collection: dict[str, Any], entries: dict[str, Any],
     "only real, navigable, published Site pages" guarantee as the other grid modes. `all`/`category` pull from
     the map; `manual` keeps the tenant's ordered page references, dropping any not published on the Site."""
     rule = str(collection.get("rule") or "manual")
+    # `page_id` rides along so a Roundup's per-entry copy can be bound to the page the tenant PICKED
+    # rather than to the offer behind it (plans/ROUNDUP_PAGES.md open question 2). Two pages can serve the
+    # same offer -- a seasonal variant, a second language -- and the pitch belongs to the page.
     if rule == "all":
-        return [{"offer_id": str(e["offer_id"]), "slug": slug}
+        return [{"offer_id": str(e["offer_id"]), "slug": slug, "page_id": str(e.get("page_id") or "")}
                 for slug, e in entries.items() if isinstance(e, dict) and e.get("offer_id")]
     if rule == "category":
         cat = str(collection.get("category") or "")
-        return [{"offer_id": str(e["offer_id"]), "slug": slug}
+        return [{"offer_id": str(e["offer_id"]), "slug": slug, "page_id": str(e.get("page_id") or "")}
                 for slug, e in entries.items()
                 if isinstance(e, dict) and e.get("offer_id") and str(e.get("category") or "") == cat]
     items = []
@@ -401,7 +404,7 @@ def _collection_grid_items(collection: dict[str, Any], entries: dict[str, Any],
         hit = slug_offer_by_page.get(str(page_id))
         if hit:
             slug, offer_id = hit
-            items.append({"offer_id": offer_id, "slug": slug})
+            items.append({"offer_id": offer_id, "slug": slug, "page_id": str(page_id)})
     return items
 
 
@@ -556,6 +559,15 @@ def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None,
         for slug, entry in entries.items()
         if isinstance(entry, dict) and entry.get("offer_id")
     }
+    # The page behind each offer, so a curated grid's items carry `page_id` like every other mode. The
+    # three modes must produce IDENTICAL item shapes -- `test_migration_is_behavior_preserving` compares
+    # an inline grid against the same grid migrated to a Collection, and a field present in one and not
+    # the other would make a migration that changes nothing look like one that changes something.
+    page_by_offer = {
+        str(entry["offer_id"]): str(entry.get("page_id") or "")
+        for slug, entry in entries.items()
+        if isinstance(entry, dict) and entry.get("offer_id")
+    }
     # page_id -> (Site slug, offer_id), for resolving a Collection's ordered page-id members.
     slug_offer_by_page = {
         str(entry["page_id"]): (slug, str(entry["offer_id"]))
@@ -586,14 +598,15 @@ def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None,
         category = str(section.get("category") or "").strip()
         if scope == "all" or category:
             section["items"] = [
-                {"offer_id": str(entry.get("offer_id")), "slug": slug}
+                {"offer_id": str(entry.get("offer_id")), "slug": slug,
+                 "page_id": str(entry.get("page_id") or "")}
                 for slug, entry in entries.items()
                 if isinstance(entry, dict) and entry.get("offer_id")
                 and (scope == "all" or str(entry.get("category") or "") == category)
             ]
         else:  # curated — keep the tenant's order, drop off-Site/unpublished, re-point to the Site slug
             section["items"] = [
-                {"offer_id": oid, "slug": slug_by_offer[oid]}
+                {"offer_id": oid, "slug": slug_by_offer[oid], "page_id": page_by_offer.get(oid, "")}
                 for item in (section.get("items") or [])
                 for oid in [str((item or {}).get("offer_id") or "")]
                 if oid in slug_by_offer

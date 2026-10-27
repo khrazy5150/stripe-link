@@ -1407,7 +1407,11 @@ class CategoryPageTests(unittest.TestCase):
             {"offer_id": "offer_missing", "slug": "/x"},                # not on Site -> dropped
         ]}]}
         resolve_category_grids(page, self._site())
-        self.assertEqual(page["sections"][0]["items"], [{"offer_id": "offer_b", "slug": "/whey"}])
+        # `page_id` rides along on every mode so a Roundup's per-entry copy can be keyed by the page the
+        # tenant picked (plans/ROUNDUP_PAGES.md). The assertion this test is really making is the re-point
+        # and the drop, both unchanged.
+        self.assertEqual(page["sections"][0]["items"],
+                         [{"offer_id": "offer_b", "slug": "/whey", "page_id": "page_b"}])
 
     def test_resolve_curated_grid_preserves_order(self):
         page = {"sections": [{"id": "g", "type": "catalog_grid", "items": [

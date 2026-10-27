@@ -158,3 +158,60 @@ class MasonryCssTests(unittest.TestCase):
 
     def test_the_hover_lift_respects_reduced_motion(self):
         self.assertIn("prefers-reduced-motion:reduce", self.CSS)
+
+
+class PerEntryPitchTests(unittest.TestCase):
+    """The paragraph beside each entry (plans/ROUNDUP_PAGES.md open question 2, resolved).
+
+    Optional, with a fallback, because "very little design" is the goal: a tenant who writes nothing still
+    gets a working page. Keyed by PAGE rather than offer, because the tenant picked a page and two pages
+    can serve the same offer -- a seasonal variant, a second language -- and the pitch belongs to the page.
+    """
+
+    OFFERS = {
+        "o1": {"offer_id": "o1", "name": "Lamp",
+               "presentation": {"headline": "Desk Lamp", "subheadline": "Folds flat, charges by USB."},
+               "items": [{"product_id": "pr1"}]},
+        "o2": {"offer_id": "o2", "name": "Bag", "presentation": {"headline": "Travel Bag"},
+               "items": [{"product_id": "pr2"}]},
+    }
+    PRODUCTS = {"pr1": {"product_id": "pr1", "description": "Product one description."},
+                "pr2": {"product_id": "pr2", "description": "Product two description."}}
+    ITEMS = [{"offer_id": "o1", "slug": "/lamp", "page_id": "p1"},
+             {"offer_id": "o2", "slug": "/bag", "page_id": "p2"}]
+
+    def _pitches(self, layout="listicle", entry_copy=None):
+        import re
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        section = {"type": "catalog_grid", "id": "s1", "items": self.ITEMS, "layout": layout,
+                   "entry_copy": entry_copy or {}}
+        markup = html.render_catalog_grid(section, self.OFFERS, self.PRODUCTS, {})
+        return re.findall(r'sl-catalog-pitch">([^<]*)', markup)
+
+    def test_authored_copy_wins(self):
+        self.assertEqual(self._pitches(entry_copy={"p1": "The one my desk needed.", "p2": "Fits a laptop."}),
+                         ["The one my desk needed.", "Fits a laptop."])
+
+    def test_writing_nothing_falls_back_to_the_pages_own_words(self):
+        """Offer subheadline, then the product description — the same ladder `hero_copy` climbs, so an
+        entry reads the way its own page's hero does."""
+        self.assertEqual(self._pitches(),
+                         ["Folds flat, charges by USB.", "Product two description."])
+
+    def test_one_authored_entry_does_not_suppress_the_others_fallback(self):
+        self.assertEqual(self._pitches(entry_copy={"p1": "Authored."}),
+                         ["Authored.", "Product two description."])
+
+    def test_the_card_layouts_carry_no_pitch(self):
+        """A card is a glance and a row is a read. Grid and masonry are unchanged by this."""
+        for layout in ("grid", "masonry"):
+            self.assertEqual(self._pitches(layout=layout), [], layout)
+
+    def test_copy_is_keyed_by_page_not_offer(self):
+        # Keyed by offer_id, this would match and render. It must not.
+        self.assertEqual(self._pitches(entry_copy={"o1": "Wrong key."})[0],
+                         "Folds flat, charges by USB.")
+
+    def test_the_pitch_is_escaped(self):
+        self.assertEqual(self._pitches(entry_copy={"p1": "Under <$60> & tidy"})[0],
+                         "Under &lt;$60&gt; &amp; tidy")
