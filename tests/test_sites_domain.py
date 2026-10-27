@@ -175,6 +175,12 @@ class SitesDomainTests(unittest.TestCase):
             patch.object(sites_handler, "get_dcv_delegation_uuid", return_value="testuuid"),
             # Default: re-trigger is a no-op (overridden where the retrigger path is under test).
             patch.object(sites_handler, "retrigger_ssl_validation", return_value=None),
+            # The domain exists. Connect refuses a name the registry does not know, and without this the
+            # whole class would be asking live DNS about its fixture domains -- passing today only
+            # because axelmart.com happens to be registered, and failing the day it lapses or the
+            # network is unavailable. Overridden in the tests that are about that refusal.
+            patch.object(sites_handler, "observe_name_servers",
+                         return_value=(["ns1.example-registrar.com"], True)),
         ]
         for p in self._patches:
             p.start()
@@ -234,6 +240,39 @@ class SitesDomainTests(unittest.TestCase):
         router = router.split("if method ==", 1)[0]
         code = "\n".join(l for l in router.splitlines() if not l.strip().startswith("#"))
         self.assertNotIn('os.environ.get("ENVIRONMENT")', code)
+
+    def test_connect_refuses_a_domain_the_registry_does_not_know(self):
+        """`assert_valid_domain` checks the SHAPE of a name, not whether anyone has registered it.
+        skincare.shop -- NXDOMAIN at the .shop registry -- passed it, and would have had a Cloudflare
+        custom hostname created for it: pending forever, verifiable by nobody, ours to clean up."""
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "observe_name_servers", return_value=([], True)), \
+             patch.object(sites_handler, "create_custom_hostname") as created:
+            resp = self._connect({"tenant_id": "t1", "domain": "skincare.shop"})
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertEqual(json.loads(resp["body"])["error"], "domain_not_found")
+        created.assert_not_called()
+        self.assertIsNone(self.repo.get("t1", "site_D1")["hosting"].get("custom_domain"))
+
+    def test_a_failed_lookup_does_not_block_connect(self):
+        """`answered` False means OUR lookup fell over, not that the domain is absent. Refusing there
+        would charge our own flaky DNS to the tenant, who can see perfectly well that their domain
+        exists."""
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "observe_name_servers", return_value=([], False)), \
+             patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
+        self.assertEqual(resp["statusCode"], 201)
+
+    def test_the_registry_is_asked_about_the_root_not_the_subdomain(self):
+        """Nameservers belong to the registered domain. `shop.axelmart.com` has none of its own, so
+        asking about the typed name would refuse every subdomain anyone ever connected."""
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "observe_name_servers",
+                          return_value=(["ns1.example-registrar.com"], True)) as looked, \
+             patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
+        self.assertEqual(looked.call_args.args[0], "axelmart.com")
 
     def test_connect_creates_hostname_and_returns_dns_instructions(self):
         self.repo.put(base_site())

@@ -32,6 +32,8 @@ from stripe_link.domain.custom_domains import (
     is_apex_domain,
     normalize_domain,
     normalize_route_path,
+    observe_name_servers,
+    registrable_root,
     retrigger_ssl_validation,
 )
 
@@ -971,6 +973,19 @@ def connect_domain(event, repository, site_id):
         assert_valid_domain(domain)
     except CustomDomainError as exc:
         return error_response(exc.message, status_code=exc.status_code, code="invalid_domain")
+    # A DOMAIN THAT DOES NOT EXIST. `assert_valid_domain` checks the SHAPE of the name, not whether
+    # anyone has registered it, so skincare.shop -- NXDOMAIN at the .shop registry -- passed it and would
+    # have had a Cloudflare custom hostname created for it: pending forever, verifiable by nobody, and
+    # ours to clean up. Same orphan the managed-DNS gate refuses to create a zone for.
+    #
+    # Only a DEFINITE answer refuses. `observe_name_servers` returns `(values, answered)`, and an empty
+    # list with `answered` False means our lookup fell over, not that the domain is absent -- blocking
+    # there would charge our own flaky DNS to the tenant.
+    name_servers, answered = observe_name_servers(registrable_root(domain))
+    if answered and not name_servers:
+        return error_response(
+            "We cannot find this domain. It has no nameservers at all, which usually means the name is "
+            "misspelled or not registered yet.", code="domain_not_found")
     homepage_id = _ensure_homepage(site, body.get("homepage_page_id"))
     if not homepage_id:
         return error_response("Choose which page your domain should show as its homepage.", code="homepage_required")

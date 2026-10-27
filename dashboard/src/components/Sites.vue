@@ -559,7 +559,7 @@
               </div>
 
               <div v-if="dnsChoice !== 'managed'" class="button-row">
-                <button type="button" class="primary-action" :disabled="domainBusy || !domainForm.domain || (!siteHasHomepage && !domainForm.homepage)" @click="connectDomain">
+                <button type="button" class="primary-action" :disabled="domainBusy || !domainForm.domain || domainUnregistered || (!siteHasHomepage && !domainForm.homepage)" @click="connectDomain">
                   {{ domainBusy ? "Connecting…" : "Connect domain" }}
                 </button>
               </div>
@@ -1109,6 +1109,10 @@ const managedFound = computed(() => detectionSummary(managedDetection.value));
 // it does not, one because we could not ask. Neither leaves anything useful to say about its DNS.
 const domainNotFound = computed(() =>
   ["undelegated", "unreadable"].includes(managedDetection.value?.reason));
+// Blocking is narrower than silencing, deliberately. `undelegated` is a DEFINITE answer -- the registry
+// says there is no such name -- while `unreadable` is our own lookup failing, and refusing to connect a
+// perfectly good domain because our DoH call timed out would be our bug charged to the tenant.
+const domainUnregistered = computed(() => managedDetection.value?.reason === "undelegated");
 
 // MANAGED DNS IS ALWAYS THE WHOLE DOMAIN. The server already normalises -- `www.example.com` creates a
 // zone for `example.com` -- but a backstop the screen contradicts is a backstop that confuses: the box
