@@ -1,6 +1,6 @@
 # Roundup pages
 
-**Status:** **P1 SHIPPED** 2026-10-27. P2–P4 planned. Design agreed with the author 2026-10-27.
+**Status:** **P1 + P2 SHIPPED** 2026-10-27. P3–P4 planned. Design agreed with the author 2026-10-27.
 
 A Roundup is a **non-transacting listing page**: an ordered set of the tenant's own landing pages, each
 rendered as an entry with an image, a short pitch and a link through to that page, under a headline that
@@ -288,8 +288,26 @@ hierarchy is built on, and a layout that rendered beautiful unlinked tiles would
 quietly costing the Site its linking. Unknown and absent layouts both fall back to `grid`, so every
 Collection written before this renders exactly as it did.
 
-**P2 — the reverse cascade.** §5. Independently valuable — every Collection embed is stale today, not
-just counted ones. **Must land before P3**, or the counted title is a lie.
+**P2 — the reverse cascade. SHIPPED 2026-10-27.** Writing or deleting a Collection now re-renders the
+PUBLISHED pages that embed it: `pages_embedding_collection` finds them, and each is re-put so the publish
+stream fires. Drafts are skipped — no artifact to go stale, and they resolve the collection fresh when
+they do publish. Best-effort per page, after the Collection's own write, so a failed re-render never
+costs the tenant their edit. 13 tests in `tests/test_collection_reverse_cascade.py`, asserting on the
+page WRITE rather than a patched helper, because the write is what fires the stream.
+
+Two things building it taught:
+
+- **The finder lives in `handlers/collections.py`, not `runtime/publishing.py` where it belongs.**
+  Importing the publish module made the function statically reach three further tables and a bucket it
+  never touches, and the grant tests correctly demanded all of them. Likewise the page re-put is written
+  out rather than imported from `handlers.sites`, which would have dragged in Stripe keys, user profiles
+  and six more tables for three lines. Both are deliberate; both are commented at the site.
+- **`rule: all` and `category` collections have a SECOND staleness this does not fix.** Their membership
+  changes when *pages* change, not when the Collection does — publishing a new offer page silently
+  changes what an `all` collection contains, and nothing re-renders its readers. P2 closes the
+  Collection-write direction only. **This matters for P4**: a counted headline on an `all`-rule Roundup
+  would still drift. Either restrict the count to `manual` collections, or add the page-publish
+  direction too. Unresolved — see open question 5.
 
 **P3 — the `roundup` action.** The enum entry, the composition, the wizard card, the two required text
 fields.
@@ -320,6 +338,12 @@ pattern picker.
    could work under about $25 and not above it — and a Roundup is a browsing page, where the reader has
    not yet chosen anything.
 
-4. **How many entries before the page stops being good?** The reference has 88 and is the worse for it.
+4. **Does the count work on `all`/`category` collections?** P2 re-renders embedders when the COLLECTION
+   is written. An `all`-rule collection changes membership when a *page* publishes, which is a different
+   trigger and is not wired. Options: restrict `{count}` to `manual` collections, where the tenant's edit
+   is the only thing that changes the list; or cascade from page publish as well, which is a wider fan-out
+   and needs its own termination argument. Decide before P4.
+
+5. **How many entries before the page stops being good?** The reference has 88 and is the worse for it.
    `numbered_list` already has a `NUMBERED_LIST_MAX`. Decide whether a Roundup gets a cap, a warning, or
    nothing.

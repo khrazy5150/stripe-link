@@ -1021,6 +1021,9 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           COLLECTIONS_TABLE: !Ref CollectionsTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          # Writing a Collection re-renders the published pages that embed it, by re-putting each page
+          # so the publish stream fires (plans/ROUNDUP_PAGES.md §5).
+          PAGES_TABLE: !Ref PagesTable
       FunctionName: !Sub "${ProjectPrefix}-collections-api-${Environment}"
       CodeUri: src/
       Handler: handlers.collections.handler
@@ -1031,6 +1034,9 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CollectionsTable
+        # Read to find the embedders, write to re-put them — the re-put IS the re-render trigger.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PagesTable
       Events:
         CollectionsCreate:
           Type: Api
