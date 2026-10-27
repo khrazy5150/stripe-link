@@ -432,7 +432,18 @@ class OfferedOnlyAfterCheckingTests(unittest.TestCase):
         self.assertIn('v-if="managedDetection?.eligible"', SITES_VUE)
 
     def test_detection_runs_from_the_domain_watcher_not_only_a_button(self):
-        self.assertIn("readMyDns(domain);", SITES_VUE)
+        self.assertIn("setTimeout(() => readMyDns(domain), 600);", SITES_VUE)
+
+    def test_the_provider_lookup_waits_for_the_domain_to_be_real(self):
+        """They used to fire side by side, and the browser's own DoH call beats our round trip -- so a
+        nonsense domain painted "we can't tell whether your DNS provider..." and retracted it a moment
+        later for "We cannot find this domain". Asking who runs the DNS for an unregistered name is a
+        question with no subject."""
+        self.assertIn('if (res?.reason !== "undelegated") await detectDnsProvider(name, { advise: true });',
+                      SITES_VUE)
+
+    def test_the_watcher_no_longer_races_them(self):
+        self.assertNotIn("detectDnsProvider(domain, { advise: true });\n    readMyDns(domain);", SITES_VUE)
 
     def test_the_lookup_is_race_guarded(self):
         """It runs while someone is typing, so an earlier slow answer must not overwrite a later one --

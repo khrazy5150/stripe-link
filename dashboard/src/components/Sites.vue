@@ -1204,11 +1204,21 @@ async function readMyDns(domain) {
     const res = await store.startManagedDns(editing.value.site_id, name);
     if (token !== detectionLookup) return;        // a later keystroke already won
     managedDetection.value = res;
+    // DOES IT EXIST, THEN EVERYTHING ELSE. These two lookups used to run side by side from the watcher,
+    // and the browser's own DoH call is faster than our round trip -- so a nonsense domain painted
+    // "we can't tell whether your DNS provider can point a root domain at an external host" and then
+    // retracted it a moment later in favour of "We cannot find this domain". Asking about the DNS
+    // provider of a name that is not registered is a question with no subject.
+    // AWAITED, so "Checking this domain's DNS…" covers both lookups rather than clearing between them
+    // and leaving the panel blank while the second one runs.
+    if (res?.reason !== "undelegated") await detectDnsProvider(name, { advise: true });
   } catch (err) {
     if (token !== detectionLookup) return;
     // Deliberately NOT surfaced as an error: this runs while someone is typing, and a failed lookup
     // means only that we cannot offer managed DNS yet -- the ordinary custom-domain route is untouched.
     managedDetection.value = null;
+    // Detection unavailable, so nothing contradicts the apex advice: fall back to offering it.
+    await detectDnsProvider(name, { advise: true });
   } finally {
     if (token === detectionLookup) domainChecking.value = false;
   }
@@ -1450,10 +1460,9 @@ watch(() => domainForm.domain, (domain) => {
   if (!domain || !domain.includes(".")) return;
   // Debounced: this runs while someone is typing a domain name, one lookup per pause rather than per key.
   domainChecking.value = true;
-  adviceTimer = setTimeout(() => {
-    detectDnsProvider(domain, { advise: true });
-    readMyDns(domain);
-  }, 600);
+  // One call, not two in parallel. `readMyDns` runs the provider lookup itself once it knows the domain
+  // is real, which is the only order in which the two answers cannot contradict each other on screen.
+  adviceTimer = setTimeout(() => readMyDns(domain), 600);
 });
 const openStep = ref(0);
 const copied = ref("");
