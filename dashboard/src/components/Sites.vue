@@ -379,7 +379,13 @@
               <!-- Tone carries a real distinction: orange means "this provider cannot do it", blue means
                    "we do not know and here is how to find out". Hardcoding `warning` made the second one
                    look like a failure the tenant had caused. -->
-              <div v-if="connectAdvice && dnsChoice !== 'managed'"
+              <!-- NOT WHEN THE DOMAIN ITSELF IS IN DOUBT. Apex advice answers "how do I point this
+                   domain at you", which presupposes there is a domain. skincare.shop -- NXDOMAIN at the
+                   .shop registry -- drew "We cannot find this domain" and then, directly underneath,
+                   "we can't tell whether your DNS provider can point a root domain at an external host"
+                   about a provider it does not have, offering "Use www.skincare.shop" as the fix. The
+                   first banner is the whole answer; anything after it is noise built on a false premise. -->
+              <div v-if="connectAdvice && dnsChoice !== 'managed' && !domainNotFound"
                    :class="['keys-status-banner', connectAdvice.tone || 'warning', 'apex-advice']">
                 <!-- The conditional lead-in only makes sense while keeping their own DNS is a CHOICE.
                      For a domain we will not move it is the only route, and "if" implies an alternative
@@ -1099,6 +1105,10 @@ let managedStartedAt = 0;
 const managedState = computed(() =>
   managedDnsState(managedZone.value, managedReview.value, managedDetection.value));
 const managedFound = computed(() => detectionSummary(managedDetection.value));
+// Both reasons mean "we have not established that this domain exists" -- one because the registry says
+// it does not, one because we could not ask. Neither leaves anything useful to say about its DNS.
+const domainNotFound = computed(() =>
+  ["undelegated", "unreadable"].includes(managedDetection.value?.reason));
 
 // MANAGED DNS IS ALWAYS THE WHOLE DOMAIN. The server already normalises -- `www.example.com` creates a
 // zone for `example.com` -- but a backstop the screen contradicts is a backstop that confuses: the box

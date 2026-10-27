@@ -455,3 +455,21 @@ class ApexAdviceNeedsARealDetectionTests(unittest.TestCase):
 
     def test_the_fallback_to_the_default_provider_is_gone(self):
         self.assertNotIn("apexAdvice(domain, detected || dnsProvider.value)", SITES_VUE)
+
+
+class NoApexAdviceForADomainThatMayNotExistTests(unittest.TestCase):
+    """Apex advice answers "how do I point this domain at you", which presupposes a domain.
+
+    skincare.shop -- NXDOMAIN straight from the .shop registry -- drew "We cannot find this domain" and
+    then, directly underneath, "we can't tell whether your DNS provider can point a root domain at an
+    external host" about a provider it does not have, with "Use www.skincare.shop" offered as the fix:
+    a www subdomain of a name that is not registered.
+    """
+
+    def test_the_apex_banner_is_suppressed(self):
+        self.assertIn("v-if=\"connectAdvice && dnsChoice !== 'managed' && !domainNotFound\"", SITES_VUE)
+
+    def test_both_doubtful_reasons_count(self):
+        """One says the registry has no such name, the other says we could not ask. Neither leaves
+        anything true to say about the domain's DNS provider."""
+        self.assertIn('["undelegated", "unreadable"].includes(managedDetection.value?.reason)', SITES_VUE)
