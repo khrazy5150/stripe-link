@@ -1,6 +1,6 @@
 # Roundup pages
 
-**Status:** **P1 + P2 SHIPPED** 2026-10-27. P3–P4 planned. Design agreed with the author 2026-10-27.
+**Status:** **P1 + P2 + P3 SHIPPED** 2026-10-27. P4 planned. Design agreed with the author 2026-10-27.
 
 A Roundup is a **non-transacting listing page**: an ordered set of the tenant's own landing pages, each
 rendered as an entry with an image, a short pitch and a link through to that page, under a headline that
@@ -309,8 +309,25 @@ Two things building it taught:
   would still drift. Either restrict the count to `manual` collections, or add the page-publish
   direction too. Unresolved — see open question 5.
 
-**P3 — the `roundup` action.** The enum entry, the composition, the wizard card, the two required text
-fields.
+**P3 — the `roundup` action. SHIPPED 2026-10-27.** `roundup` joins `LEAD_CAPTURE_ACTIONS`, maps to the
+`lead_roundup` composition, gets rules in `composition_rules.json` (which the dashboard imports, so
+builder and renderer cannot drift), a wizard card, a glyph and form copy. 13 tests in
+`tests/test_roundup_composition.py`.
+
+Two traps found building it, both of which would have shipped looking correct:
+
+- **The composition's NAME decides whether the page transacts.** `render_coupon` computes
+  `transacts = not composition_key(offer).startswith("lead_")`, so a composition called `roundup` would
+  have been handed a checkout href on a page that sells nothing. It is named `lead_roundup`, and a test
+  now asserts that every lead action maps to a name starting `lead_`.
+- **`THIN_BY_DESIGN` is derived from `LEAD_COMPOSITIONS.values()`**, so joining that map silently
+  exempted the Roundup from the thin-content WARNING — while the demotion in `publishing.py` happened
+  anyway. Silently unranked with the one explanation switched off. `lead_roundup` is now subtracted from
+  that set explicitly, which is the only lead shape that is.
+
+`rating` is in neither `sections` nor `excludes`, which is how "available but never volunteered" from §7
+is expressed in the rules file. Also fixed in passing: the `teal` tone the Register-for-an-event card has
+referenced since it shipped had no CSS rule, so that icon rendered untinted beside its siblings.
 
 **P4 — the title engine.** `{count}` / `{year}`, plural rule, propagation to all four surfaces, the
 pattern picker.

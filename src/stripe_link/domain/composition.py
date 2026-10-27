@@ -259,6 +259,10 @@ LEAD_COMPOSITIONS = {
     "social_redirect": "lead_social",
     # A session page is a capture page that must also say WHEN (plans/WEBINAR.md).
     "register_event": "lead_event",
+    # NAMED `lead_` ON PURPOSE. `render_coupon` decides whether a page transacts with
+    # `composition_key(offer).startswith("lead_")`, so a composition called "roundup" would have been
+    # handed a checkout href on a page that sells nothing (plans/ROUNDUP_PAGES.md §2a).
+    "roundup": "lead_roundup",
 }
 # An offer that says lead_gen without naming an action still must not get a checkout page. The capture
 # shape is the safe default: it is the only one that keeps a form, so nothing the tenant typed is lost.
@@ -405,7 +409,14 @@ def is_lead_composition(offer: dict[str, Any]) -> bool:
 # Pages whose FORM is short. Being brief is what these pages ARE, not a defect in them, so the thin-content
 # nudge is skipped for all of them (plans/LEAD_GEN_PAGES.md, and the tip jar for the same reason: there is no
 # product to describe, so "add a specifications table or condition details" is advice that cannot be taken).
-THIN_BY_DESIGN = set(LEAD_COMPOSITIONS.values()) | {"tip_jar"}
+# A ROUNDUP IS THE EXCEPTION, and it is the whole point of it. Every other lead shape is short because
+# being short is what it IS -- a squeeze page asks one thing, a link hub is a list of links -- so the
+# notice is suppressed because padding them would damage the page to silence it. A Roundup is the
+# opposite: it must carry an introduction and a note on how the products were chosen, or the
+# thin-content gate publishes it noindex and it never ranks, which is the one thing it exists to do.
+# Leaving it in this set would have suppressed the single warning that explains why
+# (plans/ROUNDUP_PAGES.md §6).
+THIN_BY_DESIGN = (set(LEAD_COMPOSITIONS.values()) - {"lead_roundup"}) | {"tip_jar"}
 
 
 def is_thin_by_design(offer: dict[str, Any]) -> bool:

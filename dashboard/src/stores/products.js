@@ -661,6 +661,11 @@ const LEAD_FORM_COPY = {
   // Addressed to someone deciding whether to turn up, not to someone buying anything: a webinar is a free
   // event, and the ask is an hour of their attention.
   register_event: { title: "Save your seat", description: "Register and we'll send you the link." },
+  // A Roundup has no form and no single button -- each entry links to its own page -- so these two
+  // required fields are the page's INTRODUCTION, which is also the content the thin-content gate counts.
+  // Phrased as a prompt the tenant will overwrite rather than copy a visitor would ever read.
+  roundup: { title: "What this list is for",
+             description: "Say who these picks are for and how you chose them." },
 };
 
 function leadCaptureShape(action = {}) {

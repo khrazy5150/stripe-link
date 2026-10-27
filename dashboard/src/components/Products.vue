@@ -931,6 +931,9 @@ const leadActions = [
   { action: "external_url", label: "Go to URL", description: "Send the visitor to an external page.", tone: "red" },
   { action: "social_redirect", label: "Social page", description: "Direct the visitor to a social profile.", tone: "pink" },
   { action: "register_event", label: "Register for an event", description: "Save the visitor a seat at a live session.", tone: "teal" },
+  // Captures nothing, like "Go to URL" and "Social page" above it: this list is in practice "what does
+  // this non-transacting page do" (plans/ROUNDUP_PAGES.md §2a).
+  { action: "roundup", label: "Roundup", description: "List your own landing pages under a headline that counts itself.", tone: "indigo" },
 ];
 
 // `event_id` is in the default shape so the field exists before anything is chosen — a v-model binding

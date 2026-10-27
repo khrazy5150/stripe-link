@@ -18,6 +18,8 @@ const PATHS = {
   external_url: "M8.25 8.25h-3v10.5h10.5v-3m-4.5-3 7.5-7.5m0 0h-4.5m4.5 0v4.5",
   // A calendar with a seat marked: registering is capturing, plus a date.
   register_event: "M6.75 3.75v3m10.5-3v3M4.5 8.25h15m-15 0v10.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V8.25m-15 0h15M9.75 13.5l1.5 1.5 3-3",
+  // A numbered stack: rows with a leading marker, which is what a Roundup renders.
+  roundup: "M4.5 6.75h2m-2 5.25h2m-2 5.25h2M9.75 6.75h9.75M9.75 12h9.75M9.75 17.25h9.75",
   social_redirect: "M7.5 12a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm13.5-5.25a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm0 10.5a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0ZM7.1 11l9.3-3.25M7.1 13l9.3 3.25",
 };
 

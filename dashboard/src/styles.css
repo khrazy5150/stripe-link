@@ -1741,6 +1741,10 @@ fieldset input[type="radio"] {
 .lead-action-icon.red { background: #fee2e2; color: #b45309; }
 .lead-action-icon.lime { background: #ecfccb; color: #4d7c0f; }
 .lead-action-icon.pink { background: #fce7f3; color: #be185d; }
+/* `teal` has been referenced by the Register-for-an-event card since it shipped with no rule to match, so
+   that icon rendered on the bare container while every sibling had a tint. Added here with indigo. */
+.lead-action-icon.teal { background: #ccfbf1; color: #0f766e; }
+.lead-action-icon.indigo { background: #e0e7ff; color: #4338ca; }
 
 .lead-selected-check {
   position: absolute;

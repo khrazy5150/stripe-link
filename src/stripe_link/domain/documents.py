@@ -811,6 +811,10 @@ LEAD_CAPTURE_ACTIONS = frozenset({
     # A seat at a scheduled session (plans/WEBINAR.md). A capture action with a DATE attached: it collects
     # the same fields, and the thing that makes it different is the event it registers for.
     "register_event",
+    # A listing of the tenant's own landing pages under a headline that counts itself
+    # (plans/ROUNDUP_PAGES.md). It captures nothing -- like `external_url` and `social_redirect`, which
+    # are already here -- so this enum is in practice "what does this NON-TRANSACTING page do".
+    "roundup",
 })
 
 
