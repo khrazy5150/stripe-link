@@ -376,7 +376,11 @@
                    "you can't do that" about a limitation one of the two cards removes entirely. Offer
                    the choice first; qualify the second option afterwards. It vanishes once managed DNS
                    is chosen, because there the apex is exactly what works. -->
-              <div v-if="connectAdvice && dnsChoice !== 'managed'" class="keys-status-banner warning apex-advice">
+              <!-- Tone carries a real distinction: orange means "this provider cannot do it", blue means
+                   "we do not know and here is how to find out". Hardcoding `warning` made the second one
+                   look like a failure the tenant had caused. -->
+              <div v-if="connectAdvice && dnsChoice !== 'managed'"
+                   :class="['keys-status-banner', connectAdvice.tone || 'warning', 'apex-advice']">
                 <!-- The conditional lead-in only makes sense while keeping their own DNS is a CHOICE.
                      For a domain we will not move it is the only route, and "if" implies an alternative
                      that is not on offer. -->

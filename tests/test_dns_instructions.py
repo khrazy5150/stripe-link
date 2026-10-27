@@ -176,8 +176,14 @@ class ProviderDetectionTests(unittest.TestCase):
     def test_an_unclassified_provider_is_not_told_to_give_up(self):
         # DigitalOcean and cPanel are deliberately unverified either way. The harmless failure is to show
         # the generic ALIAS instruction; the harmful one is to tell someone their domain cannot work.
+        # Updated 2026-10-27: these now get explicit "we cannot tell, here is how to check" guidance
+        # rather than silence. The INTENT of this test is unchanged and is what is asserted -- none of
+        # them is told their domain cannot work.
         for provider in ("digitalocean", "cpanel", ""):
-            self.assertIsNone(self._advice("coderbay.net", provider), provider)
+            advice = self._advice("coderbay.net", provider)
+            self.assertIsNotNone(advice, provider)
+            self.assertEqual(advice["tone"], "info", provider)
+            self.assertNotIn("can't be pointed at an external host", advice["reason"], provider)
 
     def test_an_unrecognised_provider_does_not_guess(self):
         # Falls through to the generic apex instruction rather than asserting someone's DNS is Route 53.
@@ -372,3 +378,63 @@ class ApexRedirectStepTests(unittest.TestCase):
         self.assertIn("apexRedirectStep", vue)
         self.assertIn('statusText: "Optional"', vue)
         self.assertIn("rec.instructions", vue)
+
+
+def _apex(domain, provider):
+    """`apexAdvice` for one domain/provider, run through node like everything else here."""
+    script = f"""
+    import {{ apexAdvice }} from {json.dumps(str(MODULE))};
+    console.log(JSON.stringify(apexAdvice({json.dumps(domain)}, {json.dumps(provider)})));
+    """
+    result = subprocess.run(["node", "--input-type=module", "-e", script],
+                            capture_output=True, text=True, cwd=ROOT, timeout=60)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    return json.loads(result.stdout)
+
+
+class ApexAdviceForUnknownProvidersTests(unittest.TestCase):
+    """Three categories, not two.
+
+    `APEX_INCAPABLE` and "everything else" used to be complements, which equated "we verified this works"
+    with "we have no idea" -- and the second group is much the larger one. A tenant on Bluehost,
+    DreamHost, a cPanel reseller or any vanity-nameserver host got silence, which reads as "nothing to
+    worry about" and left them with no apex guidance at all.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if subprocess.run(["node", "--version"], capture_output=True).returncode != 0:
+            raise unittest.SkipTest("node is not available")
+
+    def test_providers_that_cannot_do_it_still_warn(self):
+        for provider in ("route53", "azure", "godaddy"):
+            advice = _apex("example.com", provider)
+            self.assertEqual(advice["tone"], "warning", provider)
+            self.assertIn("can't be pointed at an external host", advice["reason"], provider)
+
+    def test_verified_capable_providers_stay_silent(self):
+        # Cloudflare flattens and Namecheap has ALIAS; saying "we cannot tell" would be false.
+        for provider in ("cloudflare", "namecheap"):
+            self.assertIsNone(_apex("example.com", provider), provider)
+
+    def test_unverified_providers_are_told_how_to_check(self):
+        """cPanel is the case that proves the category is needed: its apex support depends on whether
+        the host runs PowerDNS with `expand-alias` enabled, so no answer is true of every cPanel host."""
+        for provider in ("digitalocean", "cpanel"):
+            advice = _apex("example.com", provider)
+            self.assertEqual(advice["tone"], "info", provider)
+            self.assertIn("ALIAS or ANAME option in your DNS editor", advice["fix"], provider)
+
+    def test_an_undetected_provider_is_not_named(self):
+        advice = _apex("example.com", "")
+        self.assertIn("your DNS provider", advice["reason"])
+        # The picker's catch-all label is a form hint and reads as nonsense mid-sentence.
+        self.assertNotIn("Other / full name", advice["reason"])
+
+    def test_unknown_still_offers_the_www_fallback(self):
+        self.assertEqual(_apex("example.com", "")["suggestion"], "www.example.com")
+
+    def test_a_subdomain_gets_no_apex_advice_at_all(self):
+        for provider in ("route53", "cpanel", ""):
+            self.assertIsNone(_apex("www.example.com", provider), provider)

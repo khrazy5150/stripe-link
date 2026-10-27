@@ -70,6 +70,30 @@ const NS_PATTERNS = [
  *  DigitalOcean and cPanel sit in that unclassified group deliberately -- not verified either way. */
 const APEX_INCAPABLE = new Set(["route53", "azure", "godaddy"]);
 
+/** Providers we have VERIFIED can point a root domain at an external host, and so say nothing about.
+ *
+ *  Separating this from "everything not in APEX_INCAPABLE" is the whole point. Those two sets used to be
+ *  complements, which quietly equated "we know this works" with "we have no idea" -- and the second group
+ *  is much the larger one. A tenant on Bluehost, DreamHost, a cPanel reseller or any vanity-nameserver
+ *  host got silence, which reads as "nothing to worry about" and left them with no apex guidance at all.
+ *
+ *  Anything in NEITHER set is now unknown, and unknown gets told how to find out. That is a real answer:
+ *  we cannot inspect their DNS editor, but they can, and ALIAS/ANAME is a one-look question. cPanel is
+ *  the case that proves the category is needed -- its apex support depends on whether the host runs
+ *  PowerDNS with `expand-alias` enabled, so it has no answer that is true of every cPanel host.
+ *
+ *  Google Cloud DNS is in here on an earlier verification -- it has an apex ALIAS, reachable via
+ *  gcloud/API -- and stays on it. "We can't tell" would be a false statement about a provider somebody
+ *  already checked. */
+const APEX_CAPABLE = new Set(["cloudflare", "namecheap", "googlecloud"]);
+
+/** The provider's name for prose. `dnsProvider` falls back to the picker's catch-all entry, whose label
+ *  ("Other / full name") is a form hint and reads as nonsense in a sentence. */
+function providerProse(providerId) {
+  const provider = DNS_PROVIDERS.find((p) => p.id === providerId);
+  return provider && provider.id !== "other" ? provider.label : "your DNS provider";
+}
+
 export function detectProvider(nameservers) {
   for (const ns of nameservers || []) {
     const host = String(ns || "").trim().toLowerCase();
@@ -140,9 +164,23 @@ export async function lookupNameservers(domain, { fetchFn = fetch } = {}) {
 export function apexAdvice(domain, providerId) {
   const name = String(domain || "").trim().toLowerCase().replace(/^\.+|\.+$/g, "");
   if (!name || !name.includes(".") || name !== rootDomain(name)) return null;
-  if (!APEX_INCAPABLE.has(providerId)) return null;
+  if (APEX_CAPABLE.has(providerId)) return null;        // flattening or ALIAS, confirmed: nothing to say
+  if (!APEX_INCAPABLE.has(providerId)) {
+    // UNKNOWN, said out loud. Not a warning -- it is a question with a one-look answer, and the tenant
+    // is the only one who can look. `tone` keeps it out of the orange banner that means "you cannot".
+    return {
+      tone: "info",
+      suggestion: `www.${name}`,
+      reason: `We can't tell whether ${providerProse(providerId)} can point a root domain at an `
+            + `external host. That needs an ALIAS, ANAME or CNAME-flattening record, and not every `
+            + `provider has one.`,
+      fix: `Look for an ALIAS or ANAME option in your DNS editor. If it is there, use it to point `
+         + `${name} at us. If it is not, use www.${name} instead — that always works.`,
+    };
+  }
   const provider = dnsProvider(providerId);
   return {
+    tone: "warning",
     suggestion: `www.${name}`,
     reason: `The apex domain (${name}) can't be pointed at an external host from ${provider.label}. `
           + `Use www.${name} instead.`,
