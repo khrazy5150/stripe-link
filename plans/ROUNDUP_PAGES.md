@@ -1,6 +1,6 @@
 # Roundup pages
 
-**Status:** **P1–P4 SHIPPED** 2026-10-27 (P4 backend; the builder affordances are the remaining work — see §8). Design agreed with the author 2026-10-27.
+**Status:** **P1–P4 SHIPPED** 2026-10-27. One gap remains: nothing seeds a Roundup's grid at creation — see §8. Design agreed with the author 2026-10-27.
 
 A Roundup is a **non-transacting listing page**: an ordered set of the tenant's own landing pages, each
 rendered as an entry with an image, a short pitch and a link through to that page, under a headline that
@@ -348,14 +348,28 @@ The five headline patterns live in `composition_rules.json` as `roundup_headline
 already imports. They are structures — `{count} {things} for {audience}` — never finished claims, and a
 test asserts none of them ships an adjective on the tenant's behalf.
 
-**STILL TO BUILD, and the page is not usable end to end without it:**
+**P4b — per-entry copy and the builder controls. SHIPPED 2026-10-27.**
 
-- **The builder affordances.** Nothing yet surfaces the patterns where the headline is edited, and
-  nothing explains the tokens. A tenant today would have to type `{count}` knowing it works.
-- **Per-entry pitch copy** (open question 2's resolution): optional text on the embedding section, bound
-  by `page_id`, falling back to the offer's own description. The composition permits `content_block` for
-  the intro and the selection rationale — which is what the thin-content gate counts — but the paragraph
-  per entry is not wired to the listicle renderer.
+- **Per-entry pitch copy**, open question 2's resolution, is wired. Items now carry `page_id` in all
+  three resolve modes, and the listicle renders `section.entry_copy[page_id]`, falling back to the
+  offer's subheadline and then the product description — the same ladder `hero_copy` climbs, so an
+  entry reads the way its own page's hero does. Grid and masonry are untouched: a card is a glance, a
+  row is a read. Keyed by PAGE, not offer, because two pages can serve one offer and the pitch
+  belongs to the page.
+- **Builder controls**: headline patterns as one-click chips under the Hero Headline (roundup pages
+  only, read from the shared rules file so the builder cannot offer a pattern the publisher would not
+  expand), a layout select on the grid section defaulting to "use the collection's setting", and a
+  per-entry copy box for each member of a `manual` collection.
+
+Carrying `page_id` on only the Collection path broke `test_migration_is_behavior_preserving`, which
+compares an inline grid against the same grid migrated to a Collection. That test was right: a field
+present in one mode and not the other makes a migration that changes nothing look like one that
+changes something. All three modes now emit the same item shape.
+
+**STILL TO BUILD before a tenant can make one unaided:** `catalog_grid` is `ui: "internal"`, so it
+never appears in the Add-content menu — it arrives with the page. Offer-less pages get theirs from the
+storefront wizard. **A Roundup has an offer, so nothing currently seeds its grid or mints its
+Collection.** That creation flow is the last gap, and it is the wizard's job, not the builder's.
 
 ---
 
