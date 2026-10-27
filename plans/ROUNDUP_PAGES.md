@@ -324,11 +324,24 @@ pattern picker.
    and a listicle on another without being duplicated. Cheap for `all`/`category`, slightly redundant for
    `manual`. Revisit if a real tenant wants both.
 
-2. **Where does per-entry pitch copy live?** A Collection's members are page references with nowhere to
-   put a paragraph. Either extend the member shape, or author the entries on the embedding **section**
-   with an `offer_id` binding. This plan leans to the section — the pitch is page-specific framing, and
-   the same Collection on two pages may want different angles — but it is unresolved, and it decides
-   whether a Roundup has any original content or merely re-prints the offer pages' own descriptions.
+2. **Where does per-entry pitch copy live?** STILL OPEN; it blocks P3.
+
+   The input model is settled and needed no change: a `manual` Collection's `members` are **page_ids**,
+   and `_collection_grid_items` resolves each to `(slug, offer_id)`. So a Roundup is built from the
+   tenant's existing LANDING PAGES, and an offer already written up on a page can be pulled into any
+   number of Roundups without being recreated. That is the author's intent and it is what the code
+   already does.
+
+   What is unsettled is the paragraph. Members are bare page references with nowhere to put one. The
+   recommendation is **optional copy authored on the embedding section**, bound by `page_id`, falling
+   back to the offer's own description when absent:
+
+   - *On the section, not the Collection*, because one Collection may be embedded by two Roundups that
+     frame the same product differently ("for your mom" / "for coworkers"), and a Collection is
+     documented as pure, reusable, URL-unaware data.
+   - *Optional, with a fallback*, because "very little design" is the goal: a tenant who writes nothing
+     still gets a working page, and the 150-word floor is carried by the intro and the selection
+     rationale rather than by per-entry prose.
 
 3. ~~**Does the listicle CTA go to the offer page or straight to checkout?**~~ **DECIDED 2026-10-27 —
    both links go to the offer page.** The entry heading is a link and the button is a button, as on the
@@ -338,11 +351,15 @@ pattern picker.
    could work under about $25 and not above it — and a Roundup is a browsing page, where the reader has
    not yet chosen anything.
 
-4. **Does the count work on `all`/`category` collections?** P2 re-renders embedders when the COLLECTION
-   is written. An `all`-rule collection changes membership when a *page* publishes, which is a different
-   trigger and is not wired. Options: restrict `{count}` to `manual` collections, where the tenant's edit
-   is the only thing that changes the list; or cascade from page publish as well, which is a wider fan-out
-   and needs its own termination argument. Decide before P4.
+4. ~~**Does the count work on `all`/`category` collections?**~~ **DECIDED 2026-10-27 — `manual` only.**
+   `{count}` is offered on `manual` collections, where the tenant's own edit is the only thing that
+   changes the list and P2 already re-renders every reader of it. On `all` and `category` the checkbox is
+   not offered: their membership moves when a *page* publishes, a direction that is not wired, so a count
+   there could drift silently — the precise failure this feature exists to prevent.
+
+   Counting those is a future enhancement, and it is gated on the publish-and-refresh lifecycle being
+   able to GUARANTEE consistency rather than usually achieving it. A number that is right most of the
+   time is worse than no number, because it is trusted.
 
 5. **How many entries before the page stops being good?** The reference has 88 and is the worse for it.
    `numbered_list` already has a `NUMBERED_LIST_MAX`. Decide whether a Roundup gets a cap, a warning, or
