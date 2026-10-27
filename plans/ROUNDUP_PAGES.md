@@ -1,6 +1,6 @@
 # Roundup pages
 
-**Status:** PLANNED, not built. Design agreed with the author 2026-10-27.
+**Status:** **P1 SHIPPED** 2026-10-27. P2–P4 planned. Design agreed with the author 2026-10-27.
 
 A Roundup is a **non-transacting listing page**: an ordered set of the tenant's own landing pages, each
 rendered as an entry with an image, a short pitch and a link through to that page, under a headline that
@@ -275,8 +275,18 @@ it is the whole of our exposure, and it costs nothing to stay on the right side 
 
 ## 8. Phases
 
-**P1 — `presentation.layout`.** Add the field (default `grid`, so nothing existing moves), implement
-`listicle` rendering, port `masonry`. Shippable alone: it improves Collections with or without Roundups.
+**P1 — `presentation.layout`. SHIPPED 2026-10-27.** The field exists on `Collection.presentation` beside
+`heading`, validated against `COLLECTION_LAYOUTS` (`documents.py`), propagated onto the section at publish
+by `resolve_category_grids` with the section winning over the Collection, and rendered by
+`render_catalog_grid`, which now branches on it. Masonry is ported from the old dot-net front page as pure
+CSS multi-column with the four original breakpoints, its square crop dropped so heights can vary, and the
+hover lift behind `prefers-reduced-motion`. The listicle is a real `<ol>` with a CSS counter.
+
+19 tests in `tests/test_collection_layouts.py`. The one they exist for is **crawlability**: all three
+layouts must emit one `<a href>` per item, because these cards are the internal links the catalog
+hierarchy is built on, and a layout that rendered beautiful unlinked tiles would look finished while
+quietly costing the Site its linking. Unknown and absent layouts both fall back to `grid`, so every
+Collection written before this renders exactly as it did.
 
 **P2 — the reverse cascade.** §5. Independently valuable — every Collection embed is stale today, not
 just counted ones. **Must land before P3**, or the counted title is a lie.

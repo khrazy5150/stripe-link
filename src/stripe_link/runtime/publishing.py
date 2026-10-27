@@ -519,10 +519,18 @@ def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None,
         collection = collections_by_id.get(str(section.get("collection_id") or ""))
         if collection is not None:
             section["items"] = _collection_grid_items(collection, entries, slug_offer_by_page)
+            collection_presentation = collection.get("presentation") or {}
             if not str(section.get("heading") or "").strip():
-                heading = str((collection.get("presentation") or {}).get("heading") or "").strip()
+                heading = str(collection_presentation.get("heading") or "").strip()
                 if heading:
                     section["heading"] = heading
+            # Layout travels the same road as the heading, with the same precedence: the section wins if
+            # it says anything, else the Collection decides how its own members are arranged. Absent on
+            # both means `grid`, which is what every Collection rendered before this existed.
+            if not str(section.get("layout") or "").strip():
+                layout = str(collection_presentation.get("layout") or "").strip()
+                if layout:
+                    section["layout"] = layout
             continue
         scope = str(section.get("scope") or "").strip()
         category = str(section.get("category") or "").strip()

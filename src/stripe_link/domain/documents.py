@@ -2612,6 +2612,12 @@ def validate_review(document: dict[str, Any]) -> None:
 
 
 COLLECTION_RULES = {"manual", "all", "category"}
+# How a Collection's members are laid out. `grid` is the default and is what every existing Collection
+# gets, so adding this moves nothing. `masonry` is a column-flow gallery for UNORDERED browsing --
+# `column-count` fills top-to-bottom per column, so ten items in five columns read 1,3,5,7,9 across the
+# top and a curated ranking is destroyed. `listicle` is the ordered single column a Roundup needs
+# (plans/ROUNDUP_PAGES.md §3).
+COLLECTION_LAYOUTS = {"grid", "masonry", "listicle"}
 
 
 def validate_collection(document: dict[str, Any]) -> None:
@@ -2643,6 +2649,8 @@ def validate_collection(document: dict[str, Any]) -> None:
         if not isinstance(presentation, dict):
             raise DocumentValidationError("Collection presentation must be an object.")
         optional_string(presentation, "heading", "Collection heading")
+        if presentation.get("layout") is not None:
+            require_enum(presentation, "layout", COLLECTION_LAYOUTS, "Collection presentation.layout")
 
 
 def validate_semantic_model(model: Any) -> None:

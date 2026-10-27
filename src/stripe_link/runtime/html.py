@@ -1403,6 +1403,29 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    a.sl-catalog-card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     # height:auto is load-bearing: responsive_img emits an intrinsic height attr, and a fixed height defeats aspect-ratio.
     "    .sl-catalog-card img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:0.8rem;background:#fff;display:block}",
+    # MASONRY — CSS multi-column, ported from the old dot-net front page. No JS, no library.
+    # The aspect-ratio above is explicitly dropped: variable tile heights ARE the layout, and forcing
+    # every image square would produce a uniform grid with extra steps.
+    "    .sl-catalog-cards.sl-catalog-masonry{display:block;column-count:5;column-gap:1.4rem}",
+    "    .sl-catalog-masonry .sl-catalog-card{break-inside:avoid;margin:0 0 1.4rem;width:100%}",
+    "    .sl-catalog-masonry .sl-catalog-card img{aspect-ratio:auto}",
+    "    @media (max-width:1180px){.sl-catalog-cards.sl-catalog-masonry{column-count:4}}",
+    "    @media (max-width:900px){.sl-catalog-cards.sl-catalog-masonry{column-count:3}}",
+    "    @media (max-width:650px){.sl-catalog-cards.sl-catalog-masonry{column-count:2;column-gap:1rem}}",
+    "    @media (max-width:420px){.sl-catalog-cards.sl-catalog-masonry{column-count:1}}",
+    # LISTICLE — one ordered row per member, image beside the text. A CSS counter draws the number so it
+    # carries no content of its own; the <ol> already says the position to anything that reads markup.
+    "    .sl-catalog-list{list-style:none;counter-reset:sl-catalog;display:flex;flex-direction:column;gap:1.2rem;margin:0;padding:0}",
+    "    .sl-catalog-row{counter-increment:sl-catalog;display:block}",
+    "    .sl-catalog-row .sl-catalog-card{display:grid;grid-template-columns:auto 12rem minmax(0,1fr);align-items:center;gap:1.2rem}",
+    "    .sl-catalog-row .sl-catalog-card::before{content:counter(sl-catalog);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;line-height:1;color:var(--sl-price-amount);min-width:2.2rem;text-align:right}",
+    "    .sl-catalog-row .sl-catalog-card img{aspect-ratio:1/1;width:12rem}",
+    "    .sl-catalog-row .sl-catalog-price{margin:0.4rem 0 0}",
+    # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
+    "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
+    "      .sl-catalog-row .sl-catalog-card img{grid-column:1/-1;width:100%}}",
+    # The lift on hover is decoration; anyone who asked for less motion does not get it.
+    "    @media (prefers-reduced-motion:reduce){a.sl-catalog-card{transition:none}a.sl-catalog-card:hover{transform:none}}",
     "    .sl-catalog-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;line-height:1.3;color:var(--sl-price-title);margin:0}",
     "    .sl-catalog-price{font-family:var(--sl-font-accent);font-weight:900;font-size:1.8rem;color:var(--sl-price-amount);margin:auto 0 0}",
     "    .sl-seller-profile{display:flex;flex-direction:column;gap:1rem}",
@@ -7844,7 +7867,24 @@ def render_catalog_grid(
     """A grid of the store's products (plans/SITE_OBJECT.md §2.5b / SEO-13): one card per curated item, each
     an internal link to that offer's landing page slug on the Site — the crawlable catalog hierarchy that
     makes subfolder domain authority work. Reuses the product_carousel card shape; links instead of buy-now.
-    Links resolve against the Site home host, so cards render as plain (unlinked) tiles off a custom domain."""
+    Links resolve against the Site home host, so cards render as plain (unlinked) tiles off a custom domain.
+
+    THREE LAYOUTS, one renderer (plans/ROUNDUP_PAGES.md §3). The card CONTENT is identical in all three --
+    image, title, price, wrapped in the same anchor -- and only the container differs, so a layout cannot
+    drift into rendering different data:
+
+      grid      uniform cards. The default, and what every collection rendered before this existed.
+      masonry   CSS multi-column, variable heights. For UNORDERED browsing only: `column-count` fills
+                each column top-to-bottom, so ten items in five columns read 1,3,5,7,9 across the top.
+                The DOM order stays correct -- crawlers and screen readers get the real sequence -- which
+                is why this is easy to miss in review: the markup is right and the layout misleads.
+      listicle  one row per member, in a real <ol>. The sequence is in the MARKUP, not just the styling,
+                for the same reason `render_numbered_list` uses one: assistive technology announces the
+                position and the visible number is a CSS counter carrying no content of its own.
+    """
+    layout = str(section.get("layout") or "").strip().lower()
+    if layout not in ("grid", "masonry", "listicle"):
+        layout = "grid"
     home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
     cards = []
     for item in section.get("items") or []:
@@ -7871,20 +7911,26 @@ def render_catalog_grid(
         slug = str((item or {}).get("slug") or "").strip()
         href = internal_href(slug) if home and slug else ""  # host-relative so the card works on any serving host
         if href:
-            cards.append(f'      <a class="sl-catalog-card" href="{escape(href)}">\n{inner}\n      </a>')
+            card = f'<a class="sl-catalog-card" href="{escape(href)}">\n{inner}\n      </a>'
         else:
-            cards.append(f'      <div class="sl-catalog-card">\n{inner}\n      </div>')
+            card = f'<div class="sl-catalog-card">\n{inner}\n      </div>'
+        # The listicle's rows are <li> so the order lives in the markup; the anchor is unchanged inside it,
+        # which is what keeps every layout equally crawlable.
+        cards.append(f'      <li class="sl-catalog-row">{card}</li>' if layout == "listicle"
+                     else f'      {card}')
     if not cards:
         return ""
     heading = str(section.get("heading") or "").strip()
     heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
     section_type = escape(str(section.get("type") or "catalog_grid"))
+    open_tag, close_tag = (('<ol class="sl-catalog-list">', "</ol>") if layout == "listicle"
+                           else (f'<div class="sl-catalog-cards sl-catalog-{layout}">', "</div>"))
     return "\n".join(line for line in [
-        f'    <section class="sl-catalog-grid" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="{section_type}">',
+        f'    <section class="sl-catalog-grid sl-layout-{layout}" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="{section_type}" data-layout="{layout}">',
         heading_html,
-        '      <div class="sl-catalog-cards">',
+        f"      {open_tag}",
         *cards,
-        "      </div>",
+        f"      {close_tag}",
         "    </section>",
     ] if line)
 
