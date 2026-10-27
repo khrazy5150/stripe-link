@@ -225,6 +225,12 @@ author's "ideally no design" goal has to bend, and the distinction that resolves
 
 - **No layout decisions.** The tenant picks pages; the page builds itself. This is the real goal and it
   is fully preserved.
+
+  To be exact about what "no design" means here, because it is the point of the whole feature: a tenant
+  must never be asked *"image above the heading or beside it? button before the paragraph or after?"*
+  Every entry has one fixed arrangement, chosen once, by us. That is precisely the flaw in other page
+  builders — unlimited choice with no direction, which produces either paralysis or a bad page, and
+  usually both. The tenant's only decisions are **which pages, in what order, under what headline**.
 - **Two required text fields.** An introduction, and a short "how these were chosen". Without them the
   page is a reassembly of content Google already has from the offer pages, with nothing of its own.
 
@@ -237,11 +243,33 @@ Per-entry pitch copy: see §9, open question 2.
 - **Affiliate links.** A Roundup lists the tenant's own offers. Third-party links change the data model,
   make `Product` markup impermissible, and bring FTC disclosure duties onto the platform hosting them.
   Revisit as its own plan, with the disclosure requirement designed in rather than added after.
-- **Free-text ratings and review counts.** The reference shows "4.7" and "7951 Reviews". We have reviews
-  with enforced integrity — only a real buyer writes one. A rating from an authored field would make this
-  a fake-review generator and put `AggregateRating` markup behind a number nobody earned. If entries show
-  a rating it comes from the real review data or it does not appear.
-- **Free-text discount badges.** Same argument: derive from an actual compare-at price or omit.
+- **A new per-entry rating field.** See below — the existing `rating` element already covers this and
+  already has a settled policy. Do not invent a second one on the Roundup section.
+- **Free-text discount badges.** Derive from an actual compare-at price or omit. Unlike a star badge there
+  is no existing element for this, so adding one would be a new decision rather than a settled one.
+
+### Star ratings: already solved, available, not volunteered
+
+An earlier draft of this plan ruled star ratings out. That was wrong, and the correction is worth
+recording because it is the kind of thing a later reader will re-litigate.
+
+The `rating` element already exists — `composition_rules.json`, labelled *"Star-rating badge"*, slot
+`proof` — and `render_structured_data` (`html.py:~5358`) already draws the exact line this plan was
+reaching for, in its own words:
+
+> *No AggregateRating. The `rating` element is a number a tenant typed, with no verifiable source.
+> Emitting it as review markup would be fabricated structured data — against Google's structured-data
+> policies and squarely within the FTC's rule on deceptive ratings. It stays visible-only text until a
+> real review source exists.*
+
+So the platform's position is already set and is the right one: **the badge renders, the markup does
+not.** A tenant who adds it is making a claim in their own name on their own page, which is theirs to
+make. The `reviews` element is the other half — real buyer reviews, which *do* earn `AggregateRating`.
+
+For Roundup specifically: `rating` is **available but never volunteered**. It does not appear in the
+default template, the wizard does not suggest it, and no copy hints at it. The reference page covers
+every entry in invented scores; the difference between a tool that permits that and a tool that proposes
+it is the whole of our exposure, and it costs nothing to stay on the right side of it.
 
 ---
 
@@ -274,11 +302,13 @@ pattern picker.
    the same Collection on two pages may want different angles — but it is unresolved, and it decides
    whether a Roundup has any original content or merely re-prints the offer pages' own descriptions.
 
-3. **Does the listicle CTA go to the offer page or straight to checkout?** The author's instinct was
-   checkout. Straight-to-checkout costs the internal links §6 depends on, the page carrying `Product`
-   markup, and any buyer context before the payment form. **The reference page solves this and we should
-   copy it**: the entry heading is a link, *and* there is a separate button. Heading → offer page
-   (crawlable, keeps the SEO architecture), button → checkout (conversion). Confirm before P1.
+3. ~~**Does the listicle CTA go to the offer page or straight to checkout?**~~ **DECIDED 2026-10-27 —
+   both links go to the offer page.** The entry heading is a link and the button is a button, as on the
+   reference, and both land on the offer landing page, which then transacts. Straight-to-checkout was
+   considered and rejected: it costs the internal links §6 depends on, the page carrying `Product` markup,
+   and any buyer context before the payment form. The author's assessment was that skipping the offer page
+   could work under about $25 and not above it — and a Roundup is a browsing page, where the reader has
+   not yet chosen anything.
 
 4. **How many entries before the page stops being good?** The reference has 88 and is the worse for it.
    `numbered_list` already has a `NUMBERED_LIST_MAX`. Decide whether a Roundup gets a cap, a warning, or
