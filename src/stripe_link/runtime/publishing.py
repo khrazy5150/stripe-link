@@ -26,6 +26,7 @@ def _products_deliver_file(products_by_id) -> bool:
 
 import copy
 import json
+from datetime import datetime, timezone
 import base64
 import logging
 import os
@@ -50,7 +51,8 @@ from stripe_link.domain.documents import (
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path, public_url
 from stripe_link.domain.bnpl import messaging_method_types
-from stripe_link.domain.composition import composition_forbids_indexing, composition_key
+from stripe_link.domain.composition import (composition_forbids_indexing, composition_key,
+                                            expand_title_tokens, has_title_tokens)
 from stripe_link.domain.reviews import in_mode as reviews_in_mode
 from stripe_link.domain.sites import find_site_for_page
 from stripe_link.domain.social_links import section_own_links
@@ -484,6 +486,54 @@ def backfill_page_collections(pages_repository: Any, sites_repository: Any, coll
             {"collection_id": c["collection_id"], "page_id": page_id, "rule": c["rule"],
              "members": len(c.get("members") or [])} for c in new_collections)
     return summary
+
+
+def roundup_item_count(page: dict[str, Any], collections_by_id: dict[str, Any] | None) -> int | None:
+    """How many items this page actually lists, or None when there is nothing countable on it.
+
+    MANUAL COLLECTIONS ONLY (plans/ROUNDUP_PAGES.md open question 4, decided). A manual collection's
+    membership changes only when the tenant edits it, and P2 re-renders every page embedding it on that
+    write -- so a count taken here cannot drift. `all` and `category` collections change membership when
+    a PAGE publishes, a direction nothing is wired to, so a number printed for them would go quietly
+    wrong. A count that is right most of the time is worse than no count, because it gets trusted.
+
+    Counted from the RESOLVED items, after `resolve_category_grids` has dropped members that are not
+    published on the Site -- so the headline can never claim more than the page shows.
+    """
+    collections_by_id = collections_by_id or {}
+    total = None
+    for section in page.get("sections") or []:
+        if not isinstance(section, dict) or section.get("type") != "catalog_grid":
+            continue
+        collection = collections_by_id.get(str(section.get("collection_id") or ""))
+        if not collection or str(collection.get("rule") or "manual") != "manual":
+            continue
+        total = (total or 0) + len(section.get("items") or [])
+    return total
+
+
+def expand_roundup_titles(page: dict[str, Any], collections_by_id: dict[str, Any] | None,
+                          *, year: int) -> None:
+    """Resolve `{count}` / `{year}` in the page's headline and SEO title, in place, at publish.
+
+    Both fields, because between them they are all four surfaces the plan requires to agree: the hero's
+    `headline` IS the h1, and `seo.title` feeds the `<title>`, `og:title` (which is the title up to the
+    brand separator) and the `CollectionPage` name in `collection_json_ld`. A count that updated in three
+    of the four would make the page contradict itself, which is the failure this whole feature is about.
+
+    Expanded here rather than at render because artifacts are pre-rendered and served from the CDN: there
+    is no request-time hook, and publish is the moment the resolved item list is known.
+    """
+    count = roundup_item_count(page, collections_by_id)
+    seo = page.get("seo")
+    if isinstance(seo, dict) and has_title_tokens(seo.get("title")):
+        seo["title"] = expand_title_tokens(str(seo.get("title")), count=count, year=year)
+    for section in page.get("sections") or []:
+        if not isinstance(section, dict) or section.get("type") != "hero":
+            continue
+        for field in ("headline", "subheadline"):
+            if has_title_tokens(section.get(field)):
+                section[field] = expand_title_tokens(str(section.get(field)), count=count, year=year)
 
 
 def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None,
@@ -1339,6 +1389,8 @@ def publish_page_document(
             except Exception:  # noqa: BLE001 — the parent artifact must publish even if the Site write fails
                 pass
     resolve_category_grids(page, site, collections_by_id)
+    # AFTER the grids resolve: the count is of what the page will actually show, not what was picked.
+    expand_roundup_titles(page, collections_by_id, year=datetime.now(timezone.utc).year)
     offer, products_by_id, services_by_id, offers_by_id = load_render_context(
         page,
         offers_repository=offers_repository,

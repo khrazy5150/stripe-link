@@ -1,6 +1,6 @@
 # Roundup pages
 
-**Status:** **P1 + P2 + P3 SHIPPED** 2026-10-27. P4 planned. Design agreed with the author 2026-10-27.
+**Status:** **P1–P4 SHIPPED** 2026-10-27 (P4 backend; the builder affordances are the remaining work — see §8). Design agreed with the author 2026-10-27.
 
 A Roundup is a **non-transacting listing page**: an ordered set of the tenant's own landing pages, each
 rendered as an entry with an image, a short pitch and a link through to that page, under a headline that
@@ -329,8 +329,33 @@ Two traps found building it, both of which would have shipped looking correct:
 is expressed in the rules file. Also fixed in passing: the `teal` tone the Register-for-an-event card has
 referenced since it shipped had no CSS rule, so that icon rendered untinted beside its siblings.
 
-**P4 — the title engine.** `{count}` / `{year}`, plural rule, propagation to all four surfaces, the
-pattern picker.
+**P4 — the title engine. BACKEND SHIPPED 2026-10-27.** `expand_title_tokens` resolves `{count}` and
+`{year}`; `roundup_item_count` counts the RESOLVED items of `manual` collections only;
+`expand_roundup_titles` runs at publish, straight after `resolve_category_grids`, and rewrites both
+`seo.title` and the hero's `headline`/`subheadline` in place. Those two fields are all four surfaces:
+`seo.title` feeds the `<title>`, `og:title` and the `CollectionPage` name, and the hero headline IS the
+h1. 20 tests in `tests/test_roundup_title_engine.py`.
+
+Expanded at publish rather than at render because artifacts are pre-rendered and served from the CDN —
+there is no request-time hook, and publish is the moment the resolved item list is known.
+
+Degradation is deliberate: an unknown count (no manual collection on the page) drops the number rather
+than publishing a literal `{count}` to a live page, which would be worse than any wrong number. One item
+drops it too — "1 gift ideas for your mom" is fatal to the format, and no automatic singularisation is
+attempted because the tenant typed the plural and English does not let us un-type it.
+
+The five headline patterns live in `composition_rules.json` as `roundup_headlines`, which the dashboard
+already imports. They are structures — `{count} {things} for {audience}` — never finished claims, and a
+test asserts none of them ships an adjective on the tenant's behalf.
+
+**STILL TO BUILD, and the page is not usable end to end without it:**
+
+- **The builder affordances.** Nothing yet surfaces the patterns where the headline is edited, and
+  nothing explains the tokens. A tenant today would have to type `{count}` knowing it works.
+- **Per-entry pitch copy** (open question 2's resolution): optional text on the embedding section, bound
+  by `page_id`, falling back to the offer's own description. The composition permits `content_block` for
+  the intro and the selection rationale — which is what the thin-content gate counts — but the paragraph
+  per entry is not wired to the listicle renderer.
 
 ---
 

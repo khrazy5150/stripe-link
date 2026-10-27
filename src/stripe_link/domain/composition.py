@@ -17,6 +17,7 @@ Packs are union-only, so a page without a goal composes exactly as it did before
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from stripe_link.domain.opportunities import derived_offer_type
@@ -421,6 +422,45 @@ THIN_BY_DESIGN = (set(LEAD_COMPOSITIONS.values()) - {"lead_roundup"}) | {"tip_ja
 
 def is_thin_by_design(offer: dict[str, Any]) -> bool:
     return composition_key(offer) in THIN_BY_DESIGN
+
+
+# --- Roundup headline tokens (plans/ROUNDUP_PAGES.md §4) -------------------------------------------
+# The headline formula `{count} {plural noun} {hook}` is a proven pattern most small merchants do not
+# know, and handing it over with the number kept true is the point of the feature. The reference page it
+# comes from says "29 Insanely Cool Gifts" above a list of more than sixty: the number was typed once and
+# the author kept adding products.
+_COUNT_TOKEN = re.compile(r"\{count\}\s*")
+_YEAR_TOKEN = re.compile(r"\{year\}")
+
+
+def expand_title_tokens(text: str, *, count: int | None, year: int) -> str:
+    """Resolve `{count}` and `{year}` in a headline.
+
+    `{count}` is DROPPED, not printed as 1, when there is one item or when no countable list was found.
+    "1 gift ideas for your mom" is fatal to the format, and no automatic singularisation is attempted --
+    the tenant typed the plural, and English does not let us un-type it. Removing the token leaves
+    "Gift ideas for your mom", which reads correctly, and the first letter is re-capitalised only when
+    the token started the line so "Our {count} best picks" does not become "Our Best picks".
+
+    `{year}` exists for the same reason the count does. "25 insane gadgets you'll love in 2027" is
+    hand-typed text that goes stale exactly the way a hand-typed count does, and worse: a year in the
+    past reads as an abandoned page. If we maintain one number we should maintain both.
+    """
+    if not text:
+        return ""
+    out = _YEAR_TOKEN.sub(str(year), str(text))
+    if count is not None and count > 1:
+        return _COUNT_TOKEN.sub(f"{count} ", out).strip()
+    started_with_count = bool(re.match(r"\s*\{count\}", out))
+    out = _COUNT_TOKEN.sub("", out).strip()
+    if started_with_count and out:
+        out = out[0].upper() + out[1:]
+    return out
+
+
+def has_title_tokens(text: str) -> bool:
+    """Whether a headline is templated at all -- which is also how the page says "count me"."""
+    return bool(text) and bool(_COUNT_TOKEN.search(str(text)) or _YEAR_TOKEN.search(str(text)))
 
 
 def default_cta_label(offer: dict[str, Any]) -> str:

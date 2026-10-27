@@ -1511,5 +1511,13 @@
         "credential"
       ]
     }
-  }
+  },
+  "_roundup_headlines_comment": "Headline PATTERNS for a Roundup, offered in the builder as a starting point. Structures, never finished claims: `{count}` and `{year}` are maintained at publish, and the hook is the tenant's to write. The page this feature copies opens every entry with lines like 'you absolutely have to have' -- shipping that as pre-filled copy would put our words in their mouth, and the claims are where their liability starts. The structure is the gift (plans/ROUNDUP_PAGES.md \u00a74).",
+  "roundup_headlines": [
+    "{count} {things} for {audience}",
+    "{count} {things} under ${price}",
+    "{count} {things} you'll love in {year}",
+    "{count} {things} {audience} swear by",
+    "The {count} best {things} we've found"
+  ]
 }
