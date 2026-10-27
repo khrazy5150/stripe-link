@@ -473,6 +473,29 @@ class DetectTests(unittest.TestCase):
         self.assertFalse(body_of(response)["eligible"])
         self.assertEqual(body_of(response)["reason"], "unreadable")
 
+    def test_a_domain_with_no_delegation_is_refused(self):
+        """Measured on skincare.shop, 2026-10-27: NXDOMAIN straight from the .shop registry, and the
+        gate said yes. Every other rule is phrased as an ABSENCE -- no mail, no gated provider -- and a
+        domain that does not exist has none of those things either, so it sailed past all of them.
+
+        We would have created a Cloudflare zone for a name nobody owns: it can never activate, because
+        there is no registrar account in which to change the nameservers, and it would sit pending on
+        our account with no original nameservers to hand back on the way out."""
+        response, created, _, zones = self._detect(name_servers=[], mail=[])
+        payload = body_of(response)
+        self.assertFalse(payload["eligible"])
+        self.assertEqual(payload["reason"], "undelegated")
+        created.assert_not_called()
+        self.assertEqual(zones.docs, {})
+
+    def test_no_delegation_is_distinct_from_a_failed_lookup(self):
+        """The resolver SPOKE in one case and did not in the other, and the tenant's next move differs:
+        check the spelling, versus wait a moment and retry."""
+        undelegated, _, _, _ = self._detect(name_servers=[], mail=[])
+        unreadable, _, _, _ = self._detect(name_servers=[], mail=[], ns_known=False)
+        self.assertEqual(body_of(undelegated)["reason"], "undelegated")
+        self.assertEqual(body_of(unreadable)["reason"], "unreadable")
+
     def test_importing_an_ineligible_domain_is_refused_server_side(self):
         """The UI does not offer the button, so reaching here means something bypassed it. A check the
         client can skip is not a check."""

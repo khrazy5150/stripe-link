@@ -122,6 +122,7 @@ def eligibility(*, name_servers: Iterable[str], name_servers_known: bool,
     rule out mail we could not see, and we cannot rule out Route 53 if we never learned who answers, so
     silence is a refusal here rather than a pass. Same rule as `review(observed_complete=...)`.
     """
+    name_servers = [str(n).strip() for n in (name_servers or []) if str(n or "").strip()]
     provider_id, label = unmovable_provider(name_servers)
     if not mail_complete or not name_servers_known:
         return {
@@ -129,6 +130,23 @@ def eligibility(*, name_servers: Iterable[str], name_servers_known: bool,
             "headline": "We could not read this domain's DNS just now.",
             "detail": "That is usually temporary. Try again in a moment — we will not offer to move a "
                       "domain we cannot see, because the records we would miss are the ones that matter.",
+        }
+    if not name_servers:
+        # ANSWERED, AND THE ANSWER WAS "THERE IS NO SUCH DOMAIN". Not the same as a failed lookup, which
+        # the branch above catches: the resolver spoke, and what it said was that this name has no
+        # delegation. Measured on skincare.shop, 2026-10-27 -- NXDOMAIN straight from the .shop registry.
+        #
+        # It read as eligible because every rule below is phrased as an absence: no mail, no gated
+        # provider. A domain that does not exist has no mail and no provider either, so it sailed past
+        # all of them. We would have created a Cloudflare zone for a name nobody owns, which can never
+        # activate (there is no registrar account in which to change the nameservers) and would sit
+        # pending on our account forever, with no original nameservers to hand back on the way out.
+        return {
+            "eligible": False, "reason": "undelegated", "provider": "",
+            "headline": "We cannot find this domain.",
+            "detail": "It has no nameservers at all, which usually means the name is misspelled or not "
+                      "registered yet. Check the spelling — and if you have only just bought it, give "
+                      "your registrar a few minutes and try again.",
         }
     if mail_present:
         # MAIL IS THE HARD STOP, and it is tested on any mail-shaped record rather than on MX alone.
