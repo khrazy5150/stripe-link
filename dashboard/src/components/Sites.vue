@@ -344,7 +344,20 @@
                 <strong>{{ dnsChoice === 'managed' ? 'Let us handle the DNS' : 'Keep your DNS where it is' }}</strong>
                 <button type="button" class="link-button" @click="dnsChoice = ''">Change</button>
               </p>
-              <div v-if="domainForm.domain && !dnsChoice" class="dns-choice">
+              <!-- CHECKED BEFORE OFFERED. The cards used to appear the moment a domain was typed, so an
+                   AWS-hosted domain was shown "Let us handle the DNS — Recommended" for the one route
+                   that would then be refused. -->
+              <p v-if="domainForm.domain && !dnsChoice && domainChecking" class="field-note">
+                Checking this domain's DNS…
+              </p>
+              <!-- Turned away: say so here, where the choice would have been, rather than letting them
+                   pick first. The ordinary route below is unaffected and is what they should use. -->
+              <div v-else-if="domainForm.domain && !dnsChoice && managedDetection && !managedDetection.eligible"
+                   class="keys-status-banner info">
+                <p><strong>{{ managedDetection.headline }}</strong></p>
+                <p>{{ managedDetection.detail }}</p>
+              </div>
+              <div v-else-if="domainForm.domain && !dnsChoice && managedDetection?.eligible" class="dns-choice">
                 <button type="button" class="dns-choice-card" @click="dnsChoice = 'managed'">
                   <strong>Let us handle the DNS</strong>
                   <small>You change two nameservers at your registrar, once. Your root domain works on
@@ -364,7 +377,13 @@
                    the choice first; qualify the second option afterwards. It vanishes once managed DNS
                    is chosen, because there the apex is exactly what works. -->
               <div v-if="connectAdvice && dnsChoice !== 'managed'" class="keys-status-banner warning apex-advice">
-                <p><strong>If you keep your DNS where it is:</strong> {{ connectAdvice.reason }}</p>
+                <!-- The conditional lead-in only makes sense while keeping their own DNS is a CHOICE.
+                     For a domain we will not move it is the only route, and "if" implies an alternative
+                     that is not on offer. -->
+                <p v-if="managedDetection?.eligible">
+                  <strong>If you keep your DNS where it is:</strong> {{ connectAdvice.reason }}
+                </p>
+                <p v-else>{{ connectAdvice.reason }}</p>
                 <p>{{ connectAdvice.fix }}</p>
                 <button type="button" class="secondary-action" @click="domainForm.domain = connectAdvice.suggestion">
                   Use {{ connectAdvice.suggestion }}
@@ -1058,6 +1077,10 @@ const managedReview = ref(null);
 // What reading their DNS told us, before anything exists. Null until they press the button, and cleared
 // the moment they import or back out -- it describes a decision in progress, not a thing we hold.
 const managedDetection = ref(null);
+// True while the lookup that decides what we may OFFER is in flight. The cards stay hidden until it
+// lands: recommending a route we are about to refuse is worse than making someone wait half a second.
+const domainChecking = ref(false);
+let detectionLookup = 0;
 const managedNameServers = ref([]);
 const managedBusy = ref(false);
 const managedError = ref("");
@@ -1146,16 +1169,30 @@ function confirmManagedDns() {
   return startManagedDns(false, true);
 }
 
-/** Reads live DNS and stops. Creates nothing -- the verdict decides what we then offer. */
-async function readMyDns() {
-  managedError.value = "";
-  managedBusy.value = true;
+/**
+ * Reads live DNS and stops. Creates nothing -- the verdict decides what we then OFFER.
+ *
+ * Runs when the domain is entered rather than behind a button, because the two choice cards are the
+ * first thing a tenant reads and one of them said "Recommended". On an AWS-hosted domain that
+ * recommended the one route we were always going to refuse, and the tenant only found out after
+ * choosing it. A recommendation made before the check is not a recommendation.
+ */
+async function readMyDns(domain) {
+  const name = domain || domainForm.domain;
+  if (!name || !name.includes(".") || !editing.value?.site_id) return;
+  const token = ++detectionLookup;
+  domainChecking.value = true;
   try {
-    managedDetection.value = await store.startManagedDns(editing.value.site_id, domainForm.domain);
+    const res = await store.startManagedDns(editing.value.site_id, name);
+    if (token !== detectionLookup) return;        // a later keystroke already won
+    managedDetection.value = res;
   } catch (err) {
-    managedError.value = err?.message || "Could not read this domain's DNS.";
+    if (token !== detectionLookup) return;
+    // Deliberately NOT surfaced as an error: this runs while someone is typing, and a failed lookup
+    // means only that we cannot offer managed DNS yet -- the ordinary custom-domain route is untouched.
+    managedDetection.value = null;
   } finally {
-    managedBusy.value = false;
+    if (token === detectionLookup) domainChecking.value = false;
   }
 }
 
@@ -1385,7 +1422,11 @@ watch(() => domainForm.domain, (domain) => {
   clearTimeout(adviceTimer);
   if (!domain || !domain.includes(".")) return;
   // Debounced: this runs while someone is typing a domain name, one lookup per pause rather than per key.
-  adviceTimer = setTimeout(() => detectDnsProvider(domain, { advise: true }), 600);
+  domainChecking.value = true;
+  adviceTimer = setTimeout(() => {
+    detectDnsProvider(domain, { advise: true });
+    readMyDns(domain);
+  }, 600);
 });
 const openStep = ref(0);
 const copied = ref("");

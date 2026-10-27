@@ -404,3 +404,37 @@ class WiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfferedOnlyAfterCheckingTests(unittest.TestCase):
+    """The two choice cards must not appear before we know which routes are available.
+
+    Found on a real screen, 2026-10-27: typing an AWS-hosted domain drew both cards immediately, with
+    "Let us handle the DNS" marked **Recommended** -- the one route that would then be refused, and the
+    tenant only discovered it after choosing. A recommendation made before the check is not a
+    recommendation, so the cards now wait for the verdict.
+    """
+
+    def test_the_cards_require_an_eligible_verdict(self):
+        self.assertIn('v-else-if="domainForm.domain && !dnsChoice && managedDetection?.eligible" class="dns-choice"',
+                      SITES_VUE)
+
+    def test_a_refusal_is_explained_where_the_choice_would_have_been(self):
+        self.assertIn('managedDetection && !managedDetection.eligible', SITES_VUE)
+
+    def test_something_is_shown_while_checking(self):
+        # Otherwise the panel is simply blank for the length of a DNS lookup, which reads as broken.
+        self.assertIn('Checking this domain\'s DNS…', SITES_VUE)
+
+    def test_the_apex_banner_drops_its_conditional_lead_in_when_there_is_no_choice(self):
+        """"If you keep your DNS where it is" implies an alternative. For a domain we will not move,
+        keeping their own DNS is the only route and the "if" is a lie about what is on offer."""
+        self.assertIn('v-if="managedDetection?.eligible"', SITES_VUE)
+
+    def test_detection_runs_from_the_domain_watcher_not_only_a_button(self):
+        self.assertIn("readMyDns(domain);", SITES_VUE)
+
+    def test_the_lookup_is_race_guarded(self):
+        """It runs while someone is typing, so an earlier slow answer must not overwrite a later one --
+        the same guard the provider lookup already needed."""
+        self.assertIn("if (token !== detectionLookup) return;", SITES_VUE)
