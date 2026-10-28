@@ -48,16 +48,173 @@ class RenderTests(unittest.TestCase):
 
 
 class AutoplayTests(unittest.TestCase):
-    def test_it_never_autoplays(self):
-        """A video that starts itself halfway down a page is noise the reader did not ask for, and content
-        playing more than five seconds with no way to stop it fails WCAG 2.2.2. The hero is a different
-        case -- the visitor has just arrived and the media IS the first impression."""
+    """Autoplay and the control bar are the tenant's choice, and the QUIET setting is the default.
+
+    A video that starts itself halfway down a page is noise the reader did not ask for, so an element that
+    says nothing autoplays nothing -- which also means every page published before these options existed
+    renders exactly as it did.
+    """
+
+    def test_it_does_not_autoplay_unless_asked(self):
         html = render_video(FILE)
         self.assertIn("<video", html)
         self.assertNotIn("autoplay", html)
 
-    def test_the_file_player_keeps_its_controls(self):
+    def test_asking_for_autoplay_gets_it(self):
+        self.assertIn("autoplay", render_video({**FILE, "autoplay": True}))
+
+    def test_autoplay_is_always_muted_and_looping(self):
+        """`muted` is not a taste decision. Every browser refuses to autoplay a video with sound, so an
+        autoplay attribute without it is a checkbox that silently does nothing -- the tenant ticks it,
+        nothing moves, and no error anywhere explains why. `loop` because a silent clip that stops dead on
+        its last frame reads as broken."""
+        html = render_video({**FILE, "autoplay": True})
+        for attribute in ("muted", "loop", "autoplay"):
+            self.assertIn(attribute, html, attribute)
+
+    def test_autoplay_never_appears_without_muted(self):
+        """The invariant stated as its own test, because this is the one that can rot: a later edit that
+        reorders the attribute list could drop `muted` and nothing else here would notice."""
+        for section in (FILE, {**FILE, "autoplay": True}, {**FILE, "autoplay": True, "hide_controls": True}):
+            html = render_video(section)
+            if "autoplay" in html:
+                self.assertIn("muted", html, section)
+
+    def test_autoplay_preloads_the_file(self):
+        """`preload="metadata"` with autoplay asks the browser to start something it was told not to
+        fetch."""
+        self.assertIn('preload="auto"', render_video({**FILE, "autoplay": True}))
+
+
+class ControlBarTests(unittest.TestCase):
+    """Hiding the bar REPLACES it rather than removing the ability to stop the video.
+
+    A chromeless looping product clip is a real design; a muted video playing with no way to pause it is a
+    WCAG 2.2.2 failure. The difference between the two is entirely whether something else can still pause
+    it, so that something is what these tests are about.
+    """
+
+    def test_the_bar_is_there_by_default(self):
         self.assertIn("controls", render_video(FILE))
+
+    def test_hiding_it_removes_the_attribute(self):
+        self.assertNotIn("controls", render_video({**FILE, "hide_controls": True}))
+
+    def test_hiding_it_makes_the_video_its_own_control(self):
+        html = render_video({**FILE, "hide_controls": True})
+        self.assertIn("data-sl-video-tap", html)
+        self.assertIn('tabindex="0"', html, "a keyboard must be able to reach the only remaining control")
+
+    def test_a_video_keeping_its_bar_is_not_made_tappable(self):
+        """Two controls for one action, one of them invisible: a click would pause a video whose own
+        button says it is playing."""
+        self.assertNotIn("data-sl-video-tap", render_video(FILE))
+
+    def test_the_page_script_carries_the_handler(self):
+        """The attribute alone is inert -- without the listener, hiding the bar really would remove the
+        only way to stop the video."""
+        from stripe_link.runtime.html import render_page_interactions_script
+
+        page = {"sections": [{"id": "v", "type": "video", "url": FILE["url"], "hide_controls": True}]}
+        script = render_page_interactions_script(page)
+        self.assertIn("data-sl-video-tap", script)
+        self.assertIn("video.pause()", script)
+
+    def test_a_page_whose_only_interaction_is_the_video_still_gets_the_script(self):
+        """The script has an early return for a page that needs no interactions. A chromeless video needs
+        one -- the tap handler is the only remaining way to pause it -- so it has to count as a reason to
+        emit the script, or the attribute ships inert and the bar really was just removed."""
+        from stripe_link.runtime.html import render_page_interactions_script
+
+        page = {"sections": [{"id": "v", "type": "video", "url": FILE["url"], "hide_controls": True}]}
+        self.assertNotEqual(render_page_interactions_script(page), "")
+
+    def test_a_page_with_a_normal_video_needs_no_script_for_it(self):
+        """The flag is specific to the chromeless case; a video keeping its own bar adds no JavaScript."""
+        from stripe_link.runtime.html import render_page_interactions_script
+
+        page = {"sections": [{"id": "v", "type": "video", "url": FILE["url"]}]}
+        self.assertEqual(render_page_interactions_script(page), "")
+
+    def test_the_stylesheet_says_it_is_clickable(self):
+        styles = "\n".join(render_template_styles({}))
+        self.assertIn("video[data-sl-video-tap]{cursor:pointer}", styles)
+        self.assertIn("video[data-sl-video-tap]:focus-visible", styles)
+
+
+class EmbedsIgnoreBothTests(unittest.TestCase):
+    """A YouTube/Vimeo link is a click-to-load facade, and that is a PRIVACY decision, not a style one.
+
+    Autoplaying one would mean loading a megabyte of third-party script and setting cookies on the
+    tenant's customers before anyone chose to watch. The builder hides both checkboxes for an embed; these
+    pin that the renderer would not honour them even if a stored document carried them.
+    """
+
+    def test_neither_flag_changes_what_an_embed_renders(self):
+        """Asserted as equality rather than by hunting for the word "autoplay": the facade's own embed URL
+        legitimately carries `autoplay=1`, because the click a visitor makes IS the gesture the browser
+        requires, and the iframe is built only then. Equality says the thing that matters -- the tenant's
+        flags reached nothing."""
+        plain = render_video(EMBED)
+        self.assertEqual(render_video({**EMBED, "autoplay": True}), plain)
+        self.assertNotIn("<video", plain)
+        self.assertNotIn("<iframe", plain, "nothing reaches the provider until a visitor asks")
+
+    def test_an_embed_is_unaffected_by_hiding_controls(self):
+        self.assertEqual(render_video({**EMBED, "hide_controls": True}), render_video(EMBED))
+
+
+class TheHeroIsUntouchedTests(unittest.TestCase):
+    """`controls` gained a default rather than a caller. Every existing call site must emit what it did."""
+
+    def test_the_hero_player_is_byte_identical(self):
+        from stripe_link.runtime.html import render_media_slide
+
+        url = "https://cdn.example.com/clip.mp4"
+        self.assertEqual(
+            render_media_slide(url, "Hero", autoplay=True),
+            '<video class="sl-hero-video" src="https://cdn.example.com/clip.mp4" '
+            'controls playsinline muted loop autoplay preload="auto" aria-label="Hero"></video>',
+        )
+
+    def test_a_still_hero_is_byte_identical(self):
+        from stripe_link.runtime.html import render_media_slide
+
+        url = "https://cdn.example.com/clip.mp4"
+        self.assertEqual(
+            render_media_slide(url, "Hero", autoplay=False),
+            '<video class="sl-hero-video" src="https://cdn.example.com/clip.mp4" '
+            'controls playsinline preload="metadata" aria-label="Hero"></video>',
+        )
+
+
+class BuilderRoundTripTests(unittest.TestCase):
+    """Source assertions, because this is Vue. A write-only field is lost on reload, which reads to the
+    tenant as the builder throwing away what they just set."""
+
+    BUILDER = ""
+
+    @classmethod
+    def setUpClass(cls):
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+        cls.BUILDER = (root / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_element_starts_with_both_switched_off(self):
+        self.assertIn("autoplay: false, hide_controls: false", self.BUILDER)
+
+    def test_both_are_sent_on_save(self):
+        self.assertIn("autoplay: element.autoplay || undefined", self.BUILDER)
+        self.assertIn("hide_controls: element.hide_controls || undefined", self.BUILDER)
+
+    def test_both_are_read_back_on_load(self):
+        self.assertIn("autoplay: Boolean(section.autoplay)", self.BUILDER)
+        self.assertIn("hide_controls: Boolean(section.hide_controls)", self.BUILDER)
+
+    def test_the_switches_are_hidden_for_an_embed(self):
+        """Offering a control that would quietly do nothing is worse than not offering it."""
+        self.assertIn('<template v-if="!isEmbedLink(element.url)">', self.BUILDER)
 
 
 class StyleTests(unittest.TestCase):

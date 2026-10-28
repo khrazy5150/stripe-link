@@ -1308,6 +1308,25 @@
                         <span>Caption (optional)</span>
                         <input v-model.trim="element.caption" type="text" placeholder="e.g. A two-minute walkthrough" />
                       </label>
+                      <template v-if="!isEmbedLink(element.url)">
+                        <label class="builder-switch-row">
+                          <span class="builder-switch" @click.stop>
+                            <input v-model="element.autoplay" type="checkbox" aria-label="Play this video automatically, muted" />
+                            <span aria-hidden="true"></span>
+                          </span>
+                          <span>Play automatically (muted, looping)</span>
+                        </label>
+                        <small class="field-note">A browser will only start a video on its own with the sound off, so this always mutes and loops.</small>
+                        <label class="builder-switch-row">
+                          <span class="builder-switch" @click.stop>
+                            <input v-model="element.hide_controls" type="checkbox" aria-label="Hide the video control bar" />
+                            <span aria-hidden="true"></span>
+                          </span>
+                          <span>Hide the controls</span>
+                        </label>
+                        <small class="field-note">The bar goes and the video becomes its own control — a click, tap or Enter pauses it.</small>
+                      </template>
+                      <small v-else class="field-note">These options apply to an uploaded file. A YouTube or Vimeo video loads only when a visitor presses play, which keeps the page fast and shares nothing with the provider until then.</small>
                       <p v-if="!element.url" class="field-warning">
                         Add a video — this element will not render until it has one.
                       </p>
@@ -6401,7 +6420,8 @@ function newElement(type) {
   }
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
-  if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "", aspect: 1.7777777778 };
+  if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "", aspect: 1.7777777778,
+    autoplay: false, hide_controls: false };
   if (type === "before_after") return { ...base, heading: "", before_url: "", after_url: "",
     before_crop: null, after_crop: null, before_label: "Before", after_label: "After",
     ratio: 1.3333333333, start: 50 };
@@ -7297,7 +7317,11 @@ function elementSection(element) {
       heading: (element.heading || "").trim() || undefined,
       caption: (element.caption || "").trim() || undefined,
       poster: (element.poster || "").trim() || undefined,
-      aspect: Number(element.aspect) || undefined };
+      aspect: Number(element.aspect) || undefined,
+      // Omitted when off, the way every other optional field here is: an absent key and `false` mean the
+      // same thing to the renderer, and only one of them adds weight to every stored document.
+      autoplay: element.autoplay || undefined,
+      hide_controls: element.hide_controls || undefined };
   }
   if (element.type === "before_after") {
     // One image is not a comparison, so an incomplete pair is dropped rather than half-rendered.
@@ -7436,7 +7460,8 @@ function elementsFromPage(sections) {
     } else if (section.type === "video") {
       elements.push({ id: keepId(section), type: "video", url: section.url || "",
         heading: section.heading || "", caption: section.caption || "", poster: section.poster || "",
-        aspect: Number(section.aspect) || 1.7777777778 });
+        aspect: Number(section.aspect) || 1.7777777778,
+        autoplay: Boolean(section.autoplay), hide_controls: Boolean(section.hide_controls) });
     } else if (section.type === "before_after") {
       elements.push({ id: keepId(section), type: "before_after", heading: section.heading || "",
         before_url: section.before_url || "", after_url: section.after_url || "",

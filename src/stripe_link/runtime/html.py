@@ -1128,6 +1128,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # An uploaded file is sized here; an embed brings its own aspect-ratio box with it.
     "    .sl-video-frame>video{display:block;width:100%;height:100%;object-fit:contain;background:#000}",
     "    .sl-video-frame{aspect-ratio:var(--sl-video-ar,16/9)}",
+    # A chromeless video IS its own play/pause control, so it has to look and focus like one.
+    "    .sl-video-frame>video[data-sl-video-tap]{cursor:pointer}",
+    "    .sl-video-frame>video[data-sl-video-tap]:focus-visible{outline:3px solid var(--sl-accent,#2563eb);outline-offset:2px}",
     # A vertical video on a wide screen must not become a full-height column; the frame stays centred and
     # bounded by the viewport instead.
     "    .sl-video-block.is-tall .sl-video-frame{max-width:min(100%,45vh);margin:0 auto}",
@@ -3527,14 +3530,21 @@ def render_video_embed(embed: dict[str, str], alt: str) -> str:
 HERO_BAND = "\x00hero-band"
 
 
-def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False, poster: str = "") -> str:
+def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False, poster: str = "",
+                       controls: bool = True) -> str:
     """The MediaViewer's image/video modes (plans/CONVERSION_CONTEXT.md review 4). A video URL renders a
     <video>. Autoplay adds muted+loop because every browser refuses to autoplay with sound.
 
-    `controls` is ALWAYS present, autoplay included. Without it an autoplaying hero starts muted with no
-    way to unmute, pause or scrub — the tenant enabled autoplay, not silence, and a visitor who wants the
-    audio had no affordance at all. It is also a WCAG 2.2.2 (Pause, Stop, Hide) failure: content that
-    plays automatically for more than five seconds must offer a way to stop it."""
+    `controls` defaults to ON and the hero never turns it off. Without it an autoplaying hero starts muted
+    with no way to unmute, pause or scrub — the tenant enabled autoplay, not silence, and a visitor who
+    wants the audio had no affordance at all. It is also a WCAG 2.2.2 (Pause, Stop, Hide) failure: content
+    that plays automatically for more than five seconds must offer a way to stop it.
+
+    The video ELEMENT may turn it off, because a chromeless looping product clip is a real design and a
+    control bar welded across it is not. What makes that legitimate rather than a regression is that the
+    bar is REPLACED, not removed: the video becomes the control (`data-sl-video-tap`, focusable, click or
+    Enter/Space to pause), so the mechanism 2.2.2 asks for still exists. Silence plus no way to stop it is
+    the combination that is never shipped."""
     if url == HERO_BAND:
         # Decorative: it carries no information the identity block below does not already say, so it takes
         # no alt text and is hidden from a screen reader rather than announced as "image".
@@ -3545,8 +3555,16 @@ def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = Fals
         # deterministic thumbnail at all, so this is the only poster it can have.
         return render_video_embed({**embed, "thumbnail_url": poster or embed["thumbnail_url"]}, alt)
     if is_video_url(url):
-        attrs = "controls playsinline" + (" muted loop autoplay" if autoplay else "")
-        preload = "auto" if eager else "metadata"
+        # `muted` is not a taste decision: every browser refuses to autoplay a video with sound, so an
+        # autoplay flag that did not mute would be a checkbox that silently does nothing -- the tenant
+        # ticks it, nothing moves, and there is no error anywhere to explain why.
+        parts = ["controls", "playsinline"] if controls else ["playsinline", "data-sl-video-tap",
+                                                              'tabindex="0"']
+        if autoplay:
+            parts.extend(["muted", "loop", "autoplay"])
+        attrs = " ".join(parts)
+        # Autoplay with `preload="metadata"` asks the browser to start something it was told not to fetch.
+        preload = "auto" if eager or autoplay else "metadata"
         return (
             f"<video class=\"sl-hero-video\" src=\"{escape(str(url))}\" {attrs} preload=\"{preload}\" "
             f"aria-label=\"{escape(alt)}\"></video>"
@@ -7435,9 +7453,19 @@ VIDEO_BLOCK_DEFAULT_ASPECT = 16 / 9
 def render_video(section: dict[str, Any]) -> str:
     """One video anywhere on the page: an uploaded file, or a YouTube/Vimeo link.
 
-    Deliberately NOT autoplaying. The hero offers autoplay because a visitor has just arrived and the media
-    is the first impression; a video that starts itself halfway down a page is noise the reader did not ask
-    for, and content that plays for more than five seconds without a way to stop it fails WCAG 2.2.2.
+    Autoplay and the control bar are OPT-IN choices, and both default to the quiet setting: a video that
+    starts itself halfway down a page is noise the reader did not ask for, so nothing autoplays unless the
+    tenant says so.
+
+    Autoplay always implies `muted` and `loop`, because a browser will not start a video with sound and a
+    silent clip that stops dead on its last frame reads as broken. Hiding the control bar swaps it for
+    tap-to-pause rather than removing the ability to stop the video (WCAG 2.2.2) -- see render_media_slide.
+
+    **Both settings apply to an uploaded FILE only.** A YouTube or Vimeo link renders a click-to-load
+    facade that deliberately contacts the provider only once a visitor asks for it; autoplaying one would
+    mean loading a megabyte of third-party script and setting cookies on the tenant's customers before
+    anyone chose to watch. The builder hides both checkboxes for an embed rather than offering a control
+    that would quietly do nothing.
 
     Everything about picking between a file and an embed already lives in render_media_slide, so this
     element is placement and a caption -- it inherits the click-to-load facade, the poster handling and the
@@ -7470,7 +7498,8 @@ def render_video(section: dict[str, Any]) -> str:
         rows.append(f'      <h2 class="sl-video-heading">{render_headline_markup(heading)}</h2>')
     rows.append(
         '      <div class="sl-video-frame">'
-        + render_media_slide(url, heading or caption or "Video", autoplay=False, poster=poster)
+        + render_media_slide(url, heading or caption or "Video", autoplay=bool(section.get("autoplay")),
+                             controls=not section.get("hide_controls"), poster=poster)
         + "</div>"
     )
     if caption:
@@ -9303,6 +9332,13 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         for section in page.get("sections", [])
         for url in (section.get("images") or [])
     )
+    # A video whose control bar is hidden NEEDS this script -- the tap handler is the only thing left that
+    # can pause it. Without this flag a page carrying nothing else interactive returned no script at all,
+    # and hiding the bar really would have removed the last way to stop the video.
+    has_chromeless_video = any(
+        section.get("type") == "video" and section.get("hide_controls")
+        for section in page.get("sections", [])
+    )
     has_before_after = any(
         section.get("type") == "before_after"
         and str(section.get("before_url") or "").strip()
@@ -9314,7 +9350,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         and str(((section.get("cta") or {}).get("action")) or "") == "download"
         for section in page.get("sections", [])
     )
-    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download, has_before_after, has_video_embed]):
+    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download, has_before_after, has_video_embed, has_chromeless_video]):
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -9323,10 +9359,6 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      document.querySelectorAll('[data-sl-current-year]').forEach((node) => {",
         "        node.textContent = String(new Date().getFullYear());",
         "      });",
-        # BEFORE / AFTER. The range input already handles drag, touch, click-to-jump, keyboard and
-        # assistive technology; all that is left is moving its value into the custom property the clip-path
-        # and the handle read. Without this the divider simply stays where the tenant authored it, which is
-        # a legible side-by-side rather than a broken control.
         # VIDEO EMBED. The provider's iframe -- a megabyte of script and third-party cookies -- is not
         # loaded until a visitor asks for it. Replacing the facade rather than layering over it means the
         # poster stops competing for the frame, and autoplay is honoured because the click IS the gesture
@@ -9344,6 +9376,23 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          box.appendChild(frame);",
         "        });",
         "      });",
+        # CHROMELESS VIDEO. The control bar was hidden, so the video itself becomes the control -- this is
+        # what keeps hiding it from being a WCAG 2.2.2 failure rather than a style choice. Click or
+        # Enter/Space toggles; the element carries tabindex="0" so a keyboard reaches it at all.
+        "      document.querySelectorAll('[data-sl-video-tap]').forEach((video) => {",
+        "        const toggle = () => { if (video.paused) { video.play(); } else { video.pause(); } };",
+        "        video.addEventListener('click', toggle);",
+        "        video.addEventListener('keydown', (event) => {",
+        "          if (event.key !== ' ' && event.key !== 'Enter') return;",
+        # Space scrolls the page by default, which would move the video out of view as it paused.
+        "          event.preventDefault();",
+        "          toggle();",
+        "        });",
+        "      });",
+        # BEFORE / AFTER. The range input already handles drag, touch, click-to-jump, keyboard and
+        # assistive technology; all that is left is moving its value into the custom property the clip-path
+        # and the handle read. Without this the divider simply stays where the tenant authored it, which is
+        # a legible side-by-side rather than a broken control.
         "      document.querySelectorAll('[data-sl-before-after]').forEach((frame) => {",
         "        const range = frame.querySelector('.sl-ba-range');",
         "        if (!range) return;",
