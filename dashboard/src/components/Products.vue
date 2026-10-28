@@ -529,7 +529,13 @@
             </div>
           </section>
 
-          <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
+          <!-- Every WIZARD_FLOWS entry ends in "image", including lead_gen and tip_jar, so all three
+               intents are offered a picture when they are CREATED. Gating the edit form on `transaction`
+               made that a one-way door: a lead magnet or a tip jar could be given an image and then never
+               change or remove it, and a Roundup -- a page whose whole job is to rank -- was stuck with
+               the lead-action glyph forever. The product list already prefers images[0] and falls back to
+               that glyph, so an image is meaningful for every intent here. -->
+          <section class="modal-form-section">
             <ProductImagesField
               heading="Image URLs"
               v-model:uploaded="form.uploaded_images"
