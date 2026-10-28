@@ -41,8 +41,10 @@
         @drop="dropOn(index)"
       >
         <img :src="url" alt="Uploaded product image" />
-        <span v-if="index === 0" class="product-image-badge">Shown at checkout</span>
         <figcaption>{{ shortName(url) }}</figcaption>
+        <!-- Sits in the same slot the other cards give "Make first", so the row reads as one control with
+             one option already taken, rather than a label stuck over the picture it is describing. -->
+        <span v-if="index === 0" class="product-image-badge">checkout</span>
         <!-- One click, because "which one is the marquee" is a CHOICE, not an ordering task. Dragging
              works too, but picking the cover out of a dozen phone photos should not require aiming. -->
         <button

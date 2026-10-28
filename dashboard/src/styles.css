@@ -1817,15 +1817,15 @@ fieldset input[type="radio"] {
 .product-image-preview.is-first { border-color: var(--brand, #4f46e5); }
 
 .product-image-badge {
-  position: absolute;
-  top: 0.6rem;
-  left: 0.6rem;
+  display: block;
+  margin: 0 0.8rem 0.8rem;
+  text-align: center;
   background: var(--brand, #4f46e5);
   color: #fff;
   border-radius: 999px;
-  font-size: 1rem;
+  font-size: 1.2rem;
   font-weight: 800;
-  padding: 0.3rem 0.8rem;
+  padding: 0.5rem 0.8rem;
   letter-spacing: 0.02em;
 }
 
