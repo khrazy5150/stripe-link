@@ -32,6 +32,16 @@ export default [
       // is typed rather than nine days later.
       "no-undef": "error",
 
+      // The template half of the same rule, and it exists because `no-undef` does not reach into one.
+      // `unplaceableProducts` was referenced twice in Offers.vue's template and defined nowhere: the
+      // build passed, `no-undef` passed, and every click of "+ Add Offer" threw on `undefined.length`
+      // and blanked the screen. Nine days for the last one of these, this one shipped 2026-10-18 and
+      // was reported 2026-10-27.
+      //
+      // Measured before turning it on: ZERO findings across the dashboard once that one was fixed, so
+      // it blocks nothing that exists today and catches the next one the day it is typed.
+      "vue/no-undef-properties": "error",
+
       // Clean today too, and each is a real mistake rather than a preference.
       "vue/no-unused-components": "error",
       "vue/require-v-for-key": "error",

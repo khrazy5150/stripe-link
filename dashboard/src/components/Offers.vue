@@ -1110,6 +1110,42 @@ const draftSelectedIntent = computed(() => {
   const intents = new Set(selectedDraftItems.map(productIntentFor));
   return intents.size === 1 ? [...intents][0] : "";
 });
+// Selected products the saved document has nowhere to put, and why -- in the tenant's terms rather than
+// the model's. The panel invites the tenant to pick "any order-bump / upsell / downsell products", so it
+// has to say when it cannot honour one.
+//
+// This MIRRORS buildFunnelBlock and the items loop instead of re-deciding placement. A warning that
+// disagrees with what save actually writes is worse than no warning at all, because the tenant learns to
+// ignore it. A product earns a place as a landing card (a landing price), a checkout bump (order_bump) or
+// a post-purchase upsell (upsell). A downsell rides its OWN product's upsell, so a downsell-only product
+// is placed nowhere -- the accepted gap this warning exists to name (plans/OFFER_MODEL_REDESIGN.md §6).
+const unplaceableProducts = computed(() => {
+  // `funnel` is only written for a transaction offer, so on a lead-gen offer a funnel-only product is
+  // dropped as well -- by a different route, to the same invisible end.
+  const funnelIsWritten = effectiveProductIntent.value === "transaction";
+  const reasonFor = (product) => {
+    if (landingPrices(product).length) return "";
+    const funnelPlaced = Boolean(contextPrice(product, "order_bump") || contextPrice(product, "upsell"));
+    if (funnelPlaced) {
+      return funnelIsWritten
+        ? ""
+        : "is priced only as a bump or upsell, and this offer captures leads rather than selling";
+    }
+    if (!productPrices(product).length) return "has no prices yet";
+    if (contextPrice(product, "downsell")) {
+      return "is priced only as a downsell, which is offered only when the same product's own upsell is declined";
+    }
+    return "has no landing, bump or upsell price";
+  };
+  return selectedProducts.value
+    .map((product) => ({
+      id: productId(product),
+      name: product.name || "Untitled Product",
+      reason: reasonFor(product),
+    }))
+    .filter((item) => item.reason);
+});
+
 const detectedOfferTypeLabel = computed(() => {
   const labels = {
     single_product: "SINGLE OFFER",
