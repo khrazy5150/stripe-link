@@ -378,6 +378,15 @@
                     <div v-if="itemConfig(product).price_image_errors[price.price_id]" class="price-image-error">
                       {{ itemConfig(product).price_image_errors[price.price_id] }}
                     </div>
+                    <!-- Says what this image does NOT do. A checkout line sends only the price id, so
+                         Stripe renders the image on the synced Stripe PRODUCT and shows the first one;
+                         every tier here is a price on that one product, so they cannot differ at
+                         checkout. Finding that out otherwise means buying something and looking. -->
+                    <small
+                      v-if="itemConfig(product).price_image_urls[price.price_id]"
+                      class="field-note"
+                    >Shown on this price card. Stripe's checkout page shows the product's first image —
+                      reorder the images in Products to change that.</small>
                   </label>
                 </div>
               </article>

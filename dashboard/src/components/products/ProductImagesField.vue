@@ -21,10 +21,36 @@
     <!-- Previews AND a crop button, not a count. The first cut of the wizard's image step printed "3 images
          added" and nothing else, so the tenant could neither see what they had uploaded nor frame it — and
          the crop is what decides the shape the page renders (plans/IMAGE_CROPPER.md). -->
+    <!-- WHICH image Stripe shows, said where the tenant can act on it. A checkout line sends only the
+         price id, so Stripe renders the image on the synced Stripe Product and uses the FIRST one -- the
+         hero and the price card never reach it. Without this, the only way to find that out is to buy
+         something and look. -->
+    <p v-if="uploaded.length > 1" class="field-note">
+      Upload as many as you like, then pick the marquee one — press <strong>Make first</strong> (or drag).
+      The first image is the one Stripe shows on the checkout page.
+    </p>
     <div v-if="uploaded.length" class="product-image-previews">
-      <figure v-for="url in uploaded" :key="url" class="product-image-preview">
+      <figure
+        v-for="(url, index) in uploaded"
+        :key="url"
+        class="product-image-preview"
+        :class="{ 'is-first': index === 0 }"
+        draggable="true"
+        @dragstart="dragFrom = index"
+        @dragover.prevent
+        @drop="dropOn(index)"
+      >
         <img :src="url" alt="Uploaded product image" />
+        <span v-if="index === 0" class="product-image-badge">Shown at checkout</span>
         <figcaption>{{ shortName(url) }}</figcaption>
+        <!-- One click, because "which one is the marquee" is a CHOICE, not an ordering task. Dragging
+             works too, but picking the cover out of a dozen phone photos should not require aiming. -->
+        <button
+          v-if="index !== 0"
+          type="button"
+          class="secondary-action compact"
+          @click.prevent="makeFirst(index)"
+        >Make first</button>
         <button
           v-if="canCrop(url)"
           type="button"
@@ -56,7 +82,7 @@
  */
 import { ref } from "vue";
 
-defineProps({
+const props = defineProps({
   uploaded: { type: Array, required: true },
   urls: { type: String, default: "" },
   status: { type: String, default: "" },
@@ -67,10 +93,31 @@ defineProps({
   maxImages: { type: Number, default: 8 },
   heading: { type: String, default: "" },
 });
-const emit = defineEmits(["files", "crop", "update:urls"]);
+const emit = defineEmits(["files", "crop", "update:urls", "update:uploaded"]);
 
 const fileInput = ref(null);
 const dragActive = ref(false);
+const dragFrom = ref(null);
+
+// Reordering is the whole point of saying which image Stripe uses: a label naming a slot the tenant
+// cannot change would just tell them their image is wrong and leave them there.
+function makeFirst(index) {
+  if (index <= 0) return;
+  const next = [...props.uploaded];
+  const [moved] = next.splice(index, 1);
+  next.unshift(moved);
+  emit("update:uploaded", next);
+}
+
+function dropOn(index) {
+  const from = dragFrom.value;
+  dragFrom.value = null;
+  if (from === null || from === index) return;
+  const next = [...props.uploaded];
+  const [moved] = next.splice(from, 1);
+  next.splice(index, 0, moved);
+  emit("update:uploaded", next);
+}
 
 function onPicked(event) {
   emit("files", Array.from(event.target.files || []));

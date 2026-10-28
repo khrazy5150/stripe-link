@@ -1812,6 +1812,23 @@ fieldset input[type="radio"] {
   background: #fff;
 }
 
+/* The first image is the one Stripe Checkout renders, so it is marked rather than merely first. */
+.product-image-preview { position: relative; cursor: grab; }
+.product-image-preview.is-first { border-color: var(--brand, #4f46e5); }
+
+.product-image-badge {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  background: var(--brand, #4f46e5);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 800;
+  padding: 0.3rem 0.8rem;
+  letter-spacing: 0.02em;
+}
+
 .product-image-preview img {
   width: 100%;
   height: 8rem;

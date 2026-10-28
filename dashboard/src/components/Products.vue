@@ -361,7 +361,7 @@
               You can skip this and add one later. A page with no image is not broken — it is just plainer.
             </p>
             <ProductImagesField
-              :uploaded="form.uploaded_images"
+              v-model:uploaded="form.uploaded_images"
               v-model:urls="form.images"
               :status="uploadStatus"
               :status-kind="uploadStatusKind"
@@ -532,7 +532,7 @@
           <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
             <ProductImagesField
               heading="Image URLs"
-              :uploaded="form.uploaded_images"
+              v-model:uploaded="form.uploaded_images"
               v-model:urls="form.images"
               :status="uploadStatus"
               :status-kind="uploadStatusKind"
