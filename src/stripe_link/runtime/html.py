@@ -3768,8 +3768,19 @@ def render_hero_media(
     overhang = ("" if not has_avatar else
                 (" has-avatar-top" if placement == "overlay_top" else " has-avatar"))
     media_class = "sl-hero-media" + overhang
+    # Which conversion target each slide stands for, DECLARED rather than inferred from its position.
+    #
+    # The island used to read the settled slide's ordinal and treat it as the target index. That held only
+    # while slide count == item count, which `offer_uses_grouped_item_media` guaranteed by throwing away a
+    # single product's gallery. With the gallery restored the two counts legitimately differ, and the
+    # ordinal would have meant: swiping to the second PHOTO re-prices the BNPL island against the second
+    # TIER CARD (it indexes `.sl-price-option` by that number), and hides a listicle's tier block entirely.
+    #
+    # One landing item means one target, so every slide declares 0 and swiping a gallery changes nothing.
+    # Several items and grouped media still gives exactly one slide each, so the ordinal is the item index.
+    one_target = len(stage_opportunities(offer, STAGE_LANDING)) <= 1
     slides = [
-        f"        <div class=\"sl-hero-slide\">"
+        f"        <div class=\"sl-hero-slide\" data-conv-index=\"{0 if one_target else index}\">"
         f"{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0), poster=posters.get(url, ''))}</div>"
         for index, url in enumerate(images)
     ]
@@ -3841,8 +3852,20 @@ def hero_media_images(
 
 
 def offer_uses_grouped_item_media(offer: dict[str, Any]) -> bool:
-    items = stage_opportunities(offer, STAGE_LANDING)
-    return len(items) > 1 or any(item.get("selectable_prices") for item in items if isinstance(item, dict))
+    """Does the hero carousel stand for the ITEMS rather than for one product's gallery?
+
+    One slide per item, because the slide ordinal IS the conversion-target index that the tier blocks and
+    the BNPL island read. More than one landing item and that mapping has to hold.
+
+    `any(selectable_prices)` used to be part of this and was WRONG. It arrived (98708a7, 2026-06-12) as a
+    generalisation of `offer_type == "bundle"` at a moment when `offer_type` was being dropped as a stored
+    field, so tiers were standing in for "several products". They are not the same thing: a single product
+    sold as 1-pack and 4-pack is ONE product with ONE conversion target, and collapsing its gallery to a
+    single image lost every photo but the first on exactly the offers most likely to have several --
+    while the builder went on listing them all as AUTO rows, promising a carousel the page never built.
+    `derived_offer_type` is authoritative now, so the proxy is not needed by anything.
+    """
+    return len(stage_opportunities(offer, STAGE_LANDING)) > 1
 
 
 def render_headline(section: dict[str, Any]) -> str:
@@ -7336,7 +7359,10 @@ def render_photo(section: dict[str, Any]) -> str:
 
     A LIST with one shared heading rather than one image per element, because the screenshots that prompted
     this arrive as a set under a single claim, and three separate rows would let them drift apart in the
-    order. The element is repeatable, so a page can still hold several unrelated photo blocks.
+    order. Deliberately NOT repeatable for the same reason: a second click of the palette button means
+    "another photo", which appends to this block's list, not "another photo block". (The video element IS
+    repeatable, and the difference is real -- it holds ONE video with its own heading, shape and autoplay
+    setting, so a second one is a separate argument elsewhere on the page rather than another item here.)
 
     Stacked at full width by default: a review screenshot is only proof while its text is readable, and a
     grid shrinks it until it is not. `side_by_side` opts into a 2-up grid for photos that do not carry text.
@@ -9698,8 +9724,18 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          convTrack.addEventListener('scroll', () => {",
         "            window.clearTimeout(convTimer);",
         "            convTimer = window.setTimeout(() => {",
-        "              const index = Math.round(convTrack.scrollLeft / convTrack.clientWidth);",
-        "              if (index !== currentIndex) { applyTarget(index); emit('conversion:itemChanged', { index: index, target: convTargets[index] }); }",
+        "              const slideIndex = Math.round(convTrack.scrollLeft / convTrack.clientWidth);",
+        # The slide SAYS which target it stands for. Falling back to the ordinal keeps a page published
+        # before this attribute existed behaving exactly as it did.
+        "              const slide = convTrack.children[slideIndex];",
+        "              const declared = slide && slide.dataset ? slide.dataset.convIndex : undefined;",
+        "              const index = declared === undefined || declared === '' ? slideIndex : Number(declared);",
+        # Range-checked HERE as well as inside applyTarget: applyTarget returning early still left the
+        # emit firing, so an out-of-range slide told every listener to switch to a target that does not
+        # exist -- which hides a listicle's tier block and leaves nothing to add to the cart.
+        "              if (index !== currentIndex && index >= 0 && index < convTargets.length) {",
+        "                applyTarget(index); emit('conversion:itemChanged', { index: index, target: convTargets[index] });",
+        "              }",
         "            }, 60);",
         "          });",
         "        }",

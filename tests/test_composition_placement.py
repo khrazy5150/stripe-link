@@ -62,7 +62,14 @@ class RepeatableSectionTests(unittest.TestCase):
         # event_date joined 2026-10-14: the author's own references print the same date TWICE on one page
         # — a band near the top and a card beside the sign-up — so a second click means another placement
         # of the date, not another date.
-        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon", "info_cards", "event_date"})
+        # video joined 2026-10-28 at the author's request, and the link_cards/photo reasoning does NOT
+        # transfer. Those are one block holding a SET -- a second click means "another link", "another
+        # screenshot" -- and the block has one heading because the items argue one point together. A video
+        # element holds a single `url` with its OWN heading, shape, caption, autoplay and control setting,
+        # and two videos on a landing page are a demo near the top and a testimonial near the buy button:
+        # separate arguments at separate places, which is the info_cards case, not the photo one.
+        self.assertEqual(repeatable,
+                         {"content_block", "catalog_grid", "page_ribbon", "info_cards", "event_date", "video"})
 
     def test_container_sections_are_singletons(self):
         # Testimonials and FAQ are ONE section holding many items, each with its own add control. A

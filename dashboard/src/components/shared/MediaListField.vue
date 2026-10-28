@@ -50,7 +50,10 @@
         @apply="applyCrop"
         @cancel="croppingUrl = ''"
       />
-      <template v-else-if="derived.length">
+      <!-- Only while NOTHING is stored. `hero_media_images()` returns section.images whenever it has any,
+           so one uploaded picture already replaces this whole list -- showing the AUTO rows beside it said
+           they were still in play and they were not. -->
+      <template v-if="!croppingUrl && !items.length && derived.length">
         <ul class="media-list is-derived">
           <li v-for="(item, index) in derived" :key="`auto-${index}`" class="media-list-item is-derived">
             <span class="media-drag is-placeholder" aria-hidden="true"></span>
@@ -65,8 +68,16 @@
           </li>
         </ul>
         <p class="media-list-empty">{{ derivedNote }}</p>
+        <!-- Takes ownership of the derived list. Until the images are STORED there is no order to change
+             and nothing to drag, which is why the AUTO rows carry a placeholder where the handle goes. -->
+        <button
+          v-if="derivedUrls.length > 1"
+          type="button"
+          class="secondary-action compact"
+          @click="adoptDerived"
+        >Use these images (lets you reorder)</button>
       </template>
-      <p v-else class="media-list-empty">{{ emptyText }}</p>
+      <p v-if="!croppingUrl && !items.length && !derived.length" class="media-list-empty">{{ emptyText }}</p>
 
       <div class="media-actions">
         <input ref="imageInput" type="file" accept="image/*" hidden @change="pickImage" />
@@ -243,6 +254,15 @@ async function applyCrop(rect) {
   } finally {
     cropBusy.value = false;
   }
+}
+
+// The AUTO rows as a plain URL list, blanks dropped: an item with no image occupies a slide on the page
+// (the renderer draws a placeholder) but there is no URL to store for it.
+const derivedUrls = computed(() => props.derived.map((item) => item?.url || "").filter(Boolean));
+
+function adoptDerived() {
+  if (!derivedUrls.value.length) return;
+  commit(derivedUrls.value);
 }
 
 function removeAt(index) {

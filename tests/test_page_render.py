@@ -191,7 +191,14 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("data-section-type=\"brand_label\"", html)
         self.assertIn(">Creatine Gummies</p>", html)
         self.assertIn("data-section-type=\"hero_media\"", html)
-        self.assertIn("data-media-count=\"1\"", html)
+        # THREE, not one. This fixture is the bug: one product, three images, three selectable tiers and
+        # no explicit hero_media.images. `offer_uses_grouped_item_media` counted the tiers as several
+        # products and kept only the first photo, so the canonical example page shipped a one-slide hero
+        # over a three-image product. Tiers are not items; the gallery is the product's.
+        self.assertIn("data-media-count=\"3\"", html)
+        # ...and every slide stands for the SAME conversion target, so swiping photos is not read as
+        # switching product (which would re-price the BNPL island against the wrong tier card).
+        self.assertEqual(html.count('data-conv-index="0"'), 3)
         self.assertIn("images/universal-bundle/creatine_gummies_1.webp", html)
         self.assertIn("<h1>Get Creatine Gummies Bundle Today</h1>", html)   # standalone headline = the h1
         self.assertIn(">Creatine Gummies</p>", html)                         # brand label demoted to <p>
