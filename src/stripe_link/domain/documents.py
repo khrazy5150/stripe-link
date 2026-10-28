@@ -779,6 +779,16 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
             require_string(field, "type", "Product lead_capture.fields.type")
             optional_bool(field, "required", "Product lead_capture.fields.required")
         return
+    # Actions that point SOMEWHERE, named explicitly. This used to be the fall-through -- anything that
+    # was not a capture action was assumed to need a target -- and that is why `roundup` could not be
+    # created at all: it captures nothing and points nowhere, so it landed here and was refused with a
+    # message about a field it must never have. Worse, it would not even have reached the message twice:
+    # `expected_type[action]` below is a dict lookup with no default, so a second action falling through
+    # here raises KeyError and the tenant gets a 500 instead of anything they can read.
+    #
+    # An action is allowed to belong to NEITHER branch. Listing the target actions says which ones do.
+    if action not in TARGET_ACTIONS:
+        return
     target = lead_capture.get("target")
     # A Social Page has NO single destination -- its cards are the actions (plans/LEAD_GEN_PAGES.md §8).
     # Demanding one made the tenant nominate a "primary" profile, which the page then rendered as a lone
@@ -805,6 +815,11 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
 # `open_form` was retired 2026-09-10 (plans/LEAD_GEN_PAGES.md §6, plans/FORM_BUILDER.md §8): its form_id
 # was read by nothing and it fell through to a generic email CTA. Zero products used it, so it left no data.
 # Shared with the OFFER validator, which carries a denormalised copy of the primary product's action.
+# The actions whose whole point is a destination: the product carries a `target` object and the page
+# renders a button to it. Kept beside LEAD_CAPTURE_ACTIONS so the two are read together -- a new action
+# added there and NOT added here needs neither a target nor capture fields, which is the common case.
+TARGET_ACTIONS = frozenset({"call_number", "external_url", "social_redirect"})
+
 LEAD_CAPTURE_ACTIONS = frozenset({
     "capture_email", "capture_phone", "capture_email_phone",
     "call_number", "external_url", "social_redirect",

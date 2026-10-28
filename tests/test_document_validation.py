@@ -434,6 +434,44 @@ class DocumentValidationTests(unittest.TestCase):
 
         validate_product_document(product)
 
+    def test_product_accepts_an_action_that_neither_captures_nor_targets(self):
+        """A Roundup captures nothing and points nowhere -- its content is the Collection it lists.
+
+        It could not be created at all. The target check was the FALL-THROUGH, so anything that was not a
+        capture action was assumed to need a destination: the wizard refused every Roundup with
+        "lead_capture.target must be an object for target actions", a message about a field the shape must
+        never have. An action is allowed to belong to neither branch.
+        """
+        product = copy.deepcopy(self.product)
+        product["product_intent"] = "lead_gen"
+        product["lead_capture"] = {
+            "action": "roundup",
+            "title": "What this list is for",
+            "description": "Say who these picks are for and how you chose them.",
+        }
+
+        validate_product_document(product)
+
+    def test_every_action_is_either_a_capture_a_target_or_neither_without_exploding(self):
+        """The second failure hiding behind the first: `expected_type[action]` is a dict lookup with no
+        default. A new action falling through to the target branch raises KeyError, so the tenant gets a
+        500 rather than a message -- which is how this would have been reported next time, with nothing in
+        the response to say what was wrong.
+        """
+        from stripe_link.domain.documents import LEAD_CAPTURE_ACTIONS
+
+        for action in LEAD_CAPTURE_ACTIONS:
+            product = copy.deepcopy(self.product)
+            product["product_intent"] = "lead_gen"
+            product["lead_capture"] = {"action": action, "title": "t", "description": "d"}
+            with self.subTest(action=action):
+                try:
+                    validate_product_document(product)
+                except DocumentValidationError:
+                    pass          # a real, readable refusal is fine -- that is the validator working
+                except KeyError as exc:
+                    self.fail(f"{action} fell through to the target branch and raised KeyError({exc})")
+
     def test_product_rejects_incomplete_lead_capture_target(self):
         product = copy.deepcopy(self.product)
         product["product_intent"] = "lead_gen"
