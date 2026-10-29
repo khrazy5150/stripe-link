@@ -1441,7 +1441,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # cuts got wrong.
     "    .sl-layout-editorial .sl-catalog-list{gap:3.2rem}",
     "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card{display:block;background:transparent;border:0;padding:0;text-align:center}",
-    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{display:block;margin:0 0 0.6rem;font-size:3.4rem;min-width:0;text-align:center}",
+    # THE NUMBER MOVES ONTO THE HEADLINE. A bare numeral on its own line above the title read as a stray
+    # figure rather than as a rank -- the author asked for the circled badge the numbered_list element
+    # already draws, beside the words it numbers. Same recipe as `.sl-numbered-item::before`, inline so it
+    # sits ON the heading line and wraps with it; the counter is incremented by the row, and a counter is
+    # visible to a descendant, so no second counter is needed.
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{content:none}",
+    "    .sl-layout-editorial .sl-catalog-title::before{content:counter(sl-catalog);display:inline-grid;place-items:center;width:3.6rem;height:3.6rem;margin-right:1rem;vertical-align:middle;border-radius:50%;background:var(--sl-badge-bg,var(--sl-accent));color:var(--sl-badge-ink,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
+    # A RULE BETWEEN ENTRIES, same border token the content block's "Add a dividing line" uses. Intrinsic
+    # to the layout rather than a tick: the tenant chose editorial, and an entry that is prose plus a panel
+    # needs a boundary or the next headline reads as part of the panel above it. Symmetric space around the
+    # line (the list gap above, the padding below) so it separates rather than attaching to one side.
+    "    .sl-layout-editorial .sl-catalog-row + .sl-catalog-row{border-top:1px solid var(--sl-content-border);padding-top:3.2rem}",
     "    .sl-layout-editorial .sl-catalog-body{gap:0.8rem}",
     "    .sl-layout-editorial .sl-catalog-title{font-size:clamp(2rem,4vw,2.8rem);line-height:1.2}",
     "    .sl-layout-editorial .sl-catalog-pitch{font-size:1.6rem;line-height:1.55;opacity:0.85}",
@@ -1453,6 +1464,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-layout-editorial a.sl-catalog-card:hover{transform:none;box-shadow:none}",
     "    .sl-layout-editorial a.sl-catalog-card:hover .sl-catalog-panel{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     "    .sl-catalog-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
+    # The reason to buy, inside the panel. The ribbon's body copy exactly -- this IS the ribbon's body.
+    "    .sl-catalog-support{margin:0;font-size:1.6rem;line-height:1.55;opacity:0.85}",
     # A SPAN styled as a button, because the card is already the anchor. It must not look clickable on its
     # own in a way that suggests a second destination -- there is only one, and the whole row goes there.
     "    .sl-catalog-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-size:1.5rem;font-weight:700;line-height:1}",
@@ -7988,10 +8001,13 @@ def render_catalog_grid(
             continue
         presentation = offer.get("presentation") or {}
         name = str(presentation.get("headline") or offer.get("name") or "")
+        # Resolved ONCE, up here, because every editorial default below reads it -- the name, the category,
+        # the reason to buy. It used to be fetched twice lazily (for the image, then for the pitch), which
+        # was fine while two callers wanted it and is the shape drift starts from once five do.
+        product = first_offer_product(offer, products_by_id) or {}
         image = str(presentation.get("hero_image_url") or "").strip()
         if not image:
-            product = first_offer_product(offer, products_by_id)
-            image = str((product.get("images") or [""])[0] if product else "")
+            image = str((product.get("images") or [""])[0])
         # THE PITCH, listicle only. A card is a glance and a row is a read: the grid and masonry layouts
         # stay as they were. Optional, with a fallback, because "very little design" is the goal -- a
         # tenant who writes nothing still gets a working page (plans/ROUNDUP_PAGES.md open question 2).
@@ -8006,8 +8022,7 @@ def render_catalog_grid(
             if not pitch:
                 pitch = str(presentation.get("subheadline") or "").strip()
             if not pitch:
-                fallback_product = first_offer_product(offer, products_by_id)
-                pitch = str((fallback_product or {}).get("description") or "").strip()
+                pitch = str(product.get("description") or "").strip()
             if pitch:
                 pitch_html = f'<p class="sl-catalog-pitch">{escape(pitch)}</p>'
         price_html = ""
@@ -8024,38 +8039,58 @@ def render_catalog_grid(
         #
         # Added for grid and masonry too, not only where it was needed, because the card CONTENT being
         # identical in all three layouts is the property that stops one drifting from another.
-        # EDITORIAL extras, all optional and all the tenant's own words. Parallel page_id maps, the shape
-        # `entry_copy` already established, so each is independently absent and nothing needs migrating.
+        # EDITORIAL extras: parallel page_id maps, the shape `entry_copy` already established, so each is
+        # independently absent and nothing needs migrating.
         #
-        # None of them has a generated default except the headline, which falls back to the entry's own
-        # name. An eyebrow and a button label are CLAIMS -- "Supplies are limited", "Shop now" -- and the
-        # rule this plan has held throughout is that we give the shape and the tenant writes the hook.
-        eyebrow_html = headline_html = cta_html = ""
+        # EVERY ONE OF THEM NOW CARRIES A DEFAULT READ OFF THE PRODUCT. The first cut defaulted only the
+        # headline, on the argument that an eyebrow and a button label are CLAIMS the tenant must write
+        # themselves. That argument was wrong about where the words come from: a category and a product
+        # name are the tenant's own data, already typed once on the product, and making them retype it per
+        # listing page is the "fill it in yourself" form this builder exists to avoid. The standing
+        # formula, in the author's words: the software fills the data in and the tenant edits the wording.
+        #
+        # The dashboard writes these same defaults into the editor's boxes when an entry is first opened,
+        # so what publishes is what the tenant can see and change. The ladder stays here as well, for the
+        # entry added to the Collection after that modal was last open -- it must still render as an
+        # argument rather than as four empty slots.
+        eyebrow_html = headline_html = cta_html = support_html = ""
         if layout == "editorial":
+            # THE CATEGORY. Stored either as a typed label ("Electronics") or as a key
+            # ("dietary_supplement"); the underscores are swapped out here for the same reason the
+            # product search humanises them. CSS uppercases it, so no case fixing is needed.
             eyebrow = str((section.get("entry_eyebrow") or {}).get(page_id) or "").strip()
+            if not eyebrow:
+                eyebrow = str(product.get("product_category") or "").replace("_", " ").strip()
             if eyebrow:
                 eyebrow_html = f'<p class="sl-catalog-eyebrow">{escape(eyebrow)}</p>'
-            entry_name = str((section.get("entry_headline") or {}).get(page_id) or "").strip() or name
+            # The PRODUCT's name before the offer's: `name` is the offer headline, which on a landing page
+            # is a sales line ("Homeowners Are Trading in Their Doorbell Cams for This") rather than the
+            # name of the thing. An entry in a ranked list is announcing which product this is.
+            entry_name = (str((section.get("entry_headline") or {}).get(page_id) or "").strip()
+                          or str(product.get("name") or "").strip() or name)
             headline_html = f'<h3 class="sl-catalog-title">{render_headline_markup(entry_name)}</h3>'
-            # DEFAULTED, unlike the eyebrow. The first cut left this empty unless the tenant typed one,
-            # and the result was that an editorial entry rendered the same four things a compact row does
-            # -- image, title, pitch, price -- only bigger. The author set the layout, saw no button and
-            # no visible change, and reported it as "no change in layout". He was right: the fancy layout
-            # has to BE fancy before anyone writes a word, because the formula here is that the software
-            # fills the data in and the tenant edits the wording.
-            #
-            # Built from the OFFER's name, never the entry headline: a tenant who writes an editorial
-            # headline ("Homeowners Are Trading in Their Doorbell Cams for This") would otherwise get a
-            # button that begins "See Homeowners Are Trading...". And it is navigation, not a claim -- the
-            # row goes to that page and the button says so -- which is why it may carry a default at all
-            # while the eyebrow ("Supplies are limited") still may not.
-            cta = str((section.get("entry_cta") or {}).get(page_id) or "").strip() or (f"See {name}" if name else "")
-            if cta:
-                # A SPAN, not a nested <a>: the whole card is already the link, and an anchor inside an
-                # anchor is invalid markup that browsers silently un-nest -- which would put the button
-                # outside the card and break the row.
-                cta_html = f'<span class="sl-catalog-cta">{escape(cta)}</span>'
-        img_html = (responsive_img(image, name or "Product", sizes=CONTENT_BLOCK_SIZES) if image else "")
+            # THE REASON TO BUY, product-level and asked once (Product.selling_point). The last resort is
+            # deliberately bland: "Available now" states a fact about stock and claims nothing about the
+            # product, which is the only kind of sentence we may put in a seller's mouth unasked.
+            support = str((section.get("entry_support") or {}).get(page_id) or "").strip()
+            if not support:
+                support = str(product.get("selling_point") or "").strip() or "Available now"
+            support_html = f'<p class="sl-catalog-support">{escape(support)}</p>'
+            # NAVIGATION, not a claim -- the row goes to that page and the button says so. "Shop Now"
+            # rather than the earlier "See {name}": a generated label built from a name gets unreadable the
+            # moment the name is long, and every button on the page reading the same thing is correct here
+            # because every button does the same thing.
+            cta = str((section.get("entry_cta") or {}).get(page_id) or "").strip() or "Shop Now"
+            # A SPAN, not a nested <a>: the whole card is already the link, and an anchor inside an anchor
+            # is invalid markup that browsers silently un-nest -- which would put the button outside the
+            # card and break the row.
+            cta_html = f'<span class="sl-catalog-cta">{escape(cta)}</span>'
+        # ALT falls back to the PRODUCT's name. `name` is the offer headline, which on a landing page is a
+        # sales line ("Homeowners Are Trading in Their Doorbell Cams") -- a description of the pitch, not
+        # of the picture. A tenant's own words still win over both: responsive_img resolves the image_alts
+        # sidecar typed against the asset before it ever reaches this fallback.
+        img_alt = str(product.get("name") or "").strip() or name or "Product"
+        img_html = (responsive_img(image, img_alt, sizes=CONTENT_BLOCK_SIZES) if image else "")
         if layout == "editorial":
             # TWO PARTS per entry, which is what the author drew and what the first two cuts of this got
             # wrong. He assembled it by hand as a CONTENT BLOCK followed by a PAGE RIBBON, and the point
@@ -8067,6 +8102,7 @@ def render_catalog_grid(
             # thing a Roundup is FOR; the panel is the call to action it earns.
             panel_copy = "\n".join(line for line in [
                 (f"            {eyebrow_html}" if eyebrow_html else ""),
+                (f"            {support_html}" if support_html else ""),
                 (f"            {price_html}" if price_html else ""),
                 (f"            {cta_html}" if cta_html else ""),
             ] if line)

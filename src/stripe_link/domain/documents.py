@@ -91,6 +91,7 @@ PRODUCT_FIELD_ORDER = [
     "status",
     "name",
     "description",
+    "selling_point",
     "images",
     "product_intent",
     "product_type",
@@ -908,6 +909,11 @@ def validate_product_document(document: dict[str, Any]) -> None:
     if document.get("stripe_mode") is not None:
         require_enum(document, "stripe_mode", {"test", "live"})
     optional_string(document, "description")
+    # THE ONE-LINE REASON TO BUY, the tenant's own words. Short on purpose: it is printed verbatim beside a
+    # product (a Roundup entry's supporting line today) rather than summarised, and a paragraph there reads
+    # as a second description. Not `ai_context` -- that structure LICENSES what a generated page may assert;
+    # this one supplies the sentence.
+    optional_string(document, "selling_point", "Product selling_point", max_length=150)
     if document.get("product_intent") is not None:
         require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Product product_intent")
     optional_string(document, "product_type")

@@ -384,6 +384,56 @@ default — the builder composed every webinar page as a squeeze page while the 
 as `lead_event`. The comment above the map claimed a test pinned it; the test only checked that the
 LOOKUP was written. Both maps are now compared member by member.
 
+**P5 — the editorial entry, filled from the product. SHIPPED dev 2026-10-28.** Three cuts, and the
+first two were wrong in a way worth recording because the mistake is easy to repeat.
+
+The author drew the shape by hand out of the elements the builder already has — a **content block**
+followed by a **page ribbon** — and asked for it to be generated from the data. Cut one defaulted
+nothing, so an editorial entry rendered the same four things a compact row does, only bigger ("there is
+no change in layout" — he was right). Cut two folded the whole entry into one ribbon-shaped row, which
+reads as a product tile however generously it is spaced, because the prose has nowhere to be. The entry
+is **prose then a panel**: the headline and paragraph argue for the product in the tenant's words, and
+only then does a tinted panel show it and offer the way through. The card itself carries no chrome at
+all — a box around the prose is what made it a tile.
+
+The last cut filled the words. Every editorial box now starts from the product behind the entry:
+
+| box | starts from |
+| --- | --- |
+| headline | `product.name`, then the offer's headline |
+| paragraph | the page's `subheadline`, then `product.description` |
+| eyebrow | `product.product_category`, underscores humanised |
+| supporting line | `product.selling_point`, then `"Available now"` |
+| button | `"Shop Now"` |
+
+**The earlier rule that an eyebrow and a button are CLAIMS the tenant must write themselves was wrong
+about where the words come from.** A category and a product name are the tenant's own data, typed once
+on the product; making them retype it on every page that lists the product is the self-service form this
+builder exists to replace. The author stated the formula plainly: *the software will fill in the data
+first, and the tenant can modify the wording.* The one thing still not invented is a REASON —
+`selling_point` is a field the tenant fills in, and its absence falls back to `"Available now"`, a fact
+about stock that claims nothing about the product.
+
+`Product.selling_point` is new (≤150 chars, optional, both product forms). Short on purpose: it is
+printed verbatim beside a product rather than summarised, and a paragraph there reads as a second
+description. It is **not** `ai_context` — that structure licenses what a GENERATED page may assert; this
+one supplies the sentence.
+
+The defaults are written INTO the editor's boxes, not shown as placeholders, because a placeholder
+cannot be edited — it vanishes on the first keystroke and there is no way to keep half of it. They are
+seeded once, when the grid editor opens, and only for an entry with nothing authored, so the moment a
+tenant touches one of its five boxes that entry is theirs. The renderer keeps the same ladder anyway:
+an entry added to the Collection since the modal was last open has never been through the seeder.
+Duplicated logic, so `TheBuilderShowsWhatWouldPublishTests` pins the two copies to each other.
+
+Two pieces of chrome, both borrowed rather than invented: the rank is now the **circled badge
+`numbered_list` draws**, moved onto the headline (the row increments the counter, the title draws it,
+inline so it sits on the heading's own line) because a bare numeral above the title read as a stray
+figure; and a **dividing rule** separates one entry from the next, using the same `--sl-content-border`
+the content block's "Add a dividing line" uses. The rule is intrinsic to the layout rather than a tick
+of its own — an entry that is prose plus a panel needs a boundary, or the next headline reads as part of
+the panel above it.
+
 ---
 
 ## 9. Open questions
@@ -401,16 +451,18 @@ LOOKUP was written. Both maps are now compared member by member.
    number of Roundups without being recreated. That is the author's intent and it is what the code
    already does.
 
-   What is unsettled is the paragraph. Members are bare page references with nowhere to put one. The
-   recommendation is **optional copy authored on the embedding section**, bound by `page_id`, falling
-   back to the offer's own description when absent:
+   ~~What is unsettled is the paragraph.~~ **DECIDED and SHIPPED — see P5.** Members are bare page
+   references with nowhere to put one, so the copy is authored on the embedding section, bound by
+   `page_id`. Five boxes rather than one, and each is PRE-FILLED from the product rather than merely
+   falling back to it:
 
    - *On the section, not the Collection*, because one Collection may be embedded by two Roundups that
      frame the same product differently ("for your mom" / "for coworkers"), and a Collection is
      documented as pure, reusable, URL-unaware data.
-   - *Optional, with a fallback*, because "very little design" is the goal: a tenant who writes nothing
-     still gets a working page, and the 150-word floor is carried by the intro and the selection
-     rationale rather than by per-entry prose.
+   - *Pre-filled, with the same ladder kept in the renderer*, because "very little design" is the goal
+     — and a tenant who writes nothing gets a page that already argues, rather than one with the shape
+     of an argument and no words in it. The 150-word floor is still carried by the intro and the
+     selection rationale rather than by per-entry prose.
 
 3. ~~**Does the listicle CTA go to the offer page or straight to checkout?**~~ **DECIDED 2026-10-27 —
    both links go to the offer page.** The entry heading is a link and the button is a button, as on the

@@ -244,6 +244,23 @@
               Description
               <textarea v-model.trim="form.description" rows="3" placeholder="Describe it in a line or two..."></textarea>
             </label>
+            <!-- THE ONE LINE THAT SELLS IT. The description says what the thing IS -- often pasted from a
+                 supplier and written for a marketplace listing -- which is why a page that lists this
+                 product beside others cannot argue for it from that alone. Asked once here so every page
+                 that mentions the product inherits the same sentence instead of re-deriving one. -->
+            <label>
+              Best reason to buy it
+              <input
+                v-model.trim="form.selling_point"
+                maxlength="150"
+                autocomplete="off"
+                placeholder="e.g. Catches what a doorbell cam misses, indoors and at night"
+              />
+              <span class="field-note">
+                One line, in your words. Used wherever this product is listed beside others — on a Roundup
+                page it is the line under the picture. Optional.
+              </span>
+            </label>
 
             <template v-if="wizardIntent === 'transaction'">
               <div class="modal-inline-grid">
@@ -394,6 +411,23 @@
           <label>
             Description
             <textarea v-model.trim="form.description" rows="4" placeholder="Describe your product..."></textarea>
+          </label>
+          <!-- THE ONE LINE THAT SELLS IT. The description says what the thing IS -- often pasted from a
+               supplier and written for a marketplace listing -- which is why a page that lists this
+               product beside others cannot argue for it from that alone. Asked once here so every page
+               that mentions the product inherits the same sentence instead of re-deriving one. -->
+          <label>
+            Best reason to buy it
+            <input
+              v-model.trim="form.selling_point"
+              maxlength="150"
+              autocomplete="off"
+              placeholder="e.g. Catches what a doorbell cam misses, indoors and at night"
+            />
+            <span class="field-note">
+              One line, in your words. Used wherever this product is listed beside others — on a Roundup
+              page it is the line under the picture. Optional.
+            </span>
           </label>
 
           <div class="modal-inline-grid">
@@ -1067,6 +1101,7 @@ function defaultProductForm() {
     created_at: null,
     name: "",
     description: "",
+    selling_point: "",
     product_type: "physical",
     product_category: "",
     sku: "",
@@ -1194,6 +1229,7 @@ function productFormFromDocument(product) {
     created_at: product.created_at || null,
     name: product.name || "",
     description: product.description || "",
+    selling_point: product.selling_point || "",
     product_type: productType,
     product_category: product.product_category || "",
     sku: product.sku || "",

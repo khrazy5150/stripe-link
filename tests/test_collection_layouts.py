@@ -224,18 +224,22 @@ class EditorialLayoutTests(unittest.TestCase):
         tenant edits the wording."""
         markup = self._render()
         self.assertIn("sl-catalog-cta", markup)
-        self.assertIn("See Compact Desk Lamp", markup)
+        self.assertIn("Shop Now", markup)
 
-    def test_the_eyebrow_still_has_no_default(self):
-        """The button is NAVIGATION -- the row goes to that page and it says so. An eyebrow is a CLAIM
-        ("Supplies are limited"), and this plan has never put one of those in a tenant's mouth."""
+    def test_the_eyebrow_defaults_to_nothing_when_there_is_no_product_to_read(self):
+        """It defaults to the product's CATEGORY, which is the tenant's own data. With no product resolved
+        there is nothing to say, and an empty eyebrow element is not rendered at all -- the earlier rule
+        that an eyebrow must never be invented still holds, it is just no longer invented FROM NOTHING."""
         self.assertNotIn("sl-catalog-eyebrow", self._render())
 
-    def test_the_button_is_named_from_the_offer_not_the_entry_headline(self):
-        """A tenant writing an editorial headline would otherwise get a button reading
-        "See Homeowners Are Trading in Their Doorbell Cams for This"."""
+    def test_the_button_label_is_fixed_rather_than_built_from_a_name(self):
+        """It used to read "See {offer name}", which got unreadable the moment the name was long -- and a
+        tenant writing an editorial headline risked "See Homeowners Are Trading in Their Doorbell Cams for
+        This". Every button on a Roundup does the same thing, so every button may say the same thing."""
         markup = self._render(entry_headline={"pg1": "Homeowners Are Trading in Their Doorbell Cams"})
-        self.assertIn("See Compact Desk Lamp", markup)
+        self.assertIn('<span class="sl-catalog-cta">Shop Now</span>', markup)
+        self.assertNotIn("See Homeowners", markup)
+        self.assertNotIn("See Compact Desk Lamp", markup)
 
     def test_the_compact_row_gains_no_button(self):
         """The two layouts must stay visibly different, which is the whole reason this was reported."""
@@ -282,6 +286,235 @@ class EditorialLayoutTests(unittest.TestCase):
                 {"type": "catalog_grid", "id": "s1", "layout": layout, "items": [self.ENTRY],
                  "entry_copy": {"pg1": "Why this one made the list"}}, OFFERS, {}, {})
             self.assertIn("Why this one made the list", markup, layout)
+
+
+class TheEntryIsFilledFromTheProductTests(unittest.TestCase):
+    """Every editorial box now starts from the product behind the entry.
+
+    The first cut defaulted only the headline, arguing that an eyebrow and a button label are CLAIMS the
+    tenant must write. That argument was wrong about where the words come from: a category and a product
+    name are the tenant's own data, typed once on the product, and making them retype it on every page
+    that lists the product is the self-service form this builder exists to replace. The author named the
+    formula directly -- "the software will fill in the data first, and the tenant can modify the wording."
+
+    The one thing still not invented is a REASON. `selling_point` is a field the tenant fills in, and when
+    it is empty the entry falls back to "Available now": a fact about stock that claims nothing about the
+    product. That is the whole of what we may say in a seller's voice unasked.
+    """
+
+    ENTRY = {"offer_id": "o3", "slug": "/mini-cam", "page_id": "pg3"}
+    OFFER = {"o3": {"offer_id": "o3", "name": "Mini Cam Offer",
+                    "items": [{"product_id": "pr1", "price_id": "pc1"}],
+                    "presentation": {"headline": "Homeowners Are Trading In Their Doorbell Cams",
+                                     "subheadline": "Protect your home and your loved ones."}}}
+    PRODUCT = {"pr1": {"name": "Security Mini Cam", "product_category": "home_security",
+                       "description": "4pcs Mini Wireless Security Camera, 2.4GHz WiFi, night vision.",
+                       "selling_point": "Catches what a doorbell cam misses, indoors and at night.",
+                       "images": ["https://img/cam.jpg"]}}
+
+    def _render(self, products=None, **overrides):
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        section = {"type": "catalog_grid", "id": "s1", "layout": "editorial", "items": [self.ENTRY]}
+        section.update(overrides)
+        return html.render_catalog_grid(section, self.OFFER,
+                                        self.PRODUCT if products is None else products, {})
+
+    def test_the_eyebrow_is_the_products_category(self):
+        self.assertIn('<p class="sl-catalog-eyebrow">home security</p>', self._render())
+
+    def test_a_stored_category_key_is_humanised(self):
+        """Categories are stored either as a typed label ("Electronics") or as a key
+        ("dietary_supplement"). The second must not publish with its underscores showing."""
+        self.assertNotIn("home_security", self._render())
+
+    def test_the_headline_is_the_PRODUCTS_name_not_the_offers_sales_line(self):
+        """An offer headline is a sales line; an entry in a ranked list is announcing which product this
+        is. Reading `presentation.headline` here would title entry 1 "Homeowners Are Trading In Their
+        Doorbell Cams", which says nothing about what is being ranked."""
+        markup = self._render()
+        self.assertIn("Security Mini Cam</h3>", markup)
+        # Title-cased on the way out ("In" -> "in"), so assert the form that actually publishes.
+        self.assertNotIn("Homeowners Are Trading in Their Doorbell Cams</h3>", markup)
+
+    def test_the_supporting_line_is_the_products_selling_point(self):
+        self.assertIn('<p class="sl-catalog-support">Catches what a doorbell cam misses, indoors and at night.</p>',
+                      self._render())
+
+    def test_a_product_with_no_selling_point_gets_the_bland_fallback(self):
+        bare = {"pr1": {"name": "Security Mini Cam", "product_category": "home_security"}}
+        self.assertIn('<p class="sl-catalog-support">Available now</p>', self._render(products=bare))
+
+    def test_the_pitch_prefers_the_pages_own_subheadline_over_the_description(self):
+        """Unchanged ladder, and deliberately so: a description is often pasted from a supplier and
+        written for a marketplace listing, while the subheadline is the pitch for THIS page."""
+        markup = self._render()
+        self.assertIn("Protect your home and your loved ones.", markup)
+        self.assertNotIn("4pcs Mini Wireless Security Camera", markup)
+
+    def test_the_description_is_the_last_resort_for_the_pitch(self):
+        offer = {"o3": {**self.OFFER["o3"], "presentation": {"headline": "Mini Cam"}}}
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        markup = html.render_catalog_grid(
+            {"type": "catalog_grid", "id": "s1", "layout": "editorial", "items": [self.ENTRY]},
+            offer, self.PRODUCT, {})
+        self.assertIn("4pcs Mini Wireless Security Camera", markup)
+
+    def test_the_tenants_words_beat_the_products_everywhere(self):
+        """The defaults are a STARTING POINT. A value written in the builder is the whole reason these
+        are editable boxes rather than a fixed rendering of the product."""
+        markup = self._render(entry_eyebrow={"pg3": "Supplies are limited"},
+                              entry_headline={"pg3": "The One We Keep Recommending"},
+                              entry_copy={"pg3": "Why this one made the list"},
+                              entry_support={"pg3": "Runs for a year on one charge"},
+                              entry_cta={"pg3": "See the mini cam"})
+        for written in ("Supplies are limited", "The One We Keep Recommending", "Why this one made the list",
+                        "Runs for a year on one charge", "See the mini cam"):
+            self.assertIn(written, markup, written)
+        self.assertNotIn("home security", markup)
+        self.assertNotIn("Shop Now", markup)
+
+    def test_the_compact_row_gains_none_of_it(self):
+        """The two ordered layouts must stay visibly different -- that difference is what was reported
+        missing in the first place. A compact row has nowhere to put a supporting line or a button."""
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        markup = html.render_catalog_grid(
+            {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY]},
+            self.OFFER, self.PRODUCT, {})
+        for absent in ("sl-catalog-support", "sl-catalog-cta", "sl-catalog-eyebrow", "Available now"):
+            self.assertNotIn(absent, markup, absent)
+
+    def test_an_offer_with_no_product_still_renders_an_entry(self):
+        """Nothing in the ladder may become required. A Roundup can list a page whose product was
+        archived, and the entry must still be a link rather than a hole in the list."""
+        markup = self._render(products={})
+        self.assertIn('<a class="sl-catalog-card"', markup)
+        self.assertIn("Homeowners Are Trading in Their Doorbell Cams", markup)  # the offer's own, as before
+        self.assertIn("Available now", markup)
+
+
+class TheNumberIsABadgeBesideTheHeadlineTests(unittest.TestCase):
+    """The author asked for "a circle number (similar to how the numbered list shows it) ... next to the
+    headline". It was a bare numeral on its own line above the title, which reads as a stray figure
+    rather than as a rank.
+
+    The counter is incremented by the ROW and drawn by the TITLE. That works because a CSS counter is
+    visible to a descendant, and it is what puts the badge on the heading's own line so the two wrap
+    together instead of stacking.
+    """
+
+    CSS = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+
+    def test_the_row_still_increments_the_counter(self):
+        self.assertIn(".sl-catalog-row{counter-increment:sl-catalog", self.CSS)
+
+    def test_the_card_no_longer_draws_it(self):
+        rule = self.CSS.split(".sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{", 1)[1].split("}", 1)[0]
+        self.assertEqual(rule, "content:none")
+
+    def test_the_title_draws_it_as_a_circle(self):
+        rule = self.CSS.split(".sl-layout-editorial .sl-catalog-title::before{", 1)[1].split("}", 1)[0]
+        self.assertIn("content:counter(sl-catalog)", rule)
+        self.assertIn("border-radius:50%", rule)
+        self.assertIn("inline-grid", rule)  # inline, so it sits ON the heading line
+
+    def test_it_borrows_the_numbered_lists_own_badge(self):
+        """Same element the author pointed at. Two hand-tuned circles that drift apart is the failure
+        mode; the numbers here must look like the numbers there."""
+        badge = self.CSS.split(".sl-numbered-item::before{", 1)[1].split("}", 1)[0]
+        mine = self.CSS.split(".sl-layout-editorial .sl-catalog-title::before{", 1)[1].split("}", 1)[0]
+        for shared in ("width:3.6rem", "height:3.6rem", "border-radius:50%",
+                       "background:var(--sl-badge-bg,var(--sl-accent))",
+                       "color:var(--sl-badge-ink,#fff)", "font-size:1.8rem"):
+            self.assertIn(shared, badge, shared)
+            self.assertIn(shared, mine, shared)
+
+    def test_a_rule_separates_one_entry_from_the_next(self):
+        """"Add a dividing line", which the author ticked by hand on every content block in his mock-up.
+        Intrinsic to the layout rather than a tick of its own: an entry that is prose plus a panel needs a
+        boundary, or the next headline reads as part of the panel above it."""
+        rule = self.CSS.split(".sl-layout-editorial .sl-catalog-row + .sl-catalog-row{", 1)[1].split("}", 1)[0]
+        self.assertIn("border-top:1px solid var(--sl-content-border)", rule)
+
+    def test_the_rule_never_lands_above_the_first_entry(self):
+        """`+` and not `:not(:first-child)` for a reason worth stating: a line above entry 1 would read as
+        a separator from the page heading, which is not what it separates."""
+        self.assertNotIn(".sl-layout-editorial .sl-catalog-row:first-child", self.CSS)
+
+    def test_the_divider_uses_the_same_token_the_content_block_does(self):
+        divided = self.CSS.split(".sl-content-blocks--divided .sl-content-block{", 1)[1].split("}", 1)[0]
+        self.assertIn("var(--sl-content-border)", divided)
+
+
+class TheBuilderShowsWhatWouldPublishTests(unittest.TestCase):
+    """The defaults are written INTO the editor's boxes, not shown as placeholders.
+
+    The author asked for exactly this: "Prefill all of these and make them editable for tenants to
+    change." A placeholder cannot be edited into -- it vanishes the moment anything is typed and there is
+    no way to keep part of it -- so prefilling is what makes "modify the wording" a real option.
+
+    The renderer keeps its own copy of the ladder regardless, because an entry added to the Collection
+    after the modal was last open has never been through the dashboard's seeder. Two copies of one rule is
+    a drift risk, so these tests pin them to each other.
+
+    Source assertions, because this is Vue. The behaviour they stand for is opening the grid editor.
+    """
+
+    BUILDER = (pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+    COMPOSER = (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "composables" / "pageComposer.js").read_text(encoding="utf-8")
+
+    def _defaults(self):
+        return self.BUILDER.split("function roundupEntryDefaults(page)", 1)[1].split("\n}", 1)[0]
+
+    def test_the_boxes_are_filled_when_the_grid_editor_opens(self):
+        self.assertIn('if (row?.editor === "catalog_grid") seedRoundupEntryCopy();', self.BUILDER)
+
+    def test_an_entry_the_tenant_has_touched_is_never_reseeded(self):
+        """What keeps this a starting point rather than a default that keeps reasserting itself. Without
+        it, a tenant who deletes an eyebrow finds it back the next time they open the modal."""
+        block = self.BUILDER.split("function seedRoundupEntryCopy()", 1)[1].split("\n}", 1)[0]
+        self.assertIn("if (ROUNDUP_ENTRY_FIELDS.some(authored)) continue;", block)
+
+    def test_it_seeds_every_box_the_renderer_reads(self):
+        fields = self.BUILDER.split("const ROUNDUP_ENTRY_FIELDS = [", 1)[1].split("]", 1)[0]
+        for field in ("entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"):
+            self.assertIn(f'"{field}"', fields, field)
+
+    def test_every_seeded_box_is_also_saved(self):
+        """A field the seeder fills and the composer drops is a value the tenant edits and then loses."""
+        block = self.COMPOSER.split("export function catalogGridSection(state)", 1)[1].split("\n}", 1)[0]
+        for field in ("entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"):
+            self.assertIn(f"{field}: authored(grid.{field})", block, field)
+
+    def test_every_saved_box_is_read_back(self):
+        """Write-only fields are lost on reload, which reads as the builder discarding the tenant's work."""
+        block = self.COMPOSER.split("export function offerlessState(page)", 1)[1].split("\n  },", 1)[0]
+        for field in ("entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"):
+            self.assertIn(f"{field}: {{ ...(grid.{field} || {{}}) }}", block, field)
+
+    def test_the_dashboards_ladder_matches_the_renderers(self):
+        """The four values both sides derive. Spelled out here so that changing one and not the other
+        fails a test rather than publishing something the tenant never saw in the form."""
+        defaults = self._defaults()
+        self.assertIn("presentation.subheadline || product.description", defaults)
+        self.assertIn("product.product_category", defaults)
+        self.assertIn("product.name || presentation.headline", defaults)
+        self.assertIn('product.selling_point || "Available now"', defaults)
+        self.assertIn('entry_cta: "Shop Now"', defaults)
+
+    def test_the_renderer_holds_the_same_four(self):
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        block = source.split("def render_catalog_grid(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('product.get("product_category") or ""', block)
+        self.assertIn('product.get("name") or ""', block)
+        self.assertIn('product.get("selling_point") or ""', block)
+        self.assertIn('"Available now"', block)
+        self.assertIn('or "Shop Now"', block)
+
+    def test_the_supporting_box_is_offered_in_the_form(self):
+        self.assertIn("builder.catalog_grid.entry_support[entry.page_id]", self.BUILDER)
 
 
 class TheEntryIsProseThenAPanelTests(unittest.TestCase):
@@ -348,9 +581,12 @@ class TheEntryIsProseThenAPanelTests(unittest.TestCase):
         self.assertIn("Because now you can set one up in three minutes.", entry)
 
     def test_both_are_pre_filled_when_the_tenant_writes_nothing(self):
+        """This fixture's product is named "Desk Lamp" while the offer heads its landing page with
+        "Compact Desk Lamp" -- which is why the headline reads the product. An offer headline is a sales
+        line; an entry in a ranked list is saying which product this is."""
         entry = self._entry()
-        self.assertIn("Compact Desk Lamp", entry)          # headline <- the entry's own name
-        self.assertIn("sl-catalog-cta", entry)             # button   <- "See <name>"
+        self.assertIn("Desk Lamp", entry)                  # headline <- the PRODUCT's name
+        self.assertIn("sl-catalog-cta", entry)             # button   <- "Shop Now"
 
     def test_the_compact_row_keeps_its_old_shape(self):
         """Two layouts, and the quiet one must not inherit the loud one's structure."""

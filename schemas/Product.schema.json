@@ -69,6 +69,12 @@
     "description": {
       "type": "string"
     },
+    "selling_point": {
+      "type": "string",
+      "maxLength": 150,
+      "description": "The single strongest reason to buy this, in the seller's own words. Short marketing copy a renderer may print verbatim -- distinct from ai_context, which licenses what a GENERATED page may assert rather than supplying words. Read today by the Roundup entry's supporting line, which falls back to \"Available now\" when it is absent.",
+      "$comment": "plans/ROUNDUP_PAGES.md -- added 2026-10-28 so an editorial entry can argue for a product without the tenant retyping the pitch on every page that lists it."
+    },
     "images": {
       "type": "array",
       "description": "Canonical product imagery. Offer-specific bundle/composite presentation images can override this from Offer items.",

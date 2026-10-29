@@ -194,6 +194,7 @@ export function catalogGridSection(state) {
     // compact list to compare, and switches back would otherwise find their words gone.
     entry_eyebrow: authored(grid.entry_eyebrow),
     entry_headline: authored(grid.entry_headline),
+    entry_support: authored(grid.entry_support),
     entry_cta: authored(grid.entry_cta),
   };
 }
@@ -245,6 +246,7 @@ export function offerlessState(page) {
       entry_copy: { ...(grid.entry_copy || {}) },
       entry_eyebrow: { ...(grid.entry_eyebrow || {}) },
       entry_headline: { ...(grid.entry_headline || {}) },
+      entry_support: { ...(grid.entry_support || {}) },
       entry_cta: { ...(grid.entry_cta || {}) },
     },
     seller_profile: {

@@ -816,42 +816,53 @@
                     This page has no collection yet, so the grid will not render.
                   </template>
                 </small>
-                <!-- Optional on purpose: a tenant who writes nothing still gets a working page, because each
-                     entry falls back to its own page's subheadline and then its product description. -->
+                <!-- Filled in from each entry's own product the first time this opens (name, category,
+                     pitch, reason to buy) so the tenant edits wording rather than inventing it. Anything
+                     emptied still publishes: the renderer applies the same ladder for a box left blank. -->
                 <div v-if="roundupEntries.length" class="builder-repeat-list">
-                  <span class="field-label">What to say about each one (optional)</span>
+                  <span class="field-label">What to say about each one</span>
                   <div v-for="entry in roundupEntries" :key="entry.page_id" class="offer-field">
                     <span>{{ entry.name }}</span>
+                    <!-- Editorial only: the compact row has nowhere to put an eyebrow, a button or a line
+                         under the picture, and offering fields that would not render is how a tenant comes
+                         to distrust a form. The headline is editable in BOTH -- it is the entry's title. -->
+                    <input
+                      v-if="builder.catalog_grid.layout === 'editorial'"
+                      v-model.trim="builder.catalog_grid.entry_headline[entry.page_id]"
+                      type="text"
+                      placeholder="Headline — the name of the thing, or your own line"
+                      :aria-label="`Headline for ${entry.name}`"
+                    />
                     <textarea
                       v-model.trim="builder.catalog_grid.entry_copy[entry.page_id]"
                       rows="2"
                       placeholder="Why this one made the list"
                     ></textarea>
-                    <!-- Editorial only: the compact row has nowhere to put an eyebrow or a button, and
-                         offering fields that would not render is how a tenant comes to distrust a form. -->
                     <template v-if="builder.catalog_grid.layout === 'editorial'">
                       <input
                         v-model.trim="builder.catalog_grid.entry_eyebrow[entry.page_id]"
                         type="text"
-                        placeholder="Small line above, e.g. Supplies are limited (optional)"
+                        placeholder="Small line above the picture, e.g. the category"
                         :aria-label="`Eyebrow for ${entry.name}`"
                       />
                       <input
-                        v-model.trim="builder.catalog_grid.entry_headline[entry.page_id]"
+                        v-model.trim="builder.catalog_grid.entry_support[entry.page_id]"
                         type="text"
-                        placeholder="A headline of its own (optional — defaults to the page's)"
-                        :aria-label="`Headline for ${entry.name}`"
+                        placeholder="One line beside the picture — the reason to buy it"
+                        :aria-label="`Supporting copy for ${entry.name}`"
                       />
                       <input
                         v-model.trim="builder.catalog_grid.entry_cta[entry.page_id]"
                         type="text"
-                        placeholder="Button text, e.g. Shop the mini cam (optional)"
+                        placeholder="Button text, e.g. Shop Now"
                         :aria-label="`Button text for ${entry.name}`"
                       />
                     </template>
                   </div>
                   <small class="field-note">
-                    Leave any of these blank and we use that page's own subheadline instead.
+                    These start from each product — its name, category, description and best reason to buy.
+                    Change any of them here; it only affects this page. Empty one and we fall back to the
+                    product again.
                   </small>
                 </div>
             </template>
@@ -3198,6 +3209,29 @@ const headlineShowsYear = computed({
     builder.headline = text.replace(/\s*\b(?:for|in)\s+\{year\}/gi, "").replace(/\s*\{year\}/gi, "").trim();
   },
 });
+// The words an entry STARTS with, read off the product the entry points at. This is the same ladder
+// render_catalog_grid applies when a box is left empty, duplicated here on purpose and pinned by
+// tests/test_collection_layouts.py: the tenant has to be able to SEE and edit what would publish, and a
+// placeholder they cannot select is not that. The renderer keeps its copy because an entry added to the
+// Collection after this modal was last open has never been through here.
+//
+// product.name before the offer's headline: a landing page headline is a sales line ("Homeowners Are
+// Trading in Their Doorbell Cams for This"), and an entry in a ranked list is saying which product it is.
+function roundupEntryDefaults(page) {
+  const offer = (offers.value || []).find((item) => item.offer_id === page?.offer_id) || null;
+  const product = offerProducts(offer)[0] || {};
+  const presentation = offer?.presentation || {};
+  return {
+    entry_copy: presentation.subheadline || product.description || "",
+    entry_eyebrow: String(product.product_category || "").replace(/_/g, " "),
+    entry_headline: product.name || presentation.headline || offer?.name || page?.name || "",
+    // "Available now" is the deliberately bland last resort: it states a fact about stock and claims
+    // nothing about the product, which is the only kind of sentence we may put in a seller's mouth unasked.
+    entry_support: product.selling_point || "Available now",
+    entry_cta: "Shop Now",
+  };
+}
+
 // The entries a pitch can be written for: this grid's Collection members, named. Only MANUAL collections
 // have an authored order to write against -- an `all` collection's membership moves on its own, so a
 // paragraph pinned to one of its pages would outlive the reason it was written.
@@ -3208,9 +3242,36 @@ const roundupEntries = computed(() => {
   if (!collection || (collection.rule || "manual") !== "manual") return [];
   return (collection.members || []).map((pageId) => {
     const page = (pages.value || []).find((p) => p.page_id === pageId);
-    return { page_id: pageId, name: page?.name || pageId };
+    return { page_id: pageId, name: page?.name || pageId, defaults: roundupEntryDefaults(page) };
   });
 });
+
+// The five boxes an editorial entry has. Named once so the seeder, the save and the renderer's own ladder
+// cannot end up disagreeing about how many there are.
+const ROUNDUP_ENTRY_FIELDS = ["entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"];
+
+// PRE-FILL, once per entry, when the grid's editor is opened.
+//
+// The formula this builder has followed throughout: the software fills the data in and the tenant edits
+// the wording. Offering five empty optional boxes beside a layout that needs words in them puts the
+// writing back on the tenant and reads as an unfinished form -- and the product already carries every
+// answer, typed once.
+//
+// Only an entry with NOTHING authored is seeded, which is what makes this a starting point rather than a
+// default that keeps reasserting itself: the moment one of its five boxes holds anything, that entry is
+// the tenant's and is never touched again. Emptying all five does hand it back to the data on the next
+// open, which is also the only way to ask for the defaults a second time.
+function seedRoundupEntryCopy() {
+  const grid = builder.catalog_grid;
+  for (const entry of roundupEntries.value) {
+    const authored = (field) => String(grid[field]?.[entry.page_id] || "").trim();
+    if (ROUNDUP_ENTRY_FIELDS.some(authored)) continue;
+    for (const field of ROUNDUP_ENTRY_FIELDS) {
+      const value = String(entry.defaults?.[field] || "").trim();
+      if (value) grid[field][entry.page_id] = value;
+    }
+  }
+}
 // Which lead action this page's offer performs. The cta TYPE cannot say: one type ("email") backs three.
 // The CTA types that wear the shared panel (render_cta_panel): a phone number, a destination host, a
 // filename. `email` is the inline form and `buy` is the price card -- neither is a panel.
@@ -4414,10 +4475,13 @@ function defaultBuilderForm() {
       layout: "",
       // page_id -> the tenant's pitch for that entry. Keyed by PAGE because that is what they picked.
       entry_copy: {},
-      // Editorial-only extras, same keying. Each optional: an eyebrow and a button label are CLAIMS, so
-      // they have no generated default, and an entry with none still renders.
+      // Editorial-only extras, same keying. Pre-filled from the product behind each entry the first time
+      // its boxes are opened (seedRoundupEntryCopy), and the renderer applies the same ladder again for an
+      // entry added to the Collection since -- so neither surface can show the tenant something the other
+      // would not publish.
       entry_eyebrow: {},
       entry_headline: {},
+      entry_support: {},
       entry_cta: {},
     },
     seller_profile: {
@@ -6794,6 +6858,9 @@ function toggleSetting(key) {
 const sectionEditor = ref(null);
 
 function openSectionEditor(row) {
+  // Fill the grid's per-entry boxes from the product behind each entry before the modal paints, so the
+  // tenant opens a form with words in it. Entries they have already written are left alone.
+  if (row?.editor === "catalog_grid") seedRoundupEntryCopy();
   sectionEditor.value = { row, isNew: false };
 }
 
