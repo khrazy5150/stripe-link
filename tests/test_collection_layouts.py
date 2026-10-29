@@ -392,6 +392,111 @@ class TheEntryIsFilledFromTheProductTests(unittest.TestCase):
         self.assertIn("Available now", markup)
 
 
+class TheEntryWearsTheRibbonsOwnPresentationsTests(unittest.TestCase):
+    """Reuse that goes further than the stylesheet: the entry takes the ELEMENT's settings, by their own
+    names, so a tenant who knows the page ribbon already knows this control.
+
+    `centered` is withheld, and that is a product decision rather than an oversight: it is the ribbon's
+    NO-IMAGE presentation (`render_page_ribbon` drops the image for it), and an entry in a product listing
+    exists to show the product. The other two both keep the picture, and `compact` is the denser one for a
+    long list -- which is the shape a Roundup grows into.
+    """
+
+    def _ribbon_div(self, presentation=None):
+        section = {"type": "catalog_grid", "id": "s1", "layout": "editorial",
+                   "items": [{"offer_id": "o9", "slug": "/cam", "page_id": "pg9"}]}
+        if presentation is not None:
+            section["entry_presentation"] = presentation
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        offers = {"o9": {"offer_id": "o9", "name": "Mini Cam",
+                         "items": [{"product_id": "p9", "price_id": "pc9"}],
+                         "presentation": {"headline": "Mini Cam"}}}
+        products = {"p9": {"name": "Security Mini Cam", "images": ["https://img/cam.jpg"]}}
+        markup = html.render_catalog_grid(section, offers, products, {})
+        return next(line.strip() for line in markup.splitlines() if "sl-page-ribbon" in line)
+
+    def test_the_default_is_the_ribbons_default(self):
+        self.assertEqual(self._ribbon_div(), '<div class="sl-page-ribbon is-image_left">')
+
+    def test_compact_is_offered_and_is_the_ribbons_own_compact(self):
+        self.assertEqual(self._ribbon_div("compact"), '<div class="sl-page-ribbon is-compact">')
+        css = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        self.assertIn(".sl-page-ribbon.is-compact{", css)
+
+    def test_an_unknown_presentation_falls_back_rather_than_emitting_a_dead_class(self):
+        """A class the stylesheet has no rule for renders an unstyled block, which looks like a bug in the
+        layout rather than a bad value in the document."""
+        self.assertEqual(self._ribbon_div("bogus"), '<div class="sl-page-ribbon is-image_left">')
+
+    def test_centered_is_not_reachable(self):
+        """Withheld deliberately -- it would publish an entry with no picture."""
+        self.assertNotIn("centered", html.ENTRY_RIBBON_PRESENTATIONS)
+        self.assertEqual(self._ribbon_div("centered"), '<div class="sl-page-ribbon is-image_left">')
+
+    def test_the_offered_set_is_a_subset_of_the_elements_own(self):
+        """If the ribbon ever renames a presentation, this fails rather than the entry silently emitting a
+        class the element no longer styles."""
+        for presentation in html.ENTRY_RIBBON_PRESENTATIONS:
+            self.assertIn(presentation, html.RIBBON_PRESENTATIONS, presentation)
+
+    def test_the_builder_offers_exactly_what_the_renderer_accepts(self):
+        builder = (pathlib.Path(__file__).resolve().parents[1]
+                   / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+        block = builder.split('v-model="builder.catalog_grid.entry_presentation"', 1)[1].split("</select>", 1)[0]
+        offered = set(re.findall(r'<option value="([a-z_]+)"', block))
+        self.assertEqual(offered, set(html.ENTRY_RIBBON_PRESENTATIONS))
+
+    def test_it_round_trips_so_the_choice_is_not_write_only(self):
+        composer = (pathlib.Path(__file__).resolve().parents[1]
+                    / "dashboard" / "src" / "composables" / "pageComposer.js").read_text(encoding="utf-8")
+        self.assertIn("entry_presentation: grid.entry_presentation || undefined", composer)
+        self.assertIn('entry_presentation: grid.entry_presentation || ""', composer)
+
+
+class TheRibbonCapIsAContentJudgementTests(unittest.TestCase):
+    """`RIBBON_MAX = 2` was right for the page it was written on and wrong everywhere else.
+
+    Three ribbons on a page that sells ONE thing stop interrupting and become wallpaper. On a page that
+    does not transact the ribbons ARE the content, so the same number capped a Roundup at two products.
+    The author made the call: lift it for non-transacting pages, and KEEP the mechanism, because the
+    figure that matters next is one nobody has measured -- a page carrying hundreds of entries is untested,
+    and that is where a real performance cap will go.
+
+    Source assertions, because this is Vue. The behaviour is the Add-content menu.
+    """
+
+    BUILDER = (pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_cap_still_exists(self):
+        """Deleting it would throw away the only place a measured limit can land."""
+        self.assertIn("const RIBBON_MAX_TRANSACTION = 2;", self.BUILDER)
+        self.assertIn("const RIBBON_MAX_UNLIMITED = -1;", self.BUILDER)
+
+    def test_it_is_chosen_by_the_composition_rather_than_fixed(self):
+        block = self.BUILDER.split("const ribbonMax = computed(", 1)[1].split(");", 1)[0]
+        self.assertIn("LEAD_COMPOSITION_TYPES.has(builderOfferType.value)", block)
+        self.assertIn("RIBBON_MAX_UNLIMITED", block)
+        self.assertIn("RIBBON_MAX_TRANSACTION", block)
+
+    def test_a_negative_cap_means_no_limit_rather_than_blocking_everything(self):
+        """`ribbonCount >= -1` is true for an empty page. Read as a plain comparison, lifting the cap would
+        have disabled the button permanently -- the exact opposite of what was asked for."""
+        for name in ("ribbonLimitReached", "ribbonOverloaded"):
+            block = self.BUILDER.split(f"const {name} = computed(", 1)[1].split(");", 1)[0]
+            self.assertIn("ribbonMax.value >= 0", block, name)
+
+    def test_the_add_button_reads_the_computed_not_a_constant(self):
+        self.assertIn("entry.type === 'page_ribbon' && ribbonLimitReached", self.BUILDER)
+        self.assertNotIn("ribbonCount >= RIBBON_MAX", self.BUILDER)
+
+    def test_the_warning_is_gone_where_it_would_not_be_actionable(self):
+        """It used to be a hardcoded `ribbonCount > 2`, which would have told a Roundup tenant their page
+        was wallpaper for building it the way the shape intends. A notice needs an action behind it."""
+        self.assertNotIn("ribbonCount > 2", self.BUILDER)
+        self.assertIn('v-if="ribbonOverloaded"', self.BUILDER)
+
+
 class TheNumberIsABadgeBesideTheHeadlineTests(unittest.TestCase):
     """The author asked for "a circle number (similar to how the numbered list shows it) ... next to the
     headline". It was a bare numeral on its own line above the title, which reads as a stray figure

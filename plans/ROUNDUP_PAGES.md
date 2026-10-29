@@ -449,6 +449,29 @@ Three rules remain, scoped to `.sl-catalog-row`, and each is a difference the ri
 from inside a ranked list: the panel follows prose rather than standing alone, its images must match each
 other down the list, and the whole row is one link so the hover lift belongs to the panel.
 
+**The cap moved with it. 2026-10-29.** `RIBBON_MAX = 2` was right for the page it was written on and
+wrong everywhere else: three ribbons on a page selling ONE thing stop interrupting and become wallpaper,
+but on a non-transacting page the ribbons ARE the content, so the same number capped a Roundup at two
+products. It is now `RIBBON_MAX_TRANSACTION = 2` for transacting compositions and `RIBBON_MAX_UNLIMITED
+= -1` for the `lead_*` ones, chosen through the `LEAD_COMPOSITION_TYPES` set that already exists.
+
+The restriction is **kept, not deleted** — the author's call, and the right one: the figure that matters
+next is one nobody has measured. A page carrying hundreds of entries is untested, and this is where a
+real performance cap lands once it is (his example was 40).
+
+One trap worth naming, because it is the kind that reads as correct: `-1` as "no limit" only works if
+every comparison guards for it. `ribbonCount >= -1` is true on an EMPTY page, so a plain reading of the
+cap would have disabled the Add button permanently — the exact opposite of lifting it. Both derived
+computeds test `ribbonMax >= 0` first, and a test pins that. The soft warning moved to the same guard, so
+a Roundup tenant is never told their page is wallpaper for building it the way the shape intends.
+
+**And the entry wears the ribbon's own presentations.** `entry_presentation` on the grid takes
+`image_left` or `compact` — the element's settings, by the element's names, one for the whole grid rather
+than per entry, since a list that changes shape row by row stops reading as a list. `centered` is
+withheld: it is the ribbon's NO-IMAGE presentation, and an entry in a product listing exists to show the
+product. `ENTRY_RIBBON_PRESENTATIONS` is asserted to be a subset of `RIBBON_PRESENTATIONS`, so renaming a
+presentation on the element fails a test instead of emitting a class the stylesheet no longer has.
+
 **The lesson for the next element like this**: a test that asserts two copies hold the same values
 confirms the duplication rather than removing it, and it passes right up until the copy omits a property
 the original has. `EditorialUsesTheRibbonItselfTests` asserts there is only one set of values — including

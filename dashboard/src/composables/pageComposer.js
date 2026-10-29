@@ -189,6 +189,9 @@ export function catalogGridSection(state) {
     heading: grid.heading || undefined,
     // "" means "whatever the Collection says", which is the same precedence the publisher applies.
     layout: grid.layout || undefined,
+    // Which page_ribbon presentation each editorial entry wears. Omitted when unset so the renderer
+    // applies its own default rather than the browser pinning one into the document.
+    entry_presentation: grid.entry_presentation || undefined,
     entry_copy: authored(grid.entry_copy),
     // Editorial extras. Sent whatever the layout says: a tenant who writes an eyebrow, switches to the
     // compact list to compare, and switches back would otherwise find their words gone.
@@ -243,6 +246,7 @@ export function offerlessState(page) {
       collection_id: grid.collection_id || "",
       heading: grid.heading || "",
       layout: grid.layout || "",
+      entry_presentation: grid.entry_presentation || "",
       entry_copy: { ...(grid.entry_copy || {}) },
       entry_eyebrow: { ...(grid.entry_eyebrow || {}) },
       entry_headline: { ...(grid.entry_headline || {}) },

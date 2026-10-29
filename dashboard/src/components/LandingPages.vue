@@ -809,6 +809,19 @@
                     entry its own headline, pitch and button; List is the compact version.
                   </small>
                 </label>
+                <!-- Editorial only: the compact layouts draw no ribbon, so the setting would do nothing. -->
+                <label v-if="builder.catalog_grid.layout === 'editorial'" class="offer-field">
+                  <span>Panel style</span>
+                  <select v-model="builder.catalog_grid.entry_presentation">
+                    <option value="image_left">Image left — image, then the copy and button</option>
+                    <option value="compact">Compact — a smaller image, for a longer list</option>
+                  </select>
+                  <small class="field-note">
+                    Each entry's panel is a page ribbon, so it uses the ribbon's own styles. "Centered" is
+                    not offered here because it is the ribbon's no-image layout, and an entry in a product
+                    list is there to show the product.
+                  </small>
+                </label>
                 <small class="field-note">
                   Which products appear here comes from this page's collection, and the grid refreshes itself
                   every time you publish — a new product page on this Site shows up on its own.
@@ -1186,8 +1199,9 @@
                     </template>
 
                     <template v-else-if="element.type === 'page_ribbon'">
-                      <p v-if="ribbonCount > 2" class="field-warning">
-                        Three ribbons stop being interruptions and become wallpaper. Two is the most a page should carry.
+                      <p v-if="ribbonOverloaded" class="field-warning">
+                        Three ribbons stop being interruptions and become wallpaper. Two is the most a page
+                        that sells one thing should carry.
                       </p>
                       <label class="offer-field">
                         <span>Layout</span>
@@ -2445,8 +2459,8 @@
               :key="entry.type"
               class="secondary-action compact"
               type="button"
-              :disabled="isBuilderPublished || (entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX)"
-              :title="isBuilderPublished ? 'Unpublish this page to edit it' : (entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX ? 'Two ribbons is the most a page should carry' : undefined)"
+              :disabled="isBuilderPublished || (entry.type === 'page_ribbon' && ribbonLimitReached)"
+              :title="isBuilderPublished ? 'Unpublish this page to edit it' : (entry.type === 'page_ribbon' && ribbonLimitReached ? `${ribbonMax} ribbons is the most a page that sells one thing should carry` : undefined)"
               @click="addElement(entry.type)">
             + {{ entry.label }}
             </button>
@@ -4473,6 +4487,10 @@ function defaultBuilderForm() {
       // "" means "whatever the Collection says" -- the section only overrides when it has an opinion,
       // which is the same precedence resolve_category_grids applies at publish.
       layout: "",
+      // Which page_ribbon presentation an editorial entry wears -- the element's own setting, by its own
+      // name. One for the whole grid rather than per entry: a list that changes shape row by row stops
+      // reading as a list.
+      entry_presentation: "",
       // page_id -> the tenant's pitch for that entry. Keyed by PAGE because that is what they picked.
       entry_copy: {},
       // Editorial-only extras, same keying. Pre-filled from the product behind each entry the first time
@@ -6941,7 +6959,16 @@ async function loadBusinessEmailState() {
   }
 }
 
-const RIBBON_MAX = 2;
+// THE RIBBON CAP IS A CONTENT JUDGEMENT, not a technical one, and it was only ever right for a page that
+// sells ONE thing: there, a third interruption stops interrupting and becomes wallpaper. On a page that
+// does not transact the ribbons ARE the content -- a Roundup is a list of them, one per entry -- so a cap
+// of two capped the page at two products.
+//
+// -1 means no limit. The restriction is kept rather than deleted because the number that matters next is
+// one nobody has measured: a page carrying hundreds of entries is untested, and when we do test it this
+// is where the figure goes (the author's example was 40).
+const RIBBON_MAX_TRANSACTION = 2;
+const RIBBON_MAX_UNLIMITED = -1;
 
 // A ribbon's lead magnet. There is no 50MB technical limit here — that number was invented, not measured.
 // The browser PUTs straight to a presigned S3 URL, so API Gateway's 10MB payload cap is not in the path;
@@ -7144,6 +7171,14 @@ function chooseRibbonPage(page) {
   closeRibbonPagePicker();
 }
 const ribbonCount = computed(() => builder.elements.filter((el) => el.type === "page_ribbon").length);
+// Declared HERE, after `ribbonCount`, not beside the constants: a computed that reads a `const` defined
+// further down the file hits the temporal dead zone the moment anything evaluates it during setup.
+const ribbonMax = computed(() => (LEAD_COMPOSITION_TYPES.has(builderOfferType.value)
+  ? RIBBON_MAX_UNLIMITED : RIBBON_MAX_TRANSACTION));
+const ribbonLimitReached = computed(() => ribbonMax.value >= 0 && ribbonCount.value >= ribbonMax.value);
+// A warning only where it is ACTIONABLE. On a Roundup, many ribbons are the correct shape of the page,
+// and telling a tenant their page is wallpaper for doing the right thing is how a notice stops being read.
+const ribbonOverloaded = computed(() => ribbonMax.value >= 0 && ribbonCount.value > ribbonMax.value);
 
 async function commitNewSection() {
   const element = sectionEditor.value?.row?.element;

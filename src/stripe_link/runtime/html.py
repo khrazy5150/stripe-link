@@ -7165,6 +7165,9 @@ def render_author_bio(section: dict[str, Any]) -> str:
 
 
 RIBBON_PRESENTATIONS = ("image_left", "centered", "compact")
+# The subset a catalog entry may wear. `centered` is the ribbon's no-image presentation, and an entry in a
+# product listing exists to show the product -- see render_catalog_grid.
+ENTRY_RIBBON_PRESENTATIONS = ("image_left", "compact")
 RIBBON_PURPOSES = ("promote_offer", "capture_lead", "promote_content", "custom")
 # Named after the existing action vocabulary (CTA_TO_ACTION below) rather than a new set of words for the
 # same ideas. `none` is explicit: a ribbon with nothing to click is a content block, and should say so.
@@ -7991,6 +7994,14 @@ def render_catalog_grid(
     layout = str(section.get("layout") or "").strip().lower()
     if layout not in ("grid", "masonry", "listicle", "editorial"):
         layout = "grid"
+    # WHICH RIBBON each editorial entry wears. The element's own presentations, by their own names, so a
+    # tenant who knows the ribbon knows this. `centered` is deliberately not offered: it is the ribbon's
+    # NO-IMAGE presentation (render_page_ribbon drops the image for it), and an entry in a product listing
+    # without its picture is not a thing to put on a menu. The other two both keep it, and `compact` is the
+    # denser one for a long list.
+    entry_presentation = str(section.get("entry_presentation") or "").strip().lower()
+    if entry_presentation not in ENTRY_RIBBON_PRESENTATIONS:
+        entry_presentation = "image_left"
     # Both ordered layouts read the per-entry overrides; only the container and the chrome differ.
     ordered = layout in ("listicle", "editorial")
     home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
@@ -8117,7 +8128,7 @@ def render_catalog_grid(
             # anchor and inside the page's heading outline, and a sectioning element there would add a
             # rung to that outline for a thing that is not a section of the document.
             panel = "\n".join(line for line in [
-                '          <div class="sl-page-ribbon is-image_left">',
+                f'          <div class="sl-page-ribbon is-{entry_presentation}">',
                 (f'            <div class="sl-ribbon-media">{img_html}</div>' if img_html else ""),
                 f'            <div class="sl-ribbon-copy">\n{panel_copy}\n            </div>',
                 "          </div>",
