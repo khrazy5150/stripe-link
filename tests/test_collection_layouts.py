@@ -11,6 +11,7 @@ with a slug must still come out as a real `<a href>`. A layout that quietly stop
 look perfect on screen and cost the Site its internal linking.
 """
 
+import re
 import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_collection
@@ -130,6 +131,56 @@ class LayoutMarkupTests(unittest.TestCase):
         self.assertIn('class="sl-catalog-grid sl-layout-masonry"', markup)
         self.assertIn('data-section-id="s1"', markup)
         self.assertIn('data-section-type="catalog_grid"', markup)
+
+
+class TheRowIsOneGridTests(unittest.TestCase):
+    """A listicle row is a three-column grid: number, image, words. The CHILD COUNT has to match.
+
+    Reported 2026-10-28 against a live Roundup. The card put its title, pitch and price in as three
+    separate grid children, so a row carrying an image held five items for three columns and wrapped: the
+    title sat beside the image while the pitch and the price dropped onto a second line under the number,
+    and a long title ran outside the card.
+
+    Nothing caught it because every existing test asked whether the ANCHOR and the ORDER were right, and
+    both were. The markup was correct and the layout was wrong, which is the same way the masonry column
+    order is easy to miss.
+    """
+
+    def _card(self, layout="listicle"):
+        markup = _render(layout)
+        return markup.split('<a class="sl-catalog-card"', 1)[1].split("</a>", 1)[0]
+
+    def test_the_words_are_one_child_not_three(self):
+        card = self._card()
+        self.assertEqual(card.count('<div class="sl-catalog-body">'), 1)
+
+    def test_the_card_has_exactly_the_children_the_columns_expect(self):
+        """Image + body. The number is a ::before, so three grid items for three columns. A new paragraph
+        added outside the body would break the row again, and this is what says so."""
+        card = self._card()
+        top_level = re.findall(r'\n        <(\w+)', card)
+        self.assertEqual(top_level, ["img", "div"], card)
+
+    def test_the_title_and_price_moved_INSIDE_the_body(self):
+        card = self._card()
+        body = card.split('<div class="sl-catalog-body">', 1)[1]
+        self.assertIn("sl-catalog-title", body)
+
+    def test_every_layout_carries_the_same_card_content(self):
+        """The property the wrapper was added to every layout to keep: a layout is a container, and two
+        layouts rendering different DATA is the drift this renderer exists to prevent."""
+        bodies = {layout: self._card(layout).count('<div class="sl-catalog-body">')
+                  for layout in ("grid", "masonry", "listicle")}
+        self.assertEqual(set(bodies.values()), {1}, bodies)
+
+    def test_the_body_cannot_be_pushed_out_of_its_column(self):
+        css = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        self.assertIn("min-width:0", css.split(".sl-catalog-body{", 1)[1].split("}", 1)[0])
+
+    def test_the_row_aligns_to_the_top_of_the_words(self):
+        css = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        row = css.split(".sl-catalog-row .sl-catalog-card{", 1)[1].split("}", 1)[0]
+        self.assertIn("align-items:start", row)
 
 
 class MasonryCssTests(unittest.TestCase):

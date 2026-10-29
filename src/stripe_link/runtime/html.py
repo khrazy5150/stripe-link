@@ -1406,6 +1406,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    a.sl-catalog-card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     # height:auto is load-bearing: responsive_img emits an intrinsic height attr, and a fixed height defeats aspect-ratio.
     "    .sl-catalog-card img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:0.8rem;background:#fff;display:block}",
+    # The words, as one block. `flex:1` lets the price keep its `margin-top:auto` bottom alignment in a
+    # grid card; `min-width:0` is what stops a long title pushing out of its column in a listicle row.
+    "    .sl-catalog-body{display:flex;flex-direction:column;gap:0.6rem;flex:1;min-width:0}",
     # MASONRY — CSS multi-column, ported from the old dot-net front page. No JS, no library.
     # The aspect-ratio above is explicitly dropped: variable tile heights ARE the layout, and forcing
     # every image square would produce a uniform grid with extra steps.
@@ -1420,14 +1423,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # carries no content of its own; the <ol> already says the position to anything that reads markup.
     "    .sl-catalog-list{list-style:none;counter-reset:sl-catalog;display:flex;flex-direction:column;gap:1.2rem;margin:0;padding:0}",
     "    .sl-catalog-row{counter-increment:sl-catalog;display:block}",
-    "    .sl-catalog-row .sl-catalog-card{display:grid;grid-template-columns:auto 12rem minmax(0,1fr);align-items:center;gap:1.2rem}",
+    "    .sl-catalog-row .sl-catalog-card{display:grid;grid-template-columns:auto 12rem minmax(0,1fr);align-items:start;gap:1.2rem}",
     "    .sl-catalog-row .sl-catalog-card::before{content:counter(sl-catalog);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;line-height:1;color:var(--sl-price-amount);min-width:2.2rem;text-align:right}",
     "    .sl-catalog-row .sl-catalog-card img{aspect-ratio:1/1;width:12rem}",
     "    .sl-catalog-row .sl-catalog-price{margin:0.4rem 0 0}",
     "    .sl-catalog-pitch{margin:0.3rem 0 0;font-size:1.5rem;line-height:1.5;color:var(--sl-content-text)}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
-    "      .sl-catalog-row .sl-catalog-card img{grid-column:1/-1;width:100%}}",
+    "      .sl-catalog-row .sl-catalog-card img{width:100%}",
+    "      .sl-catalog-row .sl-catalog-body{grid-column:1/-1}}",
     # The lift on hover is decoration; anyone who asked for less motion does not get it.
     "    @media (prefers-reduced-motion:reduce){a.sl-catalog-card{transition:none}a.sl-catalog-card:hover{transform:none}}",
     "    .sl-catalog-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;line-height:1.3;color:var(--sl-price-title);margin:0}",
@@ -7977,11 +7981,22 @@ def render_catalog_grid(
             price_html = f'<p class="sl-catalog-price">{escape(format_money(int(resolved.get("subtotal", 0)), str(resolved.get("currency") or "usd")))}</p>'
         except Exception:  # noqa: BLE001 - a broken card must not break the page
             pass
+        # The words go in ONE wrapper, in every layout. A listicle row is a three-column grid -- number,
+        # image, words -- and with the title, pitch and price as separate grid children there were five
+        # items for three columns: the row wrapped, so the title sat beside the image while the pitch and
+        # the price dropped onto a second line under the number. Grouping them makes the child count match
+        # the column count instead of relying on the card never gaining another paragraph.
+        #
+        # Added for grid and masonry too, not only where it was needed, because the card CONTENT being
+        # identical in all three layouts is the property that stops one drifting from another.
+        body = "\n".join(line for line in [
+            f'          <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
+            (f"          {pitch_html}" if pitch_html else ""),
+            (f"          {price_html}" if price_html else ""),
+        ] if line)
         inner = "\n".join(line for line in [
             (f"        {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
-            f'        <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
-            (f"        {pitch_html}" if pitch_html else ""),
-            (f"        {price_html}" if price_html else ""),
+            f'        <div class="sl-catalog-body">\n{body}\n        </div>',
         ] if line)
         slug = str((item or {}).get("slug") or "").strip()
         href = internal_href(slug) if home and slug else ""  # host-relative so the card works on any serving host
