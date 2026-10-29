@@ -284,6 +284,66 @@ class EditorialLayoutTests(unittest.TestCase):
             self.assertIn("Why this one made the list", markup, layout)
 
 
+class EditorialBorrowsTheRibbonTests(unittest.TestCase):
+    """The proportions are the page ribbon's, deliberately.
+
+    The author built his mock-up out of page ribbons and content blocks. The first cut of this layout
+    guessed its own smaller numbers -- an 18rem image, a 2.2rem headline -- and he reported, twice, that
+    the layout "looks the same": it read as a row with a button rather than an entry that argues.
+
+    Borrowing the element he pointed at is both closer to what he drew and one less set of magic numbers
+    to keep in step, so these tests assert the two stay equal rather than merely asserting values.
+    """
+
+    CSS = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+
+    def _rule(self, selector):
+        return self.CSS.split(selector + "{", 1)[1].split("}", 1)[0]
+
+    def test_the_headline_is_the_ribbon_headline(self):
+        ribbon = self._rule(".sl-ribbon-headline")
+        entry = self._rule(".sl-layout-editorial .sl-catalog-title")
+        for part in ("font-size:clamp(2rem,4vw,2.8rem)", "line-height:1.2"):
+            self.assertIn(part, ribbon, part)
+            self.assertIn(part, entry, part)
+
+    def test_the_body_copy_is_the_ribbon_body(self):
+        ribbon = self._rule(".sl-ribbon-body")
+        entry = self._rule(".sl-layout-editorial .sl-catalog-pitch")
+        for part in ("font-size:1.6rem", "line-height:1.55", "opacity:0.85"):
+            self.assertIn(part, ribbon, part)
+            self.assertIn(part, entry, part)
+
+    def test_the_eyebrow_is_the_ribbon_eyebrow(self):
+        ribbon = self._rule(".sl-ribbon-eyebrow")
+        entry = self._rule(".sl-catalog-eyebrow")
+        for part in ("font-size:1.3rem", "letter-spacing:0.08em", "text-transform:uppercase"):
+            self.assertIn(part, ribbon, part)
+            self.assertIn(part, entry, part)
+
+    def test_the_image_column_is_the_ribbon_image_column(self):
+        self.assertIn("minmax(0,22rem)", self._rule(".sl-page-ribbon.is-image_left"))
+        self.assertIn("minmax(0,22rem)", self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card"))
+
+    def test_the_image_fills_its_column_rather_than_naming_a_width(self):
+        """Two numbers for one measurement is how a column and the thing inside it come to disagree."""
+        self.assertIn("width:100%", self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card img"))
+
+    def test_the_panel_matches_the_ribbon_and_beats_the_compact_row(self):
+        card = self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card")
+        self.assertIn("padding:3.2rem", card)
+        self.assertIn("border-radius:1.4rem", card)
+        # The compact row must stay compact, or the two layouts collapse into one again.
+        self.assertIn("12rem", self._rule(".sl-catalog-row .sl-catalog-card"))
+
+    def test_editorial_outranks_the_compact_row(self):
+        """Three classes beat two, so the editorial rules win wherever they overlap. Asserted because the
+        whole bug was 'the layout looks the same' and a specificity slip reproduces it exactly."""
+        compact = ".sl-catalog-row .sl-catalog-card"
+        editorial = ".sl-layout-editorial .sl-catalog-row .sl-catalog-card"
+        self.assertEqual(editorial.count("."), compact.count(".") + 1)
+
+
 class TheCountTickTests(unittest.TestCase):
     """The tick writes the TOKEN, so there is no second piece of state to disagree with the headline.
 

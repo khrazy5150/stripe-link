@@ -1430,19 +1430,26 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-catalog-pitch{margin:0.3rem 0 0;font-size:1.5rem;line-height:1.5;color:var(--sl-content-text)}",
     # EDITORIAL — the same ordered list with room to argue. Shares the row grid; only the proportions and
     # the chrome change, so the two ordered layouts cannot drift into rendering different things.
-    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto 18rem minmax(0,1fr);gap:1.8rem;padding:1.8rem}",
+    # The proportions are the PAGE RIBBON's, not new numbers. The author built his mock-up out of ribbons,
+    # and the first cut of this guessed smaller values -- an 18rem image and a 2.2rem headline -- which
+    # read as "a row with a button" rather than an entry that argues. Borrowing the element he actually
+    # pointed at is both closer to what he drew and one less set of magic numbers to keep in step.
+    #   ribbon: minmax(0,22rem) column | gap 2rem | padding 3.2rem | radius 1.4rem | centred
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,22rem) minmax(0,1fr);gap:2rem;padding:3.2rem;border-radius:1.4rem;align-items:center}",
     "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{font-size:3.4rem;min-width:3rem}",
-    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card img{width:18rem}",
-    "    .sl-layout-editorial .sl-catalog-body{gap:0.9rem}",
-    "    .sl-layout-editorial .sl-catalog-title{font-size:2.2rem}",
-    "    .sl-layout-editorial .sl-catalog-pitch{font-size:1.6rem}",
-    "    .sl-catalog-eyebrow{margin:0;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--sl-muted)}",
+    # Fills the 22rem column rather than naming a width of its own, so the two cannot disagree.
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card img{width:100%}",
+    "    .sl-layout-editorial .sl-catalog-body{gap:0.8rem}",
+    "    .sl-layout-editorial .sl-catalog-title{font-size:clamp(2rem,4vw,2.8rem);line-height:1.2}",
+    "    .sl-layout-editorial .sl-catalog-pitch{font-size:1.6rem;line-height:1.55;opacity:0.85}",
+    "    .sl-catalog-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
     # A SPAN styled as a button, because the card is already the anchor. It must not look clickable on its
     # own in a way that suggests a second destination -- there is only one, and the whole row goes there.
-    "    .sl-catalog-cta{align-self:start;display:inline-block;margin:0.3rem 0 0;padding:0.9rem 1.8rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:800;font-size:1.4rem;line-height:1}",
-    "    @media (max-width:650px){.sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr);gap:1.2rem;padding:1.2rem}",
-    "      .sl-layout-editorial .sl-catalog-row .sl-catalog-card img{width:100%}",
-    "      .sl-layout-editorial .sl-catalog-title{font-size:1.9rem}}",
+    "    .sl-catalog-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-size:1.5rem;font-weight:700;line-height:1}",
+    # Mirrors the ribbon's own collapse at 700px: one column, tighter padding, full-width button.
+    "    @media (max-width:650px){.sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr);gap:1.4rem;padding:2rem}",
+    "      .sl-layout-editorial .sl-catalog-body{grid-column:1/-1}",
+    "      .sl-catalog-cta{justify-self:stretch;justify-content:center}}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
     "      .sl-catalog-row .sl-catalog-card img{width:100%}",
