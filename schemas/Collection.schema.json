@@ -76,10 +76,11 @@
           "enum": [
             "grid",
             "masonry",
-            "listicle"
+            "listicle",
+            "editorial"
           ],
           "default": "grid",
-          "description": "How the collection's members are laid out. grid = uniform cards (default). masonry = CSS multi-column, variable heights, for unordered browsing. listicle = one ordered row per member, for a ranked roundup."
+          "description": "How the collection's members are laid out. grid = uniform cards (default). masonry = CSS multi-column, variable heights, for unordered browsing. listicle = one compact ordered row per member. editorial = the same order with room to argue: eyebrow, headline, image, pitch and a button per member."
         }
       }
     },

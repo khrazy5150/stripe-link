@@ -145,9 +145,18 @@ class TheWizardMustSeedTheGridTests(unittest.TestCase):
         self.assertIn("if (!(await seedRoundupCollection())) return;", self.BUILDER)
 
     def test_it_starts_manual_so_the_count_can_be_offered(self):
+        """`manual` is load-bearing: `roundup_item_count` counts manual collections ONLY, because an
+        `all` rule's membership moves when a PAGE publishes -- a direction nothing re-renders from."""
         block = self.BUILDER.split("async function seedRoundupCollection()", 1)[1].split("\n}", 1)[0]
         self.assertIn('rule: "manual"', block)
-        self.assertIn('layout: "listicle"', block)
+
+    def test_it_starts_in_an_ORDERED_layout(self):
+        """A Roundup is a ranking, so it may never start in grid or masonry -- masonry fills column by
+        column and destroys a curated order outright. `editorial` is the default (room to argue per
+        entry); `listicle` is the compact alternative one select away."""
+        block = self.BUILDER.split("async function seedRoundupCollection()", 1)[1].split("\n}", 1)[0]
+        layout = next(line for line in block.splitlines() if "layout:" in line)
+        self.assertRegex(layout, r'layout: "(editorial|listicle)"')
 
     def test_a_failed_mint_stops_rather_than_opening_an_empty_grid(self):
         block = self.BUILDER.split("async function seedRoundupCollection()", 1)[1].split("\n}", 1)[0]

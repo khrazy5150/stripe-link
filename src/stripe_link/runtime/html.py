@@ -1428,6 +1428,21 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-catalog-row .sl-catalog-card img{aspect-ratio:1/1;width:12rem}",
     "    .sl-catalog-row .sl-catalog-price{margin:0.4rem 0 0}",
     "    .sl-catalog-pitch{margin:0.3rem 0 0;font-size:1.5rem;line-height:1.5;color:var(--sl-content-text)}",
+    # EDITORIAL — the same ordered list with room to argue. Shares the row grid; only the proportions and
+    # the chrome change, so the two ordered layouts cannot drift into rendering different things.
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto 18rem minmax(0,1fr);gap:1.8rem;padding:1.8rem}",
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{font-size:3.4rem;min-width:3rem}",
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card img{width:18rem}",
+    "    .sl-layout-editorial .sl-catalog-body{gap:0.9rem}",
+    "    .sl-layout-editorial .sl-catalog-title{font-size:2.2rem}",
+    "    .sl-layout-editorial .sl-catalog-pitch{font-size:1.6rem}",
+    "    .sl-catalog-eyebrow{margin:0;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--sl-muted)}",
+    # A SPAN styled as a button, because the card is already the anchor. It must not look clickable on its
+    # own in a way that suggests a second destination -- there is only one, and the whole row goes there.
+    "    .sl-catalog-cta{align-self:start;display:inline-block;margin:0.3rem 0 0;padding:0.9rem 1.8rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:800;font-size:1.4rem;line-height:1}",
+    "    @media (max-width:650px){.sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr);gap:1.2rem;padding:1.2rem}",
+    "      .sl-layout-editorial .sl-catalog-row .sl-catalog-card img{width:100%}",
+    "      .sl-layout-editorial .sl-catalog-title{font-size:1.9rem}}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
     "      .sl-catalog-row .sl-catalog-card img{width:100%}",
@@ -7943,8 +7958,10 @@ def render_catalog_grid(
                 position and the visible number is a CSS counter carrying no content of its own.
     """
     layout = str(section.get("layout") or "").strip().lower()
-    if layout not in ("grid", "masonry", "listicle"):
+    if layout not in ("grid", "masonry", "listicle", "editorial"):
         layout = "grid"
+    # Both ordered layouts read the per-entry overrides; only the container and the chrome differ.
+    ordered = layout in ("listicle", "editorial")
     home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
     cards = []
     for item in section.get("items") or []:
@@ -7965,8 +7982,8 @@ def render_catalog_grid(
         # back to the offer's own subheadline, then the product's description -- the same ladder
         # `hero_copy` climbs, so an entry reads as its own page's hero does.
         pitch_html = ""
-        if layout == "listicle":
-            page_id = str((item or {}).get("page_id") or "")
+        page_id = str((item or {}).get("page_id") or "")
+        if ordered:
             pitch = str((section.get("entry_copy") or {}).get(page_id) or "").strip()
             if not pitch:
                 pitch = str(presentation.get("subheadline") or "").strip()
@@ -7989,10 +8006,32 @@ def render_catalog_grid(
         #
         # Added for grid and masonry too, not only where it was needed, because the card CONTENT being
         # identical in all three layouts is the property that stops one drifting from another.
+        # EDITORIAL extras, all optional and all the tenant's own words. Parallel page_id maps, the shape
+        # `entry_copy` already established, so each is independently absent and nothing needs migrating.
+        #
+        # None of them has a generated default except the headline, which falls back to the entry's own
+        # name. An eyebrow and a button label are CLAIMS -- "Supplies are limited", "Shop now" -- and the
+        # rule this plan has held throughout is that we give the shape and the tenant writes the hook.
+        eyebrow_html = headline_html = cta_html = ""
+        if layout == "editorial":
+            eyebrow = str((section.get("entry_eyebrow") or {}).get(page_id) or "").strip()
+            if eyebrow:
+                eyebrow_html = f'<p class="sl-catalog-eyebrow">{escape(eyebrow)}</p>'
+            entry_name = str((section.get("entry_headline") or {}).get(page_id) or "").strip() or name
+            headline_html = f'<h3 class="sl-catalog-title">{render_headline_markup(entry_name)}</h3>'
+            cta = str((section.get("entry_cta") or {}).get(page_id) or "").strip()
+            if cta:
+                # A SPAN, not a nested <a>: the whole card is already the link, and an anchor inside an
+                # anchor is invalid markup that browsers silently un-nest -- which would put the button
+                # outside the card and break the row.
+                cta_html = f'<span class="sl-catalog-cta">{escape(cta)}</span>'
         body = "\n".join(line for line in [
-            f'          <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
+            (f"          {eyebrow_html}" if eyebrow_html else ""),
+            (headline_html and f"          {headline_html}")
+            or f'          <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
             (f"          {pitch_html}" if pitch_html else ""),
             (f"          {price_html}" if price_html else ""),
+            (f"          {cta_html}" if cta_html else ""),
         ] if line)
         inner = "\n".join(line for line in [
             (f"        {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
@@ -8006,14 +8045,16 @@ def render_catalog_grid(
             card = f'<div class="sl-catalog-card">\n{inner}\n      </div>'
         # The listicle's rows are <li> so the order lives in the markup; the anchor is unchanged inside it,
         # which is what keeps every layout equally crawlable.
-        cards.append(f'      <li class="sl-catalog-row">{card}</li>' if layout == "listicle"
+        cards.append(f'      <li class="sl-catalog-row">{card}</li>' if ordered
                      else f'      {card}')
     if not cards:
         return ""
     heading = str(section.get("heading") or "").strip()
     heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
     section_type = escape(str(section.get("type") or "catalog_grid"))
-    open_tag, close_tag = (('<ol class="sl-catalog-list">', "</ol>") if layout == "listicle"
+    # The <ol> is unchanged: the SECTION already carries `sl-layout-{layout}`, so editorial scopes its
+    # styling off that rather than adding a second class saying the same thing in another place.
+    open_tag, close_tag = (('<ol class="sl-catalog-list">', "</ol>") if ordered
                            else (f'<div class="sl-catalog-cards sl-catalog-{layout}">', "</div>"))
     return "\n".join(line for line in [
         f'    <section class="sl-catalog-grid sl-layout-{layout}" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="{section_type}" data-layout="{layout}">',

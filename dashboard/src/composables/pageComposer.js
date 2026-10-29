@@ -177,8 +177,11 @@ export function catalogGridSection(state) {
   if (!grid.collection_id) return null;
   // Blank boxes are not authored copy. Keeping them would persist "" for every entry the tenant skipped,
   // and an empty string is authored-but-blank — it would suppress the fallback to the page's own words.
-  const copy = Object.fromEntries(
-    Object.entries(grid.entry_copy || {}).filter(([, value]) => String(value || "").trim()));
+  const authored = (map) => {
+    const kept = Object.fromEntries(
+      Object.entries(map || {}).filter(([, value]) => String(value || "").trim()));
+    return Object.keys(kept).length ? kept : undefined;
+  };
   return {
     id: "catalog-grid",
     type: "catalog_grid",
@@ -186,7 +189,12 @@ export function catalogGridSection(state) {
     heading: grid.heading || undefined,
     // "" means "whatever the Collection says", which is the same precedence the publisher applies.
     layout: grid.layout || undefined,
-    entry_copy: Object.keys(copy).length ? copy : undefined,
+    entry_copy: authored(grid.entry_copy),
+    // Editorial extras. Sent whatever the layout says: a tenant who writes an eyebrow, switches to the
+    // compact list to compare, and switches back would otherwise find their words gone.
+    entry_eyebrow: authored(grid.entry_eyebrow),
+    entry_headline: authored(grid.entry_headline),
+    entry_cta: authored(grid.entry_cta),
   };
 }
 
@@ -235,6 +243,9 @@ export function offerlessState(page) {
       heading: grid.heading || "",
       layout: grid.layout || "",
       entry_copy: { ...(grid.entry_copy || {}) },
+      entry_eyebrow: { ...(grid.entry_eyebrow || {}) },
+      entry_headline: { ...(grid.entry_headline || {}) },
+      entry_cta: { ...(grid.entry_cta || {}) },
     },
     seller_profile: {
       heading: profile.heading || "",

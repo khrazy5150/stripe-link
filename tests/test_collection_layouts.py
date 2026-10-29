@@ -11,6 +11,7 @@ with a slug must still come out as a real `<a href>`. A layout that quietly stop
 look perfect on screen and cost the Site its internal linking.
 """
 
+import pathlib
 import re
 import unittest
 
@@ -181,6 +182,114 @@ class TheRowIsOneGridTests(unittest.TestCase):
         css = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
         row = css.split(".sl-catalog-row .sl-catalog-card{", 1)[1].split("}", 1)[0]
         self.assertIn("align-items:start", row)
+
+
+class EditorialLayoutTests(unittest.TestCase):
+    """The Roundup's real shape: the same ordered sequence, given room to ARGUE.
+
+    The author built it by hand out of content blocks and page ribbons to show what it should look like,
+    and then asked for it to be generated. It is a LAYOUT rather than generated elements, and the reasons
+    are concrete: `page_ribbon` caps at two per page, generated elements would not grow when a product
+    joins the Collection, and `{count}` counts the GRID — so a hand-assembled page would carry a number
+    that stops matching the list, which is the exact failure the counted headline exists to prevent.
+    """
+
+    ENTRY = {"offer_id": "o1", "slug": "/desk-lamp", "page_id": "pg1"}
+
+    def _render(self, **overrides):
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        section = {"type": "catalog_grid", "id": "s1", "layout": "editorial", "items": [self.ENTRY]}
+        section.update(overrides)
+        return html.render_catalog_grid(section, OFFERS, {}, {})
+
+    def test_it_is_a_valid_collection_layout(self):
+        validate_collection({**COLLECTION_BASE, "members": ["p1"],
+                             "presentation": {"layout": "editorial"}})
+
+    def test_it_keeps_the_order_in_the_markup(self):
+        """Still an <ol>. The sequence is the whole point of a ranked roundup, and an editorial entry does
+        not get to be less crawlable or less announceable than a compact one."""
+        markup = self._render()
+        self.assertIn("<ol class=\"sl-catalog-list\">", markup)
+        self.assertIn('<li class="sl-catalog-row">', markup)
+
+    def test_it_scopes_its_styling_off_the_section_rather_than_a_second_class(self):
+        self.assertIn('class="sl-catalog-grid sl-layout-editorial"', self._render())
+
+    def test_an_entry_with_no_extras_still_renders(self):
+        """Every editorial field is optional. A tenant who writes nothing gets the page's own words, which
+        is the "very little design" rule this shape was built under."""
+        markup = self._render()
+        self.assertIn("sl-catalog-title", markup)
+        self.assertNotIn("sl-catalog-eyebrow", markup)
+        self.assertNotIn("sl-catalog-cta", markup)
+
+    def test_the_tenants_words_win_where_they_wrote_them(self):
+        markup = self._render(entry_eyebrow={"pg1": "Supplies are limited"},
+                              entry_headline={"pg1": "Homeowners Are Switching"},
+                              entry_cta={"pg1": "Shop the mini cam"})
+        self.assertIn("Supplies are limited", markup)
+        self.assertIn("Homeowners Are Switching", markup)
+        self.assertIn("Shop the mini cam", markup)
+
+    def test_a_blank_override_falls_back_rather_than_blanking_the_entry(self):
+        markup = self._render(entry_headline={"pg1": "   "})
+        self.assertIn("Compact Desk Lamp", markup)
+
+    def test_the_button_is_a_span_not_a_nested_anchor(self):
+        """The card IS the link. An <a> inside an <a> is invalid markup that browsers silently un-nest,
+        which would lift the button out of the card and break the row."""
+        markup = self._render(entry_cta={"pg1": "Shop now"})
+        self.assertIn('<span class="sl-catalog-cta">', markup)
+        self.assertEqual(markup.count("<a "), 1)
+
+    def test_the_extras_are_editorial_only(self):
+        """Offering a field in the builder that the chosen layout would not render is how a tenant comes
+        to distrust the form. The compact row has nowhere to put an eyebrow or a button."""
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        section = {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY],
+                   "entry_eyebrow": {"pg1": "Supplies are limited"}, "entry_cta": {"pg1": "Shop now"}}
+        markup = html.render_catalog_grid(section, OFFERS, {}, {})
+        self.assertNotIn("Supplies are limited", markup)
+        self.assertNotIn("sl-catalog-cta", markup)
+
+    def test_both_ordered_layouts_read_the_same_per_entry_pitch(self):
+        """entry_copy predates this and belongs to BOTH; switching layout to compare must not lose it."""
+        for layout in ("listicle", "editorial"):
+            html._RENDER_STATE["home_url"] = "https://shop.example.com"
+            markup = html.render_catalog_grid(
+                {"type": "catalog_grid", "id": "s1", "layout": layout, "items": [self.ENTRY],
+                 "entry_copy": {"pg1": "Why this one made the list"}}, OFFERS, {}, {})
+            self.assertIn("Why this one made the list", markup, layout)
+
+
+class TheCountTickTests(unittest.TestCase):
+    """The tick writes the TOKEN, so there is no second piece of state to disagree with the headline.
+
+    Author: type "Amazing Gift Ideas", tick both, publish "2 Amazing Gift Ideas for 2026". Source
+    assertions, because this is Vue — the behaviour they stand for is that the checkbox is checked exactly
+    when the token is present.
+    """
+
+    BUILDER = (pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_checkbox_state_is_derived_from_the_headline(self):
+        self.assertIn("get: () => COUNT_TOKEN.test(builder.headline", self.BUILDER)
+        self.assertIn("get: () => YEAR_TOKEN.test(builder.headline", self.BUILDER)
+
+    def test_ticking_inserts_and_unticking_removes(self):
+        block = self.BUILDER.split("const headlineCountsItems", 1)[1].split("});", 1)[0]
+        self.assertIn("`{count} ${text}`", block)
+        self.assertIn('replace(/\\{count\\}\\s*/g, "")', block)
+
+    def test_removing_the_year_takes_its_connector_with_it(self):
+        """"...you'll love in {year}" must not leave a dangling "in"."""
+        block = self.BUILDER.split("const headlineShowsYear", 1)[1].split("});", 1)[0]
+        self.assertIn("(?:for|in)", block)
+
+    def test_a_new_roundup_starts_editorial(self):
+        self.assertIn('presentation: { layout: "editorial" }', self.BUILDER)
 
 
 class MasonryCssTests(unittest.TestCase):

@@ -2635,8 +2635,14 @@ COLLECTION_RULES = {"manual", "all", "category"}
 # gets, so adding this moves nothing. `masonry` is a column-flow gallery for UNORDERED browsing --
 # `column-count` fills top-to-bottom per column, so ten items in five columns read 1,3,5,7,9 across the
 # top and a curated ranking is destroyed. `listicle` is the ordered single column a Roundup needs
-# (plans/ROUNDUP_PAGES.md §3).
-COLLECTION_LAYOUTS = {"grid", "masonry", "listicle"}
+# (plans/ROUNDUP_PAGES.md §3) -- compact, a glance per member.
+#
+# `editorial` is the same ordered sequence given room to ARGUE: an eyebrow, its own headline, the image,
+# the pitch and a button, per member. The author built the shape by hand out of content blocks and page
+# ribbons to show what it should look like, and it is the right default for a Roundup -- but it is a
+# LAYOUT, not generated elements. Elements would cap at two (RIBBON_MAX), would not grow when a product
+# joins the Collection, and would leave `{count}` counting a grid that no longer matches the page.
+COLLECTION_LAYOUTS = {"grid", "masonry", "listicle", "editorial"}
 
 
 def validate_collection(document: dict[str, Any]) -> None:

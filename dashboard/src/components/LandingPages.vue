@@ -556,9 +556,24 @@
                        the number stays true as the list grows; the hook is the tenant's to write. -->
                   <div v-if="isRoundupPage" class="builder-headline-patterns">
                     <small class="field-note">
-                      Start from a pattern — <code>{count}</code> becomes the number of items in your list
-                      and <code>{year}</code> the current year, both kept up to date every time you publish.
+                      Write your own headline, then tick these — or start from a pattern below.
+                      <code>{count}</code> becomes the number of items in your list and <code>{year}</code>
+                      the current year, both kept up to date every time you publish.
                     </small>
+                    <label class="builder-switch-row">
+                      <span class="builder-switch" @click.stop>
+                        <input v-model="headlineCountsItems" type="checkbox" aria-label="Count the items in the headline" />
+                        <span aria-hidden="true"></span>
+                      </span>
+                      <span>Count the items</span>
+                    </label>
+                    <label class="builder-switch-row">
+                      <span class="builder-switch" @click.stop>
+                        <input v-model="headlineShowsYear" type="checkbox" aria-label="Show the year in the headline" />
+                        <span aria-hidden="true"></span>
+                      </span>
+                      <span>Show the year</span>
+                    </label>
                     <div class="builder-chip-row">
                       <button
                         v-for="pattern in roundupHeadlinePatterns"
@@ -786,10 +801,12 @@
                     <option value="grid">Grid — even cards</option>
                     <option value="masonry">Masonry — tiles of different heights</option>
                     <option value="listicle">List — one per row, numbered</option>
+                    <option value="editorial">Editorial — numbered, with room to sell each one</option>
                   </select>
                   <small class="field-note">
                     Masonry is for browsing: it fills column by column, so the order reads down each column
-                    rather than across. Pick List when the order matters.
+                    rather than across. Pick List or Editorial when the order matters — Editorial gives each
+                    entry its own headline, pitch and button; List is the compact version.
                   </small>
                 </label>
                 <small class="field-note">
@@ -803,14 +820,36 @@
                      entry falls back to its own page's subheadline and then its product description. -->
                 <div v-if="roundupEntries.length" class="builder-repeat-list">
                   <span class="field-label">What to say about each one (optional)</span>
-                  <label v-for="entry in roundupEntries" :key="entry.page_id" class="offer-field">
+                  <div v-for="entry in roundupEntries" :key="entry.page_id" class="offer-field">
                     <span>{{ entry.name }}</span>
                     <textarea
                       v-model.trim="builder.catalog_grid.entry_copy[entry.page_id]"
                       rows="2"
                       placeholder="Why this one made the list"
                     ></textarea>
-                  </label>
+                    <!-- Editorial only: the compact row has nowhere to put an eyebrow or a button, and
+                         offering fields that would not render is how a tenant comes to distrust a form. -->
+                    <template v-if="builder.catalog_grid.layout === 'editorial'">
+                      <input
+                        v-model.trim="builder.catalog_grid.entry_eyebrow[entry.page_id]"
+                        type="text"
+                        placeholder="Small line above, e.g. Supplies are limited (optional)"
+                        :aria-label="`Eyebrow for ${entry.name}`"
+                      />
+                      <input
+                        v-model.trim="builder.catalog_grid.entry_headline[entry.page_id]"
+                        type="text"
+                        placeholder="A headline of its own (optional — defaults to the page's)"
+                        :aria-label="`Headline for ${entry.name}`"
+                      />
+                      <input
+                        v-model.trim="builder.catalog_grid.entry_cta[entry.page_id]"
+                        type="text"
+                        placeholder="Button text, e.g. Shop the mini cam (optional)"
+                        :aria-label="`Button text for ${entry.name}`"
+                      />
+                    </template>
+                  </div>
                   <small class="field-note">
                     Leave any of these blank and we use that page's own subheadline instead.
                   </small>
@@ -3127,6 +3166,38 @@ const isRoundupPage = computed(() => builderOffer.value?.lead_capture_action ===
 // Read from the SHARED rules file the Python composer uses, so the builder cannot offer a pattern the
 // publisher would not expand.
 const roundupHeadlinePatterns = computed(() => compositionRules.roundup_headlines || []);
+
+// The two ticks the author asked for: type "Amazing Gift Ideas", tick both, publish "2 Amazing Gift Ideas
+// for 2026". They write the TOKENS into the field rather than setting a flag beside it, so there is no
+// second piece of state to disagree with a headline the tenant later edits -- the box is checked exactly
+// when the token is present, and they can move the token if they want it somewhere else.
+const COUNT_TOKEN = /\{count\}/;
+const YEAR_TOKEN = /\{year\}/;
+
+const headlineCountsItems = computed({
+  get: () => COUNT_TOKEN.test(builder.headline || ""),
+  set: (on) => {
+    const text = String(builder.headline || "").trim();
+    if (on) {
+      if (!COUNT_TOKEN.test(text)) builder.headline = `{count} ${text}`.trim();
+      return;
+    }
+    builder.headline = text.replace(/\{count\}\s*/g, "").trim();
+  },
+});
+
+const headlineShowsYear = computed({
+  get: () => YEAR_TOKEN.test(builder.headline || ""),
+  set: (on) => {
+    const text = String(builder.headline || "").trim();
+    if (on) {
+      if (!YEAR_TOKEN.test(text)) builder.headline = `${text} for {year}`.trim();
+      return;
+    }
+    // Takes the connector with it -- "...you'll love in {year}" must not leave a dangling "in".
+    builder.headline = text.replace(/\s*\b(?:for|in)\s+\{year\}/gi, "").replace(/\s*\{year\}/g, "").trim();
+  },
+});
 // The entries a pitch can be written for: this grid's Collection members, named. Only MANUAL collections
 // have an authored order to write against -- an `all` collection's membership moves on its own, so a
 // paragraph pinned to one of its pages would outlive the reason it was written.
@@ -4343,6 +4414,11 @@ function defaultBuilderForm() {
       layout: "",
       // page_id -> the tenant's pitch for that entry. Keyed by PAGE because that is what they picked.
       entry_copy: {},
+      // Editorial-only extras, same keying. Each optional: an eyebrow and a button label are CLAIMS, so
+      // they have no generated default, and an entry with none still renders.
+      entry_eyebrow: {},
+      entry_headline: {},
+      entry_cta: {},
     },
     seller_profile: {
       heading: "",
@@ -5457,7 +5533,9 @@ async function seedRoundupCollection() {
       name: form.name || selectedOffer.value?.name || "Roundup",
       rule: "manual",
       members: [],
-      presentation: { layout: "listicle" },
+      // Editorial is the Roundup's shape: each entry gets room to argue. The compact numbered list is one
+      // select away for a tenant who wants a denser page.
+      presentation: { layout: "editorial" },
     });
     builder.catalog_grid.collection_id = saved.collection_id;
     return true;
