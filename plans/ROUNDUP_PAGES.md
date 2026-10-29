@@ -472,6 +472,30 @@ withheld: it is the ribbon's NO-IMAGE presentation, and an entry in a product li
 product. `ENTRY_RIBBON_PRESENTATIONS` is asserted to be a subset of `RIBBON_PRESENTATIONS`, so renaming a
 presentation on the element fails a test instead of emitting a class the stylesheet no longer has.
 
+**The side-by-side, and the two leaks it found. 2026-10-29.** The author put a hand-built page of real
+`page_ribbon` elements next to the generated grid and asked why the generated one did not look as rich.
+Three differences, and only the first was a design gap:
+
+1. **The panel had no headline.** His ribbon carried a big bold product name; the generated panel had
+   eyebrow, one line, price, button. The panel now emits `<h3 class="sl-ribbon-headline">`, and the
+   entry's TWO headlines take DIFFERENT defaults so the name does not print twice: the prose takes the
+   offer's sales line, the panel takes the product name. His own page splits them exactly so — "Watch
+   Your Sales Improve With These Landing Page Insider Secrets" above, "Digital Marketing 101" inside.
+2. **The price is out of an editorial entry.** The composition already agreed: `lead_roundup` excludes
+   every other price-bearing element because a price on a LISTING is a second claim about money that can
+   disagree with the offer page's. The grid's own price had never been read as one of those. Editorial
+   only — storefront and category pages render prices through grid and masonry today.
+3. **The image was pinned at 12rem inside a 22rem column.** `.sl-catalog-row .sl-catalog-card img` is a
+   DESCENDANT selector, so the listicle's width reached into the nested ribbon and outranked the
+   element's own `width:100%`. Every card image rule is now `> img`.
+
+**Both #3 and the visited-link purple before it are the same failure**: an entry that NESTS an element
+the surrounding CSS was never written to expect. A private copy of the ribbon hid the first; a descendant
+selector caused the second. Neither looked like a bug — both looked like decisions — and both were found
+by a human holding the real element next to the generated one, not by a test. The regression guards exist
+now (`.sl-page-ribbon` must set `color`; no `.sl-catalog-card` image rule may use a descendant selector),
+but the lesson is that nesting is the risk and the stylesheet is where it bites.
+
 **The lesson for the next element like this**: a test that asserts two copies hold the same values
 confirms the duplication rather than removing it, and it passes right up until the copy omits a property
 the original has. `EditorialUsesTheRibbonItselfTests` asserts there is only one set of values — including

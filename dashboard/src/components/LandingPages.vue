@@ -834,29 +834,38 @@
                      emptied still publishes: the renderer applies the same ladder for a box left blank. -->
                 <div v-if="roundupEntries.length" class="builder-repeat-list">
                   <span class="field-label">What to say about each one</span>
+                  <!-- An editorial entry IS a content block followed by a page ribbon, so the boxes are
+                       grouped the way the page reads. The compact list draws neither, and offering fields
+                       that would not render is how a tenant comes to distrust a form. -->
                   <div v-for="entry in roundupEntries" :key="entry.page_id" class="offer-field">
                     <span>{{ entry.name }}</span>
-                    <!-- Editorial only: the compact row has nowhere to put an eyebrow, a button or a line
-                         under the picture, and offering fields that would not render is how a tenant comes
-                         to distrust a form. The headline is editable in BOTH -- it is the entry's title. -->
-                    <input
-                      v-if="builder.catalog_grid.layout === 'editorial'"
-                      v-model.trim="builder.catalog_grid.entry_headline[entry.page_id]"
-                      type="text"
-                      placeholder="Headline — the name of the thing, or your own line"
-                      :aria-label="`Headline for ${entry.name}`"
-                    />
+                    <template v-if="builder.catalog_grid.layout === 'editorial'">
+                      <small class="field-note">Above the panel</small>
+                      <input
+                        v-model.trim="builder.catalog_grid.entry_headline[entry.page_id]"
+                        type="text"
+                        placeholder="Your hook — the reason to keep reading"
+                        :aria-label="`Lead-in headline for ${entry.name}`"
+                      />
+                    </template>
                     <textarea
                       v-model.trim="builder.catalog_grid.entry_copy[entry.page_id]"
                       rows="2"
                       placeholder="Why this one made the list"
                     ></textarea>
                     <template v-if="builder.catalog_grid.layout === 'editorial'">
+                      <small class="field-note">In the panel</small>
                       <input
                         v-model.trim="builder.catalog_grid.entry_eyebrow[entry.page_id]"
                         type="text"
-                        placeholder="Small line above the picture, e.g. the category"
+                        placeholder="Small line above, e.g. the category"
                         :aria-label="`Eyebrow for ${entry.name}`"
+                      />
+                      <input
+                        v-model.trim="builder.catalog_grid.entry_ribbon_headline[entry.page_id]"
+                        type="text"
+                        placeholder="What it is — usually the product's name"
+                        :aria-label="`Panel headline for ${entry.name}`"
                       />
                       <input
                         v-model.trim="builder.catalog_grid.entry_support[entry.page_id]"
@@ -3238,7 +3247,11 @@ function roundupEntryDefaults(page) {
   return {
     entry_copy: presentation.subheadline || product.description || "",
     entry_eyebrow: String(product.product_category || "").replace(/_/g, " "),
-    entry_headline: product.name || presentation.headline || offer?.name || page?.name || "",
+    // TWO headlines, two defaults, which is what stops the product's name printing twice. The offer
+    // headline is a SALES LINE and belongs to the editorial lead-in; the product name NAMES THE THING
+    // and belongs in the panel. Mirrors render_catalog_grid; pinned by test_collection_layouts.py.
+    entry_headline: presentation.headline || product.name || offer?.name || page?.name || "",
+    entry_ribbon_headline: product.name || presentation.headline || offer?.name || "",
     // "Available now" is the deliberately bland last resort: it states a fact about stock and claims
     // nothing about the product, which is the only kind of sentence we may put in a seller's mouth unasked.
     entry_support: product.selling_point || "Available now",
@@ -3262,7 +3275,8 @@ const roundupEntries = computed(() => {
 
 // The five boxes an editorial entry has. Named once so the seeder, the save and the renderer's own ladder
 // cannot end up disagreeing about how many there are.
-const ROUNDUP_ENTRY_FIELDS = ["entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"];
+const ROUNDUP_ENTRY_FIELDS = ["entry_copy", "entry_eyebrow", "entry_headline", "entry_ribbon_headline",
+  "entry_support", "entry_cta"];
 
 // PRE-FILL, once per entry, when the grid's editor is opened.
 //
@@ -4499,6 +4513,7 @@ function defaultBuilderForm() {
       // would not publish.
       entry_eyebrow: {},
       entry_headline: {},
+      entry_ribbon_headline: {},
       entry_support: {},
       entry_cta: {},
     },

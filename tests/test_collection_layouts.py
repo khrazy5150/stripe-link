@@ -327,22 +327,49 @@ class TheEntryIsFilledFromTheProductTests(unittest.TestCase):
         ("dietary_supplement"). The second must not publish with its underscores showing."""
         self.assertNotIn("home_security", self._render())
 
-    def test_the_headline_is_the_PRODUCTS_name_not_the_offers_sales_line(self):
-        """An offer headline is a sales line; an entry in a ranked list is announcing which product this
-        is. Reading `presentation.headline` here would title entry 1 "Homeowners Are Trading In Their
-        Doorbell Cams", which says nothing about what is being ranked."""
+    def test_the_two_headlines_take_different_defaults(self):
+        """An entry has TWO: the prose above and the panel's own. Giving them one default would print the
+        product's name twice, which is what a single `entry_headline` used to do before the panel had one.
+
+        They split along the meaning the data already carries. The offer headline is a SALES LINE
+        ("Homeowners Are Trading in Their Doorbell Cams") and belongs to the editorial lead-in; the
+        product name NAMES THE THING and belongs in the ribbon. The author's own hand-built page splits
+        them exactly so -- "Watch Your Sales Improve With These Landing Page Insider Secrets" above,
+        "Digital Marketing 101" inside the panel.
+        """
         markup = self._render()
-        self.assertIn("Security Mini Cam</h3>", markup)
+        prose, panel = markup.split('<div class="sl-page-ribbon', 1)
         # Title-cased on the way out ("In" -> "in"), so assert the form that actually publishes.
-        self.assertNotIn("Homeowners Are Trading in Their Doorbell Cams</h3>", markup)
+        self.assertIn("Homeowners Are Trading in Their Doorbell Cams", prose)
+        self.assertNotIn("Security Mini Cam", prose)
+        self.assertIn('<h3 class="sl-ribbon-headline">Security Mini Cam</h3>', panel)
+
+    def test_the_panel_headline_is_the_ribbons_own(self):
+        """The gap the author found by holding the two side by side: his hand-built ribbon carried a big
+        bold product name and the generated panel carried none, so it read thin next to his."""
+        self.assertIn('class="sl-ribbon-headline"', self._render())
+
+    def test_an_editorial_entry_shows_no_price(self):
+        """`lead_roundup` already excludes every other price-bearing element, because a price on a
+        LISTING is a second claim about money that can disagree with the offer page's. The grid's own
+        price had never been read as one of those."""
+        self.assertNotIn("sl-catalog-price", self._render())
+
+    def test_the_compact_layouts_keep_theirs(self):
+        """Storefront and category pages render prices through grid and masonry today. Editorial is the
+        new shape and the only one the author asked to change."""
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        block = source.split("def render_catalog_grid(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('if layout != "editorial":', block)
 
     def test_the_supporting_line_is_the_products_selling_point(self):
-        self.assertIn('<p class="sl-ribbon-body">Catches what a doorbell cam misses, indoors and at night.</p>',
+        self.assertIn('<p class="sl-ribbon-body sl-para">Catches what a doorbell cam misses, indoors and at night.</p>',
                       self._render())
 
     def test_a_product_with_no_selling_point_gets_the_bland_fallback(self):
         bare = {"pr1": {"name": "Security Mini Cam", "product_category": "home_security"}}
-        self.assertIn('<p class="sl-ribbon-body">Available now</p>', self._render(products=bare))
+        self.assertIn('<p class="sl-ribbon-body sl-para">Available now</p>', self._render(products=bare))
 
     def test_the_pitch_prefers_the_pages_own_subheadline_over_the_description(self):
         """Unchanged ladder, and deliberately so: a description is often pasted from a supplier and
@@ -550,6 +577,10 @@ class TheNumberIsABadgeBesideTheHeadlineTests(unittest.TestCase):
         self.assertIn("var(--sl-content-border)", divided)
 
 
+ROUNDUP_ENTRY_FIELDS = ("entry_copy", "entry_eyebrow", "entry_headline", "entry_ribbon_headline",
+                        "entry_support", "entry_cta")
+
+
 class TheBuilderShowsWhatWouldPublishTests(unittest.TestCase):
     """The defaults are written INTO the editor's boxes, not shown as placeholders.
 
@@ -583,19 +614,19 @@ class TheBuilderShowsWhatWouldPublishTests(unittest.TestCase):
 
     def test_it_seeds_every_box_the_renderer_reads(self):
         fields = self.BUILDER.split("const ROUNDUP_ENTRY_FIELDS = [", 1)[1].split("]", 1)[0]
-        for field in ("entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"):
+        for field in ROUNDUP_ENTRY_FIELDS:
             self.assertIn(f'"{field}"', fields, field)
 
     def test_every_seeded_box_is_also_saved(self):
         """A field the seeder fills and the composer drops is a value the tenant edits and then loses."""
         block = self.COMPOSER.split("export function catalogGridSection(state)", 1)[1].split("\n}", 1)[0]
-        for field in ("entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"):
+        for field in ROUNDUP_ENTRY_FIELDS:
             self.assertIn(f"{field}: authored(grid.{field})", block, field)
 
     def test_every_saved_box_is_read_back(self):
         """Write-only fields are lost on reload, which reads as the builder discarding the tenant's work."""
         block = self.COMPOSER.split("export function offerlessState(page)", 1)[1].split("\n  },", 1)[0]
-        for field in ("entry_copy", "entry_eyebrow", "entry_headline", "entry_support", "entry_cta"):
+        for field in ROUNDUP_ENTRY_FIELDS:
             self.assertIn(f"{field}: {{ ...(grid.{field} || {{}}) }}", block, field)
 
     def test_the_dashboards_ladder_matches_the_renderers(self):
@@ -604,7 +635,9 @@ class TheBuilderShowsWhatWouldPublishTests(unittest.TestCase):
         defaults = self._defaults()
         self.assertIn("presentation.subheadline || product.description", defaults)
         self.assertIn("product.product_category", defaults)
-        self.assertIn("product.name || presentation.headline", defaults)
+        # The two headlines, each taking the value that MEANS what it is for.
+        self.assertIn("entry_headline: presentation.headline || product.name", defaults)
+        self.assertIn("entry_ribbon_headline: product.name || presentation.headline", defaults)
         self.assertIn('product.selling_point || "Available now"', defaults)
         self.assertIn('entry_cta: "Shop Now"', defaults)
 
@@ -613,6 +646,7 @@ class TheBuilderShowsWhatWouldPublishTests(unittest.TestCase):
                   / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
         block = source.split("def render_catalog_grid(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn('product.get("product_category") or ""', block)
+        self.assertIn('entry_ribbon_headline', block)
         self.assertIn('product.get("name") or ""', block)
         self.assertIn('product.get("selling_point") or ""', block)
         self.assertIn('"Available now"', block)
@@ -810,6 +844,23 @@ class EditorialUsesTheRibbonItselfTests(unittest.TestCase):
         self.assertIn("transform:translateY(-2px)",
                       self._rule(".sl-layout-editorial a.sl-catalog-card:hover .sl-page-ribbon"))
 
+    def test_the_cards_own_image_rules_cannot_reach_into_the_panel(self):
+        """THE SIZE BUG. The entry nests a ribbon, and `.sl-catalog-row .sl-catalog-card img` is a
+        DESCENDANT selector -- so the listicle's `width:12rem` applied to the panel's picture inside a
+        22rem column, and the ribbon's own `width:100%` lost the specificity tie. It read as a design
+        choice rather than a leak; the author found it by holding a hand-built ribbon next to it.
+
+        Every card puts its own image at the top level, so the child combinator costs nothing and closes
+        the whole class of leak for whatever gets nested next.
+        """
+        for rule in re.findall(r"[^{}\n\"]*\.sl-catalog-card[^{}\n\"]*\bimg\s*\{", self.CSS):
+            self.assertIn("> img", rule, f"{rule.strip()} can reach inside a nested element")
+
+    def test_the_panel_image_fills_the_ribbons_column(self):
+        """What the leak was costing: the element already says the image fills its column."""
+        self.assertIn("width:100%", self._rule(".sl-ribbon-media:not(.sl-cropped) img"))
+        self.assertIn("minmax(0,22rem)", self._rule(".sl-page-ribbon.is-image_left"))
+
     def test_only_the_PANEL_is_tinted(self):
         """The prose sits on the page, not in a box. A card around the headline and paragraph is what made
         the first two cuts read as a product tile however generously they were spaced."""
@@ -901,7 +952,7 @@ class MasonryCssTests(unittest.TestCase):
     def test_the_square_crop_is_dropped_so_heights_can_vary(self):
         """Variable tile heights ARE the layout. Forcing every image square would produce a uniform grid
         with extra steps."""
-        self.assertIn(".sl-catalog-masonry .sl-catalog-card img{aspect-ratio:auto}", self.CSS)
+        self.assertIn(".sl-catalog-masonry .sl-catalog-card > img{aspect-ratio:auto}", self.CSS)
 
     def test_the_hover_lift_respects_reduced_motion(self):
         self.assertIn("prefers-reduced-motion:reduce", self.CSS)

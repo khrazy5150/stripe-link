@@ -1405,7 +1405,14 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-catalog-card{display:flex;flex-direction:column;gap:0.6rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.2rem;text-decoration:none;transition:transform .15s ease,box-shadow .15s ease}",
     "    a.sl-catalog-card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     # height:auto is load-bearing: responsive_img emits an intrinsic height attr, and a fixed height defeats aspect-ratio.
-    "    .sl-catalog-card img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:0.8rem;background:#fff;display:block}",
+    #
+    # `> img` -- the card's OWN picture, not every picture inside it. The editorial entry nests a page
+    # ribbon, and a descendant selector here reached into it: the listicle's `width:12rem` outranked the
+    # ribbon's `width:100%`, so the panel image rendered at 12rem inside a 22rem column. It looked like a
+    # sizing choice rather than a leak, and the author spotted it by holding a hand-built ribbon beside it.
+    # Every card puts its own image at the top level (catalog cards and link cards both), so the child
+    # combinator costs nothing and stops this class of leak for whatever gets nested next.
+    "    .sl-catalog-card > img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:0.8rem;background:#fff;display:block}",
     # The words, as one block. `flex:1` lets the price keep its `margin-top:auto` bottom alignment in a
     # grid card; `min-width:0` is what stops a long title pushing out of its column in a listicle row.
     "    .sl-catalog-body{display:flex;flex-direction:column;gap:0.6rem;flex:1;min-width:0}",
@@ -1414,7 +1421,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # every image square would produce a uniform grid with extra steps.
     "    .sl-catalog-cards.sl-catalog-masonry{display:block;column-count:5;column-gap:1.4rem}",
     "    .sl-catalog-masonry .sl-catalog-card{break-inside:avoid;margin:0 0 1.4rem;width:100%}",
-    "    .sl-catalog-masonry .sl-catalog-card img{aspect-ratio:auto}",
+    "    .sl-catalog-masonry .sl-catalog-card > img{aspect-ratio:auto}",
     "    @media (max-width:1180px){.sl-catalog-cards.sl-catalog-masonry{column-count:4}}",
     "    @media (max-width:900px){.sl-catalog-cards.sl-catalog-masonry{column-count:3}}",
     "    @media (max-width:650px){.sl-catalog-cards.sl-catalog-masonry{column-count:2;column-gap:1rem}}",
@@ -1425,7 +1432,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-catalog-row{counter-increment:sl-catalog;display:block}",
     "    .sl-catalog-row .sl-catalog-card{display:grid;grid-template-columns:auto 12rem minmax(0,1fr);align-items:start;gap:1.2rem}",
     "    .sl-catalog-row .sl-catalog-card::before{content:counter(sl-catalog);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;line-height:1;color:var(--sl-price-amount);min-width:2.2rem;text-align:right}",
-    "    .sl-catalog-row .sl-catalog-card img{aspect-ratio:1/1;width:12rem}",
+    "    .sl-catalog-row .sl-catalog-card > img{aspect-ratio:1/1;width:12rem}",
     "    .sl-catalog-row .sl-catalog-price{margin:0.4rem 0 0}",
     "    .sl-catalog-pitch{margin:0.3rem 0 0;font-size:1.5rem;line-height:1.5;color:var(--sl-content-text)}",
     # EDITORIAL — the same ordered list with room to argue. Shares the row grid; only the proportions and
@@ -1475,7 +1482,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-layout-editorial a.sl-catalog-card:hover .sl-page-ribbon{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
-    "      .sl-catalog-row .sl-catalog-card img{width:100%}",
+    "      .sl-catalog-row .sl-catalog-card > img{width:100%}",
     "      .sl-catalog-row .sl-catalog-body{grid-column:1/-1}}",
     # The lift on hover is decoration; anyone who asked for less motion does not get it.
     "    @media (prefers-reduced-motion:reduce){a.sl-catalog-card{transition:none}a.sl-catalog-card:hover{transform:none}",
@@ -8036,12 +8043,21 @@ def render_catalog_grid(
                 pitch = str(product.get("description") or "").strip()
             if pitch:
                 pitch_html = f'<p class="sl-catalog-pitch">{escape(pitch)}</p>'
+        # NO PRICE IN AN EDITORIAL ENTRY. The author asked for it out, and the composition already agreed
+        # with him: `lead_roundup` excludes every other price-bearing element (offer_price_selector,
+        # price_highlight, product_details) because a price on a LISTING is a second claim about money
+        # that can disagree with the one on the offer page. The grid's own price had simply never been
+        # read as one of those. His hand-built ribbons carry none either.
+        #
+        # Editorial ONLY. grid, masonry and listicle predate this work and storefront and category pages
+        # render prices through them today; changing those would be a regression nobody asked for.
         price_html = ""
-        try:
-            resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
-            price_html = f'<p class="sl-catalog-price">{escape(format_money(int(resolved.get("subtotal", 0)), str(resolved.get("currency") or "usd")))}</p>'
-        except Exception:  # noqa: BLE001 - a broken card must not break the page
-            pass
+        if layout != "editorial":
+            try:
+                resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
+                price_html = f'<p class="sl-catalog-price">{escape(format_money(int(resolved.get("subtotal", 0)), str(resolved.get("currency") or "usd")))}</p>'
+            except Exception:  # noqa: BLE001 - a broken card must not break the page
+                pass
         # The words go in ONE wrapper, in every layout. A listicle row is a three-column grid -- number,
         # image, words -- and with the title, pitch and price as separate grid children there were five
         # items for three columns: the row wrapped, so the title sat beside the image while the pitch and
@@ -8064,7 +8080,7 @@ def render_catalog_grid(
         # so what publishes is what the tenant can see and change. The ladder stays here as well, for the
         # entry added to the Collection after that modal was last open -- it must still render as an
         # argument rather than as four empty slots.
-        eyebrow_html = headline_html = cta_html = support_html = ""
+        eyebrow_html = headline_html = cta_html = support_html = panel_headline_html = ""
         if layout == "editorial":
             # THE CATEGORY. Stored either as a typed label ("Electronics") or as a key
             # ("dietary_supplement"); the underscores are swapped out here for the same reason the
@@ -8074,19 +8090,38 @@ def render_catalog_grid(
                 eyebrow = str(product.get("product_category") or "").replace("_", " ").strip()
             if eyebrow:
                 eyebrow_html = f'<p class="sl-ribbon-eyebrow">{escape(eyebrow)}</p>'
-            # The PRODUCT's name before the offer's: `name` is the offer headline, which on a landing page
-            # is a sales line ("Homeowners Are Trading in Their Doorbell Cams for This") rather than the
-            # name of the thing. An entry in a ranked list is announcing which product this is.
+            # TWO HEADLINES, because an entry is a content block THEN a ribbon and each has one. The
+            # author proved it with a side-by-side: his hand-built ribbon carried a big bold product name
+            # inside the panel, and the generated one -- eyebrow, one line, price, button -- read thin
+            # next to it. The panel was missing the element's own headline.
+            #
+            # They take DIFFERENT defaults, which is what stops the name appearing twice. The offer
+            # headline is a sales line ("Homeowners Are Trading in Their Doorbell Cams") and the product
+            # name names the thing; the prose is the editorial hook and the panel is the product. His own
+            # mock-up splits them exactly that way -- "Watch Your Sales Improve With These Landing Page
+            # Insider Secrets" above, "Digital Marketing 101" in the ribbon.
             entry_name = (str((section.get("entry_headline") or {}).get(page_id) or "").strip()
+                          or name or str(product.get("name") or "").strip())
+            headline_html = (f'<h3 class="sl-catalog-title">{render_headline_markup(entry_name)}</h3>'
+                             if entry_name else "")
+            # The panel's own, styled by the ribbon's class. An <h3> like the prose rather than the
+            # ribbon's <h2>: both sit under the grid's section heading, so they are siblings in the
+            # outline -- which is also how they read on his page, two headings of equal rank per entry.
+            panel_name = (str((section.get("entry_ribbon_headline") or {}).get(page_id) or "").strip()
                           or str(product.get("name") or "").strip() or name)
-            headline_html = f'<h3 class="sl-catalog-title">{render_headline_markup(entry_name)}</h3>'
+            panel_headline_html = (f'<h3 class="sl-ribbon-headline">{render_headline_markup(panel_name)}</h3>'
+                                   if panel_name else "")
             # THE REASON TO BUY, product-level and asked once (Product.selling_point). The last resort is
             # deliberately bland: "Available now" states a fact about stock and claims nothing about the
             # product, which is the only kind of sentence we may put in a seller's mouth unasked.
             support = str((section.get("entry_support") or {}).get(page_id) or "").strip()
             if not support:
                 support = str(product.get("selling_point") or "").strip() or "Available now"
-            support_html = f'<p class="sl-ribbon-body">{escape(support)}</p>'
+            # The ribbon's own body RENDERER, not just its class name. `render_body_markup` is what turns
+            # a blank line into a second paragraph and a single newline into a <br>; a bare <p> throws
+            # both away and publishes a run-on block. It also emits `sl-para`, which is what spaces
+            # consecutive paragraphs -- so the class list only matched the element by accident before.
+            support_html = render_body_markup(support, "sl-ribbon-body", "            ")
             # NAVIGATION, not a claim -- the row goes to that page and the button says so. "Shop Now"
             # rather than the earlier "See {name}": a generated label built from a name gets unreadable the
             # moment the name is long, and every button on the page reading the same thing is correct here
@@ -8120,7 +8155,8 @@ def render_catalog_grid(
             # for free and cannot drift from the element the author builds pages out of by hand.
             panel_copy = "\n".join(line for line in [
                 (f"            {eyebrow_html}" if eyebrow_html else ""),
-                (f"            {support_html}" if support_html else ""),
+                (f"            {panel_headline_html}" if panel_headline_html else ""),
+                support_html,  # already indented by render_body_markup
                 (f"            {price_html}" if price_html else ""),
                 (f"            {cta_html}" if cta_html else ""),
             ] if line)
