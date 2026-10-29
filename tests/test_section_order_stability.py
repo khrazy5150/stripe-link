@@ -41,6 +41,58 @@ class ThePremise(unittest.TestCase):
         self.assertGreaterEqual(len(REPEATABLE), 3, REPEATABLE)
 
 
+class WhereANewElementLands(unittest.TestCase):
+    """Author's rule, 2026-10-28: "anything above trust badges is where new elements should go by default".
+
+    `commitNewSection` appended the new key to the END of the tenant's order. Only `legal_footer` is
+    pinned_bottom, so "the end" meant between the trust badges and the footer -- under the price cards and
+    the refund policy. Every single element then had to be dragged back up past three sections.
+
+    A landing page closes with its proof, its price, its promise and its legal line. A new element is a
+    point being MADE, and points come before the closing.
+    """
+
+    CLOSING = re.search(r"export const CLOSING_SECTIONS = \[(.*?)\];", COMPOSER, re.S).group(1)
+
+    def _closing(self):
+        return re.findall(r'"([a-z_]+)"', self.CLOSING)
+
+    def test_the_closing_stack_is_declared_once(self):
+        self.assertIn("export const CLOSING_SECTIONS", COMPOSER)
+
+    def test_it_names_the_authors_four_and_ends_at_the_footer(self):
+        closing = self._closing()
+        self.assertEqual(closing[0], "trust_badges", "the boundary the author named")
+        self.assertEqual(closing[-1], "legal_footer", "nothing goes below the footer")
+        for section in ("refund_policy", "offer_price_selector"):
+            self.assertIn(section, closing, section)
+
+    def test_every_closing_section_is_a_real_element(self):
+        """A typo here fails OPEN -- the key matches nothing, the boundary silently moves to the footer,
+        and the bug comes back looking exactly like it did before."""
+        for section in self._closing():
+            self.assertIn(section, RULES["elements"], section)
+
+    def test_the_new_element_is_inserted_above_it_rather_than_appended(self):
+        body = BUILDER.split("async function commitNewSection()", 1)[1].split("\n}", 1)[0]
+        self.assertIn("CLOSING_SECTIONS.includes(row.type)", body)
+        self.assertIn("keys.slice(0, closingAt), key, ...keys.slice(closingAt)", body)
+
+    def test_it_still_appends_when_the_page_has_no_closing_stack(self):
+        """An offer-less page -- a Roundup, a link hub -- may carry none of these. The end of the list is
+        the only answer there, and it is the right one."""
+        body = BUILDER.split("async function commitNewSection()", 1)[1].split("\n}", 1)[0]
+        self.assertIn("closingAt === -1", body)
+
+    def test_the_closing_sections_stay_draggable(self):
+        """This changed where a new element LANDS, not where anything is allowed to live. Pinning the
+        stack to the bottom band would have taken the tenant's ability to move it at all."""
+        for section in self._closing():
+            if section == "legal_footer":
+                continue        # the footer was already pinned, and nothing goes under it
+            self.assertEqual(RULES["elements"][section].get("placement"), "free", section)
+
+
 class HydrationKeepsTheSavedId(unittest.TestCase):
     def test_no_element_is_rebuilt_with_a_fresh_id(self):
         body = hydrate_body()

@@ -321,6 +321,21 @@ export function renderedVar(token) {
 // composition_rules.json the Python composer uses, so builder and renderer cannot disagree.
 export const PLACEMENT_BANDS = ["lead", "pinned_top", "free", "pinned_bottom"];
 
+// The page's CLOSING STACK, innermost first, and where a newly added element stops.
+//
+// Author's rule, 2026-10-28: "anything above trust badges is where new elements should go by default".
+// From the very bottom a landing page ends footer / refund policy / price cards / trust badges, and those
+// four are the closure of the argument -- the proof, the price, the promise and the legal line. A new
+// element is always a point being MADE, so it belongs before the closing, never inside it.
+//
+// Only `legal_footer` is pinned_bottom; the rest sit in the free band, which is why appending a new key
+// to the order dropped it between the badges and the footer and every element had to be dragged back up.
+// They stay in the free band and stay draggable: this decides where a new element LANDS, not where
+// anything is allowed to live.
+export const CLOSING_SECTIONS = ["trust_badges", "offer_price_selector", "price_highlight",
+                                 "checkout_cta", "refund_policy", "legal_footer"];
+
+
 export function elementPlacement(key) {
   return (rules.elements?.[key] || {}).placement || "free";
 }

@@ -2859,7 +2859,7 @@ import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
-import { elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, catalogGridSection, goalChrome } from "../composables/pageComposer";
+import { CLOSING_SECTIONS, elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, catalogGridSection, goalChrome } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
@@ -7015,11 +7015,21 @@ async function commitNewSection() {
   // which is what makes "three blocks, some other elements, then two more" hold its shape instead of the
   // last two jumping back to join the first three.
   if (builder.section_order?.length || elementOrderMode(element?.type) === "authored") {
-    // Once they HAVE arranged it, their order is authoritative — the new section joins the end of it
-    // rather than jumping to a baseline slot they never chose. Keyed the way readers key it: only
-    // repeatable types key by element id, everything else by type.
+    // Once they HAVE arranged it, their order is authoritative — the new section joins THEIR order rather
+    // than jumping to a baseline slot they never chose. Keyed the way readers key it: only repeatable
+    // types key by element id, everything else by type.
+    //
+    // It joins above the CLOSING STACK, not at the very end. "The end" put every new element between the
+    // trust badges and the footer, so a tenant adding a video had to drag it up past the badges, the
+    // price cards and the refund policy every single time. Those four are the page's closure; a new
+    // element is a point being made, and points come before the closing (pageComposer.CLOSING_SECTIONS).
     const key = sectionOrderKey(element);
-    builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== key), key];
+    const rows = sequenceRows.value.filter((row) => row.key !== key);
+    const keys = rows.map((row) => row.key);
+    const closingAt = rows.findIndex((row) => CLOSING_SECTIONS.includes(row.type));
+    builder.section_order = closingAt === -1
+      ? [...keys, key]
+      : [...keys.slice(0, closingAt), key, ...keys.slice(closingAt)];
   }
   await autoSavePage();
 }
