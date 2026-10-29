@@ -8019,7 +8019,19 @@ def render_catalog_grid(
                 eyebrow_html = f'<p class="sl-catalog-eyebrow">{escape(eyebrow)}</p>'
             entry_name = str((section.get("entry_headline") or {}).get(page_id) or "").strip() or name
             headline_html = f'<h3 class="sl-catalog-title">{render_headline_markup(entry_name)}</h3>'
-            cta = str((section.get("entry_cta") or {}).get(page_id) or "").strip()
+            # DEFAULTED, unlike the eyebrow. The first cut left this empty unless the tenant typed one,
+            # and the result was that an editorial entry rendered the same four things a compact row does
+            # -- image, title, pitch, price -- only bigger. The author set the layout, saw no button and
+            # no visible change, and reported it as "no change in layout". He was right: the fancy layout
+            # has to BE fancy before anyone writes a word, because the formula here is that the software
+            # fills the data in and the tenant edits the wording.
+            #
+            # Built from the OFFER's name, never the entry headline: a tenant who writes an editorial
+            # headline ("Homeowners Are Trading in Their Doorbell Cams for This") would otherwise get a
+            # button that begins "See Homeowners Are Trading...". And it is navigation, not a claim -- the
+            # row goes to that page and the button says so -- which is why it may carry a default at all
+            # while the eyebrow ("Supplies are limited") still may not.
+            cta = str((section.get("entry_cta") or {}).get(page_id) or "").strip() or (f"See {name}" if name else "")
             if cta:
                 # A SPAN, not a nested <a>: the whole card is already the link, and an anchor inside an
                 # anchor is invalid markup that browsers silently un-nest -- which would put the button

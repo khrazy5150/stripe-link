@@ -216,12 +216,33 @@ class EditorialLayoutTests(unittest.TestCase):
     def test_it_scopes_its_styling_off_the_section_rather_than_a_second_class(self):
         self.assertIn('class="sl-catalog-grid sl-layout-editorial"', self._render())
 
-    def test_an_entry_with_no_extras_still_renders(self):
-        """Every editorial field is optional. A tenant who writes nothing gets the page's own words, which
-        is the "very little design" rule this shape was built under."""
+    def test_a_bare_entry_still_gets_its_button(self):
+        """THE BUG. The first cut defaulted nothing, so an editorial entry with no fields filled rendered
+        the same four things a compact row does -- image, title, pitch, price -- only bigger. The author
+        set the layout, saw no button, and reported "no change in layout". The fancy layout has to BE
+        fancy before anyone writes a word: the formula is that the software fills the data in and the
+        tenant edits the wording."""
         markup = self._render()
-        self.assertIn("sl-catalog-title", markup)
-        self.assertNotIn("sl-catalog-eyebrow", markup)
+        self.assertIn("sl-catalog-cta", markup)
+        self.assertIn("See Compact Desk Lamp", markup)
+
+    def test_the_eyebrow_still_has_no_default(self):
+        """The button is NAVIGATION -- the row goes to that page and it says so. An eyebrow is a CLAIM
+        ("Supplies are limited"), and this plan has never put one of those in a tenant's mouth."""
+        self.assertNotIn("sl-catalog-eyebrow", self._render())
+
+    def test_the_button_is_named_from_the_offer_not_the_entry_headline(self):
+        """A tenant writing an editorial headline would otherwise get a button reading
+        "See Homeowners Are Trading in Their Doorbell Cams for This"."""
+        markup = self._render(entry_headline={"pg1": "Homeowners Are Trading in Their Doorbell Cams"})
+        self.assertIn("See Compact Desk Lamp", markup)
+
+    def test_the_compact_row_gains_no_button(self):
+        """The two layouts must stay visibly different, which is the whole reason this was reported."""
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        markup = html.render_catalog_grid(
+            {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY]},
+            OFFERS, {}, {})
         self.assertNotIn("sl-catalog-cta", markup)
 
     def test_the_tenants_words_win_where_they_wrote_them(self):
@@ -281,12 +302,30 @@ class TheCountTickTests(unittest.TestCase):
     def test_ticking_inserts_and_unticking_removes(self):
         block = self.BUILDER.split("const headlineCountsItems", 1)[1].split("});", 1)[0]
         self.assertIn("`{count} ${text}`", block)
-        self.assertIn('replace(/\\{count\\}\\s*/g, "")', block)
+        self.assertIn('replace(/\\{count\\}\\s*/gi, "")', block)
 
     def test_removing_the_year_takes_its_connector_with_it(self):
         """"...you'll love in {year}" must not leave a dangling "in"."""
         block = self.BUILDER.split("const headlineShowsYear", 1)[1].split("});", 1)[0]
         self.assertIn("(?:for|in)", block)
+
+    def test_the_tokens_are_matched_case_INSENSITIVELY(self):
+        """The builder title-cases headlines as they are typed and turned `{count}` into `{Count}`, which
+        the expander's lowercase pattern no longer matched -- so a live page published the literal token.
+        Both halves are fixed: the caser leaves placeholders alone, and the server tolerates the ones
+        already stored, so those pages heal on their next publish without anyone retyping."""
+        from stripe_link.domain.composition import expand_title_tokens, has_title_tokens
+
+        stored = "{Count} Amazing Gifts Ideas for {Year}"
+        self.assertTrue(has_title_tokens(stored))
+        self.assertEqual(expand_title_tokens(stored, count=2, year=2026),
+                         "2 Amazing Gifts Ideas for 2026")
+
+    def test_the_title_caser_leaves_a_placeholder_alone(self):
+        caser = (pathlib.Path(__file__).resolve().parents[1]
+                 / "dashboard" / "src" / "utils" / "titleCase.js").read_text(encoding="utf-8")
+        self.assertIn("PLACEHOLDER_TOKEN", caser)
+        self.assertIn("if (PLACEHOLDER_TOKEN.test(word)) return word;", caser)
 
     def test_a_new_roundup_starts_editorial(self):
         self.assertIn('presentation: { layout: "editorial" }', self.BUILDER)

@@ -429,8 +429,13 @@ def is_thin_by_design(offer: dict[str, Any]) -> bool:
 # know, and handing it over with the number kept true is the point of the feature. The reference page it
 # comes from says "29 Insanely Cool Gifts" above a list of more than sixty: the number was typed once and
 # the author kept adding products.
-_COUNT_TOKEN = re.compile(r"\{count\}\s*")
-_YEAR_TOKEN = re.compile(r"\{year\}")
+# CASE-INSENSITIVE, and that is not politeness. The builder title-cases headlines as they are typed, and
+# it turned `{count}` into `{Count}` -- so live pages already carry the capitalised form and published it
+# as literal text. A token is a machine placeholder: `{Count}` is unambiguous, so matching it costs
+# nothing and heals those pages on their next publish without anyone retyping a headline. The builder no
+# longer mangles them either; this is the half that fixes what is already stored.
+_COUNT_TOKEN = re.compile(r"\{count\}\s*", re.IGNORECASE)
+_YEAR_TOKEN = re.compile(r"\{year\}", re.IGNORECASE)
 
 
 def expand_title_tokens(text: str, *, count: int | None, year: int) -> str:
@@ -451,7 +456,7 @@ def expand_title_tokens(text: str, *, count: int | None, year: int) -> str:
     out = _YEAR_TOKEN.sub(str(year), str(text))
     if count is not None and count > 1:
         return _COUNT_TOKEN.sub(f"{count} ", out).strip()
-    started_with_count = bool(re.match(r"\s*\{count\}", out))
+    started_with_count = bool(re.match(r"\s*\{count\}", out, re.IGNORECASE))
     out = _COUNT_TOKEN.sub("", out).strip()
     if started_with_count and out:
         out = out[0].upper() + out[1:]

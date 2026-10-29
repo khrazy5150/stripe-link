@@ -3171,8 +3171,8 @@ const roundupHeadlinePatterns = computed(() => compositionRules.roundup_headline
 // for 2026". They write the TOKENS into the field rather than setting a flag beside it, so there is no
 // second piece of state to disagree with a headline the tenant later edits -- the box is checked exactly
 // when the token is present, and they can move the token if they want it somewhere else.
-const COUNT_TOKEN = /\{count\}/;
-const YEAR_TOKEN = /\{year\}/;
+const COUNT_TOKEN = /\{count\}/i;
+const YEAR_TOKEN = /\{year\}/i;
 
 const headlineCountsItems = computed({
   get: () => COUNT_TOKEN.test(builder.headline || ""),
@@ -3182,7 +3182,7 @@ const headlineCountsItems = computed({
       if (!COUNT_TOKEN.test(text)) builder.headline = `{count} ${text}`.trim();
       return;
     }
-    builder.headline = text.replace(/\{count\}\s*/g, "").trim();
+    builder.headline = text.replace(/\{count\}\s*/gi, "").trim();
   },
 });
 
@@ -3195,7 +3195,7 @@ const headlineShowsYear = computed({
       return;
     }
     // Takes the connector with it -- "...you'll love in {year}" must not leave a dangling "in".
-    builder.headline = text.replace(/\s*\b(?:for|in)\s+\{year\}/gi, "").replace(/\s*\{year\}/g, "").trim();
+    builder.headline = text.replace(/\s*\b(?:for|in)\s+\{year\}/gi, "").replace(/\s*\{year\}/gi, "").trim();
   },
 });
 // The entries a pitch can be written for: this grid's Collection members, named. Only MANUAL collections

@@ -21,7 +21,14 @@ export function formatHeadline(text) {
   }).join("");
 }
 
+// A {token} is a PLACEHOLDER the publisher expands, not a word to style. The braces look like
+// punctuation to the caser below, which strips them, capitalises the core and hands back `{Count}` --
+// and the expander's pattern no longer matches, so the page publishes the literal token in its headline.
+// Reported 2026-10-28 on a live Roundup reading "{Count} Amazing Gifts Ideas for {Year}".
+const PLACEHOLDER_TOKEN = /\{[A-Za-z_]+\}/;
+
 function formatHeadlineWord(word, isFirst, isLast) {
+  if (PLACEHOLDER_TOKEN.test(word)) return word;
   if (word.length >= 2 && word === word.toUpperCase() && /^[A-Z]+$/.test(word)) return word;
   const leading = word.match(/^[^a-zA-Z]*/)?.[0] || "";
   const trailing = word.match(/[^a-zA-Z]*$/)?.[0] || "";
