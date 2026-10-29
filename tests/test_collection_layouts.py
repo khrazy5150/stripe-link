@@ -223,21 +223,21 @@ class EditorialLayoutTests(unittest.TestCase):
         fancy before anyone writes a word: the formula is that the software fills the data in and the
         tenant edits the wording."""
         markup = self._render()
-        self.assertIn("sl-catalog-cta", markup)
+        self.assertIn("sl-ribbon-cta", markup)
         self.assertIn("Shop Now", markup)
 
     def test_the_eyebrow_defaults_to_nothing_when_there_is_no_product_to_read(self):
         """It defaults to the product's CATEGORY, which is the tenant's own data. With no product resolved
         there is nothing to say, and an empty eyebrow element is not rendered at all -- the earlier rule
         that an eyebrow must never be invented still holds, it is just no longer invented FROM NOTHING."""
-        self.assertNotIn("sl-catalog-eyebrow", self._render())
+        self.assertNotIn("sl-ribbon-eyebrow", self._render())
 
     def test_the_button_label_is_fixed_rather_than_built_from_a_name(self):
         """It used to read "See {offer name}", which got unreadable the moment the name was long -- and a
         tenant writing an editorial headline risked "See Homeowners Are Trading in Their Doorbell Cams for
         This". Every button on a Roundup does the same thing, so every button may say the same thing."""
         markup = self._render(entry_headline={"pg1": "Homeowners Are Trading in Their Doorbell Cams"})
-        self.assertIn('<span class="sl-catalog-cta">Shop Now</span>', markup)
+        self.assertIn('<span class="sl-ribbon-cta">Shop Now</span>', markup)
         self.assertNotIn("See Homeowners", markup)
         self.assertNotIn("See Compact Desk Lamp", markup)
 
@@ -247,7 +247,7 @@ class EditorialLayoutTests(unittest.TestCase):
         markup = html.render_catalog_grid(
             {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY]},
             OFFERS, {}, {})
-        self.assertNotIn("sl-catalog-cta", markup)
+        self.assertNotIn("sl-ribbon-cta", markup)
 
     def test_the_tenants_words_win_where_they_wrote_them(self):
         markup = self._render(entry_eyebrow={"pg1": "Supplies are limited"},
@@ -265,7 +265,7 @@ class EditorialLayoutTests(unittest.TestCase):
         """The card IS the link. An <a> inside an <a> is invalid markup that browsers silently un-nest,
         which would lift the button out of the card and break the row."""
         markup = self._render(entry_cta={"pg1": "Shop now"})
-        self.assertIn('<span class="sl-catalog-cta">', markup)
+        self.assertIn('<span class="sl-ribbon-cta">', markup)
         self.assertEqual(markup.count("<a "), 1)
 
     def test_the_extras_are_editorial_only(self):
@@ -276,7 +276,7 @@ class EditorialLayoutTests(unittest.TestCase):
                    "entry_eyebrow": {"pg1": "Supplies are limited"}, "entry_cta": {"pg1": "Shop now"}}
         markup = html.render_catalog_grid(section, OFFERS, {}, {})
         self.assertNotIn("Supplies are limited", markup)
-        self.assertNotIn("sl-catalog-cta", markup)
+        self.assertNotIn("sl-ribbon-cta", markup)
 
     def test_both_ordered_layouts_read_the_same_per_entry_pitch(self):
         """entry_copy predates this and belongs to BOTH; switching layout to compare must not lose it."""
@@ -320,7 +320,7 @@ class TheEntryIsFilledFromTheProductTests(unittest.TestCase):
                                         self.PRODUCT if products is None else products, {})
 
     def test_the_eyebrow_is_the_products_category(self):
-        self.assertIn('<p class="sl-catalog-eyebrow">home security</p>', self._render())
+        self.assertIn('<p class="sl-ribbon-eyebrow">home security</p>', self._render())
 
     def test_a_stored_category_key_is_humanised(self):
         """Categories are stored either as a typed label ("Electronics") or as a key
@@ -337,12 +337,12 @@ class TheEntryIsFilledFromTheProductTests(unittest.TestCase):
         self.assertNotIn("Homeowners Are Trading in Their Doorbell Cams</h3>", markup)
 
     def test_the_supporting_line_is_the_products_selling_point(self):
-        self.assertIn('<p class="sl-catalog-support">Catches what a doorbell cam misses, indoors and at night.</p>',
+        self.assertIn('<p class="sl-ribbon-body">Catches what a doorbell cam misses, indoors and at night.</p>',
                       self._render())
 
     def test_a_product_with_no_selling_point_gets_the_bland_fallback(self):
         bare = {"pr1": {"name": "Security Mini Cam", "product_category": "home_security"}}
-        self.assertIn('<p class="sl-catalog-support">Available now</p>', self._render(products=bare))
+        self.assertIn('<p class="sl-ribbon-body">Available now</p>', self._render(products=bare))
 
     def test_the_pitch_prefers_the_pages_own_subheadline_over_the_description(self):
         """Unchanged ladder, and deliberately so: a description is often pasted from a supplier and
@@ -380,7 +380,7 @@ class TheEntryIsFilledFromTheProductTests(unittest.TestCase):
         markup = html.render_catalog_grid(
             {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY]},
             self.OFFER, self.PRODUCT, {})
-        for absent in ("sl-catalog-support", "sl-catalog-cta", "sl-catalog-eyebrow", "Available now"):
+        for absent in ("sl-ribbon-body", "sl-ribbon-cta", "sl-ribbon-eyebrow", "Available now"):
             self.assertNotIn(absent, markup, absent)
 
     def test_an_offer_with_no_product_still_renders_an_entry(self):
@@ -553,24 +553,24 @@ class TheEntryIsProseThenAPanelTests(unittest.TestCase):
 
     def test_the_prose_comes_before_the_panel(self):
         entry = self._entry()
-        self.assertLess(entry.index("sl-catalog-title"), entry.index("sl-catalog-panel"))
-        self.assertLess(entry.index("sl-catalog-pitch"), entry.index("sl-catalog-panel"))
+        self.assertLess(entry.index("sl-catalog-title"), entry.index("sl-page-ribbon"))
+        self.assertLess(entry.index("sl-catalog-pitch"), entry.index("sl-page-ribbon"))
 
     def test_the_image_moved_INSIDE_the_panel(self):
         """In the compact row the image is a sibling of the words. Here it belongs to the call to action."""
         entry = self._entry()
-        panel = entry.split('<div class="sl-catalog-panel">', 1)[1]
+        panel = entry.split('<div class="sl-page-ribbon is-image_left">', 1)[1]
         self.assertIn("<img", panel)
-        self.assertNotIn("<img", entry.split('<div class="sl-catalog-panel">', 1)[0])
+        self.assertNotIn("<img", entry.split('<div class="sl-page-ribbon is-image_left">', 1)[0])
 
     def test_the_call_to_action_sits_with_the_image_not_with_the_prose(self):
         """Asserted as "not in the prose half" rather than "price is in the panel": the price only
         renders when `resolve_offer` succeeds, and a fixture that fails to resolve would make this pass
         for the wrong reason. The structural claim is where things land, not whether all of them exist."""
         entry = self._entry()
-        prose, panel = entry.split('<div class="sl-catalog-panel">', 1)
-        self.assertIn("sl-catalog-cta", panel)
-        for belongs_below in ("sl-catalog-cta", "sl-catalog-price", "sl-catalog-eyebrow"):
+        prose, panel = entry.split('<div class="sl-page-ribbon is-image_left">', 1)
+        self.assertIn("sl-ribbon-cta", panel)
+        for belongs_below in ("sl-ribbon-cta", "sl-catalog-price", "sl-ribbon-eyebrow"):
             self.assertNotIn(belongs_below, prose, belongs_below)
 
     def test_the_headline_and_paragraph_are_the_tenants_to_rewrite(self):
@@ -586,7 +586,7 @@ class TheEntryIsProseThenAPanelTests(unittest.TestCase):
         line; an entry in a ranked list is saying which product this is."""
         entry = self._entry()
         self.assertIn("Desk Lamp", entry)                  # headline <- the PRODUCT's name
-        self.assertIn("sl-catalog-cta", entry)             # button   <- "Shop Now"
+        self.assertIn("sl-ribbon-cta", entry)             # button   <- "Shop Now"
 
     def test_the_compact_row_keeps_its_old_shape(self):
         """Two layouts, and the quiet one must not inherit the loud one's structure."""
@@ -594,20 +594,36 @@ class TheEntryIsProseThenAPanelTests(unittest.TestCase):
         markup = html.render_catalog_grid(
             {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY]},
             OFFERS, {}, {})
-        self.assertNotIn("sl-catalog-panel", markup)
+        self.assertNotIn("sl-page-ribbon", markup)
         row = markup.split('<a class="sl-catalog-card"', 1)[1].split("</a>", 1)[0]
         self.assertLess(row.index("<img"), row.index("sl-catalog-body"))
 
 
-class EditorialBorrowsTheRibbonTests(unittest.TestCase):
-    """The proportions are the page ribbon's, deliberately.
+def _render_editorial_entry():
+    """One editorial entry with a product behind it, for the markup assertions below."""
+    html._RENDER_STATE["home_url"] = "https://shop.example.com"
+    offers = {"o9": {"offer_id": "o9", "name": "Mini Cam", "items": [{"product_id": "p9", "price_id": "pc9"}],
+                     "presentation": {"headline": "Mini Cam", "subheadline": "Protect your home."}}}
+    products = {"p9": {"name": "Security Mini Cam", "product_category": "Electronics",
+                       "images": ["https://img/cam.jpg"], "selling_point": "Sees what a doorbell cam misses."}}
+    return html.render_catalog_grid(
+        {"type": "catalog_grid", "id": "s1", "layout": "editorial",
+         "items": [{"offer_id": "o9", "slug": "/cam", "page_id": "pg9"}]}, offers, products, {})
 
-    The author built his mock-up out of page ribbons and content blocks. The first cut of this layout
-    guessed its own smaller numbers -- an 18rem image, a 2.2rem headline -- and he reported, twice, that
-    the layout "looks the same": it read as a row with a button rather than an entry that argues.
 
-    Borrowing the element he pointed at is both closer to what he drew and one less set of magic numbers
-    to keep in step, so these tests assert the two stay equal rather than merely asserting values.
+class EditorialUsesTheRibbonItselfTests(unittest.TestCase):
+    """The panel IS a page ribbon -- the element, not a copy of its numbers.
+
+    Three cuts of this got progressively closer and all three were re-implementations. The last one
+    hand-rolled a `.sl-catalog-panel` carrying the ribbon's grid, gap, padding, radius and background
+    typed out again, and tests here asserted those values matched. They did. The duplicate still shipped
+    a bug, because a copy is defined by what it leaves out: it never set `color`, so every word in the
+    panel inherited the card's surrounding <a> and published in the browser's VISITED-LINK purple.
+
+    The author's report named the cause exactly -- "you're NOT using the same elements as the Page
+    Ribbon ... it seems like you re-invented the wheel instead of reusing the existing elements."
+
+    So these tests no longer check that two sets of numbers agree. They check that there is only one set.
     """
 
     CSS = "\n".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
@@ -629,20 +645,65 @@ class EditorialBorrowsTheRibbonTests(unittest.TestCase):
             self.assertIn(part, ribbon, part)
             self.assertIn(part, entry, part)
 
-    def test_the_eyebrow_is_the_ribbon_eyebrow(self):
-        ribbon = self._rule(".sl-ribbon-eyebrow")
-        entry = self._rule(".sl-catalog-eyebrow")
-        for part in ("font-size:1.3rem", "letter-spacing:0.08em", "text-transform:uppercase"):
-            self.assertIn(part, ribbon, part)
-            self.assertIn(part, entry, part)
+    def test_the_panel_carries_the_ribbons_own_classes(self):
+        """The whole fix, asserted on the markup: the entry opts into `.sl-page-ribbon` rather than
+        naming a private class that has to be kept in step with it by hand."""
+        markup = _render_editorial_entry()
+        self.assertIn('<div class="sl-page-ribbon is-image_left">', markup)
+        for part in ("sl-ribbon-media", "sl-ribbon-copy", "sl-ribbon-eyebrow", "sl-ribbon-body",
+                     "sl-ribbon-cta"):
+            self.assertIn(part, markup, part)
 
-    def test_the_image_column_is_the_ribbon_image_column(self):
+    def test_the_duplicate_is_gone_rather_than_merely_unused(self):
+        """A dead copy left in the stylesheet is the next person's source of truth."""
+        self.assertNotIn("sl-catalog-panel", self.CSS)
+        self.assertNotIn("sl-catalog-eyebrow", self.CSS)
+        self.assertNotIn("sl-catalog-support", self.CSS)
+        self.assertNotIn("sl-catalog-cta", self.CSS)
+
+    def test_THE_BUG_the_panel_sets_a_colour(self):
+        """What the duplicate omitted and what the element supplies.
+
+        The panel lives inside the card's <a>, so any text in it that does not state a colour inherits
+        the anchor's -- which the browser paints visited-purple on a page the visitor has been to. This
+        is the one property that made the difference visible on a real page, so it gets its own test."""
+        self.assertIn("color:var(--sl-section-ink,var(--sl-card-text,var(--sl-text)))",
+                      self._rule(".sl-page-ribbon"))
+
+    def test_no_text_in_the_panel_floats_without_one(self):
+        """Nothing inside may re-introduce the hole by overriding the inherited colour with nothing. The
+        ribbon's copy classes deliberately state no colour of their own -- they take the panel's."""
+        for selector in (".sl-ribbon-eyebrow", ".sl-ribbon-body"):
+            self.assertNotIn("color:", self._rule(selector), selector)
+
+    def test_the_button_takes_the_accent_safe_ink(self):
+        """`.sl-ribbon-cta` derives its ink from the section accent so a tenant cannot colour the button
+        into invisibility. The hand-rolled copy used a fixed gradient and `--sl-cta-text` instead, which
+        is a second answer to a question the ribbon had already answered."""
+        rule = self._rule(".sl-ribbon-cta")
+        self.assertIn("var(--sl-section-accent-ink,var(--sl-badge-ink,#fff))", rule)
+
+    def test_the_image_column_is_the_ribbons_because_it_IS_the_ribbons(self):
         self.assertIn("minmax(0,22rem)", self._rule(".sl-page-ribbon.is-image_left"))
-        self.assertIn("minmax(0,22rem)", self._rule(".sl-catalog-panel"))
 
-    def test_the_image_fills_its_column_rather_than_naming_a_width(self):
-        """Two numbers for one measurement is how a column and the thing inside it come to disagree."""
-        self.assertIn("width:100%", self._rule(".sl-catalog-panel img"))
+    def test_the_responsive_collapse_is_inherited_not_restated(self):
+        """The ribbon already collapses to one column at 700px. The duplicate restated that at 650px --
+        two breakpoints for one element, which is how a page comes to look broken at 680px."""
+        self.assertNotIn("@media (max-width:650px){.sl-page-ribbon", self.CSS)
+        self.assertIn(".sl-page-ribbon.is-image_left,.sl-page-ribbon.is-compact{grid-template-columns:minmax(0,1fr)}",
+                      self.CSS)
+
+    def test_what_is_NOT_inherited_is_stated_once_and_scoped_to_a_row(self):
+        """Three genuine differences, and each is a thing the ribbon cannot know from inside a ranked
+        list: the panel follows prose rather than standing alone, its images must match each other down
+        the list, and the whole row is one link so the hover lift belongs to the panel."""
+        rule = self._rule(".sl-catalog-row .sl-page-ribbon")
+        self.assertIn("margin-top:1.6rem", rule)
+        self.assertIn("transition:", rule)
+        square = ".sl-catalog-row .sl-ribbon-media:not(.sl-cropped) img"
+        self.assertIn("aspect-ratio:1/1", self._rule(square))
+        self.assertIn("transform:translateY(-2px)",
+                      self._rule(".sl-layout-editorial a.sl-catalog-card:hover .sl-page-ribbon"))
 
     def test_only_the_PANEL_is_tinted(self):
         """The prose sits on the page, not in a box. A card around the headline and paragraph is what made
@@ -650,7 +711,7 @@ class EditorialBorrowsTheRibbonTests(unittest.TestCase):
         card = self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card")
         self.assertIn("background:transparent", card)
         self.assertIn("border:0", card)
-        panel = self._rule(".sl-catalog-panel")
+        panel = self._rule(".sl-page-ribbon")
         self.assertIn("border-radius:1.4rem", panel)
         self.assertIn("background:var(--sl-section-bg,var(--sl-card))", panel)
 

@@ -426,6 +426,35 @@ tenant touches one of its five boxes that entry is theirs. The renderer keeps th
 an entry added to the Collection since the modal was last open has never been through the seeder.
 Duplicated logic, so `TheBuilderShowsWhatWouldPublishTests` pins the two copies to each other.
 
+**The panel is a `page_ribbon` — the element, not a copy of it. CORRECTED 2026-10-29.** Worth recording
+because three cuts in a row made the same mistake in different sizes, and the tests agreed with all three.
+
+Each cut hand-rolled a `.sl-catalog-panel` carrying the ribbon's grid, gap, padding, radius and
+background typed out again, and the tests asserted those values matched `.sl-page-ribbon`. They did
+match. The duplicate still shipped a bug, because **a copy is defined by what it leaves out**: it never
+set `color`, so every word in the panel inherited the card's surrounding `<a>` and published in the
+browser's visited-link purple. The author read it off the live page — *"you're NOT using the same
+elements as the Page Ribbon … it seems like you re-invented the wheel instead of reusing the existing
+elements."*
+
+The entry now emits `.sl-page-ribbon.is-image_left` with `.sl-ribbon-media`, `.sl-ribbon-copy`,
+`.sl-ribbon-eyebrow`, `.sl-ribbon-body` and `.sl-ribbon-cta`. Four things arrive for free that the copy
+either got wrong or restated: the **colour**, the **accent-safe button ink** (a tenant cannot colour the
+button into invisibility), the **700px collapse** (the duplicate restated it at 650px — two breakpoints
+for one element, which is how a page comes to look broken at 680px), and the type scale. A `<div>`
+rather than the ribbon's `<section>`, because this one sits inside the card's anchor and inside the
+page's heading outline.
+
+Three rules remain, scoped to `.sl-catalog-row`, and each is a difference the ribbon cannot know about
+from inside a ranked list: the panel follows prose rather than standing alone, its images must match each
+other down the list, and the whole row is one link so the hover lift belongs to the panel.
+
+**The lesson for the next element like this**: a test that asserts two copies hold the same values
+confirms the duplication rather than removing it, and it passes right up until the copy omits a property
+the original has. `EditorialUsesTheRibbonItselfTests` asserts there is only one set of values — including
+that the dead copy is *deleted* rather than merely unused, since a dead rule in the stylesheet is the
+next person's source of truth.
+
 Two pieces of chrome, both borrowed rather than invented: the rank is now the **circled badge
 `numbered_list` draws**, moved onto the headline (the row increments the counter, the title draws it,
 inline so it sits on the heading's own line) because a bare numeral above the title read as a stray

@@ -1456,30 +1456,30 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-layout-editorial .sl-catalog-body{gap:0.8rem}",
     "    .sl-layout-editorial .sl-catalog-title{font-size:clamp(2rem,4vw,2.8rem);line-height:1.2}",
     "    .sl-layout-editorial .sl-catalog-pitch{font-size:1.6rem;line-height:1.55;opacity:0.85}",
-    # THE PANEL — the page ribbon's own recipe, so the two cannot drift.
-    "    .sl-catalog-panel{display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr);gap:2rem;align-items:center;margin-top:1.6rem;padding:2.4rem;border-radius:1.4rem;background:var(--sl-section-bg,var(--sl-card));text-align:left;transition:transform .15s ease,box-shadow .15s ease}",
-    "    .sl-catalog-panel img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:1rem;background:#fff;display:block}",
-    "    .sl-catalog-panel-copy{display:grid;gap:0.8rem;justify-items:start;min-width:0}",
-    # The lift belongs to the PANEL now: a shadow under a transparent card would float behind the prose.
+    # THE PANEL IS A PAGE RIBBON. There is no `.sl-catalog-panel` any more, and that is the point: the
+    # earlier one re-declared the ribbon's grid, gap, padding, radius and background by hand, which is
+    # how it came to omit `color` -- so every word inside inherited the card's <a> and published in the
+    # browser's visited-link purple. `.sl-page-ribbon` + `.sl-ribbon-*` now supply the colour, the type,
+    # the button ink and the 700px collapse, and there is nothing left here to drift out of step.
+    #
+    # Three rules remain, and each is a difference the ribbon cannot know about from inside a ranked list:
+    # the panel is a sibling of prose rather than a section of its own, its images must match each other
+    # down the list, and the whole row is one link so the hover lift belongs to the panel.
+    "    .sl-catalog-row .sl-page-ribbon{margin-top:1.6rem;text-align:left;transition:transform .15s ease,box-shadow .15s ease}",
+    # `:not(.sl-cropped)` is REQUIRED, not defensive: a cropped box positions its image absolutely and
+    # sizes it from custom properties, so any outer rule setting width/height/object-fit corrupts that
+    # geometry (tests/test_image_crop.py::CssIsolationTests, which caught this one). Entries carry no crop
+    # today -- the guard is what keeps that still true the day one does.
+    "    .sl-catalog-row .sl-ribbon-media:not(.sl-cropped) img{aspect-ratio:1/1;object-fit:cover;border-radius:1rem;background:#fff}",
     "    .sl-layout-editorial a.sl-catalog-card:hover{transform:none;box-shadow:none}",
-    "    .sl-layout-editorial a.sl-catalog-card:hover .sl-catalog-panel{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
-    "    .sl-catalog-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
-    # The reason to buy, inside the panel. The ribbon's body copy exactly -- this IS the ribbon's body.
-    "    .sl-catalog-support{margin:0;font-size:1.6rem;line-height:1.55;opacity:0.85}",
-    # A SPAN styled as a button, because the card is already the anchor. It must not look clickable on its
-    # own in a way that suggests a second destination -- there is only one, and the whole row goes there.
-    "    .sl-catalog-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-size:1.5rem;font-weight:700;line-height:1}",
-    # Mirrors the ribbon's own collapse at 700px: one column, tighter padding, full-width button.
-    "    @media (max-width:650px){.sl-catalog-panel{grid-template-columns:minmax(0,1fr);gap:1.4rem;padding:2rem}",
-    "      .sl-catalog-panel-copy{justify-items:stretch}",
-    "      .sl-catalog-cta{justify-self:stretch;justify-content:center}}",
+    "    .sl-layout-editorial a.sl-catalog-card:hover .sl-page-ribbon{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
     "      .sl-catalog-row .sl-catalog-card img{width:100%}",
     "      .sl-catalog-row .sl-catalog-body{grid-column:1/-1}}",
     # The lift on hover is decoration; anyone who asked for less motion does not get it.
     "    @media (prefers-reduced-motion:reduce){a.sl-catalog-card{transition:none}a.sl-catalog-card:hover{transform:none}",
-    "      .sl-catalog-panel{transition:none}.sl-layout-editorial a.sl-catalog-card:hover .sl-catalog-panel{transform:none}}",
+    "      .sl-catalog-row .sl-page-ribbon{transition:none}.sl-layout-editorial a.sl-catalog-card:hover .sl-page-ribbon{transform:none}}",
     "    .sl-catalog-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;line-height:1.3;color:var(--sl-price-title);margin:0}",
     "    .sl-catalog-price{font-family:var(--sl-font-accent);font-weight:900;font-size:1.8rem;color:var(--sl-price-amount);margin:auto 0 0}",
     "    .sl-seller-profile{display:flex;flex-direction:column;gap:1rem}",
@@ -8062,7 +8062,7 @@ def render_catalog_grid(
             if not eyebrow:
                 eyebrow = str(product.get("product_category") or "").replace("_", " ").strip()
             if eyebrow:
-                eyebrow_html = f'<p class="sl-catalog-eyebrow">{escape(eyebrow)}</p>'
+                eyebrow_html = f'<p class="sl-ribbon-eyebrow">{escape(eyebrow)}</p>'
             # The PRODUCT's name before the offer's: `name` is the offer headline, which on a landing page
             # is a sales line ("Homeowners Are Trading in Their Doorbell Cams for This") rather than the
             # name of the thing. An entry in a ranked list is announcing which product this is.
@@ -8075,7 +8075,7 @@ def render_catalog_grid(
             support = str((section.get("entry_support") or {}).get(page_id) or "").strip()
             if not support:
                 support = str(product.get("selling_point") or "").strip() or "Available now"
-            support_html = f'<p class="sl-catalog-support">{escape(support)}</p>'
+            support_html = f'<p class="sl-ribbon-body">{escape(support)}</p>'
             # NAVIGATION, not a claim -- the row goes to that page and the button says so. "Shop Now"
             # rather than the earlier "See {name}": a generated label built from a name gets unreadable the
             # moment the name is long, and every button on the page reading the same thing is correct here
@@ -8084,7 +8084,7 @@ def render_catalog_grid(
             # A SPAN, not a nested <a>: the whole card is already the link, and an anchor inside an anchor
             # is invalid markup that browsers silently un-nest -- which would put the button outside the
             # card and break the row.
-            cta_html = f'<span class="sl-catalog-cta">{escape(cta)}</span>'
+            cta_html = f'<span class="sl-ribbon-cta">{escape(cta)}</span>'
         # ALT falls back to the PRODUCT's name. `name` is the offer headline, which on a landing page is a
         # sales line ("Homeowners Are Trading in Their Doorbell Cams") -- a description of the pitch, not
         # of the picture. A tenant's own words still win over both: responsive_img resolves the image_alts
@@ -8100,16 +8100,26 @@ def render_catalog_grid(
             # Folding all of it into one ribbon-shaped row -- the previous attempt -- reads as a product
             # tile however generously it is spaced, because the prose has nowhere to be. The prose is the
             # thing a Roundup is FOR; the panel is the call to action it earns.
+            # THE PANEL IS A PAGE RIBBON -- the element itself, not a copy of it. The first version of
+            # this hand-rolled a `.sl-catalog-panel` with the ribbon's grid, gap, padding, radius and
+            # background typed out again, and the bug that exposed it is the one duplication always
+            # produces: the copy left out `color`, so every word in the panel inherited the surrounding
+            # <a> and rendered in the browser's VISITED-LINK purple. `.sl-page-ribbon` sets the colour,
+            # the responsive collapse at 700px and the accent-safe button ink, and now all of it arrives
+            # for free and cannot drift from the element the author builds pages out of by hand.
             panel_copy = "\n".join(line for line in [
                 (f"            {eyebrow_html}" if eyebrow_html else ""),
                 (f"            {support_html}" if support_html else ""),
                 (f"            {price_html}" if price_html else ""),
                 (f"            {cta_html}" if cta_html else ""),
             ] if line)
+            # A <div>, where render_page_ribbon emits a <section>: this one lives inside the card's
+            # anchor and inside the page's heading outline, and a sectioning element there would add a
+            # rung to that outline for a thing that is not a section of the document.
             panel = "\n".join(line for line in [
-                '          <div class="sl-catalog-panel">',
-                (f"            {img_html}" if img_html else ""),
-                f'            <div class="sl-catalog-panel-copy">\n{panel_copy}\n            </div>',
+                '          <div class="sl-page-ribbon is-image_left">',
+                (f'            <div class="sl-ribbon-media">{img_html}</div>' if img_html else ""),
+                f'            <div class="sl-ribbon-copy">\n{panel_copy}\n            </div>',
                 "          </div>",
             ] if line)
             body = "\n".join(line for line in [
