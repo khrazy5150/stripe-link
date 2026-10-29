@@ -284,6 +284,85 @@ class EditorialLayoutTests(unittest.TestCase):
             self.assertIn("Why this one made the list", markup, layout)
 
 
+class TheEntryIsProseThenAPanelTests(unittest.TestCase):
+    """What the author actually drew, after two cuts that missed it.
+
+    He assembled the shape by hand as a CONTENT BLOCK followed by a PAGE RIBBON, and said so plainly on
+    the third try: "the headline and body of a content block pre-filled before the page ribbon is shown.
+    This gives the tenant the opportunity to modify the headline and the paragraph before presenting a
+    call to action."
+
+    Folding all of it into one ribbon-shaped row -- cut two -- reads as a product tile however generously
+    it is spaced, because the prose has nowhere to be. The prose is what a Roundup is FOR; the panel is
+    the call to action it earns.
+    """
+
+    ENTRY = {"offer_id": "o1", "slug": "/desk-lamp", "page_id": "pg1"}
+    # A COMPLETE offer, unlike the module fixture: an entry only grows a pitch when it has a subheadline
+    # to fall back to, and only grows a price when the offer resolves to one. Asserting where those land
+    # needs them to exist.
+    PRICED = {"o1": {"offer_id": "o1", "name": "Desk Lamp",
+                     "presentation": {"headline": "Compact Desk Lamp",
+                                      "subheadline": "Warm light, no glare, folds flat.",
+                                      "hero_image_url": "https://img/lamp.jpg"},
+                     "items": [{"product_id": "p1", "price_id": "pr1"}]}}
+    PRODUCTS = {"p1": {"product_id": "p1", "name": "Desk Lamp",
+                       "images": ["https://img/lamp.jpg"],
+                       "default_price_id": "pr1",
+                       "prices": [{"price_id": "pr1", "unit_amount": 4200, "currency": "usd"}]}}
+
+    def _entry(self, **overrides):
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        section = {"type": "catalog_grid", "id": "s1", "layout": "editorial", "items": [self.ENTRY]}
+        section.update(overrides)
+        markup = html.render_catalog_grid(section, self.PRICED, self.PRODUCTS, {})
+        return markup.split('<a class="sl-catalog-card"', 1)[1].split("</a>", 1)[0]
+
+    def test_the_prose_comes_before_the_panel(self):
+        entry = self._entry()
+        self.assertLess(entry.index("sl-catalog-title"), entry.index("sl-catalog-panel"))
+        self.assertLess(entry.index("sl-catalog-pitch"), entry.index("sl-catalog-panel"))
+
+    def test_the_image_moved_INSIDE_the_panel(self):
+        """In the compact row the image is a sibling of the words. Here it belongs to the call to action."""
+        entry = self._entry()
+        panel = entry.split('<div class="sl-catalog-panel">', 1)[1]
+        self.assertIn("<img", panel)
+        self.assertNotIn("<img", entry.split('<div class="sl-catalog-panel">', 1)[0])
+
+    def test_the_call_to_action_sits_with_the_image_not_with_the_prose(self):
+        """Asserted as "not in the prose half" rather than "price is in the panel": the price only
+        renders when `resolve_offer` succeeds, and a fixture that fails to resolve would make this pass
+        for the wrong reason. The structural claim is where things land, not whether all of them exist."""
+        entry = self._entry()
+        prose, panel = entry.split('<div class="sl-catalog-panel">', 1)
+        self.assertIn("sl-catalog-cta", panel)
+        for belongs_below in ("sl-catalog-cta", "sl-catalog-price", "sl-catalog-eyebrow"):
+            self.assertNotIn(belongs_below, prose, belongs_below)
+
+    def test_the_headline_and_paragraph_are_the_tenants_to_rewrite(self):
+        """The whole reason for the split: these are PRE-FILLED, then edited."""
+        entry = self._entry(entry_headline={"pg1": "Homeowners Are Switching"},
+                            entry_copy={"pg1": "Because now you can set one up in three minutes."})
+        self.assertIn("Homeowners Are Switching", entry)
+        self.assertIn("Because now you can set one up in three minutes.", entry)
+
+    def test_both_are_pre_filled_when_the_tenant_writes_nothing(self):
+        entry = self._entry()
+        self.assertIn("Compact Desk Lamp", entry)          # headline <- the entry's own name
+        self.assertIn("sl-catalog-cta", entry)             # button   <- "See <name>"
+
+    def test_the_compact_row_keeps_its_old_shape(self):
+        """Two layouts, and the quiet one must not inherit the loud one's structure."""
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        markup = html.render_catalog_grid(
+            {"type": "catalog_grid", "id": "s1", "layout": "listicle", "items": [self.ENTRY]},
+            OFFERS, {}, {})
+        self.assertNotIn("sl-catalog-panel", markup)
+        row = markup.split('<a class="sl-catalog-card"', 1)[1].split("</a>", 1)[0]
+        self.assertLess(row.index("<img"), row.index("sl-catalog-body"))
+
+
 class EditorialBorrowsTheRibbonTests(unittest.TestCase):
     """The proportions are the page ribbon's, deliberately.
 
@@ -323,17 +402,24 @@ class EditorialBorrowsTheRibbonTests(unittest.TestCase):
 
     def test_the_image_column_is_the_ribbon_image_column(self):
         self.assertIn("minmax(0,22rem)", self._rule(".sl-page-ribbon.is-image_left"))
-        self.assertIn("minmax(0,22rem)", self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card"))
+        self.assertIn("minmax(0,22rem)", self._rule(".sl-catalog-panel"))
 
     def test_the_image_fills_its_column_rather_than_naming_a_width(self):
         """Two numbers for one measurement is how a column and the thing inside it come to disagree."""
-        self.assertIn("width:100%", self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card img"))
+        self.assertIn("width:100%", self._rule(".sl-catalog-panel img"))
 
-    def test_the_panel_matches_the_ribbon_and_beats_the_compact_row(self):
+    def test_only_the_PANEL_is_tinted(self):
+        """The prose sits on the page, not in a box. A card around the headline and paragraph is what made
+        the first two cuts read as a product tile however generously they were spaced."""
         card = self._rule(".sl-layout-editorial .sl-catalog-row .sl-catalog-card")
-        self.assertIn("padding:3.2rem", card)
-        self.assertIn("border-radius:1.4rem", card)
-        # The compact row must stay compact, or the two layouts collapse into one again.
+        self.assertIn("background:transparent", card)
+        self.assertIn("border:0", card)
+        panel = self._rule(".sl-catalog-panel")
+        self.assertIn("border-radius:1.4rem", panel)
+        self.assertIn("background:var(--sl-section-bg,var(--sl-card))", panel)
+
+    def test_the_compact_row_stays_compact(self):
+        """Or the two layouts collapse into one again, which is the whole complaint."""
         self.assertIn("12rem", self._rule(".sl-catalog-row .sl-catalog-card"))
 
     def test_editorial_outranks_the_compact_row(self):

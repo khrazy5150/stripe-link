@@ -1435,27 +1435,38 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # read as "a row with a button" rather than an entry that argues. Borrowing the element he actually
     # pointed at is both closer to what he drew and one less set of magic numbers to keep in step.
     #   ribbon: minmax(0,22rem) column | gap 2rem | padding 3.2rem | radius 1.4rem | centred
-    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,22rem) minmax(0,1fr);gap:2rem;padding:3.2rem;border-radius:1.4rem;align-items:center}",
-    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{font-size:3.4rem;min-width:3rem}",
-    # Fills the 22rem column rather than naming a width of its own, so the two cannot disagree.
-    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card img{width:100%}",
+    # The entry is PROSE then a PANEL: the headline and paragraph sit on the page, in the tenant's words,
+    # and the tinted panel below shows the product and offers the way through. So the card itself carries
+    # no chrome at all -- a box around the prose would make it a tile again, which is what the first two
+    # cuts got wrong.
+    "    .sl-layout-editorial .sl-catalog-list{gap:3.2rem}",
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card{display:block;background:transparent;border:0;padding:0;text-align:center}",
+    "    .sl-layout-editorial .sl-catalog-row .sl-catalog-card::before{display:block;margin:0 0 0.6rem;font-size:3.4rem;min-width:0;text-align:center}",
     "    .sl-layout-editorial .sl-catalog-body{gap:0.8rem}",
     "    .sl-layout-editorial .sl-catalog-title{font-size:clamp(2rem,4vw,2.8rem);line-height:1.2}",
     "    .sl-layout-editorial .sl-catalog-pitch{font-size:1.6rem;line-height:1.55;opacity:0.85}",
+    # THE PANEL — the page ribbon's own recipe, so the two cannot drift.
+    "    .sl-catalog-panel{display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr);gap:2rem;align-items:center;margin-top:1.6rem;padding:2.4rem;border-radius:1.4rem;background:var(--sl-section-bg,var(--sl-card));text-align:left;transition:transform .15s ease,box-shadow .15s ease}",
+    "    .sl-catalog-panel img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:1rem;background:#fff;display:block}",
+    "    .sl-catalog-panel-copy{display:grid;gap:0.8rem;justify-items:start;min-width:0}",
+    # The lift belongs to the PANEL now: a shadow under a transparent card would float behind the prose.
+    "    .sl-layout-editorial a.sl-catalog-card:hover{transform:none;box-shadow:none}",
+    "    .sl-layout-editorial a.sl-catalog-card:hover .sl-catalog-panel{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.12)}",
     "    .sl-catalog-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
     # A SPAN styled as a button, because the card is already the anchor. It must not look clickable on its
     # own in a way that suggests a second destination -- there is only one, and the whole row goes there.
     "    .sl-catalog-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-size:1.5rem;font-weight:700;line-height:1}",
     # Mirrors the ribbon's own collapse at 700px: one column, tighter padding, full-width button.
-    "    @media (max-width:650px){.sl-layout-editorial .sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr);gap:1.4rem;padding:2rem}",
-    "      .sl-layout-editorial .sl-catalog-body{grid-column:1/-1}",
+    "    @media (max-width:650px){.sl-catalog-panel{grid-template-columns:minmax(0,1fr);gap:1.4rem;padding:2rem}",
+    "      .sl-catalog-panel-copy{justify-items:stretch}",
     "      .sl-catalog-cta{justify-self:stretch;justify-content:center}}",
     # A phone gets the number above a full-width image, not a 12rem column squeezed beside it.
     "    @media (max-width:650px){.sl-catalog-row .sl-catalog-card{grid-template-columns:auto minmax(0,1fr)}",
     "      .sl-catalog-row .sl-catalog-card img{width:100%}",
     "      .sl-catalog-row .sl-catalog-body{grid-column:1/-1}}",
     # The lift on hover is decoration; anyone who asked for less motion does not get it.
-    "    @media (prefers-reduced-motion:reduce){a.sl-catalog-card{transition:none}a.sl-catalog-card:hover{transform:none}}",
+    "    @media (prefers-reduced-motion:reduce){a.sl-catalog-card{transition:none}a.sl-catalog-card:hover{transform:none}",
+    "      .sl-catalog-panel{transition:none}.sl-layout-editorial a.sl-catalog-card:hover .sl-catalog-panel{transform:none}}",
     "    .sl-catalog-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;line-height:1.3;color:var(--sl-price-title);margin:0}",
     "    .sl-catalog-price{font-family:var(--sl-font-accent);font-weight:900;font-size:1.8rem;color:var(--sl-price-amount);margin:auto 0 0}",
     "    .sl-seller-profile{display:flex;flex-direction:column;gap:1rem}",
@@ -8044,18 +8055,43 @@ def render_catalog_grid(
                 # anchor is invalid markup that browsers silently un-nest -- which would put the button
                 # outside the card and break the row.
                 cta_html = f'<span class="sl-catalog-cta">{escape(cta)}</span>'
-        body = "\n".join(line for line in [
-            (f"          {eyebrow_html}" if eyebrow_html else ""),
-            (headline_html and f"          {headline_html}")
-            or f'          <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
-            (f"          {pitch_html}" if pitch_html else ""),
-            (f"          {price_html}" if price_html else ""),
-            (f"          {cta_html}" if cta_html else ""),
-        ] if line)
-        inner = "\n".join(line for line in [
-            (f"        {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
-            f'        <div class="sl-catalog-body">\n{body}\n        </div>',
-        ] if line)
+        img_html = (responsive_img(image, name or "Product", sizes=CONTENT_BLOCK_SIZES) if image else "")
+        if layout == "editorial":
+            # TWO PARTS per entry, which is what the author drew and what the first two cuts of this got
+            # wrong. He assembled it by hand as a CONTENT BLOCK followed by a PAGE RIBBON, and the point
+            # of the split is editorial: the headline and the paragraph argue for the product in his
+            # words, and only then does a panel show it and offer the way through.
+            #
+            # Folding all of it into one ribbon-shaped row -- the previous attempt -- reads as a product
+            # tile however generously it is spaced, because the prose has nowhere to be. The prose is the
+            # thing a Roundup is FOR; the panel is the call to action it earns.
+            panel_copy = "\n".join(line for line in [
+                (f"            {eyebrow_html}" if eyebrow_html else ""),
+                (f"            {price_html}" if price_html else ""),
+                (f"            {cta_html}" if cta_html else ""),
+            ] if line)
+            panel = "\n".join(line for line in [
+                '          <div class="sl-catalog-panel">',
+                (f"            {img_html}" if img_html else ""),
+                f'            <div class="sl-catalog-panel-copy">\n{panel_copy}\n            </div>',
+                "          </div>",
+            ] if line)
+            body = "\n".join(line for line in [
+                headline_html and f"          {headline_html}",
+                (f"          {pitch_html}" if pitch_html else ""),
+                panel,
+            ] if line)
+            inner = f'        <div class="sl-catalog-body">\n{body}\n        </div>'
+        else:
+            body = "\n".join(line for line in [
+                f'          <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
+                (f"          {pitch_html}" if pitch_html else ""),
+                (f"          {price_html}" if price_html else ""),
+            ] if line)
+            inner = "\n".join(line for line in [
+                (f"        {img_html}" if img_html else ""),
+                f'        <div class="sl-catalog-body">\n{body}\n        </div>',
+            ] if line)
         slug = str((item or {}).get("slug") or "").strip()
         href = internal_href(slug) if home and slug else ""  # host-relative so the card works on any serving host
         if href:
