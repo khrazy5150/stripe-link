@@ -12,7 +12,7 @@ import pathlib
 import unittest
 
 from stripe_link.domain.refund_policy import (
-    CLASS_DEFAULTS,
+    CLASS_FORM_SEEDS,
     CONDITION_LABELS,
     CONDITION_OPTIONS,
     CUSTOM,
@@ -33,7 +33,6 @@ from stripe_link.domain.refund_policy import (
     build,
     generate_copy,
     normalize,
-    platform_default,
     product_class,
     purchase_class,
     resolve,
@@ -196,7 +195,7 @@ class Normalize(unittest.TestCase):
     def test_never_raises_on_rubbish(self):
         for junk in (None, "", 5, [], {"refund_window": "🙂"}, {"condition": None}):
             policy = normalize(junk, policy_class=PHYSICAL)
-            self.assertEqual(policy["refund_window"], CLASS_DEFAULTS[PHYSICAL]["refund_window"])
+            self.assertEqual(policy["refund_window"], CLASS_FORM_SEEDS[PHYSICAL]["refund_window"])
 
     def test_unknown_values_fall_back_per_class(self):
         policy = normalize({"refund_window": "90_day_returns"}, policy_class=DIGITAL)
@@ -214,12 +213,16 @@ class Normalize(unittest.TestCase):
 
 
 class Resolution(unittest.TestCase):
-    def test_no_tenant_default_says_platform_default(self):
-        """The honesty fix: the old record claimed `user_preference_default` for a value no preference
-        produced, and nothing anywhere read that preference."""
+    def test_no_tenant_default_resolves_to_nothing(self):
+        """The fallback is GONE (plans/REFUND_POLICY_AND_GUARANTEES.md P2). A tenant who has set nothing
+        promises nothing: no sentence, no badge, no source. Silence is recoverable; a promise nobody
+        chose is a dispute -- and for physical goods the old fallback said the buyer keeps the item AND
+        may have their money back."""
         policy = resolve(product={"product_type": "physical"})
-        self.assertEqual(policy["source"], SOURCE_PLATFORM_DEFAULT)
-        self.assertEqual(policy["mode"], "default")
+        self.assertEqual(policy["mode"], "unset")
+        self.assertNotIn("source", policy)
+        self.assertNotIn("full_policy", policy)
+        self.assertNotIn("return_method", policy)
 
     def test_the_literal_is_not_treated_as_an_override(self):
         """29 live products carry a policy stamped by a JavaScript literal. Treating those as overrides
@@ -255,10 +258,13 @@ class Resolution(unittest.TestCase):
 
     def test_per_product_keep_it_below_survives_the_fall_through(self):
         """It is a fact about THIS item's postage economics, not a policy choice. returns.py reads it to
-        waive a return that costs more to collect than the goods are worth."""
+        waive a return that costs more to collect than the goods are worth. Needs a tenant default to
+        fall THROUGH to, now that there is no platform one."""
+        tenant = {"refund_policies": {PHYSICAL: {"refund_window": "30_days", "condition": "any",
+                                                 "return_method": "return_required"}}}
         product = {"product_type": "physical",
                    "refund_policy": dict(LITERAL_PHYSICAL, keep_it_below=1500)}
-        self.assertEqual(resolve(product=product)["keep_it_below"], 1500)
+        self.assertEqual(resolve(tenant_config=tenant, product=product)["keep_it_below"], 1500)
 
     def test_price_decides_for_mixed_pricing(self):
         product = {"product_type": "physical", "prices": [
@@ -268,63 +274,74 @@ class Resolution(unittest.TestCase):
         self.assertEqual(resolve(product=product, price=product["prices"][1])["policy_class"], SUBSCRIPTION)
 
     def test_resolved_shape_is_what_the_consumers_already_read(self):
-        """runtime/html.py reads short_label/full_policy; returns.py reads return_method/keep_it_below."""
-        policy = resolve(product={"product_type": "physical"})
+        """runtime/html.py reads short_label/full_policy; returns.py reads return_method/keep_it_below.
+        The shape holds when there IS a policy -- which now means a tenant set one."""
+        tenant = {"refund_policies": {PHYSICAL: {"refund_window": "30_days", "condition": "unused",
+                                                 "return_method": "return_required"}}}
+        policy = resolve(tenant_config=tenant, product={"product_type": "physical"})
         for field in ("source", "refund_window", "condition", "return_method", "short_label",
-                      "full_policy"):
+                      "full_policy", "return_shipping"):
             self.assertIn(field, policy)
 
 
 class LivePromisesDoNotMove(unittest.TestCase):
-    """The regression that matters: what 32 live dev products currently promise."""
+    """Superseded by P2, and kept as the record of what changed rather than deleted.
 
-    def test_the_digital_literal_resolves_to_identical_text(self):
-        policy = resolve(product={"product_type": "digital", "refund_policy": LITERAL_DIGITAL})
-        self.assertEqual(policy["short_label"], LITERAL_DIGITAL["short_label"])
-        self.assertEqual(policy["full_policy"], LITERAL_DIGITAL["full_policy"])
+    These used to assert that the platform fallback reproduced the JavaScript literal word for word, so
+    that removing the literal moved no live promise. That guarantee is now deliberately gone: the
+    fallback promised, for physical goods, that the buyer keeps the item AND may have their money back,
+    and nobody chose it. A product carrying the old literal resolves to NOTHING until its tenant sets a
+    default -- which is the tenant-visible consequence P2 requires Configuration to announce.
+    """
 
-    def test_the_physical_literal_loses_only_the_duplicated_paragraph(self):
-        policy = resolve(product={"product_type": "physical", "refund_policy": LITERAL_PHYSICAL})
-        self.assertEqual(policy["short_label"], LITERAL_PHYSICAL["short_label"])
-        self.assertEqual(policy["full_policy"],
-                         "Refunds are available within 30 days of delivery in unused condition.")
-        self.assertTrue(LITERAL_PHYSICAL["full_policy"].startswith(policy["full_policy"]))
+    def test_the_literal_no_longer_resolves_to_anything(self):
+        for literal in (LITERAL_PHYSICAL, LITERAL_DIGITAL):
+            with self.subTest(literal=literal["short_label"]):
+                policy = resolve(product={"product_type": "physical", "refund_policy": literal})
+                self.assertEqual(policy["mode"], "unset")
 
-    def test_a_product_with_no_policy_still_renders_nothing_new(self):
-        """3 live products carry no policy. The renderer returns "" for an empty one, and resolution must
-        not invent a promise for a product that never made one."""
-        self.assertEqual(resolve(product={"product_type": "physical"})["source"],
-                         SOURCE_PLATFORM_DEFAULT)
+    def test_a_tenant_default_is_what_brings_the_promise_back(self):
+        """And it is the tenant's wording, not the literal's -- which is the point of the whole family
+        of plans: the promise on the page is one a human chose."""
+        tenant = {"refund_policies": {PHYSICAL: {"refund_window": "90_days",
+                                                 "condition": "working_condition",
+                                                 "return_method": "return_required"}}}
+        policy = resolve(tenant_config=tenant,
+                         product={"product_type": "physical", "refund_policy": LITERAL_PHYSICAL})
+        self.assertEqual(policy["mode"], "default")
+        self.assertEqual(policy["short_label"], "90-day money-back")
+        self.assertIn("in working condition", policy["full_policy"])
 
 
 class TenantDefaults(unittest.TestCase):
-    def test_absent_classes_fall_back_and_say_so(self):
-        policies = tenant_policies(None)
-        self.assertEqual(sorted(policies), [DIGITAL, PHYSICAL, SUBSCRIPTION])
-        for policy in policies.values():
-            self.assertEqual(policy["source"], SOURCE_PLATFORM_DEFAULT)
+    def test_absent_classes_are_simply_absent(self):
+        """They used to be filled with the platform's fallback, which is how a promise nobody chose
+        reached every live page. A caller must handle the gap rather than be handed a policy."""
+        self.assertEqual(tenant_policies(None), {})
 
     def test_a_set_class_is_labelled_as_the_tenants(self):
         policies = tenant_policies({"refund_policies": {PHYSICAL: {
             "refund_window": "60_days", "condition": "unopened",
             "return_method": "return_required"}}})
         self.assertEqual(policies[PHYSICAL]["source"], SOURCE_TENANT_DEFAULT)
-        self.assertEqual(policies[DIGITAL]["source"], SOURCE_PLATFORM_DEFAULT)
+        self.assertNotIn(DIGITAL, policies)
 
-    def test_platform_defaults_reproduce_the_literal(self):
-        """The fault was provenance and editability, not the numbers. Changing them here would silently
-        rewrite the promise on every live page that shows one."""
-        self.assertEqual(platform_default(PHYSICAL)["refund_window"], "30_days")
-        self.assertEqual(platform_default(PHYSICAL)["condition"], "unused")
-        self.assertEqual(platform_default(DIGITAL)["refund_window"], NON_REFUNDABLE)
-        self.assertEqual(platform_default(DIGITAL)["return_method"], "digital_revoke_access")
+    def test_nothing_manufactures_a_policy_any_more(self):
+        """`platform_default` is gone. If it comes back, a tenant who set nothing starts promising
+        again -- which is the entire fault this phase removed."""
+        import stripe_link.domain.refund_policy as module
+        self.assertFalse(hasattr(module, "platform_default"))
 
-    def test_every_class_default_is_buildable(self):
-        for policy_class, rule in CLASS_DEFAULTS.items():
-            self.assertIn(rule["refund_window"], WINDOW_OPTIONS)
-            self.assertIn(rule["condition"], CONDITION_OPTIONS)
-            self.assertIn(rule["return_method"], RETURN_METHOD_OPTIONS)
-            self.assertTrue(platform_default(policy_class)["full_policy"])
+    def test_the_seeds_are_a_form_starting_point_not_a_promise(self):
+        """They survive to fill the three selects when a tenant first enables a class, and to coerce a
+        single bad field inside a policy that DOES exist. Neither can make a page say anything: the
+        tenant still has to enable and save."""
+        for policy_class, rule in CLASS_FORM_SEEDS.items():
+            with self.subTest(policy_class=policy_class):
+                self.assertIn(rule["refund_window"], WINDOW_OPTIONS)
+                self.assertIn(rule["condition"], CONDITION_OPTIONS)
+                self.assertIn(rule["return_method"], RETURN_METHOD_OPTIONS)
+        self.assertEqual(tenant_policies({}), {})
 
 
 class VocabularyAgreesWithTheSchema(unittest.TestCase):

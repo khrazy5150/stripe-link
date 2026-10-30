@@ -249,8 +249,16 @@ def chosen_badges(context: dict[str, Any] | None, *, refund_policy: Any = None) 
         badges.append({"enabled": True, "emoji": "\U0001F1FA\U0001F1F8", "label": "Ships from USA"})
     if context.get("money_back_badge"):
         policy = refund_policy if isinstance(refund_policy, dict) else {}
-        label = str(policy.get("short_label") or "").strip() or "Money-back guarantee"
-        badges.append({"enabled": True, "emoji": "\u2705", "label": label})
+        label = str(policy.get("short_label") or "").strip()
+        # SUPPRESSED, NOT RELABELLED, when there is no policy behind it. The fallback used to be the bare
+        # words "Money-back guarantee", which was safe only while every product had a policy: the platform
+        # stood one in for any tenant who set none. With that fallback gone
+        # (plans/REFUND_POLICY_AND_GUARANTEES.md P2) the same line becomes a guarantee badge over no
+        # guarantee -- a fabricated claim on a public page, and a worse one than an invented number
+        # because it reads as the tenant's own promise. A tenant who ticks the badge and sets no policy
+        # gets no badge, which is recoverable; a promise nobody made is a dispute.
+        if label:
+            badges.append({"enabled": True, "emoji": "\u2705", "label": label})
     return badges
 
 

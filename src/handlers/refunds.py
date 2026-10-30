@@ -15,6 +15,7 @@ The refund is issued on the tenant's connected account by PaymentIntent; the pla
 application fee is NOT reversed (legacy behavior). Idempotent on refund_request_id.
 """
 
+import os
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
@@ -33,6 +34,7 @@ from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     RepositoryError,
     orders_repository,
+    platform_config_repository,
     products_repository,
     refund_requests_repository,
     refunds_repository,
@@ -120,7 +122,8 @@ def handler(
         return error_response(str(exc), code="repository_error")
 
 
-def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=None, mode="test"):
+def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=None,
+             config_repo=None, mode="test"):
     """Approve the CLAIM, and decide whether the money waits for the goods.
 
     The snapshot is taken here, once, and everything downstream reads it rather than re-deriving from a
@@ -152,11 +155,31 @@ def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=
         unreadable = True
     lines = resolve_order_lines(order or {}, product_index(products))
 
+    # THE TENANT'S DEFAULTS, because the product no longer carries a stamped copy of them
+    # (plans/REFUND_POLICY_AND_GUARANTEES.md P3). Unreadable is treated exactly like an unreadable
+    # catalogue above: recorded, never swallowed into "the tenant set nothing", because those two say
+    # opposite things about whether the goods come back.
+    #
+    # NOT CONFIGURED is different from UNREADABLE. A table this deployment never had is a shape the
+    # grant tests forbid in the template, so in practice it means a caller that injects its own repos;
+    # a read that FAILS against a table that exists is the dangerous one, and only that sets
+    # `unreadable` -- which makes every physical refund wait for the goods.
+    tenant_config = None
+    repo_config = config_repo
+    if repo_config is None and os.environ.get("PLATFORM_CONFIG_TABLE"):
+        repo_config = platform_config_repository()
+    if repo_config is not None:
+        try:
+            tenant_config = repo_config.get(tenant_id)
+        except Exception:  # noqa: BLE001 - a refund must not fail because settings are unreadable
+            unreadable = True
+
     snapshot = policy_snapshot(
         lines, by_id,
         order_total=int((order or {}).get("amount_total") or request.get("amount") or 0),
-        keep_it_below=_keep_it_below(by_id, lines),
-        policy_unreadable=unreadable)
+        keep_it_below=_keep_it_below(by_id, lines, tenant_config),
+        policy_unreadable=unreadable,
+        tenant_config=tenant_config)
     request["policy_snapshot"] = {**(request.get("policy_snapshot") or {}), **snapshot}
     status = next_status_after_approval(snapshot)
     if status == RETURN_PENDING:
@@ -164,15 +187,24 @@ def _approve(repo, request, tenant_id, body, now, *, orders_repo, products_repo=
     return _set_status(repo, request, status, body, now)
 
 
-def _keep_it_below(products_by_id, lines):
+def _keep_it_below(products_by_id, lines, tenant_config=None):
     """The lowest keep-it threshold among the products being returned.
 
     Lowest, not highest: a tenant who says "do not bother returning my $5 item" has not thereby said it
     about the $200 one in the same order.
+
+    RESOLVED rather than read off the product, for the same reason `return_requirement` is: the stamped
+    copy is gone, and `resolve` is what carries a per-product threshold through alongside a tenant
+    default (P3).
     """
+    from stripe_link.domain import refund_policy as refund_policy_module
+
     thresholds = []
     for line in lines or []:
-        policy = (products_by_id.get(str(line.get("product_id") or "")) or {}).get("refund_policy") or {}
+        product = products_by_id.get(str(line.get("product_id") or ""))
+        if not product:
+            continue
+        policy = refund_policy_module.resolve(tenant_config=tenant_config, product=product)
         value = policy.get("keep_it_below")
         if isinstance(value, int) and value > 0:
             thresholds.append(value)

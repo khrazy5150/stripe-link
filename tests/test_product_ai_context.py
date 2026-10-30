@@ -139,14 +139,27 @@ class TrustBadgeChoiceTests(unittest.TestCase):
 
     def test_no_window_is_INVENTED_when_the_policy_has_no_short_label(self):
         # `guarantee` is a numeric-grounded claim class, so a badge asserting "30 days" the policy never
-        # said would be a fabricated number on a public page.
+        # said would be a fabricated number on a public page. A policy with prose but no label is a
+        # policy nonetheless, so the badge stands -- unlabelled, never invented.
         badges = self._badges({"money_back_badge": True},
-                              refund_policy={"full_policy": "Refunds within 30 days of delivery."})
-        self.assertEqual(badges[0]["label"], "Money-back guarantee")
+                              refund_policy={"short_label": "Refund policy",
+                                             "full_policy": "Refunds within 30 days of delivery."})
+        self.assertEqual(badges[0]["label"], "Refund policy")
         self.assertNotIn("30", badges[0]["label"])
 
+    def test_the_badge_is_SUPPRESSED_when_there_is_no_policy_at_all(self):
+        """It used to fall back to the bare words "Money-back guarantee", which was safe only while the
+        platform stood a policy in for every tenant. With that fallback gone
+        (plans/REFUND_POLICY_AND_GUARANTEES.md P2) the same line is a guarantee badge over no guarantee --
+        a fabricated claim, and a worse one than an invented number because it reads as the tenant's own
+        promise. Suppressed, not relabelled."""
+        self.assertEqual(self._badges({"money_back_badge": True}), [])
+        self.assertEqual(self._badges({"money_back_badge": True},
+                                      refund_policy={"mode": "unset"}), [])
+
     def test_both_choices_produce_both_badges(self):
-        badges = self._badges({"ships_from_us": True, "money_back_badge": True})
+        badges = self._badges({"ships_from_us": True, "money_back_badge": True},
+                              refund_policy={"short_label": "90-day money-back"})
         self.assertEqual(len(badges), 2)
 
     def test_the_booleans_are_valid_product_context(self):

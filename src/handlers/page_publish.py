@@ -18,6 +18,7 @@ from stripe_link.repositories.documents import (
     pages_repository,
     products_repository,
     routes_repository,
+    platform_config_repository,
     services_repository,
     shipping_config_repository,
     sites_repository,
@@ -162,14 +163,14 @@ def should_publish_record(record: dict[str, Any]) -> bool:
     return bool(image)
 
 
-def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, events_repo=None, collections_repo=None, routes_repo=None, stripe_keys_repo=None, experiments_repo=None, shipping_config_repo=None, s3_client=None, cloudfront_client=None):
+def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, events_repo=None, collections_repo=None, routes_repo=None, stripe_keys_repo=None, experiments_repo=None, shipping_config_repo=None, platform_config_repo=None, s3_client=None, cloudfront_client=None):
     # Mode-scoped repos (offers/products/services/sites/pages/collections) are built PER RECORD from each page's
     # own stripe_mode below — a single stream batch can mix modes (plans/STRIPE_MODE_DECOUPLING.md P4). Capture any
     # injected repos (tests) so the per-record build honours them. The rest are Stripe-mode-agnostic.
     _injected = {
         "offers": offers_repo, "products": products_repo, "services": services_repo,
         "sites": sites_repo, "pages": pages_repo, "collections": collections_repo,
-        "shipping_config": shipping_config_repo,
+        "shipping_config": shipping_config_repo, "platform_config": platform_config_repo,
         "experiments": experiments_repo,
     }
     stripe_keys_repo = stripe_keys_repo or (stripe_keys_repository() if os.environ.get("STRIPE_KEYS_TABLE") else None)
@@ -232,6 +233,8 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
             collections_repo = _injected["collections"] or (collections_repository(mode=page_mode) if os.environ.get("COLLECTIONS_TABLE") else None)
             # The tenant's shipping ZONES, read for one question: can this offer's shipping be priced at
             # all? Absent table -> None -> the element stays exactly as it was, which is the safe default.
+            platform_config_repo = _injected["platform_config"] or (
+                platform_config_repository() if os.environ.get("PLATFORM_CONFIG_TABLE") else None)
             shipping_config_repo = _injected["shipping_config"] or (
                 shipping_config_repository() if os.environ.get("SHIPPING_CONFIG_TABLE") else None)
             # A/B: a variant artifact must carry the TESTED page's canonical and robots, because the edge
@@ -287,6 +290,7 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
                 pages_repository=pages_repo,
                 collections_repository=collections_repo,
                 shipping_config_repository=shipping_config_repo,
+                platform_config_repository=platform_config_repo,
                 stripe_keys_repository=stripe_keys_repo,
                 tenant_profiles_repository=tenant_profiles_repo,
                 experiments_repository=experiments_repo,

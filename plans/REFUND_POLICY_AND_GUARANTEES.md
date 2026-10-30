@@ -1,6 +1,6 @@
 # Refund Policy II — the promises the vocabulary cannot make
 
-**Status: P1 SHIPPED dev 2026-10-30 · P2–P7 planned · Written 2026-10-27 · Follows `plans/REFUND_POLICY.md`,
+**Status: P1–P3 SHIPPED dev 2026-10-30 · P4–P7 planned · Written 2026-10-27 · Follows `plans/REFUND_POLICY.md`,
 which is shipped.**
 
 **P1 done.** Three conditions (`working_condition`, `complete_in_packaging`, `any_value_adjusted`), a
@@ -11,11 +11,26 @@ return note rather than inside `full_policy`, keeping the one-source rule that e
 once both printing the note. Defaults are the status quo (`buyer_pays` for a real return, `not_applicable`
 wherever nothing travels back), so no stored policy gains a promise nobody made.
 
-**P2 and P3 must ship together.** P3 says so and the reason is the whole risk of this plan: removing the
-stamp without moving `return_requirement` and `_keep_it_below` to `resolve()` in the SAME change means a
-product with no override reads an empty policy, finds no `return_required`, and every physical refund is
-released without the goods coming back. P2 also has a tenant-visible consequence that needs saying first —
-every page carrying the platform default loses its refund section on its next publish.
+**P2 and P3 shipped together**, as P3 required. `platform_default()` is gone, `tenant_policies()` returns
+only the classes the tenant set, and `resolve()` answers `mode: "unset"` with no policy at all.
+`apply_to_product` stamps nothing: `Product.refund_policy` is the override channel only, and the promise is
+composed at publish from the live default — so a Configuration change now reaches every page at its next
+publish with no product edited, which is the fault P3 existed to remove.
+
+Both dangerous readers moved in the same change: `returns.return_requirement` and `refunds._keep_it_below`
+resolve rather than reading the stamp. **A physical good with NO resolved policy now requires its return** —
+the old fallback answered "customer keeps" there, which is how a shipped item could be refunded with nothing
+coming back on a policy nobody chose. Requiring it is the recoverable direction: one click waives it, while a
+return wrongly skipped is goods AND money gone with nothing to click.
+
+The money-back badge is SUPPRESSED, not relabelled, when there is no policy — the old "Money-back guarantee"
+fallback becomes a guarantee badge over no guarantee the moment the platform stops standing one in.
+
+Configuration names the unset classes and says what happens at the next publish. `CLASS_DEFAULTS` survives,
+renamed `CLASS_FORM_SEEDS` and used for two things that are not promises: seeding the three selects when a
+tenant first enables a class, and coercing a single bad field inside a policy that DOES exist. A DEVIATION
+from this phase's wording ("CLASS_DEFAULTS go"), taken because the settings screen already models "not set"
+with its own per-class toggle, so the values can start a form without ever reaching a page.
 
 The first plan stopped a lie: a hardcoded JavaScript literal was authoring every product's refund promise.
 It succeeded — the vocabulary is data, the sentence is generated server-side, and a screen exists. This plan

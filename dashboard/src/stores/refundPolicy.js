@@ -17,6 +17,7 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
     // The tenant's three defaults as the server resolves them, each carrying a `source` that says whether
     // the tenant chose it or the platform fell back.
     resolved: {},
+    unset: [],
     loaded: false,
     loading: false,
     error: "",
@@ -40,6 +41,7 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
         const body = await apiRequest("/config", { params: { refund_options: "1" } });
         this.options = body.refund_policy_options || {};
         this.resolved = body.refund_policies || {};
+        this.unset = body.refund_policies_unset || [];
         this.loaded = true;
       } catch (err) {
         // A tenant who has saved no config document gets a 404 -- and the vocabulary and the platform's
@@ -50,6 +52,7 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
         if (payload.refund_policy_options || payload.refund_policies) {
           this.options = payload.refund_policy_options || {};
           this.resolved = payload.refund_policies || {};
+          this.unset = payload.refund_policies_unset || [];
           this.loaded = true;
           this.error = "";
         } else {

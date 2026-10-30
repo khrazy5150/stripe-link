@@ -7,6 +7,7 @@ from stripe_link.common import (
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_tenant_config
 from stripe_link.domain.refund_policy import (
+    CLASSES as REFUND_CLASSES,
     RefundPolicyError,
     build,
     stored_policies,
@@ -65,10 +66,17 @@ def _refund_payload(config, event):
     Separated so the NOT-FOUND path can return it too. Three small objects for every caller; the 20KB of
     generated previews only when asked, so no other screen reading /config pays for the pickers.
     """
+    policies = tenant_policies(config)
     payload = {
-        # Resolved, so a caller sees what each class promises TODAY and a platform fallback is labelled as
-        # what it is rather than dressed up as the tenant's own setting.
-        "refund_policies": tenant_policies(config),
+        # ONLY the classes the tenant set. The platform fallback is gone, so a class they left alone is
+        # absent rather than filled in with a promise nobody chose.
+        "refund_policies": policies,
+        # WHAT THE SILENCE COSTS, said here rather than discovered. Every product stored before this
+        # change carries a `platform_default` snapshot, and that snapshot stopped being read -- so those
+        # pages lose their refund section at their next publish. A notice naming an action the tenant
+        # must take is the only kind worth showing, so it appears only while there is one to take: no
+        # policy set at all (plans/REFUND_POLICY_AND_GUARANTEES.md P2).
+        "refund_policies_unset": [cls for cls in REFUND_CLASSES if cls not in policies],
     }
     # The vocabulary carries a generated sentence for all 126 class/window/condition combinations, because the
     # server must stay the only thing that can author a commercial promise -- a JavaScript copy of that

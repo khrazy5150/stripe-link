@@ -14,6 +14,7 @@ import unittest
 from handlers.config import handler as config_handler
 from stripe_link.domain.documents import DocumentValidationError, validate_tenant_config
 from stripe_link.domain.refund_policy import (
+    CLASSES as REFUND_CLASSES,
     DIGITAL,
     PHYSICAL,
     SOURCE_PLATFORM_DEFAULT,
@@ -73,11 +74,14 @@ class WhereTheyLive(unittest.TestCase):
         for document in (None, {}, config_document(), config_document(legal_defaults={})):
             self.assertEqual(stored_policies(document), {})
 
-    def test_a_set_class_outranks_the_platform_fallback(self):
+    def test_only_the_classes_the_tenant_set_come_back(self):
+        """There is no platform fallback to outrank any more. A class they left alone is ABSENT, and a
+        caller must handle the gap rather than be handed a promise nobody chose
+        (plans/REFUND_POLICY_AND_GUARANTEES.md P2)."""
         policies = tenant_policies(with_policies({PHYSICAL: VALID_PHYSICAL}))
         self.assertEqual(policies[PHYSICAL]["refund_window"], "60_days")
         self.assertEqual(policies[PHYSICAL]["source"], SOURCE_TENANT_DEFAULT)
-        self.assertEqual(policies[DIGITAL]["source"], SOURCE_PLATFORM_DEFAULT)
+        self.assertNotIn(DIGITAL, policies)
 
 
 class Validation(unittest.TestCase):
@@ -183,11 +187,13 @@ class TheServerWritesTheSentence(unittest.TestCase):
 
 
 class WhatTheScreenReceives(unittest.TestCase):
-    def test_get_always_returns_resolved_policies(self):
+    def test_get_returns_the_policies_the_tenant_set(self):
+        """And only those. The screen's own per-class `enabled` toggle already models "not set", so an
+        absent class arrives absent rather than pre-filled with a promise nobody chose."""
         repository = FakeRepository(stored=with_policies({PHYSICAL: VALID_PHYSICAL}))
         body = json.loads(config_handler(event("GET"), None, repository=repository)["body"])
         self.assertEqual(body["refund_policies"][PHYSICAL]["refund_window"], "60_days")
-        self.assertEqual(body["refund_policies"][DIGITAL]["source"], SOURCE_PLATFORM_DEFAULT)
+        self.assertNotIn(DIGITAL, body["refund_policies"])
 
     def test_the_20kb_vocabulary_is_opt_in(self):
         """Every other screen that reads /config should not pay for the pickers' option tables."""
@@ -220,7 +226,9 @@ class WhatTheScreenReceives(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertEqual(body["error"], "not_found")
         self.assertIn("refund_policy_options", body)
-        self.assertEqual(body["refund_policies"][PHYSICAL]["source"], SOURCE_PLATFORM_DEFAULT)
+        # The VOCABULARY is not part of the document, so it still arrives and the dropdowns fill. The
+        # POLICIES are empty, because this tenant has set none and the platform no longer invents one.
+        self.assertEqual(body["refund_policies"], {})
         self.assertTrue(body["refund_policy_options"]["windows"])
 
     def test_the_404_still_reads_as_a_failure(self):
@@ -238,3 +246,37 @@ class WhatTheScreenReceives(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTenantIsToldWhatTheSilenceCosts(unittest.TestCase):
+    """P2's own requirement: "The consequence must be stated to the tenant, not discovered by them."
+
+    Every product stored before this change carries a snapshot of the old platform default, and that
+    snapshot stopped being read -- so those pages lose their refund section at their next publish.
+    """
+
+    def test_the_unset_classes_are_named(self):
+        repository = FakeRepository(stored=with_policies({PHYSICAL: VALID_PHYSICAL}))
+        body = json.loads(config_handler(event("GET"), None, repository=repository)["body"])
+        self.assertNotIn(PHYSICAL, body["refund_policies_unset"])
+        self.assertIn(DIGITAL, body["refund_policies_unset"])
+
+    def test_a_tenant_who_set_nothing_is_told_about_all_three(self):
+        repository = FakeRepository(stored=None)
+        body = json.loads(config_handler(event("GET"), None, repository=repository)["body"])
+        self.assertEqual(sorted(body["refund_policies_unset"]), sorted(REFUND_CLASSES))
+
+    def test_a_tenant_who_set_everything_is_told_nothing(self):
+        """A notice needs an action the tenant must take, or it is noise that teaches them to ignore
+        the panel."""
+        stored = with_policies({cls: VALID_PHYSICAL for cls in REFUND_CLASSES})
+        body = json.loads(config_handler(event("GET"), None,
+                                         repository=FakeRepository(stored=stored))["body"])
+        self.assertEqual(body["refund_policies_unset"], [])
+
+    def test_the_screen_shows_it(self):
+        import pathlib
+        vue = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+               / "Configuration.vue").read_text(encoding="utf-8")
+        self.assertIn('v-if="refundStore.unset.length"', vue)
+        self.assertIn("will show no refund section the next time they publish", vue)

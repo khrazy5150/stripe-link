@@ -30,13 +30,22 @@ RETURN_STATES = (RETURN_PENDING, RETURN_IN_TRANSIT, RETURN_RECEIVED)
 DEFAULT_RETURN_WINDOW_DAYS = 3
 
 
-def _policy(product: dict[str, Any]) -> dict[str, Any]:
-    policy = (product or {}).get("refund_policy")
-    return policy if isinstance(policy, dict) else {}
+def _policy(product: dict[str, Any], tenant_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The policy this product actually promises, RESOLVED -- not the snapshot it happens to carry.
+
+    The product stopped carrying a stamped copy (plans/REFUND_POLICY_AND_GUARANTEES.md P3), so reading
+    `product["refund_policy"]` now finds only a deliberate override. Resolving instead is what keeps a
+    tenant default reaching this decision at all; without it a product with no override would read an
+    empty policy, find no `return_required`, and every physical refund would be released without the
+    goods coming back.
+    """
+    from stripe_link.domain import refund_policy as refunds
+    return refunds.resolve(tenant_config=tenant_config, product=product or {})
 
 
 def return_requirement(lines: list[dict[str, Any]], products_by_id: dict[str, dict[str, Any]],
-                       *, order_total: int = 0, keep_it_below: int | None = None) -> dict[str, Any]:
+                       *, order_total: int = 0, keep_it_below: int | None = None,
+                       tenant_config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Whether these goods have to come back before money goes out.
 
     Returns `{required, reason, products, keep_it}`. `keep_it` means a return WAS required and is being
@@ -47,14 +56,20 @@ def return_requirement(lines: list[dict[str, Any]], products_by_id: dict[str, di
         product = products_by_id.get(str(line.get("product_id") or "").strip())
         if not product:
             continue
-        policy = _policy(product)
+        policy = _policy(product, tenant_config)
         method = str(policy.get("return_method") or "").strip()
         fulfillment = product.get("fulfillment") or {}
         # A download cannot be posted back, whatever the policy says. Physical-return language on a
         # digital product is a trap the tenant set for themselves, not an instruction to follow.
         if fulfillment.get("requires_shipping") is False or method == REVOKE:
             continue
-        if method == RETURN_REQUIRED:
+        # NO RESOLVED POLICY MEANS ASK FOR THE GOODS. A tenant who has set no default has not said the
+        # buyer may keep a physical item -- they have said nothing, and the two are opposite instructions.
+        # The old platform fallback answered "customer keeps" here, which is how a shipped item could be
+        # refunded with nothing coming back on a policy nobody chose. Requiring it is the recoverable
+        # direction: the merchant waives it with one click, while a return wrongly skipped is goods AND
+        # money gone with nothing to click (the rule `policy_snapshot` already states for unreadable data).
+        if method == RETURN_REQUIRED or (not method and policy.get("mode") == "unset"):
             requiring.append({"product_id": str(product.get("product_id") or ""),
                               "name": str(product.get("name") or "")})
 
@@ -83,7 +98,8 @@ def return_requirement(lines: list[dict[str, Any]], products_by_id: dict[str, di
 def policy_snapshot(lines: list[dict[str, Any]], products_by_id: dict[str, dict[str, Any]],
                     *, order_total: int = 0, keep_it_below: int | None = None,
                     window_days: int = DEFAULT_RETURN_WINDOW_DAYS,
-                    policy_unreadable: bool = False) -> dict[str, Any]:
+                    policy_unreadable: bool = False,
+                    tenant_config: dict[str, Any] | None = None) -> dict[str, Any]:
     """The terms as they stood WHEN THE BUYER ASKED.
 
     `RefundRequest.policy_snapshot` already exists for exactly this reason: a tenant editing their policy
@@ -111,7 +127,7 @@ def policy_snapshot(lines: list[dict[str, Any]], products_by_id: dict[str, dict[
             "policy_unreadable": True,
         }
     requirement = return_requirement(lines, products_by_id, order_total=order_total,
-                                     keep_it_below=keep_it_below)
+                                     keep_it_below=keep_it_below, tenant_config=tenant_config)
     return {
         "return_required": bool(requirement["required"]),
         "keep_it": bool(requirement["keep_it"]),

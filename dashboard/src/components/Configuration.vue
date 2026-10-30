@@ -206,9 +206,26 @@
       <header class="dashboard-card-header"><h2>Refund Policy</h2></header>
       <div class="dashboard-card-body">
         <p class="field-note">
-          What your storefront promises buyers, per kind of product. Until you set these, the platform's
-          default applies and is labelled as such — it is not a policy you chose.
+          What your storefront promises buyers, per kind of product. A kind you do not set says nothing
+          about refunds at all — there is no platform default standing in for you.
         </p>
+        <!-- SAID HERE, NOT DISCOVERED. Products stored before this change carry a snapshot of the old
+             platform default, and that snapshot stopped being read: those pages lose their refund
+             section at their next publish. The notice names the action, and appears only while there is
+             one to take. -->
+        <div v-if="refundStore.unset.length" class="keys-status-banner is-prose">
+          <span class="banner-line">
+            <strong>{{ refundStore.unset.length === 3 ? "You have not set a refund policy." :
+              "Some product kinds have no refund policy." }}</strong>
+            Pages for
+            {{ refundStore.unset.map((c) => (refundOptions.class_labels?.[c] || c).toLowerCase()).join(", ") }}
+            will show no refund section the next time they publish.
+          </span>
+          <span class="banner-line">
+            Your pages may still be showing the platform's old default — it was removed, and nothing
+            replaces it until you set your own below.
+          </span>
+        </div>
         <div v-for="cls in refundClasses" :key="cls" class="refund-class">
           <div class="refund-class-head">
             <div>

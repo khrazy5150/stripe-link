@@ -63,6 +63,7 @@ from stripe_link.domain.custom_domains import (
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.shipping import shipping_is_quotable
+from stripe_link.domain import refund_policy as refund_policy_module
 from stripe_link.runtime.upsell_pages import (
     synthesize_downsell_carousel_page,
     synthesize_thank_you_page,
@@ -1355,6 +1356,9 @@ def publish_page_document(
     tenant_profiles_repository: Any | None = None,
     experiments_repository: Any | None = None,
     events_repository: Any | None = None,
+    # The tenant's refund defaults. The product stopped carrying a stamped copy (P3), so the promise is
+    # composed HERE, at the one moment the live default and the product are both in hand.
+    platform_config_repository: Any | None = None,
     # The tenant's shipping ZONES, for one question: can a shipping price be produced for this offer at
     # all? Nothing else in publish needs them, and they are not on the page or the offer -- the rule type
     # is tenant-level and changes independently of both, so it cannot be denormalised onto either without
@@ -1571,6 +1575,25 @@ def publish_page_document(
         tenant_preferences = embed_imported_fonts(
             tenant_preferences, s3_client, os.environ.get("FONTS_BUCKET", ""),
         )
+
+    # THE REFUND PROMISE, RESOLVED NOW. Composed from the live tenant default plus any product override
+    # and baked into the artifact being rendered -- IN MEMORY ONLY. Nothing is written back to the
+    # product table: the author's rule is that nothing alters old data, and the artifact is the snapshot.
+    # A class the tenant never set resolves to nothing, and the product's policy is REMOVED so the
+    # renderer's existing "no policy, no section" branch does the rest.
+    if platform_config_repository is not None:
+        try:
+            tenant_config = platform_config_repository.get(tenant_id) or {}
+            for product in products_by_id.values():
+                resolved = refund_policy_module.resolve(tenant_config=tenant_config, product=product)
+                if resolved.get("mode") == "unset":
+                    product.pop("refund_policy", None)
+                else:
+                    product["refund_policy"] = resolved
+        except Exception:  # noqa: BLE001 - a page must publish even when settings are unreadable
+            # Left exactly as loaded. An unreadable config must not be mistaken for "the tenant set
+            # nothing" -- those say opposite things, and the second silently deletes a live promise.
+            logger.exception("refund defaults unreadable for %s; leaving policies as stored", tenant_id)
 
     # CAN THIS OFFER'S SHIPPING BE PRICED? Only `live` and `flat_rate_box` zones read a dimension, so a
     # flat or free store keeps its shipping element whatever is measured -- taking away the one field that

@@ -20,18 +20,25 @@ from stripe_link.domain.returns import (
     return_requirement,
 )
 
+# A product-level policy is an OVERRIDE now, and an override is what `source` says it is
+# (plans/REFUND_POLICY_AND_GUARANTEES.md P3). Without one these fall through to the tenant default,
+# which in a test with no config is nothing at all -- and a physical good with no resolved policy
+# requires its return, deliberately. Stamping the source is what makes these fixtures mean what they
+# always meant: a decision taken about THIS product.
+OVERRIDE = "product_override"
+
 KETTLEBELL = {"product_id": "p1", "name": "Kettlebell",
               "fulfillment": {"requires_shipping": True},
-              "refund_policy": {"return_method": "return_required"}}
+              "refund_policy": {"source": OVERRIDE, "return_method": "return_required"}}
 STICKER = {"product_id": "p2", "name": "Sticker",
            "fulfillment": {"requires_shipping": True},
-           "refund_policy": {"return_method": "return_required", "keep_it_below": 2000}}
+           "refund_policy": {"source": OVERRIDE, "return_method": "return_required", "keep_it_below": 2000}}
 EBOOK = {"product_id": "p3", "name": "Ebook",
          "fulfillment": {"requires_shipping": False},
-         "refund_policy": {"return_method": "return_required"}}
+         "refund_policy": {"source": OVERRIDE, "return_method": "return_required"}}
 KEEPS = {"product_id": "p4", "name": "Tea",
          "fulfillment": {"requires_shipping": True},
-         "refund_policy": {"return_method": "no_return_customer_keeps"}}
+         "refund_policy": {"source": OVERRIDE, "return_method": "no_return_customer_keeps"}}
 BY_ID = {p["product_id"]: p for p in (KETTLEBELL, STICKER, EBOOK, KEEPS)}
 
 

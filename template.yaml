@@ -1377,6 +1377,9 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           ORDERS_TABLE: !Ref OrdersTable
+          # Refund defaults: the product no longer carries a stamped copy, so the promise and the
+          # return requirement are resolved from the tenant's settings (plans/REFUND_POLICY_AND_GUARANTEES.md P3).
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           PRODUCTS_TABLE: !Ref ProductsTable
           REFUNDS_TABLE: !Ref RefundsTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
@@ -1386,6 +1389,10 @@ Resources:
       Handler: handlers.refunds.handler
       Description: Approve/reject a refund request and execute the Stripe refund on the tenant's connected account (platform fee kept).
       Policies:
+        # Refund defaults, read-only: the resolved promise and the return requirement both
+        # come from the tenant's settings now that the product carries no stamped copy.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
         - DynamoDBCrudPolicy:
             TableName: !Ref NotificationsTable
         - DynamoDBCrudPolicy:
@@ -2893,6 +2900,9 @@ Resources:
           EXPERIMENTS_TABLE: !Ref ExperimentsTable
           OFFERS_TABLE: !Ref OffersTable
           PAGES_TABLE: !Ref PagesTable
+          # Refund defaults: the product no longer carries a stamped copy, so the promise and the
+          # return requirement are resolved from the tenant's settings (plans/REFUND_POLICY_AND_GUARANTEES.md P3).
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           PRODUCTS_TABLE: !Ref ProductsTable
           REVIEWS_TABLE: !Ref ReviewsTable
           ROUTES_TABLE: !Ref RoutesTable
@@ -2910,6 +2920,10 @@ Resources:
         # app_config read: APP_CONFIG_TABLE is set in Globals for every function, so a missing grant
         # fails SILENTLY -- platform_config swallows the AccessDenied and returns empties, which shows up
         # as a vanished favicon or platform legal identity rather than an error.
+        # Refund defaults, read-only: the resolved promise and the return requirement both
+        # come from the tenant's settings now that the product carries no stamped copy.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref AppConfigTable
         - DynamoDBReadPolicy:
@@ -5106,6 +5120,9 @@ Resources:
           CARTS_TABLE: !Ref CartsTable
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           ORDERS_TABLE: !Ref OrdersTable
+          # Refund defaults: the product no longer carries a stamped copy, so the promise and the
+          # return requirement are resolved from the tenant's settings (plans/REFUND_POLICY_AND_GUARANTEES.md P3).
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           PRODUCTS_TABLE: !Ref ProductsTable
           REFUNDS_TABLE: !Ref RefundsTable
           SHIPMENTS_TABLE: !Ref ShipmentsTable
@@ -5121,6 +5138,10 @@ Resources:
         # The shipping QUOTE the order transacted on, for the transit days of the service that actually
         # shipped -- marking an order shipped recomputes the buyer's arrival date from the day it really
         # left (plans/THANK_YOU_PAGE.md P4). Read-only; shares CartsTable with carts and tokens.
+        # Refund defaults, read-only: the resolved promise and the return requirement both
+        # come from the tenant's settings now that the product carries no stamped copy.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref CartsTable
         # WRITE, not read: an address deliverability verdict is stored on the order it is about, so the

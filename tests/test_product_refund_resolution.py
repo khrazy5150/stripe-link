@@ -59,56 +59,80 @@ def product(**overrides):
 
 
 class TheTenantsDefaultWins(unittest.TestCase):
-    def test_no_policy_sent_gets_the_tenant_default(self):
-        document = product()
-        repository = FakeConfigRepository(TENANT_CONFIG)
-        resolve_refund_policy(document, config_repository=repository)
-        self.assertEqual(document["refund_policy"]["refund_window"], "14_days")
-        self.assertEqual(document["refund_policy"]["source"], SOURCE_TENANT_DEFAULT)
+    """Renamed in spirit: the write no longer stamps anything (P3).
 
-    def test_a_client_sending_the_old_literal_is_overruled(self):
-        """The property that actually fixes the bug. Fixing the browser is not enough -- a browser is not a
-        place you can enforce anything, and an old cached bundle keeps posting the literal."""
+    It used to compose the tenant's default into the product document at save time, which is exactly what
+    made a Configuration change reach nothing -- the promise froze at the save and only thawed if the
+    product happened to be edited again. The product is now the OVERRIDE CHANNEL ONLY and the promise is
+    composed at publish from the live default.
+    """
+
+    def test_no_policy_sent_stores_no_policy(self):
+        document = product()
+        resolve_refund_policy(document, config_repository=FakeConfigRepository(TENANT_CONFIG))
+        self.assertIsNone(document.get("refund_policy"))
+
+    def test_a_client_sending_the_old_literal_is_still_overruled(self):
+        """The property that fixes the original bug, and it survives the change: a browser is not a place
+        you can enforce anything, and an old cached bundle keeps posting the literal. It is now DISCARDED
+        rather than replaced -- the page gets the tenant's live default at publish instead."""
         document = product(refund_policy=dict(THE_LITERAL))
         resolve_refund_policy(document, config_repository=FakeConfigRepository(TENANT_CONFIG))
-        self.assertEqual(document["refund_policy"]["refund_window"], "14_days")
-        self.assertEqual(document["refund_policy"]["source"], SOURCE_TENANT_DEFAULT)
-        self.assertNotIn("may keep the item", document["refund_policy"]["full_policy"])
+        self.assertIsNone(document.get("refund_policy"))
 
-    def test_no_tenant_default_falls_back_and_says_so(self):
-        document = product()
-        resolve_refund_policy(document, config_repository=FakeConfigRepository(None))
-        self.assertEqual(document["refund_policy"]["source"], SOURCE_PLATFORM_DEFAULT)
-        self.assertEqual(document["refund_policy"]["refund_window"], "30_days")
+    def test_the_promise_now_comes_from_resolution_at_publish(self):
+        """What the page will say, asked of the same function publish asks."""
+        from stripe_link.domain.refund_policy import resolve
+        policy = resolve(tenant_config=TENANT_CONFIG, product=product())
+        self.assertEqual(policy["refund_window"], "14_days")
+        self.assertEqual(policy["source"], SOURCE_TENANT_DEFAULT)
 
-    def test_an_unreadable_config_still_yields_a_policy(self):
-        """A product saved with no policy at all would render nothing, and every read path expects one. An
-        unreadable config must not decide what a storefront promises, nor block the save."""
-        document = product()
-        resolve_refund_policy(document, config_repository=FakeConfigRepository(raises=True))
-        self.assertEqual(document["refund_policy"]["source"], SOURCE_PLATFORM_DEFAULT)
+    def test_no_tenant_default_resolves_to_nothing(self):
+        """The platform fallback is gone (P2). No policy chosen means the page says nothing about
+        refunds -- silence is recoverable, a promise nobody made is a dispute."""
+        from stripe_link.domain.refund_policy import resolve
+        self.assertEqual(resolve(tenant_config=None, product=product())["mode"], "unset")
 
     def test_the_class_follows_the_product(self):
-        document = product(product_type="digital")
-        resolve_refund_policy(document, config_repository=FakeConfigRepository(TENANT_CONFIG))
-        # The tenant set only `physical`; digital falls back, and the fallback is non-refundable.
-        self.assertEqual(document["refund_policy"]["refund_window"], NON_REFUNDABLE)
-        self.assertEqual(document["refund_policy"]["source"], SOURCE_PLATFORM_DEFAULT)
+        from stripe_link.domain.refund_policy import resolve
+        # The tenant set only `physical`, so a digital product resolves to nothing at all.
+        self.assertEqual(resolve(tenant_config=TENANT_CONFIG,
+                                 product=product(product_type="digital"))["mode"], "unset")
 
     def test_a_subscription_only_product_uses_the_subscription_class(self):
+        """The class still follows the recurring price. This tenant set only `physical`, so the right
+        answer is NOTHING -- reaching for the physical terms because they are the ones that exist is the
+        mistake the class split prevents."""
+        from stripe_link.domain.refund_policy import resolve
         document = product(prices=[{"price_id": "pr1", "pricing_model": "recurring",
                                     "recurring": {"interval": "month"}}])
-        resolve_refund_policy(document, config_repository=FakeConfigRepository(TENANT_CONFIG))
-        self.assertEqual(document["refund_policy"]["full_policy"],
-                         "Refunds are available within 72 hours of renewal.")
+        policy = resolve(tenant_config=TENANT_CONFIG, product=document)
+        self.assertEqual(policy["policy_class"], "subscription")
+        self.assertEqual(policy["mode"], "unset")
+
+    def test_a_subscription_window_runs_from_RENEWAL(self):
+        """The legacy generator rendered a 72-hour subscription window as "within 3 days of delivery" --
+        wrong unit AND wrong event, on a page making a commercial promise. Nothing is delivered to a
+        subscriber and nothing arrives on renewal."""
+        from stripe_link.domain.refund_policy import resolve
+        tenant = {"legal_defaults": {"refund_policies": {
+            "subscription": {"refund_window": "72_hours", "condition": "any",
+                             "return_method": "no_return_customer_keeps"}}}}
+        document = product(prices=[{"price_id": "pr1", "pricing_model": "recurring",
+                                    "recurring": {"interval": "month"}}])
+        policy = resolve(tenant_config=tenant, product=document)
+        self.assertEqual(policy["full_policy"], "Refunds are available within 72 hours of renewal.")
 
     def test_mixed_pricing_keeps_the_goods_class(self):
-        """A product sold one-time AND recurring makes two promises; the one-time buyers are not renewing."""
+        """A product sold one-time AND recurring makes two promises; the one-time buyers are not
+        renewing."""
+        from stripe_link.domain.refund_policy import resolve
         document = product(prices=[{"price_id": "a", "pricing_model": "one_time"},
                                    {"price_id": "b", "pricing_model": "recurring",
                                     "recurring": {"interval": "month"}}])
-        resolve_refund_policy(document, config_repository=FakeConfigRepository(TENANT_CONFIG))
-        self.assertEqual(document["refund_policy"]["refund_window"], "14_days")
+        self.assertEqual(resolve(tenant_config=TENANT_CONFIG, product=document)["refund_window"],
+                         "14_days")
+
 
 
 class OverridesAreHonoured(unittest.TestCase):
@@ -146,12 +170,13 @@ class OverridesAreHonoured(unittest.TestCase):
         self.assertEqual(document["refund_policy"]["full_policy"],
                          "Tips are gifts and are non-refundable.")
 
-    def test_per_product_keep_it_below_survives_the_tenant_default(self):
-        """It is a fact about THIS item's postage economics, not a policy choice."""
+    def test_a_threshold_without_an_override_is_not_a_policy(self):
+        """`keep_it_below` alone never made this product's terms its own, and the document cannot carry a
+        bare threshold -- the schema requires source/short_label/full_policy. Per-class thresholds live
+        on the tenant default, which Configuration already edits, and `resolve` carries one through."""
         document = product(refund_policy={"keep_it_below": 1500})
         resolve_refund_policy(document, config_repository=FakeConfigRepository(TENANT_CONFIG))
-        self.assertEqual(document["refund_policy"]["refund_window"], "14_days")
-        self.assertEqual(document["refund_policy"]["keep_it_below"], 1500)
+        self.assertIsNone(document.get("refund_policy"))
 
 
 class BothWritePathsAgree(unittest.TestCase):
@@ -168,8 +193,7 @@ class BothWritePathsAgree(unittest.TestCase):
         generated = product()
         generated.pop("refund_policy", None)
         apply_to_product(generated, TENANT_CONFIG)
-        self.assertEqual(generated["refund_policy"]["refund_window"], "14_days")
-        self.assertEqual(generated["refund_policy"]["source"], SOURCE_TENANT_DEFAULT)
+        self.assertIsNone(generated.get("refund_policy"))
 
     def test_the_handler_wrapper_and_the_domain_rule_agree(self):
         through_handler = product()
@@ -179,7 +203,7 @@ class BothWritePathsAgree(unittest.TestCase):
         through_domain = product()
         apply_to_product(through_domain, TENANT_CONFIG)
 
-        self.assertEqual(through_handler["refund_policy"], through_domain["refund_policy"])
+        self.assertEqual(through_handler.get("refund_policy"), through_domain.get("refund_policy"))
 
     def test_an_override_needs_no_config_read_on_either_path(self):
         """A product that decides for itself must not fail because a settings table blinked."""
@@ -207,11 +231,10 @@ class ThroughTheHandler(unittest.TestCase):
                            config_repository=FakeConfigRepository(TENANT_CONFIG))
         self.assertEqual(response["statusCode"], 201)
         stored = self.repository.get("t1", self.product["product_id"])
-        self.assertEqual(stored["refund_policy"]["refund_window"], "14_days")
-        self.assertEqual(stored["refund_policy"]["source"], SOURCE_TENANT_DEFAULT)
-        self.assertNotIn("may keep the item", stored["refund_policy"]["full_policy"])
+        # DISCARDED, not replaced. The page gets the tenant's live default at publish instead.
+        self.assertIsNone(stored.get("refund_policy"))
 
-    def test_a_product_sent_with_no_policy_still_gets_one(self):
+    def test_a_product_sent_with_no_policy_stores_none(self):
         self.product.pop("refund_policy", None)
         response = handler({"httpMethod": "POST", "body": json.dumps(self.product)}, None,
                            repository=self.repository,
@@ -219,7 +242,7 @@ class ThroughTheHandler(unittest.TestCase):
                            config_repository=FakeConfigRepository(TENANT_CONFIG))
         self.assertEqual(response["statusCode"], 201)
         stored = self.repository.get("t1", self.product["product_id"])
-        self.assertEqual(stored["refund_policy"]["source"], SOURCE_TENANT_DEFAULT)
+        self.assertIsNone(stored.get("refund_policy"))
 
     def test_reads_never_resolve_anything(self):
         """The author's rule: nothing alters old data, everything is organic. A GET must not rewrite a

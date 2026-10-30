@@ -153,12 +153,24 @@ RETURN_METHOD_OPTIONS: dict[str, str] = {
 
 WINDOW_BASIS: dict[str, str] = {PHYSICAL: "of delivery", DIGITAL: "of purchase", SUBSCRIPTION: "of renewal"}
 
-# The platform's fallback when a tenant has set nothing. These reproduce EXACTLY what the JavaScript literal
-# has been writing, on purpose: the fault was provenance and editability, not the numbers, and changing the
-# numbers here would silently rewrite the promise on every live page that already shows one. Once tenants can
-# see and set their own defaults, whether 30 days is the right platform fallback becomes a question worth
-# asking -- but it is a separate question from stopping the lie.
-CLASS_DEFAULTS: dict[str, dict[str, str]] = {
+# A STARTING POINT FOR THE FORM, and never a published promise.
+#
+# These were the platform's fallback: a tenant who had set nothing still got a policy, stamped
+# `platform_default`, and it reached live pages. Nobody chose it, and for physical goods it promised the
+# buyer keeps the item AND may have their money back. `platform_default()` is gone and nothing manufactures
+# a policy from this table any more (plans/REFUND_POLICY_AND_GUARANTEES.md P2).
+#
+# The values survive for two jobs that are not promises:
+#
+#   * seeding the settings form when a tenant first enables a class, so the three selects open on
+#     something sensible rather than empty -- the tenant still has to enable and save before a page says
+#     anything, which is the whole difference;
+#   * coercing a single unrecognised field inside a policy that DOES exist (`normalize`), where the
+#     alternative is dropping a field out of a document the tenant did save.
+#
+# Neither path can make a page promise anything the tenant did not enable. The name says `seeds` so that a
+# future caller reaching for "the default policy" does not find one here.
+CLASS_FORM_SEEDS: dict[str, dict[str, str]] = {
     PHYSICAL: {"refund_window": "30_days", "condition": "unused", "return_method": KEEPS},
     DIGITAL: {"refund_window": NON_REFUNDABLE, "condition": "any", "return_method": REVOKE},
     SUBSCRIPTION: {"refund_window": "72_hours", "condition": "any", "return_method": KEEPS},
@@ -287,7 +299,7 @@ def generate_copy(policy_class: str, window: str, condition: str) -> tuple[str, 
     renderer, the policy sentence belongs here.
     """
     policy_class = policy_class if policy_class in CLASSES else PHYSICAL
-    option = WINDOW_OPTIONS.get(window) or WINDOW_OPTIONS[CLASS_DEFAULTS[policy_class]["refund_window"]]
+    option = WINDOW_OPTIONS.get(window) or WINDOW_OPTIONS[CLASS_FORM_SEEDS[policy_class]["refund_window"]]
     short_label = str(option["short_label"])
 
     if window == NON_REFUNDABLE:
@@ -357,7 +369,7 @@ def normalize(policy: Any, *, policy_class: str) -> dict[str, Any]:
     wording is preserved over generated copy -- structured fields classify the policy, prose displays it.
     """
     policy_class = policy_class if policy_class in CLASSES else PHYSICAL
-    default = CLASS_DEFAULTS[policy_class]
+    default = CLASS_FORM_SEEDS[policy_class]
     raw = policy if isinstance(policy, dict) else {}
 
     window = _text(raw.get("refund_window")).lower()
@@ -393,14 +405,6 @@ def normalize(policy: Any, *, policy_class: str) -> dict[str, Any]:
     return normalized
 
 
-def platform_default(policy_class: str) -> dict[str, Any]:
-    """The fallback, labelled as what it is. Never `tenant_default` -- no tenant chose this."""
-    policy_class = policy_class if policy_class in CLASSES else PHYSICAL
-    rule = CLASS_DEFAULTS[policy_class]
-    return build(policy_class, refund_window=rule["refund_window"], condition=rule["condition"],
-                 return_method=rule["return_method"], source=SOURCE_PLATFORM_DEFAULT)
-
-
 def stored_policies(tenant_config: dict[str, Any] | None) -> dict[str, Any]:
     """Pull the tenant's per-class defaults out of their settings document.
 
@@ -422,9 +426,11 @@ def stored_policies(tenant_config: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def tenant_policies(tenant_config: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    """The tenant's three defaults, with the platform's fallback standing in where they set none.
+    """ONLY the classes the tenant actually set. A class they left alone is absent from the map.
 
-    Each policy's `source` says which it is, so a caller never has to guess whether a tenant chose this.
+    It used to stand the platform's fallback in for every gap, which is how a promise nobody chose came
+    to be on every live page. Absence is the honest answer and a caller must handle it: where there is no
+    answer the page says NOTHING -- silence is recoverable, a false promise is a dispute.
     """
     stored = stored_policies(tenant_config)
     out: dict[str, dict[str, Any]] = {}
@@ -434,8 +440,6 @@ def tenant_policies(tenant_config: dict[str, Any] | None) -> dict[str, dict[str,
             policy = normalize(raw, policy_class=policy_class)
             policy["source"] = SOURCE_TENANT_DEFAULT
             out[policy_class] = policy
-        else:
-            out[policy_class] = platform_default(policy_class)
     return out
 
 
@@ -468,7 +472,15 @@ def resolve(*, tenant_config: dict[str, Any] | None = None,
         resolved = normalize(stored, policy_class=policy_class)
         mode = "override"
     else:
-        resolved = tenant_policies(tenant_config)[policy_class]
+        default = tenant_policies(tenant_config).get(policy_class)
+        if default is None:
+            # NOTHING TO RESOLVE. No override, and the tenant never set a default for this class -- so
+            # there is no promise, and manufacturing one is the fault this phase removes. Callers must
+            # read `mode` rather than assuming a policy: `render_refund_policy` renders nothing from an
+            # empty dict, the money-back badge is suppressed, and `return_requirement` treats a physical
+            # good with no resolved method as still requiring its return.
+            return {"policy_class": policy_class, "mode": "unset"}
+        resolved = default
         mode = "default"
         # A per-product `keep_it_below` is a fact about THIS item's postage economics, not a policy choice,
         # so it survives falling through to the tenant default. `domain/returns.py` reads it off the
@@ -514,7 +526,8 @@ def vocabulary() -> dict[str, Any]:
                             for key, label in RETURN_SHIPPING_OPTIONS.items()],
         "return_shipping_defaults": {method: default_return_shipping(method)
                                      for method in RETURN_METHOD_OPTIONS},
-        "class_defaults": {k: dict(v) for k, v in CLASS_DEFAULTS.items()},
+        # The form's starting values, not a policy. The key name is the dashboard's and is kept.
+        "class_defaults": {k: dict(v) for k, v in CLASS_FORM_SEEDS.items()},
         "previews": previews,
     }
 
@@ -569,11 +582,18 @@ def apply_to_product(document: dict[str, Any], tenant_config: dict[str, Any] | N
     if source == SOURCE_TIP_JAR:
         return document
 
-    resolved = dict(tenant_policies(tenant_config)[policy_class])
-    # `keep_it_below` is a fact about THIS item's postage economics rather than a policy choice, so a
-    # per-product value survives even when the terms come from the tenant's default.
-    threshold = _whole(stored.get("keep_it_below"))
-    if threshold and threshold > 0:
-        resolved["keep_it_below"] = threshold
-    document["refund_policy"] = resolved
+    # NOTHING IS STAMPED. The product used to receive a frozen copy of the tenant's default here, which
+    # is why changing a default in Configuration changed nothing until every product happened to be
+    # edited for some other reason -- a tenant could set their policy, press Save, and watch their pages
+    # go on saying the old thing forever (plans/REFUND_POLICY_AND_GUARANTEES.md P3).
+    #
+    # `Product.refund_policy` is now the OVERRIDE CHANNEL ONLY: present when this product was
+    # deliberately given its own terms, or when tip_jar_provision wrote one, and absent otherwise. The
+    # promise is composed at publish from the live default instead, so the artifact still holds a
+    # snapshot -- one refreshed every publish, which is the whole point.
+    #
+    # Removed rather than left as it was, because leaving the old stamp would mean a product edited
+    # today keeps promising what the platform fallback said in October while its neighbours resolve
+    # correctly, and the two would be indistinguishable on the page.
+    document.pop("refund_policy", None)
     return document
