@@ -212,6 +212,64 @@ class TheDescriptionReadsTheHeadlineOnThePageTests(unittest.TestCase):
         self.assertEqual(document_description(page, ROUNDUP_OFFER, PRODUCTS), "My own words.")
 
 
+class TheDescriptionUsesTheHeadlinesOwnResolverTests(unittest.TestCase):
+    """The first fix for "Browse N products." read the hero SECTION and shipped unchanged.
+
+    A live Roundup on a custom domain still published "Browse 3 products." after it, because the hero
+    section on that page is EMPTY -- the tenant never typed a headline there, so the h1 came from
+    `offer.presentation` through `hero_copy`'s fallback. The fix had been written against a page built
+    the other way and tested against a fixture built the same way, so it looked right and changed
+    nothing where it mattered. Sharing `hero_copy` is what makes the description and the h1 incapable
+    of disagreeing, which is the property actually wanted.
+    """
+
+    EMPTY_HERO = {"page_id": "p", "sections": [
+        {"id": "hero", "type": "hero"},
+        {"id": "g", "type": "catalog_grid",
+         "items": [{"offer_id": "a", "slug": "/x"}, {"offer_id": "b", "slug": "/y"},
+                   {"offer_id": "c", "slug": "/z"}]},
+    ]}
+    OFFER = {"offer_id": "o", "name": "Amazing Gift Ideas", "product_intent": "lead_gen",
+             "lead_capture_action": "roundup",
+             "presentation": {"headline": "Amazing Gift Ideas",
+                              "subheadline": "These make great gifts!"}}
+
+    def test_an_untouched_hero_reads_the_offer(self):
+        self.assertEqual(document_description(self.EMPTY_HERO, self.OFFER, {}),
+                         "Amazing Gift Ideas — These make great gifts! Browse 3 products.")
+
+    def test_it_no_longer_collapses_to_the_count(self):
+        self.assertNotEqual(document_description(self.EMPTY_HERO, self.OFFER, {}),
+                            "Browse 3 products.")
+
+    def test_a_token_reached_through_the_fallback_is_expanded(self):
+        """`expand_roundup_titles` rewrites the hero SECTION at publish, so a headline reached through
+        the offer never passed through it. Without expanding here the description would publish a
+        literal "{count}" -- a regression this fix would otherwise have introduced on its own."""
+        offer = dict(self.OFFER, presentation={"headline": "{count} Amazing Gift Ideas for {year}",
+                                               "subheadline": "These make great gifts!"})
+        description = document_description(self.EMPTY_HERO, offer, {})
+        self.assertNotIn("{count}", description)
+        self.assertNotIn("{year}", description)
+        self.assertTrue(description.startswith("3 Amazing Gift Ideas for "), description)
+
+    def test_the_pages_own_words_still_outrank_the_offer(self):
+        """`hero_copy` is "the page's own words, else the offer's" and that order has to survive."""
+        page = copy.deepcopy(self.EMPTY_HERO)
+        page["sections"][0].update({"headline": "My Own Headline", "subheadline": "My own tagline."})
+        self.assertEqual(document_description(page, self.OFFER, {}),
+                         "My Own Headline — My own tagline. Browse 3 products.")
+
+    def test_a_storefront_is_untouched(self):
+        """A `brand_hero` has no offer behind it and its tagline field is `tagline`, so it keeps the
+        plain section read rather than going through hero_copy."""
+        page = {"page_id": "s", "sections": [
+            {"id": "h", "type": "brand_hero", "headline": "Probe Store", "tagline": "Good things"},
+            {"id": "g", "type": "catalog_grid", "items": [{"offer_id": "a", "slug": "/x"}]},
+        ]}
+        self.assertEqual(document_description(page, {}, {}), "Probe Store — Good things. Browse 1 product.")
+
+
 class OneFullStopTests(unittest.TestCase):
     """"These make great gifts!" came out as "great gifts!." -- the segments appended "." and only a
     trailing period was stripped first. A Roundup's subheadline is marketing copy, so the mark it ends

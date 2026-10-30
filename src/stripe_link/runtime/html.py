@@ -14,8 +14,8 @@ from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.coupon_grants import grant_prefix
 from stripe_link.domain.composition import (
-    compose_page, composition_key, default_cta_label, element_channel, is_lead_composition,
-    offerless_composition, shows_breadcrumb)
+    compose_page, composition_key, default_cta_label, element_channel, expand_title_tokens,
+    is_lead_composition, offerless_composition, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -2112,7 +2112,8 @@ def _as_sentence(text: str) -> str:
     return f"{stripped}{mark if mark and mark in '!?' else '.'}"
 
 
-def offerless_description(page: dict[str, Any]) -> str:
+def offerless_description(page: dict[str, Any], offer: dict[str, Any] | None = None,
+                          products_by_id: dict[str, dict[str, Any]] | None = None) -> str:
     """The meta description for a page with NO offer — a storefront, a category page, a store profile.
 
     These used to fall through the whole offer-shaped derivation below and come out as the bare rotating
@@ -2131,17 +2132,29 @@ def offerless_description(page: dict[str, Any]) -> str:
     """
     # EITHER HERO. `brand_hero` is the storefront/category/profile one; a ROUNDUP is routed here too --
     # `is_offerless_page` is true for anything carrying a `catalog_grid`, and every Roundup has one -- but
-    # it composes the ordinary `hero`, whose tagline field is `subheadline`. Looking only for `brand_hero`
-    # left both values empty on a Roundup, so the description collapsed to the item count alone and every
-    # Roundup on a Site published "Browse 2 products." while its own h1 read "2 Amazing Gift Ideas for
-    # 2026". The words were on the page; this function could not see them.
-    #
-    # Read AFTER `expand_roundup_titles`, which resolves `{count}`/`{year}` in the hero section in place at
-    # publish, so the description carries the same resolved number as the h1 rather than a raw token.
+    # it composes the ordinary `hero`. Looking only for `brand_hero` left both values empty on a Roundup,
+    # so the description collapsed to the item count alone and every Roundup published "Browse 3
+    # products." while its own h1 named the page.
     hero = next((s for s in (page.get("sections") or [])
                  if isinstance(s, dict) and s.get("type") in ("brand_hero", "hero")), {})
-    headline = headline_plain_text(str(hero.get("headline") or "")).strip()
-    tagline = str(hero.get("tagline") or hero.get("subheadline") or "").strip().rstrip(".")
+    if hero.get("type") == "hero":
+        # THE RESOLVER THE h1 ITSELF USES, not a second reading of the same fields. `hero_copy` is
+        # "the page's own words, else the offer's, else the product's", and reading only the SECTION --
+        # which is what the first cut of this did -- missed every page whose headline was never typed
+        # into the hero: the section is empty there and the h1 comes from `offer.presentation`. That is
+        # the common case for a Roundup, so the fix looked right on a page built one way and changed
+        # nothing on a real one. Sharing the resolver is what makes the two incapable of disagreeing.
+        headline, tagline = hero_copy(hero, offer or {}, products_by_id or {})
+        headline = headline_plain_text(headline).strip()
+        tagline = tagline.strip()
+        # `{count}`/`{year}` are resolved at publish by `expand_roundup_titles`, which rewrites the hero
+        # SECTION in place -- so a headline reached through the offer fallback above never passed through
+        # it and would print the raw token. Idempotent: an already-expanded string has no tokens left.
+        count = _grid_item_count(page)
+        headline = expand_title_tokens(headline, count=count or None, year=datetime.now(timezone.utc).year)
+    else:
+        headline = headline_plain_text(str(hero.get("headline") or "")).strip()
+        tagline = str(hero.get("tagline") or "").strip()
     org_name = str(_RENDER_ORG.get("name") or "").strip()
     org_description = re.sub(r"[.\s]+$", "", str(_RENDER_ORG.get("description") or "").strip())
     is_profile = offerless_composition(page) == "store_profile"
@@ -2184,7 +2197,7 @@ def document_description(page: dict[str, Any], offer: dict[str, Any], products_b
     # same question `is_offerless_page` answers everywhere else, and true whether or not a caller happened
     # to pass an empty offer.
     if is_offerless_page(page):
-        return offerless_description(page)
+        return offerless_description(page, offer, products_by_id)
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
     model = resolve_semantic_model(offer, products_by_id)
