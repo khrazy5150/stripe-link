@@ -2032,6 +2032,7 @@ Resources:
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
           EVENTS_TABLE: !Ref EventsTable
           REVIEWS_TABLE: !Ref ReviewsTable
+          SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
           SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
@@ -2049,6 +2050,11 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ReviewsTable
+        # The shipping element disappears when the tenant's zones price by size and nothing on the
+        # offer is measured. The PREVIEW has to make the same call as publish, or the builder shows a
+        # page the visitor never gets.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
         # Read-only: the PREVIEW renders the session state, exactly as publishing does.
         - DynamoDBReadPolicy:
             TableName: !Ref EventsTable
@@ -2891,6 +2897,10 @@ Resources:
           REVIEWS_TABLE: !Ref ReviewsTable
           ROUTES_TABLE: !Ref RoutesTable
           SERVICES_TABLE: !Ref ServicesTable
+          # Read for ONE question: can this offer's shipping be priced at all? Only `live` and
+          # `flat_rate_box` zones read a parcel's size, so a flat/free store keeps its shipping
+          # element whatever is measured -- and that element is the only thing collecting a postcode.
+          SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
           SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
@@ -2908,6 +2918,11 @@ Resources:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
+        # Shipping zones, read-only. Decides whether the shipping element can be priced for this
+        # offer at all; a missing grant would silently leave it on every page, which is the safe
+        # direction but not the correct one.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ShippingConfigTable
         # The PagesTable itself, which this function could NOT read until now -- it only ever consumed the
         # stream. A tenant takedown has to list a tenant's pages, and a restore re-writes each one so the
         # stream republishes it through the ordinary path (plans/ADMIN_SITE.md §1c).

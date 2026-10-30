@@ -438,6 +438,58 @@ def dimensions_consequence(config: dict[str, Any] | None) -> dict[str, str]:
                         "not be able to buy labels for this product until it has a size and weight.")}
 
 
+# The two zone rules that cannot price a parcel they have never been given the size of. `free` and `flat`
+# are deliberately absent: $7 is $7 whatever the box, and a free zone is free. Same split as
+# `dimensions_consequence`, which is the tenant-facing half of this same fact.
+DIMENSION_DEPENDENT_RULES = frozenset({"live", "flat_rate_box"})
+
+
+def rules_need_dimensions(config: dict[str, Any] | None) -> bool:
+    """Whether any zone this tenant configured prices by the size of the parcel."""
+    return any(str((zone or {}).get("rule", {}).get("type") or "") in DIMENSION_DEPENDENT_RULES
+               for zone in (config or {}).get("zones") or [])
+
+
+def product_is_measured(product: dict[str, Any] | None) -> bool:
+    """Whether this product carries a usable size AND weight -- the same completeness test
+    `unmeasured_products` applies, so the notice on the product and this cannot disagree."""
+    fulfillment = (product or {}).get("fulfillment") or {}
+    own = fulfillment.get("item_dimensions") or {}
+    return (all(_positive(own.get(field)) for field in ("length_in", "width_in", "height_in"))
+            and _positive(own.get("weight_lb") or fulfillment.get("weight_lb")))
+
+
+def shipping_is_quotable(products: list[dict[str, Any]] | None,
+                         config: dict[str, Any] | None) -> bool:
+    """Can a buyer be shown a shipping price for this offer at all?
+
+    The shipping element is the ONLY thing on a page that collects a postal code, and a quote without one
+    returns `needs: postal_code` -- so Stripe gets no shipping option, the buyer pays nothing to post, and
+    nobody is told. A real order shipped a Large box for $7.83 having collected $0 that way (2026-10-06).
+    Hiding the element is therefore the expensive direction to be wrong in, and everything here is shaped
+    to be wrong in the other one.
+
+    TRUE unless we are certain. Two things have to be true together before an element disappears:
+
+      * the tenant's zones price BY SIZE (`live`, `flat_rate_box`). On `free` or `flat` the quote never
+        reads a dimension -- measured on all four rules with a product carrying none: free returned one
+        option, flat returned one option charging the full $7, and only the other two came back empty.
+        A flat-rate store losing its postcode field over an unmeasured product is exactly the 2026-10-06
+        failure, and the product screen already tells those tenants the truth (`dimensions_consequence`
+        answers "info", not "warning", for them).
+      * and NOTHING on the offer is measured. One measured product among several leaves the element in
+        place: that order still cannot be packed, but the honest failure is an empty option list the
+        tenant can fix, not a parcel posted for free.
+    """
+    shippable = [product for product in products or []
+                 if ((product or {}).get("fulfillment") or {}).get("requires_shipping")]
+    if not shippable:
+        return True              # nothing ships; the element is not offered for other reasons anyway
+    if not rules_need_dimensions(config):
+        return True              # free/flat price it without ever looking at a dimension
+    return any(product_is_measured(product) for product in shippable)
+
+
 def product_readiness(products: list[dict[str, Any]] | None) -> list[str]:
     """What is still missing on the PRODUCTS before an order can be packed properly. Empty means ready.
 

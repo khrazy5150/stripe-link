@@ -2978,6 +2978,7 @@ import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { timeZoneOptions } from "../utils/timezones";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
+import { shippingIsQuotable } from "../composables/shippingQuotable";
 import { CLOSING_SECTIONS, elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, catalogGridSection, goalChrome } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
@@ -3430,11 +3431,32 @@ const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
 // its only caller. `watch(() => [sectionVisible("shipping"), ...])` runs its getter immediately to collect
 // dependencies, and that getter now reaches this -- five lines before it was initialised, which is a
 // temporal dead zone, not a stale value.
-const builderHasPhysicalItems = computed(() => (builderOfferProducts.value || []).some((product) => {
+const builderShipsPhysical = computed(() => (builderOfferProducts.value || []).some((product) => {
   const requires = product?.fulfillment?.requires_shipping;
   if (typeof requires === "boolean") return requires;
   return product?.product_type === "physical";
 }));
+// The tenant's shipping ZONES, for one question: can this offer's shipping be priced at all? Fetched
+// once; an unreadable config leaves `{}`, which `shippingIsQuotable` reads as "nothing prices by size"
+// and therefore as quotable -- the direction that keeps the postcode field on the page.
+const shippingConfig = ref({});
+async function loadShippingConfig() {
+  try {
+    const body = await apiRequest("/shipping");
+    shippingConfig.value = body?.shipping_config || {};
+  } catch {
+    // 404 means no shipping config at all, and every other failure says the same thing here: we cannot
+    // prove the element is unusable, so it stays. Deliberately silent -- this is not the tenant's problem.
+    shippingConfig.value = {};
+  }
+}
+// An unmeasured product on a `live` or `flat_rate_box` zone can never be priced, so the element would
+// take a postcode and show an empty list forever. On `free`/`flat` it is left exactly as it was: those
+// charge correctly with nothing measured, and taking the field away is the 2026-10-06 $0-postage bug.
+// Named as the composer's argument so both sides of the question travel together.
+const builderHasPhysicalItems = computed(() =>
+  builderShipsPhysical.value
+  && shippingIsQuotable(builderOfferProducts.value || [], shippingConfig.value));
 // An offer-less page (storefront / category / store profile) has no offer, so it neither transacts nor
 // captures a lead -- a third value, rather than letting it inherit `offerIntent(null)`'s "transaction"
 // default. That default was not cosmetic: every `intent === "transaction"` branch would have fired, minting
@@ -4699,7 +4721,7 @@ async function loadTenantPageDefaults() {
     tenantPageDefaults.value = {};
   }
 }
-onMounted(() => { ensurePagesLoaded(); loadTenantPageDefaults(); loadTenantFonts(); });
+onMounted(() => { ensurePagesLoaded(); loadTenantPageDefaults(); loadTenantFonts(); loadShippingConfig(); });
 
 async function loadPages() {
   loading.value = true;

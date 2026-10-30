@@ -13,9 +13,11 @@ from stripe_link.domain.pricing import PricingError
 from stripe_link.repositories.documents import (
     events_repository,
     reviews_repository,
+    shipping_config_repository,
     sites_repository,
     tenant_profiles_repository,
 )
+from stripe_link.domain.shipping import shipping_is_quotable
 from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.runtime.html import (
     RenderError,
@@ -37,6 +39,23 @@ from stripe_link.runtime.publishing import (
     site_page_type,
     site_serving_origin,
 )
+
+
+def _shipping_quotable(tenant_id: str, products_by_id: dict) -> bool:
+    """Whether a shipping price can be produced for this offer, for the PREVIEW.
+
+    Mirrors what publish decides, so the builder is not showing a page the visitor will not get. True on
+    any failure and whenever the table is absent: hiding the one element that collects a postal code is
+    the expensive way to be wrong (a real order shipped a Large box for $7.83 with $0 collected,
+    2026-10-06), so every uncertain path leaves it in place.
+    """
+    if not tenant_id or not os.environ.get("SHIPPING_CONFIG_TABLE"):
+        return True
+    try:
+        config = shipping_config_repository().get(tenant_id) or {}
+    except Exception:  # noqa: BLE001 - the preview must render even when the shipping config is unreadable
+        return True
+    return shipping_is_quotable(list((products_by_id or {}).values()), config)
 
 
 def handler(event, context, *, sites_repo=None, reviews_repo=None, events_repo=None):
@@ -202,6 +221,11 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None, events_repo=N
             events_by_id=_load_events_for_products(
                 str(page.get("tenant_id") or ""), products_by_id,
                 events_repository() if os.environ.get("EVENTS_TABLE") else None),
+            # THE PREVIEW HAS TO AGREE WITH THE PUBLISH. The shipping element disappears when the tenant's
+            # zones price by size and nothing on the offer is measured, and a preview that still drew it
+            # would show a page their visitors never get -- the same class of mismatch the events load
+            # above was added to fix.
+            shipping_quotable=_shipping_quotable(str(page.get("tenant_id") or ""), products_by_id),
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.

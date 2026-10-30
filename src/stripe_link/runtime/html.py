@@ -2569,6 +2569,11 @@ def render_page(
     preferences: dict[str, Any] | None = None,
     events_by_id: dict[str, dict[str, Any]] | None = None,
     kind: str = "",
+    # Whether a shipping price can be produced for this offer at all (shipping.shipping_is_quotable).
+    # Decided by the CALLER, which is the only layer holding the tenant's zones: neither this module nor
+    # the publisher loads them otherwise. Defaults True so every caller that has no opinion -- and every
+    # test that renders a page in isolation -- composes exactly as it did before.
+    shipping_quotable: bool = True,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -2690,7 +2695,7 @@ def render_page(
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
-            services_by_id, offers_by_id, kind,
+            services_by_id, offers_by_id, kind, shipping_quotable,
         )
     finally:
         _RENDER_DIMS_INDEX.clear()
@@ -2747,6 +2752,7 @@ def _render_page_body(
     services_by_id: dict[str, dict[str, Any]],
     offers_by_id: dict[str, dict[str, Any]],
     kind: str = "",
+    shipping_quotable: bool = True,
 ) -> str:
     # Resolve against the prices this PAGE shows. The offer's default_price_id may point at an upsell /
     # downsell / order-bump price, which belongs to the post-checkout flow — letting it through made the CTA
@@ -2791,7 +2797,11 @@ def _render_page_body(
     # WHETHER THIS OFFER SHIPS, which decides the shipping element's default. Read from the products the
     # renderer has already loaded rather than trusted from the offer alone, so a page whose offer predates
     # the denormalised flag still composes right -- the composer ORs the two.
-    ships_physical = any(
+    # ANDed with quotability. An unmeasured product on a live or by-box zone can never be priced, so the
+    # element would collect a postcode and then show an empty list forever. On `free`/`flat` the caller
+    # passes True and nothing changes -- those price fine with no dimensions, and taking their postcode
+    # field away is the 2026-10-06 $0-postage failure.
+    ships_physical = shipping_quotable and any(
         (product.get("fulfillment") or {}).get("requires_shipping")
         for product in (products_by_id or {}).values()
     )

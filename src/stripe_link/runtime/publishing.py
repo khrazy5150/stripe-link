@@ -62,6 +62,7 @@ from stripe_link.domain.custom_domains import (
     creator_hosting_domain, creator_page_url, creator_serving_enabled, site_index_records)
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
+from stripe_link.domain.shipping import shipping_is_quotable
 from stripe_link.runtime.upsell_pages import (
     synthesize_downsell_carousel_page,
     synthesize_thank_you_page,
@@ -1354,6 +1355,11 @@ def publish_page_document(
     tenant_profiles_repository: Any | None = None,
     experiments_repository: Any | None = None,
     events_repository: Any | None = None,
+    # The tenant's shipping ZONES, for one question: can a shipping price be produced for this offer at
+    # all? Nothing else in publish needs them, and they are not on the page or the offer -- the rule type
+    # is tenant-level and changes independently of both, so it cannot be denormalised onto either without
+    # going stale the next time the tenant switches from flat to live.
+    shipping_config_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -1555,13 +1561,25 @@ def publish_page_document(
             tenant_preferences, s3_client, os.environ.get("FONTS_BUCKET", ""),
         )
 
+    # CAN THIS OFFER'S SHIPPING BE PRICED? Only `live` and `flat_rate_box` zones read a dimension, so a
+    # flat or free store keeps its shipping element whatever is measured -- taking away the one field that
+    # collects a postcode is how an order shipped a Large box for $7.83 with $0 collected (2026-10-06).
+    # Best-effort: an unreadable config answers True, because the expensive mistake is hiding the element.
+    shipping_quotable = True
+    if shipping_config_repository is not None:
+        try:
+            shipping_config = shipping_config_repository.get(tenant_id) or {}
+            shipping_quotable = shipping_is_quotable(list(products_by_id.values()), shipping_config)
+        except Exception:  # noqa: BLE001 - a page must publish even when the shipping config is unreadable
+            logger.exception("shipping config unreadable for %s; leaving the element in place", tenant_id)
+
     def _render(robots: str, kind: str = "") -> str:
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
             bnpl_messaging=bnpl_messaging, preferences=tenant_preferences,
-            events_by_id=events_by_id, kind=kind,
+            events_by_id=events_by_id, kind=kind, shipping_quotable=shipping_quotable,
         )
 
     artifacts = []
