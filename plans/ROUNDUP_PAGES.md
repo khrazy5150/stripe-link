@@ -583,3 +583,66 @@ the panel above it.
 5. **How many entries before the page stops being good?** The reference has 88 and is the worse for it.
    `numbered_list` already has a `NUMBERED_LIST_MAX`. Decide whether a Roundup gets a cap, a warning, or
    nothing.
+
+---
+
+## P6 — The SEO goal's baseline, audited on a live page (2026-10-29)
+
+A published Roundup was read as a crawler sees it. It was `noindex` twice over — the free `jbay.be`
+address never indexes, and at **76 indexable words against the 150 floor** it would also have been
+demoted on a real domain, because `lead_roundup` is deliberately the one lead shape NOT exempt from the
+thin-content gate. Both are correct behaviour. What the audit found underneath them was not.
+
+**The goal decides, and that stands.** `search_seo` unions in `structured_data`, the breadcrumb and the
+prose/FAQ seeds; `paid_ads`, `minimal` and a page with no goal compose exactly as before. Nothing was
+moved into `lead_roundup`'s base sections and nothing is forced — the author's call, 2026-10-29: "an SEO
+goal must force the page into its own SEO baseline. If the tenant chooses any other goal you can skip the
+SEO mechanics." The work was making the baseline *correct when chosen*, not making it mandatory.
+
+Five fixes, all in `tests/test_roundup_seo_baseline.py`:
+
+1. **A page that sells nothing claims no price.** `product_json_ld` gated on `is_lead_composition`. The
+   composition excludes `checkout_cta`, `offer_price_selector`, `price_highlight` and `product_details`
+   precisely because "a price on the listing would be a second claim about money that can disagree with
+   the one on the offer page" — and the head then published exactly that claim, `Product` with
+   `offers.price` and `availability: InStock`, where nobody looks. A TIP JAR is not caught: it takes
+   money, so its markup should say so.
+
+2. **The description reads the headline that is on the page.** `is_offerless_page` is true for anything
+   carrying a `catalog_grid` and every Roundup has one, so the description came from
+   `offerless_description` — which looked for a `brand_hero`. A Roundup composes the ordinary `hero`,
+   whose tagline field is `subheadline`. Both came back empty, only the count survived, and every Roundup
+   on a Site published "Browse 2 products." above an h1 reading "2 Amazing Gift Ideas for 2026".
+   Now: `2 Amazing Gift Ideas for 2026 — These make great gifts! Browse 2 products.`
+
+3. **One heading per entry, and no skipped level.** The card title was a fixed `<h3>` because it "sits
+   under the grid's section heading" — optional, and a Roundup leaves it empty, so the page went h1
+   straight to h3 and `heading_outline_warnings` flagged the renderer's own output. The level now follows
+   whether the section has a heading (h2 headless, h3 under one) and the panel sits one below. The prose
+   and panel headlines also both fell back to the product name when an entry's offer had no headline of
+   its own, printing it twice; the PANEL's is dropped on a collision, because the prose title carries the
+   rank badge (`.sl-catalog-title::before` is the counter). A distinct offer headline brings it back —
+   the shape the author's own mock-up has.
+
+4. **ItemList — already worked, now pinned.** `collection_json_ld` covered `catalog_grid` all along; it
+   only ever needed the `structured_data` section the goal unions in. No new code. The full baseline is
+   now `Organization, WebSite, CollectionPage→ItemList, BreadcrumbList` — four nodes that agree with each
+   other and with the page, and no fifth claiming a sale.
+
+5. **A crop states its own size.** `rendition_base` matches the fixed rendition names, not
+   `custom_<w>x<h>_<suffix>.<ext>`, so a cropped image fell through to a full-URL sidecar lookup nothing
+   writes and published with no `width`/`height` — and an editorial entry's picture is always a crop. The
+   processor puts the output size in the filename (`image-processing/src/onDemandResize.js`), so
+   `crop_url_dims` reads it; the sidecar still wins when present, being measured rather than requested.
+
+**Still open, and NOT a code bug:** the hero `medium.webp` on that page carries no dimensions either.
+`collect_image_dims` already merges the page, offer, products, services and every linked offer, so the
+cause is a missing `image_dims` entry on that product — data, from an upload that predates the sidecar.
+The remedy is a re-upload or a backfill, not a renderer change; inventing a height from the rendition
+width would be a fabricated claim about an aspect ratio we have not measured.
+
+**The word floor is the real ranking blocker.** Two entries of product defaults — a category eyebrow, a
+one-line selling point, "Shop Now" — do not reach 150 words, and de-duplicating the headings correctly
+lowered the count further. The intro `content_block` and FAQ that `search_seo` seeds are what carry a
+Roundup over the floor; a tenant who leaves them empty still publishes a page too thin to index. Item 5
+above (the entry cap) and this are the same question from two ends: how much page there is per entry.

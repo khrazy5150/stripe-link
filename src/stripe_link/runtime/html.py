@@ -14,8 +14,8 @@ from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.coupon_grants import grant_prefix
 from stripe_link.domain.composition import (
-    compose_page, composition_key, default_cta_label, element_channel, offerless_composition,
-    shows_breadcrumb)
+    compose_page, composition_key, default_cta_label, element_channel, is_lead_composition,
+    offerless_composition, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -2090,6 +2090,28 @@ def _grid_item_count(page: dict[str, Any]) -> int:
     return total
 
 
+def _as_sentence(text: str) -> str:
+    """End a description fragment with one full stop, and only one.
+
+    The segments here were built as f-strings with a trailing "." and the tagline was `.rstrip(".")`ed to
+    stop a double stop. That handles a tagline ending in a period and nothing else, which was enough while
+    these were storefront taglines. A ROUNDUP's subheadline is marketing copy -- "These make great gifts!"
+    -- and it came out as "great gifts!." A question mark does the same. Strip whatever terminal
+    punctuation is already there, then add the one stop back.
+    """
+    stripped = str(text or "").strip().rstrip(".!?").rstrip()
+    if not stripped:
+        return ""
+    # The ORIGINAL mark is kept when it carries meaning. "!" and "?" are the author's tone and a full stop
+    # would flatten them; a bare "." was only ever punctuation we were about to re-add anyway.
+    #
+    # `mark and mark in "!?"`, not `mark in "!?"`. An empty string is a substring of every string, so the
+    # bare test is TRUE for a fragment that ended in no punctuation at all -- which returned it unchanged
+    # and dropped the full stop this function exists to add.
+    mark = str(text or "").strip()[len(stripped):].strip()[:1]
+    return f"{stripped}{mark if mark and mark in '!?' else '.'}"
+
+
 def offerless_description(page: dict[str, Any]) -> str:
     """The meta description for a page with NO offer — a storefront, a category page, a store profile.
 
@@ -2107,10 +2129,19 @@ def offerless_description(page: dict[str, Any]) -> str:
 
     No CTA is ever appended: "Order now" on a page with no checkout is a promise the page cannot keep.
     """
+    # EITHER HERO. `brand_hero` is the storefront/category/profile one; a ROUNDUP is routed here too --
+    # `is_offerless_page` is true for anything carrying a `catalog_grid`, and every Roundup has one -- but
+    # it composes the ordinary `hero`, whose tagline field is `subheadline`. Looking only for `brand_hero`
+    # left both values empty on a Roundup, so the description collapsed to the item count alone and every
+    # Roundup on a Site published "Browse 2 products." while its own h1 read "2 Amazing Gift Ideas for
+    # 2026". The words were on the page; this function could not see them.
+    #
+    # Read AFTER `expand_roundup_titles`, which resolves `{count}`/`{year}` in the hero section in place at
+    # publish, so the description carries the same resolved number as the h1 rather than a raw token.
     hero = next((s for s in (page.get("sections") or [])
-                 if isinstance(s, dict) and s.get("type") == "brand_hero"), {})
+                 if isinstance(s, dict) and s.get("type") in ("brand_hero", "hero")), {})
     headline = headline_plain_text(str(hero.get("headline") or "")).strip()
-    tagline = str(hero.get("tagline") or "").strip().rstrip(".")
+    tagline = str(hero.get("tagline") or hero.get("subheadline") or "").strip().rstrip(".")
     org_name = str(_RENDER_ORG.get("name") or "").strip()
     org_description = re.sub(r"[.\s]+$", "", str(_RENDER_ORG.get("description") or "").strip())
     is_profile = offerless_composition(page) == "store_profile"
@@ -2121,21 +2152,21 @@ def offerless_description(page: dict[str, Any]) -> str:
 
     segments: list[str] = []
     if headline and tagline:
-        segments.append(f"{headline} — {tagline}.")
+        segments.append(_as_sentence(f"{headline} — {tagline}"))
     elif headline:
         # Name the store alongside the page's own subject, so a category page reads "Widgets from Probe
         # Store" rather than the bare word a dozen other shops also use as a heading.
-        segments.append(f"{headline} from {org_name}." if org_name and org_name != headline
-                        else f"{headline}.")
+        segments.append(_as_sentence(f"{headline} from {org_name}") if org_name and org_name != headline
+                        else _as_sentence(headline))
     elif tagline:
-        segments.append(f"{tagline}.")
+        segments.append(_as_sentence(tagline))
     count = _grid_item_count(page)
     if count:
         segments.append(f"Browse {count} product{'s' if count != 1 else ''}.")
     # The business description is the LAST resort on a catalog page: borrowing it when the page already
     # said something of its own is what made two pages read identically.
     if org_description and not segments:
-        segments.append(f"{org_description}.")
+        segments.append(_as_sentence(org_description))
     text = re.sub(r"\s+", " ", " ".join(segments)).strip()
     return trim_meta(text, _DESC_MAX)
 
@@ -5701,7 +5732,19 @@ def product_json_ld(
     Everything here is stated by the tenant or computed from what the page displays. `itemCondition` comes
     from the product's `condition` field rather than assuming NewCondition: markup is a machine-readable
     claim, and asserting an unstated one is the same mistake as emitting a hand-typed rating.
+
+    NOT ON A PAGE THAT DOES NOT SELL. A lead shape excludes every price-bearing element by composition --
+    `lead_roundup` names checkout_cta, offer_price_selector, price_highlight and product_details in its
+    `excludes` precisely because "a price on the listing would be a second claim about money that can
+    disagree with the one on the offer page". The offer still carries items and prices, so this function
+    read one and published exactly that second claim, invisibly: a Roundup with no buy button anywhere on
+    it emitted `Product` with `offers.price` and `availability: InStock`. That is the same fabricated claim
+    the tip jar's `priceSpecification` exists to avoid, and it breaks the rule the rest of this file keeps
+    -- markup describes what is on the page. A TIP JAR is deliberately not caught here: it takes money, so
+    its markup should say so, and `is_lead_composition` is false for it.
     """
+    if is_lead_composition(offer):
+        return ""
     prices = landing_page_offer_prices(offer, products_by_id, services_by_id)
     if not prices:
         return ""
@@ -6197,6 +6240,39 @@ def described_alt(url: str, fallback: str) -> str:
     return _RENDER_ALTS_INDEX.get(base) or fallback
 
 
+# A CROP STATES ITS OWN SIZE. The processor writes `<base>custom_<w>x<h>_<suffix>.<ext>`
+# (image-processing/src/onDemandResize.js), so the output dimensions are in the filename and need no
+# sidecar at all. `rendition_base` does not match these -- its pattern is the fixed rendition names --
+# so a cropped image fell through to a full-URL sidecar lookup that nothing ever writes, and published
+# with no width/height. On a Roundup that is every entry picture, because an entry crops to a square.
+_CROP_URL_RE = re.compile(r"/custom_(?P<w>\d{1,5})x(?P<h>\d{1,5})_[^/]*\.(?:webp|jpe?g|png)$", re.IGNORECASE)
+
+
+def crop_url_dims(url: str) -> tuple[int, int] | None:
+    """(width, height) read off a processor crop URL, or None when it is not one."""
+    match = _CROP_URL_RE.search(str(url or ""))
+    if not match:
+        return None
+    width, height = int(match.group("w")), int(match.group("h"))
+    return (width, height) if width > 0 and height > 0 else None
+
+
+def _resolved_dims(url: str, dims: tuple[int, int] | None) -> tuple[int, int] | None:
+    """This image's intrinsic size: an explicit override, else the sidecar, else the crop's own filename.
+
+    The sidecar WINS over the filename. It is measured from the asset, while the filename states what
+    the crop was ASKED for -- the same answer in every case we know of, and the measured one is the one
+    to trust if they ever disagree.
+    """
+    if dims:
+        return dims
+    # Rendition URLs key by their shared base; external/custom URLs key by the full URL (that is how
+    # collect_image_dims normalizes them), so a non-rendition image can still carry dimensions.
+    base = rendition_base(url)
+    found = _RENDER_DIMS_INDEX.get(base) if base else _RENDER_DIMS_INDEX.get(url)
+    return found or crop_url_dims(url)
+
+
 def _dims_attrs(url: str, dims: tuple[int, int] | None) -> str:
     """width/height attributes for an <img>, from an explicit override or the render-scoped index.
 
@@ -6205,11 +6281,7 @@ def _dims_attrs(url: str, dims: tuple[int, int] | None) -> str:
     the attributes only inform crawlers; where it does not (listicle contain slots) they reserve the
     box. Absent dimensions emit nothing — identical to prior behavior.
     """
-    if dims is None:
-        # Rendition URLs key by their shared base; external/custom URLs key by the full URL (that is how
-        # collect_image_dims normalizes them), so a non-rendition image can still carry dimensions.
-        base = rendition_base(url)
-        dims = _RENDER_DIMS_INDEX.get(base) if base else _RENDER_DIMS_INDEX.get(url)
+    dims = _resolved_dims(url, dims)
     if not dims:
         return ""
     return f' width="{int(dims[0])}" height="{int(dims[1])}"'
@@ -8011,6 +8083,17 @@ def render_catalog_grid(
         entry_presentation = "image_left"
     # Both ordered layouts read the per-entry overrides; only the container and the chrome differ.
     ordered = layout in ("listicle", "editorial")
+    # THE CARD TITLE'S LEVEL FOLLOWS WHAT IS ABOVE IT. The cards were a fixed <h3> on the reasoning that
+    # they "sit under the grid's section heading" -- true only when the section HAS one. `heading` is
+    # optional and a Roundup leaves it empty, so the page went h1 (hero) straight to h3 and
+    # `heading_outline_warnings` flagged its own renderer's output: "The heading order skips from H1 to
+    # H3." Reading the heading here rather than at the return makes the level a fact about the section
+    # instead of a constant that happened to be right for the pages this started on.
+    heading = str(section.get("heading") or "").strip()
+    entry_level = 3 if heading else 2
+    # The panel is the same item presented again, not a new subsection, so it goes one level deeper --
+    # never a sibling of the title above it.
+    panel_level = entry_level + 1
     home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
     cards = []
     for item in section.get("items") or []:
@@ -8102,14 +8185,26 @@ def render_catalog_grid(
             # Insider Secrets" above, "Digital Marketing 101" in the ribbon.
             entry_name = (str((section.get("entry_headline") or {}).get(page_id) or "").strip()
                           or name or str(product.get("name") or "").strip())
-            headline_html = (f'<h3 class="sl-catalog-title">{render_headline_markup(entry_name)}</h3>'
+            headline_html = (f'<h{entry_level} class="sl-catalog-title">'
+                             f'{render_headline_markup(entry_name)}</h{entry_level}>'
                              if entry_name else "")
-            # The panel's own, styled by the ribbon's class. An <h3> like the prose rather than the
-            # ribbon's <h2>: both sit under the grid's section heading, so they are siblings in the
-            # outline -- which is also how they read on his page, two headings of equal rank per entry.
+            # The panel's own, styled by the ribbon's class, one level under the prose title above it.
             panel_name = (str((section.get("entry_ribbon_headline") or {}).get(page_id) or "").strip()
                           or str(product.get("name") or "").strip() or name)
-            panel_headline_html = (f'<h3 class="sl-ribbon-headline">{render_headline_markup(panel_name)}</h3>'
+            # NOT THE SAME WORDS TWICE. The two defaults were meant to differ -- the offer's sales line
+            # above, the product's name in the panel -- but an entry whose offer carries no headline of
+            # its own falls back to the offer NAME, which is usually the product name, so both resolved
+            # to "Security Mini Cam" and every entry published the heading twice.
+            #
+            # The PANEL's goes, not the prose one: the prose title is the entry's heading in the outline
+            # and the only thing wearing the rank badge (`.sl-catalog-title::before` is the counter), so
+            # dropping that would cost the number the whole layout is built around. Give an entry a
+            # distinct offer headline and the panel heading comes back, which is the shape the author's
+            # own mock-up has -- a sales line above, the product name in the ribbon.
+            if panel_name and entry_name and panel_name.casefold() == entry_name.casefold():
+                panel_name = ""
+            panel_headline_html = (f'<h{panel_level} class="sl-ribbon-headline">'
+                                   f'{render_headline_markup(panel_name)}</h{panel_level}>'
                                    if panel_name else "")
             # THE REASON TO BUY, product-level and asked once (Product.selling_point). The last resort is
             # deliberately bland: "Available now" states a fact about stock and claims nothing about the
@@ -8177,7 +8272,8 @@ def render_catalog_grid(
             inner = f'        <div class="sl-catalog-body">\n{body}\n        </div>'
         else:
             body = "\n".join(line for line in [
-                f'          <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
+                f'          <h{entry_level} class="sl-catalog-title">'
+                f'{render_headline_markup(name)}</h{entry_level}>',
                 (f"          {pitch_html}" if pitch_html else ""),
                 (f"          {price_html}" if price_html else ""),
             ] if line)
@@ -8197,7 +8293,7 @@ def render_catalog_grid(
                      else f'      {card}')
     if not cards:
         return ""
-    heading = str(section.get("heading") or "").strip()
+    # `heading` was read before the loop -- the card level depends on it.
     heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
     section_type = escape(str(section.get("type") or "catalog_grid"))
     # The <ol> is unchanged: the SECTION already carries `sl-layout-{layout}`, so editorial scopes its
