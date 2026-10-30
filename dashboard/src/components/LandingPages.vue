@@ -590,10 +590,24 @@
                         :key="pattern"
                         type="button"
                         class="secondary-action builder-chip"
-                        :disabled="!patternReady(pattern)"
-                        :title="patternReady(pattern) ? '' : 'Fill in the boxes above to use this one.'"
                         @click="applyHeadlinePattern(pattern)"
-                      >{{ pattern }}</button>
+                      >{{ fillBlanks(pattern) }}</button>
+                    </div>
+                    <p v-if="headlineBlankHint" class="field-error">{{ headlineBlankHint }}</p>
+                    <!-- THE HEADLINE THEY ALREADY HAVE. A blank that reached the field before these
+                         boxes existed -- or was pasted in -- had nowhere to go but a notice telling
+                         them to retype it by hand. One button finishes it instead. -->
+                    <div v-if="headlineHasBlanks.length" class="keys-status-banner is-prose">
+                      <span class="banner-line">
+                        <strong>Your headline still has a blank in it: {{ headlineBlankNames }}.</strong>
+                        That is a word for you to write, not something we fill in — only
+                        <code>{count}</code> and <code>{year}</code> do that.
+                      </span>
+                      <span class="banner-line">
+                        <button type="button" class="primary-action"
+                                :disabled="headlineHasBlanks.some((b) => !headlineBlanks[b.token].trim())"
+                                @click="fillHeadlineBlanks">Put my words in</button>
+                      </span>
                     </div>
                   </div>
                   <label class="offer-field">
@@ -3285,12 +3299,42 @@ function blanksIn(pattern) {
 function patternReady(pattern) {
   return blanksIn(pattern).every((blank) => headlineBlanks[blank.token].trim());
 }
+// What the tenant still has to say before a pattern (or their current headline) is finished.
+const headlineBlankHint = ref("");
+
+/** The tenant-owned blanks sitting in the headline right now, if any. */
+const headlineHasBlanks = computed(() => blanksIn(builder.headline || ""));
+// Built here rather than in the template: a template literal inside a mustache is a parse error.
+const headlineBlankNames = computed(() =>
+  headlineHasBlanks.value.map((blank) => "{" + blank.token + "}").join(", "));
+
 function applyHeadlinePattern(pattern) {
-  let headline = pattern;
-  for (const blank of blanksIn(pattern)) {
-    headline = headline.replace(`{${blank.token}}`, headlineBlanks[blank.token].trim());
+  const missing = blanksIn(pattern).find((blank) => !headlineBlanks[blank.token].trim());
+  if (missing) {
+    // NOT DISABLED. The first cut greyed the patterns out until the boxes were filled, which blocked
+    // the tenant without telling them why -- "I can't select other choices either" (2026-10-30). The
+    // button works; it just says what it still needs.
+    headlineBlankHint.value = `${missing.label} Fill that in and pick a pattern again.`;
+    return;
   }
-  builder.headline = headline;
+  headlineBlankHint.value = "";
+  builder.headline = fillBlanks(pattern);
+}
+
+/** Substitute every blank we have words for, leaving any we do not. */
+function fillBlanks(text) {
+  let out = text;
+  for (const blank of HEADLINE_BLANKS) {
+    const value = headlineBlanks[blank.token].trim();
+    if (value) out = out.replace(new RegExp(`\\{${blank.token}\\}`, "gi"), value);
+  }
+  return out;
+}
+
+/** Repair a headline that already carries a blank -- including one typed or published long ago. */
+function fillHeadlineBlanks() {
+  headlineBlankHint.value = "";
+  builder.headline = fillBlanks(builder.headline || "");
 }
 
 // The two ticks the author asked for: type "Amazing Gift Ideas", tick both, publish "2 Amazing Gift Ideas

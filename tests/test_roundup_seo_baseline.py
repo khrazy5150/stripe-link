@@ -613,8 +613,24 @@ class APatternsBlanksAreFilledBeforeItBecomesAHeadlineTests(unittest.TestCase):
         self.assertNotIn('@click="builder.headline = pattern"', self.VUE)
         self.assertIn('@click="applyHeadlinePattern(pattern)"', self.VUE)
 
-    def test_a_pattern_is_unusable_until_its_blanks_are_filled(self):
-        self.assertIn(':disabled="!patternReady(pattern)"', self.VUE)
+    def test_a_pattern_is_never_greyed_out(self):
+        """The first cut disabled the chips until the boxes were filled, which blocked the tenant
+        without telling them why -- "I can't select other choices either" (2026-10-30). The button
+        works; it says what it still needs."""
+        self.assertNotIn(':disabled="!patternReady(pattern)"', self.VUE)
+        self.assertIn("headlineBlankHint.value = ", self.VUE)
+
+    def test_a_headline_that_already_has_a_blank_can_be_repaired_in_place(self):
+        """A blank that reached the field before these boxes existed -- or was pasted in -- had nowhere
+        to go but a notice telling the tenant to retype it by hand."""
+        self.assertIn("function fillHeadlineBlanks()", self.VUE)
+        self.assertIn("Put my words in", self.VUE)
+        self.assertIn('v-if="headlineHasBlanks.length"', self.VUE)
+
+    def test_the_repair_is_case_insensitive(self):
+        """The field title-cases as you type, which is how `{things}` became `{Things}` -- a
+        case-sensitive substitution would leave exactly the headline that caused this."""
+        self.assertIn('"gi"', self.VUE)
 
     def test_every_tenant_owned_blank_has_a_field(self):
         """Driven off the shipped patterns, so one added later with a new blank fails here rather than
