@@ -21,6 +21,7 @@ from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
     heading_outline_warnings,
+    stale_year_warnings,
     thin_content_warnings,
     render_page,
     structured_data_warnings,
@@ -213,7 +214,13 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None, events_repo=N
                 # Quality baseline (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4): heading outline +
                 # accessibility (CLS next) + the SEO-08 thin-content floor. Checked on the rendered HTML —
                 # the source of truth for what ships.
-                "page_health": heading_outline_warnings(html, offer) + accessibility_warnings(html) + thin_content_warnings(html, offer, page),
+                #
+                # `stale_year_warnings` reads the DOCUMENT, not the html, and that is the point: this
+                # preview re-renders now, so the year in front of the tenant is always current while the
+                # live artifact may be a year behind. The only place that gap is visible is the stored
+                # `updated_at`.
+                "page_health": (heading_outline_warnings(html, offer) + accessibility_warnings(html)
+                                + thin_content_warnings(html, offer, page) + stale_year_warnings(page)),
             },
         })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:

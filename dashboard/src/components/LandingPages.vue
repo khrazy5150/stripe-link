@@ -825,10 +825,30 @@
                 <small class="field-note">
                   Which products appear here comes from this page's collection, and the grid refreshes itself
                   every time you publish — a new product page on this Site shows up on its own.
-                  <template v-if="!builder.catalog_grid.collection_id">
-                    This page has no collection yet, so the grid will not render.
-                  </template>
                 </small>
+                <!-- The grid is EMPTY and nothing else on this screen would say so. Phrased as the step it
+                     is, with the button that takes it: a notice that only describes a problem on another
+                     screen leaves the tenant to find it. -->
+                <div v-if="!builder.catalog_grid.collection_id || gridCollectionIsEmpty"
+                     class="keys-status-banner is-prose">
+                  <span v-if="!builder.catalog_grid.collection_id" class="banner-line">
+                    <strong>This grid has no collection yet.</strong>
+                    A collection is the list of pages the grid shows, so until there is one this element
+                    renders nothing.
+                  </span>
+                  <span v-else class="banner-line">
+                    <strong>“{{ gridCollection?.name || "This collection" }}” has no pages in it yet.</strong>
+                    The grid shows the pages in its collection, so it will render nothing until you add some.
+                  </span>
+                  <span v-if="navigateTo" class="banner-line">
+                    <button type="button" class="primary-action" @click="openGridCollection">
+                      {{ builder.catalog_grid.collection_id ? "Add pages to this collection" : "Go to Collections" }}
+                    </button>
+                  </span>
+                  <span v-if="navigateTo && !leavingBuilderLosesWork" class="banner-line">
+                    Your page is saved first.
+                  </span>
+                </div>
                 <!-- Filled in from each entry's own product the first time this opens (name, category,
                      pitch, reason to buy) so the tenant edits wording rather than inventing it. Anything
                      emptied still publishes: the renderer applies the same ladder for a box left blank. -->
@@ -2831,6 +2851,20 @@
       </section>
     </div>
 
+    <!-- A published page does not auto-save, so its builder edits exist only here. Asked rather than
+         saved on their behalf, because the only way to save a published page IS to publish it, and
+         publishing something a tenant was still editing is not a thing to do without being told to. -->
+    <ConfirmDialog
+      :open="pendingCollectionHandoff"
+      title="Leave this page?"
+      confirm-label="Leave"
+      @cancel="pendingCollectionHandoff = false"
+      @confirm="goToGridCollection"
+    >
+      This page is published, so changes you have made here are not saved yet — and saving a published page
+      means publishing it. Publish first if you want to keep them; otherwise they will be lost.
+    </ConfirmDialog>
+
     <ConfirmDialog
       :open="!!pendingArchivePage"
       danger
@@ -3272,6 +3306,60 @@ const roundupEntries = computed(() => {
     return { page_id: pageId, name: page?.name || pageId, defaults: roundupEntryDefaults(page) };
   });
 });
+
+// The Collection this grid embeds, when the page has one.
+const gridCollection = computed(() => {
+  const collectionId = builder.catalog_grid.collection_id;
+  if (!collectionId) return null;
+  return (collectionsStore.collections || []).find((c) => c.collection_id === collectionId) || null;
+});
+
+// A grid whose Collection has no pages in it renders NOTHING, and nothing on the screen said so.
+//
+// The element reads as broken rather than as unfinished: the editor offers a heading, a layout and a panel
+// style, the preview stays empty whatever is picked, and the one thing that would fill it is a document on
+// another screen that the tenant has no reason to know exists. The author's words, 2026-10-30: "there is
+// nothing telling tenants to do this, and the element will feel broken."
+//
+// ONLY a manual collection. `all` and `category` fill themselves from the Site's route map as pages
+// publish, so an empty one is a page that has not been written yet, not a step the tenant has missed --
+// and a notice naming an action that is not theirs to take is the kind that teaches people to ignore the
+// panel.
+const gridCollectionIsEmpty = computed(() => {
+  const collection = gridCollection.value;
+  if (!collection || (collection.rule || "manual") !== "manual") return false;
+  return !(collection.members || []).length;
+});
+
+// Whether leaving the builder right now would cost the tenant anything.
+//
+// A DRAFT auto-saves, so there is nothing to lose and nothing to ask. A PUBLISHED page does not: the Save
+// button is disabled for it and `autoSavePage` returns early, by design -- saving must never become
+// publishing. So its builder edits live only in memory, and walking to another screen would drop them
+// silently. That is the one case worth a question.
+const leavingBuilderLosesWork = computed(() => builderOpen.value && isBuilderPublished.value);
+const pendingCollectionHandoff = ref(false);
+
+/** Go to this grid's Collection, having first made sure the page survives the trip. */
+async function openGridCollection() {
+  if (!navigateTo) return;
+  if (leavingBuilderLosesWork.value) {
+    pendingCollectionHandoff.value = true;
+    return;
+  }
+  // Drafts only, and this is the builder's own save -- the same one every element editor calls on Done.
+  await autoSavePage();
+  goToGridCollection();
+}
+
+function goToGridCollection() {
+  pendingCollectionHandoff.value = false;
+  const collectionId = builder.catalog_grid.collection_id;
+  // No collection yet means there is nothing to open, so the screen itself is the destination -- the
+  // tenant makes one there and comes back. Sending an `edit` for an id that does not exist would land
+  // them on the list with no modal and no explanation, which is worse than arriving deliberately.
+  navigateTo("collections", collectionId ? { edit: collectionId } : null);
+}
 
 // The five boxes an editorial entry has. Named once so the seeder, the save and the renderer's own ladder
 // cannot end up disagreeing about how many there are.

@@ -13,6 +13,7 @@ import json
 import pathlib
 import re
 import unittest
+from datetime import datetime, timezone
 
 from stripe_link.runtime.html import (
     _as_sentence,
@@ -22,6 +23,7 @@ from stripe_link.runtime.html import (
     product_json_ld,
     render_page,
     responsive_img,
+    stale_year_warnings,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -415,3 +417,86 @@ class ACropStatesItsOwnSizeTests(unittest.TestCase):
         tag = responsive_img(self.CROP, "Security Mini Cam", sizes="22rem", dims=(800, 450))
         self.assertIn('width="800"', tag)
         self.assertIn('height="450"', tag)
+
+
+class TheYearGoesStaleAndNobodyIsToldTests(unittest.TestCase):
+    """`{year}` resolves AT PUBLISH and the artifact is then static on the CDN.
+
+    So a Roundup headlined "29 Gift Ideas for 2026" still says 2026 on the 1st of January, and the
+    builder promises the opposite in as many words -- "kept up to date every time you publish". Nothing
+    republishes on a schedule, so without a notice the tenant has no reason to suspect it.
+
+    ACTIONABLE, which is the bar: saving the page writes the document, the stream re-renders the
+    artifact, and the year resolves again. They must NOT unpublish -- that deletes the live artifact
+    first, so an indexed URL 404s until they publish again.
+    """
+
+    @staticmethod
+    def _page(headline="{count} Gifts for {year}", *, status="published", years_ago=1, seo_title=""):
+        now = datetime.now(timezone.utc)
+        stamp = int(datetime(now.year - years_ago, 6, 1, tzinfo=timezone.utc).timestamp())
+        page = {"status": status, "updated_at": stamp,
+                "sections": [{"id": "h", "type": "hero", "headline": headline}]}
+        if seo_title:
+            page["seo"] = {"title": seo_title}
+        return page
+
+    def test_a_published_page_a_year_behind_is_flagged(self):
+        warnings = stale_year_warnings(self._page())
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(str(datetime.now(timezone.utc).year), warnings[0])
+
+    def test_the_notice_names_the_action_that_works(self):
+        """Not "unpublish and republish" -- that deletes the live artifact and 404s the URL in between."""
+        text = stale_year_warnings(self._page())[0]
+        self.assertIn("Save the page", text)
+        self.assertNotIn("unpublish", text.lower())
+
+    def test_a_page_published_this_year_is_not_flagged(self):
+        self.assertEqual(stale_year_warnings(self._page(years_ago=0)), [])
+
+    def test_a_draft_is_not_flagged(self):
+        """There is no live artifact to be stale, so there is nothing to fix."""
+        self.assertEqual(stale_year_warnings(self._page(status="draft")), [])
+
+    def test_a_headline_that_only_counts_is_not_flagged(self):
+        """`{count}` is re-resolved whenever the list changes; it does not go out of date on New Year."""
+        self.assertEqual(stale_year_warnings(self._page("{count} Gift Ideas")), [])
+
+    def test_a_literal_year_is_not_flagged(self):
+        """Nothing to re-resolve: saving would change nothing, so the notice would be a dead end."""
+        self.assertEqual(stale_year_warnings(self._page("29 Gift Ideas for 2026")), [])
+
+    def test_the_seo_title_counts_too(self):
+        """`expand_roundup_titles` rewrites it alongside the hero, so it is equally able to go stale."""
+        page = self._page(headline="Gift Ideas", seo_title="Gift Ideas for {year}")
+        self.assertEqual(len(stale_year_warnings(page)), 1)
+
+    def test_a_missing_timestamp_says_nothing(self):
+        """An unreadable `updated_at` cannot show a gap, and guessing one would warn about a page that
+        may be perfectly current. Silence is the honest answer."""
+        for value in (None, "", "not-a-number", {}):
+            with self.subTest(updated_at=value):
+                page = dict(self._page(), updated_at=value)
+                self.assertEqual(stale_year_warnings(page), [])
+
+    def test_nothing_at_all_says_nothing(self):
+        self.assertEqual(stale_year_warnings(None), [])
+        self.assertEqual(stale_year_warnings({}), [])
+
+    def test_it_is_measured_against_the_write_not_the_first_publish(self):
+        """`published_at` records when the status MOVED to published, so it does not advance on a
+        re-save: a page published in December and saved in February would keep this notice forever,
+        having already fixed itself. The render follows the write, so `updated_at` is the one to read."""
+        source = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        body = source.split("def stale_year_warnings", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('page.get("updated_at")', body)
+        self.assertNotIn('page.get("published_at")', body)
+
+    def test_the_builder_is_told(self):
+        """A warning nothing surfaces is a warning nobody reads. It rides the page_health channel the
+        builder already renders, beside the thin-content and outline notices."""
+        handler = (ROOT / "src" / "handlers" / "page_render.py").read_text(encoding="utf-8")
+        self.assertIn("stale_year_warnings", handler)
+        health = handler.split('"page_health":', 1)[1].split("\n            }", 1)[0]
+        self.assertIn("stale_year_warnings(page)", health)

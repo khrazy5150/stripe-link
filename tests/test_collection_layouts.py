@@ -1013,3 +1013,75 @@ class PerEntryPitchTests(unittest.TestCase):
     def test_the_pitch_is_escaped(self):
         self.assertEqual(self._pitches(entry_copy={"p1": "Under <$60> & tidy"})[0],
                          "Under &lt;$60&gt; &amp; tidy")
+
+
+class AnEmptyGridSaysSoAndOffersTheFixTests(unittest.TestCase):
+    """A grid whose Collection has no pages renders NOTHING, and nothing on the screen said so.
+
+    The element read as broken rather than unfinished: the editor offers a heading, a layout and a panel
+    style, the preview stays empty whatever is picked, and the one thing that would fill it is a document
+    on another screen the tenant has no reason to know exists. The author, 2026-10-30: "there is nothing
+    telling tenants to do this, and the element will feel broken."
+    """
+
+    ROOT = pathlib.Path(__file__).resolve().parents[1]
+    VUE = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+    COLLECTIONS = (ROOT / "dashboard" / "src" / "components" / "Collections.vue").read_text(encoding="utf-8")
+    FLAT = re.sub(r"\s+", " ", VUE)
+
+    def test_an_empty_manual_collection_is_detected(self):
+        self.assertIn("const gridCollectionIsEmpty = computed", self.VUE)
+        self.assertIn('return !(collection.members || []).length;', self.VUE)
+
+    def test_a_self_filling_collection_is_not_nagged(self):
+        """`all` and `category` fill themselves from the Site's route map as pages publish, so an empty
+        one is a page not yet written rather than a step the tenant missed. A notice naming an action
+        that is not theirs to take is the kind that teaches people to ignore the panel."""
+        block = self.VUE.split("const gridCollectionIsEmpty", 1)[1].split("});", 1)[0]
+        self.assertIn('(collection.rule || "manual") !== "manual"', block)
+
+    def test_the_notice_carries_the_button(self):
+        """A notice that only describes a problem on another screen leaves the tenant to find it."""
+        self.assertIn("openGridCollection", self.VUE)
+        self.assertIn("Add pages to this collection", self.VUE)
+
+    def test_it_reuses_the_apps_own_banner(self):
+        """Not a new callout class with the banner's values copied into it."""
+        self.assertIn('class="keys-status-banner is-prose"', self.FLAT)
+
+    def test_the_handoff_names_the_collection(self):
+        """Arriving on the Collections list with no modal and no explanation is barely better than
+        being told to go there. The shell's intent carries which one to open."""
+        self.assertIn('navigateTo("collections", collectionId ? { edit: collectionId } : null)', self.VUE)
+
+    def test_it_reuses_the_shells_existing_handoff(self):
+        """`navigateTo`/`takeViewIntent` were provided in App.vue in 2026-09 for the product wizard.
+        A second navigation mechanism beside it would be two answers to one question."""
+        app = (self.ROOT / "dashboard" / "src" / "App.vue").read_text(encoding="utf-8")
+        self.assertIn('provide("navigateTo"', app)
+        self.assertFalse((self.ROOT / "dashboard" / "src" / "stores" / "navigation.js").exists())
+
+    def test_collections_opens_what_it_was_sent_for(self):
+        self.assertIn('const takeViewIntent = inject("takeViewIntent", null);', self.COLLECTIONS)
+        self.assertIn("if (row) openEdit(row);", self.COLLECTIONS)
+
+    def test_it_opens_after_the_pages_load(self):
+        """The member picker draws its candidates from `pages`, so opening the modal before that
+        resolves shows a collection with nothing available to add -- the exact impression the hand-off
+        exists to prevent."""
+        mounted = self.COLLECTIONS.split("onMounted(async () => {", 1)[1].split("\n});", 1)[0]
+        self.assertLess(mounted.index('apiRequest("/pages")'), mounted.index("takeViewIntent"))
+
+    def test_a_draft_is_saved_before_leaving(self):
+        block = self.VUE.split("async function openGridCollection", 1)[1].split("\n}", 1)[0]
+        self.assertIn("await autoSavePage();", block)
+
+    def test_a_published_page_is_asked_rather_than_saved(self):
+        """A published page does not auto-save -- the Save button is disabled for it and `autoSavePage`
+        returns early, by design, because saving must never become publishing. So its builder edits live
+        only in memory, and the only way to keep them is to publish. That is a decision to hand back."""
+        self.assertIn("const leavingBuilderLosesWork = computed(() => builderOpen.value && isBuilderPublished.value);",
+                      self.VUE)
+        block = self.VUE.split("async function openGridCollection", 1)[1].split("\n}", 1)[0]
+        self.assertIn("pendingCollectionHandoff.value = true;", block)
+        self.assertIn('@confirm="goToGridCollection"', self.VUE)

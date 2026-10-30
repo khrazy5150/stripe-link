@@ -15,7 +15,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_typ
 from stripe_link.domain.coupon_grants import grant_prefix
 from stripe_link.domain.composition import (
     compose_page, composition_key, default_cta_label, element_channel, expand_title_tokens,
-    is_lead_composition, offerless_composition, shows_breadcrumb)
+    has_year_token, is_lead_composition, offerless_composition, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -5224,6 +5224,50 @@ def accessibility_warnings(html: str) -> list[str]:
         noun = "image is" if missing == 1 else "images are"
         return [f"{missing} {noun} missing alt text. Describe each image so screen readers and search engines can use it."]
     return []
+
+
+def stale_year_warnings(page: dict[str, Any] | None = None) -> list[str]:
+    """A published page whose headline says last year (plans/ROUNDUP_PAGES.md).
+
+    `{year}` is resolved AT PUBLISH and the artifact is then static on the CDN, so a Roundup headlined
+    "29 Gift Ideas for 2026" still says 2026 on the 1st of January. Nothing republishes on a schedule,
+    and the builder promises the opposite in as many words -- "kept up to date every time you publish" --
+    so the tenant has no reason to suspect it and no way to notice.
+
+    ACTIONABLE, which is the whole bar for a notice here: saving the page writes the document, the stream
+    re-renders the artifact, and the year is resolved again. The tenant does not need to unpublish, and
+    should not -- that deletes the live artifact first, so an indexed URL 404s until they publish again.
+
+    Measured against `updated_at`, NOT `published_at`. `published_at` records when the status moved to
+    published, so it does not move on a re-save: a page published in December and saved in February would
+    keep this notice forever, having already fixed itself. `updated_at` is the write that triggered the
+    render, so for a published page the live artifact carries the year of that moment.
+
+    Only the fields `expand_roundup_titles` actually rewrites are checked -- `seo.title` and the hero
+    sections. A token anywhere else is not something saving would fix, and a notice naming an action that
+    does not work is worse than none.
+    """
+    page = page or {}
+    if str(page.get("status") or "") != "published":
+        return []
+    rendered_at = page.get("updated_at")
+    try:
+        rendered_year = datetime.fromtimestamp(int(rendered_at), tz=timezone.utc).year
+    except (TypeError, ValueError, OSError, OverflowError):
+        return []
+    current_year = datetime.now(timezone.utc).year
+    if rendered_year >= current_year:
+        return []
+    fields = [str((page.get("seo") or {}).get("title") or "")]
+    for section in page.get("sections") or []:
+        if isinstance(section, dict) and section.get("type") == "hero":
+            fields.extend([str(section.get("headline") or ""), str(section.get("subheadline") or "")])
+    if not any(has_year_token(field) for field in fields):
+        return []
+    return [
+        f"This page's headline shows the year, and it was last published in {rendered_year}. Save the "
+        f"page to republish it as {current_year} — the live page keeps the old year until you do."
+    ]
 
 
 THIN_CONTENT_MIN_WORDS = 150

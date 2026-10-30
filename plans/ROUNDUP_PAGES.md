@@ -646,3 +646,44 @@ one-line selling point, "Shop Now" — do not reach 150 words, and de-duplicatin
 lowered the count further. The intro `content_block` and FAQ that `search_seo` seeds are what carry a
 Roundup over the floor; a tenant who leaves them empty still publishes a page too thin to index. Item 5
 above (the entry cap) and this are the same question from two ends: how much page there is per entry.
+
+---
+
+## P7 — Two things the tenant could not see (2026-10-30)
+
+**The year goes stale silently.** `{year}` resolves at publish and the artifact is then static on the
+CDN, so a Roundup headlined "29 Gift Ideas for 2026" still says 2026 on the 1st of January — while the
+builder promises the opposite in as many words, "kept up to date every time you publish". Nothing
+republishes on a schedule, so there was no moment at which anyone would find out.
+
+`stale_year_warnings` rides the existing `page_health` channel beside the thin-content and outline
+notices. Measured against **`updated_at`, not `published_at`**: `published_at` records when the status
+moved to published and does not advance on a re-save, so a page published in December and saved in
+February would keep the notice forever, having already fixed itself.
+
+The remedy it names is **save**, not unpublish. Unpublishing deletes the live artifact
+(`delete_page_artifacts` on the published→draft transition), so an indexed URL 404s until the tenant
+publishes again — the worst possible answer on the one page type that earned its ranking. A save writes
+the document, the stream re-renders, and the year resolves again with no gap.
+
+Only `{year}` triggers it. `{count}` is re-resolved whenever the list changes and does not go out of
+date when the calendar turns; a literal "2026" typed by hand triggers nothing either, because saving
+would not change it and a notice naming an action that does not work is worse than none.
+
+**A grid with an empty Collection reads as broken.** The editor offers a heading, a layout and a panel
+style; the preview stays empty whatever is picked; and the one thing that would fill it is a document on
+another screen the tenant has no reason to know exists. The author, 2026-10-30: "there is nothing telling
+tenants to do this, and the element will feel broken."
+
+The editor now says so and carries the button. The hand-off reuses `navigateTo`/`takeViewIntent`, which
+App.vue has provided since 2026-09 for the product wizard — a second navigation mechanism beside it would
+have been two answers to one question. Collections consumes the intent **after** its pages load, because
+the member picker draws candidates from them and an empty picker is the same wrong impression again.
+
+Only a MANUAL collection is flagged. `all` and `category` fill themselves as pages publish, so an empty
+one is a page not yet written rather than a step missed.
+
+Leaving the builder is handled rather than assumed: a draft auto-saves, so it is saved and the tenant
+goes. A PUBLISHED page does not auto-save — the Save button is disabled for it and `autoSavePage` returns
+early, deliberately, because saving must never become publishing — so its builder edits live only in
+memory and the only way to keep them is to publish. That is a decision handed back, not taken.

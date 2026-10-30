@@ -158,7 +158,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, toRaw } from "vue";
+import { computed, inject, onMounted, reactive, ref, toRaw } from "vue";
 import { apiRequest } from "../api/client";
 import { useCollectionsStore } from "../stores/collections";
 import { useSitesStore } from "../stores/sites";
@@ -168,6 +168,10 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 const store = useCollectionsStore();
 const sitesStore = useSitesStore();
 const productsStore = useProductsStore();
+// Why this screen was opened, when it was opened BY another one. A Roundup's Product grid renders nothing
+// until its Collection has pages in it, and the grid's editor sends the tenant straight here with that
+// collection named rather than describing which of their collections to go and find.
+const takeViewIntent = inject("takeViewIntent", null);
 
 const pages = ref([]);           // all landing pages (GET /pages) — for member names/slugs + candidate lists
 const editing = ref(null);       // working copy of the collection in the modal, or null when closed
@@ -328,6 +332,14 @@ onMounted(async () => {
   } catch {
     pages.value = [];
   }
+  // AFTER the pages load, not beside it. The editor's member picker draws its candidates from `pages`,
+  // so opening the modal first shows a collection with nothing available to add -- which is the exact
+  // impression the hand-off exists to prevent.
+  const intent = takeViewIntent?.();
+  if (!intent?.edit) return;
+  await store.ensureLoaded();
+  const row = (store.collections || []).find((c) => c.collection_id === intent.edit);
+  if (row) openEdit(row);
 });
 </script>
 

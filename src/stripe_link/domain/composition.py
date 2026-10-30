@@ -468,6 +468,17 @@ def has_title_tokens(text: str) -> bool:
     return bool(text) and bool(_COUNT_TOKEN.search(str(text)) or _YEAR_TOKEN.search(str(text)))
 
 
+def has_year_token(text: str) -> bool:
+    """`{year}` specifically, for the stale-year notice.
+
+    Separate from `has_title_tokens` because the two go stale for different reasons and on different
+    clocks: `{count}` is re-resolved whenever the list changes and is wrong only if the list changed
+    without a publish, while `{year}` is wrong for everyone on the 1st of January. A headline that
+    only counts its items does not go out of date when the calendar turns.
+    """
+    return bool(text) and bool(_YEAR_TOKEN.search(str(text)))
+
+
 def default_cta_label(offer: dict[str, Any]) -> str:
     """What this page's button says when the tenant has not written their own.
 
