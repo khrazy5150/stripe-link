@@ -532,6 +532,24 @@
       "rank": 10,
       "order_mode": "ordered"
     },
+    "buyer_guarantees": {
+      "placement": "free",
+      "label": "Buyer guarantees",
+      "ui": "toggle",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "guarantee_bg",
+        "guarantee_border",
+        "guarantee_title",
+        "guarantee_text"
+      ],
+      "slot": "reassure",
+      "rank": 11,
+      "order_mode": "ordered"
+    },
     "legal_footer": {
       "placement": "pinned_bottom",
       "label": "Footer",
@@ -829,6 +847,7 @@
     "offer_price_selector",
     "checkout_cta",
     "refund_policy",
+    "buyer_guarantees",
     "legal_footer",
     "structured_data",
     "shipping"

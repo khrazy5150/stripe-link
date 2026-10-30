@@ -6,6 +6,8 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_tenant_config
+from stripe_link.domain.buyer_guarantees import resolve as resolve_buyer_guarantees
+from stripe_link.domain.buyer_guarantees import vocabulary as buyer_guarantee_vocabulary
 from stripe_link.domain.refund_policy import (
     CLASSES as REFUND_CLASSES,
     RefundPolicyError,
@@ -77,12 +79,19 @@ def _refund_payload(config, event):
         # must take is the only kind worth showing, so it appears only while there is one to take: no
         # policy set at all (plans/REFUND_POLICY_AND_GUARANTEES.md P2).
         "refund_policies_unset": [cls for cls in REFUND_CLASSES if cls not in policies],
+        # The tenant's delivery and price promises, resolved -- enabled ones only, in canonical order,
+        # each carrying the sentence the page will print. Generated server-side and regenerated on every
+        # read, so the screen previews exactly what publishes (P4).
+        "buyer_guarantees": resolve_buyer_guarantees(config),
     }
     # The vocabulary carries a generated sentence for all 126 class/window/condition combinations, because the
     # server must stay the only thing that can author a commercial promise -- a JavaScript copy of that
     # template is exactly how the literal in stores/products.js came to be published.
     if str(query_params(event).get("refund_options") or "").strip() in {"1", "true", "yes"}:
         payload["refund_policy_options"] = refund_policy_vocabulary()
+        # Rides the same flag rather than inventing a sibling: both are the settings screen's pickers,
+        # and a second flag would be a second thing for a caller to know about.
+        payload["buyer_guarantee_options"] = buyer_guarantee_vocabulary()
     return payload
 
 

@@ -63,6 +63,7 @@ from stripe_link.domain.custom_domains import (
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.shipping import shipping_is_quotable
+from stripe_link.domain import buyer_guarantees as buyer_guarantees_module
 from stripe_link.domain import refund_policy as refund_policy_module
 from stripe_link.runtime.upsell_pages import (
     synthesize_downsell_carousel_page,
@@ -1584,6 +1585,13 @@ def publish_page_document(
     if platform_config_repository is not None:
         try:
             tenant_config = platform_config_repository.get(tenant_id) or {}
+            # The guarantees travel the same road for the same reason: generated server-side, baked into
+            # the artifact, refreshed at every publish. A wording fix in the module reaches every page
+            # without a tenant editing anything.
+            resolved_guarantees = buyer_guarantees_module.resolve(tenant_config)
+            for section in page.get("sections") or []:
+                if isinstance(section, dict) and section.get("type") == "buyer_guarantees":
+                    section["guarantees"] = resolved_guarantees
             for product in products_by_id.values():
                 resolved = refund_policy_module.resolve(tenant_config=tenant_config, product=product)
                 if resolved.get("mode") == "unset":

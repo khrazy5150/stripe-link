@@ -5,6 +5,21 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "document_type", "tenant_id"],
+  "$defs": {
+    "buyerGuarantee": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365,
+          "description": "The clock this promise runs on. Absent where it has none (damaged_in_transit). Clamped by domain/buyer_guarantees.clamp_days on the way in and out."
+        }
+      }
+    }
+  },
   "properties": {
     "schema_version": { "type": "string", "const": "2026-05-29" },
     "document_type": { "type": "string", "const": "tenant_config" },
@@ -130,10 +145,22 @@
         "terms_url": { "type": "string" },
         "privacy_url": { "type": "string" },
         "refund_url": { "type": "string" },
+        "buyer_guarantees": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Promises about things going WRONG -- delivery and price -- which no refund-window vocabulary can express (plans/REFUND_POLICY_AND_GUARANTEES.md P4). Each is independently enabled; a tenant who enables none renders no section. The SENTENCE is generated server-side in domain/buyer_guarantees.py and regenerated on every read, so stored wording can never drift from the module's. These are the TENANT's promises -- the platform does not back them.",
+          "properties": {
+            "damaged_in_transit": { "$ref": "#/$defs/buyerGuarantee" },
+            "no_delivery_refund": { "$ref": "#/$defs/buyerGuarantee" },
+            "no_tracking_update_refund": { "$ref": "#/$defs/buyerGuarantee" },
+            "price_match": { "$ref": "#/$defs/buyerGuarantee" },
+            "price_adjustment": { "$ref": "#/$defs/buyerGuarantee" }
+          }
+        },
         "refund_policies": {
           "type": "object",
           "additionalProperties": false,
-          "description": "The tenant's DEFAULT refund terms, one per product class. The home that never existed: without it the dashboard invented a policy literal and published it (plans/REFUND_POLICY.md). Resolution lives in domain/refund_policy.py -- a deliberate product override outranks these, and these outrank the platform fallback. A class left unset resolves to the platform default and is recorded as `platform_default`, never claimed as the tenant's.",
+          "description": "The tenant's DEFAULT refund terms, one per product class. The home that never existed: without it the dashboard invented a policy literal and published it (plans/REFUND_POLICY.md). Resolution lives in domain/refund_policy.py -- a deliberate product override outranks these, and these outrank the platform fallback. A class left unset resolves to NOTHING: the page says nothing about refunds (plans/REFUND_POLICY_AND_GUARANTEES.md P2). The platform fallback was removed because it published a promise nobody chose.",
           "properties": {
             "physical": {
               "type": "object",

@@ -3153,6 +3153,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     # price the offer_price_selector filters out, so the amount would otherwise show only in the CTA button.
     "featured_price": {"render": lambda c: render_featured_price(c.section), "version": 1},
     "refund_policy": {"render": lambda c: render_refund_policy(c.section, c.offer, c.products_by_id), "version": 1},
+    "buyer_guarantees": {"render": lambda c: render_buyer_guarantees(c.section), "version": 1},
     "shipping": {"render": lambda c: render_shipping_selector(c.section, c.offer, c.products_by_id,
                                                              c.api_base_url), "version": 1},
     "faq": {"render": lambda c: render_faq(c.section), "version": 1},
@@ -6512,6 +6513,41 @@ def discount_pct(unit_amount: int, compare_at_unit_amount: int) -> int:
     if compare_at_unit_amount <= 0 or unit_amount >= compare_at_unit_amount:
         return 0
     return round((1 - (unit_amount / compare_at_unit_amount)) * 100)
+
+
+def render_buyer_guarantees(section: dict[str, Any]) -> str:
+    """The tenant's promises about things going wrong (plans/REFUND_POLICY_AND_GUARANTEES.md P6).
+
+    A numbered list, one entry per enabled guarantee, in `domain/buyer_guarantees`' canonical order --
+    so two tenants' pages are comparable and a buyer who has read one knows where to look on the next.
+    An <ol> because the order is in the MARKUP, not only the styling: assistive technology announces
+    the position, the same reason the listicle grid uses one.
+
+    The sentences arrive already composed. Publish resolves them from the tenant's settings and bakes
+    them into the section, exactly as it bakes the refund policy -- the browser never writes one, and a
+    wording fix reaches every page at its next publish without a tenant editing anything.
+
+    Nothing enabled renders NOTHING, not an empty box with a heading over it: a tenant who wants none of
+    these is unaffected, which is what "each is independently enabled" has to mean on the page.
+    """
+    if section.get("enabled") is False:
+        return ""
+    guarantees = [g for g in (section.get("guarantees") or [])
+                  if isinstance(g, dict) and str(g.get("sentence") or "").strip()]
+    if not guarantees:
+        return ""
+    items = "\n".join(
+        f'        <li class="sl-guarantee">{escape(str(g["sentence"]).strip())}</li>'
+        for g in guarantees)
+    heading = escape(str(section.get("heading") or "Our promises to you"))
+    return "\n".join([
+        f'    <section class="sl-buyer-guarantees" data-section-id="{escape(str(section.get("id", "buyer-guarantees")))}" data-section-type="buyer_guarantees">',
+        f"      <h2>{heading}</h2>",
+        '      <ol class="sl-guarantee-list">',
+        items,
+        "      </ol>",
+        "    </section>",
+    ])
 
 
 def render_refund_policy(

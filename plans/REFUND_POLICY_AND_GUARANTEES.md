@@ -1,6 +1,6 @@
 # Refund Policy II — the promises the vocabulary cannot make
 
-**Status: P1–P3 SHIPPED dev 2026-10-30 · P4–P7 planned · Written 2026-10-27 · Follows `plans/REFUND_POLICY.md`,
+**Status: ALL PHASES SHIPPED dev 2026-10-30 · Written 2026-10-27 · Follows `plans/REFUND_POLICY.md`,
 which is shipped.**
 
 **P1 done.** Three conditions (`working_condition`, `complete_in_packaging`, `any_value_adjusted`), a
@@ -256,3 +256,40 @@ survived a year.
 - **`any_value_adjusted` describes a deduction nothing computes.** If tenants use it heavily, a structured
   reduction on the refund request is the follow-on.
 - **Automatic honouring of the delivery guarantees** via `delivery_status`. The promise ships first.
+
+
+---
+
+## P4–P7 — shipped 2026-10-30
+
+`domain/buyer_guarantees.py` owns the five promises, their numbers and their copy. The sentence is
+**regenerated on every read** rather than stored, so a tenant who enabled a guarantee in October and a
+wording fix made in November cannot disagree on the page — the same reason the refund sentence is
+generated server-side, carried one step further.
+
+First person plural throughout, and a test asserts the platform is never named: these are the tenant's
+promises and Junior Bay does not stand behind them. Another test asserts no arithmetic lives beside
+`any_value_adjusted`, for the same family of reasons.
+
+Numbers are **clamped, not refused** — a screen that rejects 400 teaches the tenant to fight the form,
+and "within 400 days" is not a promise anyone acts on. Zero and negatives fall back to the default,
+because "refund if not delivered within 0 days" is a sentence with no behaviour behind it.
+
+The document validator is strict on SHAPE and silent on wording, since the wording is not stored. An
+unknown key is refused rather than ignored: the renderer drops it anyway, so accepting it would store
+something that silently does nothing. One shared `$defs/buyerGuarantee` in the schema rather than five
+copies — the duplication that let the refund enums drift across four files.
+
+`buyer_guarantees` is a governed section, off until the tenant turns it on, so one entry in
+`composition_rules.json` governs the builder palette and the published page together. It renders as an
+`<ol>` because the order is in the markup, not only the styling. `ai_floor` lists it: a guarantee is the
+same kind of thing as a refund window and a worse one to invent.
+
+P5 also closed P1's leftover — `return_shipping` has its select, shown only when `return_method` is
+`return_required`, because on a revoked download or a keep-it refund the question does not arise.
+
+**Still open, unchanged:** `late_delivery_credit` (needs a buyer balance that does not exist), a custom
+window with nowhere to put a number, per-class window basis, a structured deduction for
+`any_value_adjusted`, and automatic honouring of the delivery guarantees via `delivery_status`. The
+promise ships first; the automation is a later phase, and shipping them together would have held the
+promise hostage to the harder half.

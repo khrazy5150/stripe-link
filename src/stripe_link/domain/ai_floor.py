@@ -31,6 +31,9 @@ from stripe_link.domain.composition import element
 FLOOR_SECTIONS: dict[str, str] = {
     # Contract terms. An invented one is a representation the tenant never agreed to make.
     "refund_policy": "a refund window is a contract term; it comes from the tenant's policy",
+    # A guarantee is the same kind of thing as a refund window and a worse one to invent: it promises
+    # behaviour when something goes wrong, and the tenant -- not the platform -- has to honour it.
+    "buyer_guarantees": "a delivery or price promise is a contract term the tenant must honour",
     "legal_footer": "legal text, and jurisdiction-dependent",
     # Money. Platform-owned records, and wrong numbers here are the expensive kind of wrong.
     "checkout_cta": "carries price and the purchase action",

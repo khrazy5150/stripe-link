@@ -259,6 +259,18 @@
             </label>
           </div>
 
+          <!-- Only when something actually travels back. On a revoked download or a keep-it refund the
+               question does not arise, and offering it there invents a promise about postage. -->
+          <label v-if="form.refund_policies[cls].enabled && form.refund_policies[cls].return_method === 'return_required'"
+                 class="offer-field">
+            <span>Who pays return postage?</span>
+            <select v-model="form.refund_policies[cls].return_shipping">
+              <option v-for="o in refundOptions.return_shipping || []" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+            <small class="field-note">This is the other half of “free returns”, and buyers read it before
+              they read the window.</small>
+          </label>
+
           <label v-if="form.refund_policies[cls].enabled && form.refund_policies[cls].refund_window === 'custom'" class="offer-field">
             <span>Your policy wording <em>(required for a custom window)</em></span>
             <textarea v-model="form.refund_policies[cls].full_policy" rows="3"
@@ -283,6 +295,42 @@
         </div>
       </div>
     </section>
+
+    <!-- A SECOND PRIMITIVE, not more fields on the first. A refund policy answers "may I send this
+         back, and by when"; these answer "what if it goes wrong" -- delivery and price. No
+         window/condition/return-method vocabulary can express one. -->
+    <section class="dashboard-card">
+      <header class="dashboard-card-header"><h2>Buyer guarantees</h2></header>
+      <div class="dashboard-card-body">
+        <p class="field-note">
+          Promises about things going wrong. Each one is yours to honour — we do not check or enforce
+          them for you — so switch on only the ones you mean. Enable none and the section does not appear.
+        </p>
+        <div v-for="item in guaranteeOptions" :key="item.key" class="refund-class">
+          <div class="refund-class-head">
+            <div>
+              <h3>{{ item.label }}</h3>
+              <p class="field-note">{{ item.hint }}</p>
+            </div>
+            <label class="builder-toggle">
+              <input v-model="form.buyer_guarantees[item.key].enabled" type="checkbox" />
+              <span>Promise this</span>
+            </label>
+          </div>
+          <label v-if="form.buyer_guarantees[item.key].enabled && item.days !== null" class="offer-field">
+            <span>After how many days?</span>
+            <input v-model="form.buyer_guarantees[item.key].days" type="text" inputmode="numeric"
+                   :placeholder="String(item.days)" />
+          </label>
+          <!-- READ-ONLY, and it comes from the server. A browser composing a commercial promise is how
+               every live page came to carry a refund sentence nobody chose. -->
+          <div v-if="form.buyer_guarantees[item.key].enabled" class="refund-preview">
+            <p>{{ guaranteePreview(item) }}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Analytics Defaults</h2></header>
@@ -404,8 +452,37 @@ const refundOptions = computed(() => refundStore.options);
 const refundResolved = computed(() => refundStore.resolved);
 const refundClasses = computed(() => refundStore.classes);
 
+// The guarantee vocabulary, straight from the server. Empty until /config?refund_options=1 answers, so
+// the card renders nothing rather than inventing rows for promises the server has not described.
+const guaranteeOptions = computed(() => refundStore.guaranteeOptions.items || []);
+
+/** The sentence this guarantee will publish, at the number currently in the box.
+ *
+ *  Server-composed. The vocabulary carries the sentence at the DEFAULT number, and the number is the
+ *  only thing that varies -- so substituting it here is formatting the server's words, not authoring a
+ *  promise. The published sentence is regenerated server-side at publish regardless, so the two cannot
+ *  drift into disagreeing.
+ */
+function guaranteePreview(item) {
+  const entry = form.buyer_guarantees[item.key] || {};
+  if (item.days === null) return item.sentence;
+  const typed = parseInt(String(entry.days || ""), 10);
+  const days = Number.isFinite(typed) && typed > 0 ? typed : item.days;
+  return item.sentence.replace(String(item.days), String(days));
+}
+
+function blankGuarantees() {
+  const out = {};
+  for (const key of ["damaged_in_transit", "no_delivery_refund", "no_tracking_update_refund",
+                     "price_match", "price_adjustment"]) {
+    out[key] = { enabled: false, days: "" };
+  }
+  return out;
+}
+
 function blankRefundPolicy() {
-  return { enabled: false, refund_window: "", condition: "", return_method: "", full_policy: "", keep_it_below: "" };
+  return { enabled: false, refund_window: "", condition: "", return_method: "", return_shipping: "",
+           full_policy: "", keep_it_below: "" };
 }
 
 function refundPreview(cls) {
@@ -578,6 +655,7 @@ function defaultForm() {
       digital: blankRefundPolicy(),
       subscription: blankRefundPolicy(),
     },
+    buyer_guarantees: blankGuarantees(),
     analytics_defaults: { google_tag_id: "", pixel_id: "" },
   };
 }
@@ -633,17 +711,29 @@ function applyConfig(config) {
   form.legal_defaults = { terms_url: legal.terms_url || "", privacy_url: legal.privacy_url || "", refund_url: legal.refund_url || "" };
   form.analytics_defaults = { google_tag_id: analytics.google_tag_id || "", pixel_id: analytics.pixel_id || "" };
 
+  const storedGuarantees = legal.buyer_guarantees || {};
+  form.buyer_guarantees = blankGuarantees();
+  for (const [key, entry] of Object.entries(storedGuarantees)) {
+    if (!form.buyer_guarantees[key] || !entry) continue;
+    form.buyer_guarantees[key] = {
+      enabled: Boolean(entry.enabled),
+      days: entry.days === undefined || entry.days === null ? "" : String(entry.days),
+    };
+  }
+
   const storedPolicies = legal.refund_policies || {};
   refundClasses.value.forEach((cls) => {
     const stored = storedPolicies[cls];
     const fallback = refundResolved.value[cls] || {};
-    // An absent class is the platform fallback, and the pickers are seeded from it so switching the toggle
-    // on starts from what the storefront already says rather than from blanks.
+    // An absent class promises NOTHING now (P2). The pickers are still seeded from the server's form
+    // seeds so switching the toggle on opens on something sensible rather than three blanks -- a
+    // starting point for the form, never a promise, because nothing publishes until this is saved.
     form.refund_policies[cls] = {
       enabled: Boolean(stored),
       refund_window: (stored || fallback).refund_window || "",
       condition: (stored || fallback).condition || "",
       return_method: (stored || fallback).return_method || "",
+      return_shipping: (stored || fallback).return_shipping || "",
       full_policy: stored ? stored.full_policy || "" : "",
       keep_it_below: stored && stored.keep_it_below ? (stored.keep_it_below / 100).toFixed(2) : "",
     };
@@ -730,6 +820,11 @@ function refundPoliciesPayload() {
       condition: entry.condition,
       return_method: entry.return_method,
     };
+    // Sent only where it means something. The server supplies the status-quo default for everything
+    // else, so an omitted value is never read as a promise the tenant did not make.
+    if (entry.return_method === "return_required" && entry.return_shipping) {
+      policy.return_shipping = entry.return_shipping;
+    }
     const wording = String(entry.full_policy || "").trim();
     if (wording) policy.full_policy = wording;
     const threshold = Math.round(Number(entry.keep_it_below) * 100);
@@ -738,6 +833,23 @@ function refundPoliciesPayload() {
     }
     out[cls] = policy;
   });
+  return out;
+}
+
+// Only the ones switched on, and the number only where the promise has a clock. An omitted number
+// means "the default", which the server supplies and clamps -- the browser never decides it.
+function guaranteesPayload() {
+  const out = {};
+  for (const item of guaranteeOptions.value) {
+    const entry = form.buyer_guarantees[item.key];
+    if (!entry || !entry.enabled) continue;
+    const promise = { enabled: true };
+    if (item.days !== null) {
+      const typed = parseInt(String(entry.days || ""), 10);
+      if (Number.isFinite(typed) && typed > 0) promise.days = typed;
+    }
+    out[item.key] = promise;
+  }
   return out;
 }
 
@@ -789,6 +901,7 @@ function buildPayload() {
     refund_url: form.legal_defaults.refund_url,
   });
   setOrDelete(legal, "refund_policies", refundPoliciesPayload());
+  setOrDelete(legal, "buyer_guarantees", guaranteesPayload());
   setOrDelete(doc, "legal_defaults", legal);
   setOrDelete(doc, "analytics_defaults", prunedStrings(form.analytics_defaults));
 

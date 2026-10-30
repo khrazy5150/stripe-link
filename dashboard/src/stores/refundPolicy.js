@@ -18,6 +18,8 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
     // the tenant chose it or the platform fell back.
     resolved: {},
     unset: [],
+    guaranteeOptions: {},
+    guarantees: [],
     loaded: false,
     loading: false,
     error: "",
@@ -42,6 +44,8 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
         this.options = body.refund_policy_options || {};
         this.resolved = body.refund_policies || {};
         this.unset = body.refund_policies_unset || [];
+        this.guaranteeOptions = body.buyer_guarantee_options || this.guaranteeOptions;
+        this.guarantees = body.buyer_guarantees || [];
         this.loaded = true;
       } catch (err) {
         // A tenant who has saved no config document gets a 404 -- and the vocabulary and the platform's
@@ -53,6 +57,8 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
           this.options = payload.refund_policy_options || {};
           this.resolved = payload.refund_policies || {};
           this.unset = payload.refund_policies_unset || [];
+          this.guaranteeOptions = payload.buyer_guarantee_options || this.guaranteeOptions;
+          this.guarantees = payload.buyer_guarantees || [];
           this.loaded = true;
           this.error = "";
         } else {

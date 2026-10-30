@@ -2170,6 +2170,42 @@ def validate_stripe_keys_document(document: dict[str, Any]) -> None:
                 raise DocumentValidationError("payment_methods.tax.tax_behavior is invalid.")
 
 
+def validate_buyer_guarantees(value: Any, label: str) -> None:
+    """The tenant's delivery and price promises (plans/REFUND_POLICY_AND_GUARANTEES.md P4).
+
+    Strict on the SHAPE and silent on the wording, because the wording is not stored: the sentence is
+    generated on every read in `domain/buyer_guarantees`, so there is nothing here that could drift from
+    it. An unknown key is refused rather than ignored -- a promise this platform cannot explain must not
+    reach a settings document, and the renderer drops it anyway, so accepting it would store something
+    that silently does nothing.
+    """
+    from stripe_link.domain.buyer_guarantees import GUARANTEES, SPECS
+
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    for key, entry in value.items():
+        if key not in GUARANTEES:
+            raise DocumentValidationError(f"{label} has no guarantee named '{key}'.")
+        if not isinstance(entry, dict):
+            raise DocumentValidationError(f"{label}.{key} must be an object.")
+        optional_bool(entry, "enabled", f"{label}.{key}.enabled")
+        days = entry.get("days")
+        if days is None:
+            continue
+        if SPECS[key]["days"] is None:
+            raise DocumentValidationError(f"{label}.{key} takes no number of days.")
+        # Decimal survives a DynamoDB round trip and `isinstance(x, int)` is False for it.
+        try:
+            number = int(days)
+        except (TypeError, ValueError):
+            raise DocumentValidationError(f"{label}.{key}.days must be a whole number.") from None
+        low, high = SPECS[key].get("min_days", 1), SPECS[key].get("max_days", 365)
+        if not low <= number <= high:
+            raise DocumentValidationError(f"{label}.{key}.days must be between {low} and {high}.")
+
+
 def validate_refund_policies(policies: Any, label: str) -> None:
     """The tenant's per-class refund defaults, validated against the ONE vocabulary.
 
@@ -2267,6 +2303,8 @@ def validate_tenant_config(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Tenant config legal_defaults must be an object.")
         validate_refund_policies(legal_defaults.get("refund_policies"),
                                  "Tenant config legal_defaults.refund_policies")
+        validate_buyer_guarantees(legal_defaults.get("buyer_guarantees"),
+                                  "Tenant config legal_defaults.buyer_guarantees")
     custom_domains = document.get("custom_domains")
     if custom_domains is not None:
         if not isinstance(custom_domains, dict):
