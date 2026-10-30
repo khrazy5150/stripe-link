@@ -5236,6 +5236,59 @@ def accessibility_warnings(html: str) -> list[str]:
     return []
 
 
+# A headline pattern carries TWO kinds of brace-token and they look identical:
+#
+#     {count} {things} you'll love in {year}
+#        ^       ^                       ^
+#      filled  YOURS                  filled
+#
+# `{count}` and `{year}` are resolved at publish. `{things}`, `{audience}` and `{price}` are blanks the
+# tenant writes over -- the patterns are structures, and the hook is theirs. Nothing filled them, nothing
+# stripped them and nothing said so, so a tenant who picked a pattern and pressed publish shipped
+# "4 {Things} You'll Love in 2026" as the h1 of an indexable homepage, and the meta description repeated
+# it (2026-10-30).
+#
+# NOT STRIPPED, and not blocked. Removing the placeholder would silently rewrite the tenant's own words
+# into something they never chose, and a half-written headline is a judgement call, not a broken page.
+_PLACEHOLDER_RE = re.compile(r"\{[A-Za-z][A-Za-z0-9_ ]*\}")
+# The two the machine fills. Matched case-insensitively because the builder title-cases headlines as they
+# are typed -- which is also how `{things}` reached the page as `{Things}`.
+_FILLED_TOKENS = frozenset({"count", "year"})
+
+
+def placeholder_warnings(page: dict[str, Any] | None = None,
+                         offer: dict[str, Any] | None = None) -> list[str]:
+    """Headline placeholders the tenant has not written over yet.
+
+    Checked on the DOCUMENT, not the rendered html: a content block may legitimately contain braces, and
+    flagging those would be a notice about the tenant's own prose. Only the fields a headline pattern can
+    reach are read -- `seo.title`, the hero section, and the offer presentation the hero falls back to.
+    """
+    texts: list[str] = [str(((page or {}).get("seo") or {}).get("title") or "")]
+    for section in (page or {}).get("sections") or []:
+        if isinstance(section, dict) and section.get("type") in ("hero", "brand_hero"):
+            texts.extend([str(section.get("headline") or ""), str(section.get("subheadline") or ""),
+                          str(section.get("tagline") or "")])
+    presentation = (offer or {}).get("presentation") or {}
+    texts.extend([str(presentation.get("headline") or ""), str(presentation.get("subheadline") or "")])
+
+    unresolved: list[str] = []
+    for text in texts:
+        for match in _PLACEHOLDER_RE.findall(text):
+            if match.strip("{}").strip().lower() in _FILLED_TOKENS:
+                continue
+            if match not in unresolved:
+                unresolved.append(match)
+    if not unresolved:
+        return []
+    names = ", ".join(unresolved)
+    return [
+        f"Your headline still has {'a placeholder' if len(unresolved) == 1 else 'placeholders'} in it: "
+        f"{names}. The patterns are structures — replace {unresolved[0]} with what you are listing (for "
+        "example “Gift Ideas”). Only {count} and {year} fill themselves in; the rest are yours to write."
+    ]
+
+
 def stale_year_warnings(page: dict[str, Any] | None = None) -> list[str]:
     """A published page whose headline says last year (plans/ROUNDUP_PAGES.md).
 

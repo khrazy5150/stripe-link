@@ -21,6 +21,7 @@ from stripe_link.runtime.html import (
     document_description,
     heading_outline_warnings,
     product_json_ld,
+    placeholder_warnings,
     render_page,
     responsive_img,
     stale_year_warnings,
@@ -500,3 +501,85 @@ class TheYearGoesStaleAndNobodyIsToldTests(unittest.TestCase):
         self.assertIn("stale_year_warnings", handler)
         health = handler.split('"page_health":', 1)[1].split("\n            }", 1)[0]
         self.assertIn("stale_year_warnings(page)", health)
+
+
+class AHeadlinePatternHasTwoKindsOfBraceTests(unittest.TestCase):
+    """A Roundup headline pattern carries two kinds of brace-token and they look identical:
+
+        {count} {things} you'll love in {year}
+           ^       ^                       ^
+         filled  YOURS                  filled
+
+    `{count}` and `{year}` resolve at publish. `{things}`, `{audience}` and `{price}` are blanks the
+    tenant writes over -- the patterns are structures and the hook is theirs. Nothing filled them,
+    nothing stripped them and nothing said so, so a tenant who picked a pattern and pressed publish
+    shipped "4 {Things} You'll Love in 2026" as the h1 of an indexable homepage, with the meta
+    description repeating it (2026-10-30).
+    """
+
+    @staticmethod
+    def _page(headline="", seo_title=""):
+        page = {"sections": [{"id": "h", "type": "hero", "headline": headline}]}
+        if seo_title:
+            page["seo"] = {"title": seo_title}
+        return page
+
+    def test_the_live_headline_is_flagged(self):
+        warnings = placeholder_warnings(self._page("4 {Things} You'll Love in 2026"))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("{Things}", warnings[0])
+
+    def test_case_does_not_hide_it(self):
+        """The builder title-cases headlines as they are typed, which is how `{things}` reached the page
+        as `{Things}` -- so a case-sensitive check would have missed the one that actually shipped."""
+        for token in ("{things}", "{Things}", "{THINGS}"):
+            with self.subTest(token=token):
+                self.assertEqual(len(placeholder_warnings(self._page(f"4 {token} here"))), 1)
+
+    def test_the_machine_tokens_are_not_flagged(self):
+        """They fill themselves in; warning about them would be warning about correct behaviour."""
+        self.assertEqual(placeholder_warnings(self._page("{count} Gift Ideas for {year}")), [])
+        self.assertEqual(placeholder_warnings(self._page("{Count} Gift Ideas for {Year}")), [])
+
+    def test_a_finished_headline_says_nothing(self):
+        self.assertEqual(placeholder_warnings(self._page("4 Gift Ideas You Will Love in 2026")), [])
+        self.assertEqual(placeholder_warnings(None, None), [])
+
+    def test_every_placeholder_in_the_patterns_is_caught(self):
+        """Driven off the shipped pattern list, so a pattern added later is covered the day it lands."""
+        from stripe_link.domain.composition import RULES
+        for pattern in RULES["roundup_headlines"]:
+            with self.subTest(pattern=pattern):
+                expected = any(tok in pattern for tok in ("{things}", "{audience}", "{price}"))
+                self.assertEqual(bool(placeholder_warnings(self._page(pattern))), expected)
+
+    def test_the_seo_title_is_checked_too(self):
+        """It feeds the <title>, og:title and the CollectionPage name -- a placeholder there reaches a
+        search result, which is worse than one on the page."""
+        self.assertEqual(len(placeholder_warnings(self._page(seo_title="{count} {things}"))), 1)
+
+    def test_a_headline_reached_through_the_offer_is_checked(self):
+        """`hero_copy` falls back to the offer's presentation, and that is where the headline lives for
+        every page whose hero was never typed into."""
+        page = {"sections": [{"id": "h", "type": "hero"}]}
+        offer = {"presentation": {"headline": "{count} {things} you'll love"}}
+        self.assertEqual(len(placeholder_warnings(page, offer)), 1)
+
+    def test_it_reads_the_document_not_the_rendered_page(self):
+        """A content block may legitimately contain braces, and flagging those would be a notice about
+        the tenant's own prose."""
+        import inspect
+        from stripe_link.runtime.html import placeholder_warnings as fn
+        self.assertNotIn("html", inspect.signature(fn).parameters)
+
+    def test_it_is_a_notice_not_a_gate(self):
+        """A half-written headline is a judgement call, not a broken page -- and stripping the
+        placeholder would silently rewrite words the tenant chose."""
+        source = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        block = source.split("def placeholder_warnings", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn("raise", block)
+        self.assertNotIn("sub(", block)
+
+    def test_the_builder_is_told(self):
+        handler = (ROOT / "src" / "handlers" / "page_render.py").read_text(encoding="utf-8")
+        self.assertIn("placeholder_warnings(page, offer)", handler)

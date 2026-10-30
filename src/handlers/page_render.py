@@ -23,6 +23,7 @@ from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
     heading_outline_warnings,
+    placeholder_warnings,
     stale_year_warnings,
     thin_content_warnings,
     render_page,
@@ -244,7 +245,8 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None, events_repo=N
                 # live artifact may be a year behind. The only place that gap is visible is the stored
                 # `updated_at`.
                 "page_health": (heading_outline_warnings(html, offer) + accessibility_warnings(html)
-                                + thin_content_warnings(html, offer, page) + stale_year_warnings(page)),
+                                + thin_content_warnings(html, offer, page) + stale_year_warnings(page)
+                                + placeholder_warnings(page, offer)),
             },
         })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:
