@@ -38,6 +38,30 @@ export function managedDnsState(zone, review, detection) {
   return DELEGATE;
 }
 
+// Which refusals are a judgement about TAKING OVER THE ROOT ZONE rather than about the name in the box.
+//
+// Managed DNS always moves the registrable root -- `observe_name_servers` narrows to it before it looks
+// anything up, and `start` narrows again before it detects -- so on a subdomain all three answer a
+// question nobody has asked yet. A tenant who types `shop.example.com` connects it with one CNAME and
+// never touches the zone; telling them "Amazon Route 53 zones cannot be moved safely" reads as a refusal
+// of the thing they were actually doing, about a root domain they never mentioned.
+//
+// `undelegated` is deliberately NOT here. "We cannot find this domain" is about the name itself, and a
+// subdomain of a root that does not resolve has exactly the same problem -- holding that one back would
+// hide a real answer behind a rule written for a different one.
+const ZONE_REFUSALS = new Set(["provider", "mail", "unreadable"]);
+
+/**
+ * Is this verdict about the zone we would move, rather than about the domain the tenant typed?
+ *
+ * The caller pairs it with "is this a subdomain" to decide whether the verdict belongs on screen YET.
+ * It is never a reason to drop the verdict: once the tenant chooses managed DNS the root IS the subject,
+ * and the same banner says the same thing with the narrowing note above it to explain how they got there.
+ */
+export function refusalIsAboutTheZone(detection) {
+  return ZONE_REFUSALS.has(String((detection || {}).reason || ""));
+}
+
 /** What we read, in a sentence a tenant can check against their own DNS. */
 export function importSummary(zone) {
   const r = (zone && zone.review) || {};

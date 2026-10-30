@@ -7,6 +7,7 @@ a mail record the import missed, a delegation half the internet can see.
 
 import json
 import pathlib
+import re
 import subprocess
 import unittest
 
@@ -14,6 +15,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE = ROOT / "dashboard" / "src" / "composables" / "managedDns.js"
 SITES_VUE = (ROOT / "dashboard" / "src" / "components" / "Sites.vue").read_text(encoding="utf-8")
 STORE = (ROOT / "dashboard" / "src" / "stores" / "sites.js").read_text(encoding="utf-8")
+# A template condition long enough to matter wraps across lines, and an assertion that reproduces the
+# indentation of the day it was written breaks on a re-indent that changed nothing. Match the flattened
+# copy when the claim is about a condition rather than about a literal line.
+FLAT = re.sub(r"\s+", " ", SITES_VUE)
 
 
 def node(expr):
@@ -415,12 +420,14 @@ class OfferedOnlyAfterCheckingTests(unittest.TestCase):
     recommendation, so the cards now wait for the verdict.
     """
 
-    def test_the_cards_require_an_eligible_verdict(self):
-        self.assertIn('v-else-if="domainForm.domain && !dnsChoice && managedDetection?.eligible" class="dns-choice"',
-                      SITES_VUE)
+    def test_the_cards_require_a_verdict(self):
+        """Still gated on a detection EXISTING. What changed since is which verdicts open the cards --
+        a held-back zone refusal does too -- not whether one has to have arrived first."""
+        self.assertIn('v-else-if="domainForm.domain && !dnsChoice && managedDetection '
+                      '&& (managedDetection.eligible || zoneVerdictHeldBack)" class="dns-choice"', FLAT)
 
     def test_a_refusal_is_explained_where_the_choice_would_have_been(self):
-        self.assertIn('managedDetection && !managedDetection.eligible', SITES_VUE)
+        self.assertIn('managedDetection && !managedDetection.eligible', FLAT)
 
     def test_something_is_shown_while_checking(self):
         # Otherwise the panel is simply blank for the length of a DNS lookup, which reads as broken.
@@ -484,3 +491,74 @@ class NoApexAdviceForADomainThatMayNotExistTests(unittest.TestCase):
         """One says the registry has no such name, the other says we could not ask. Neither leaves
         anything true to say about the domain's DNS provider."""
         self.assertIn('["undelegated", "unreadable"].includes(managedDetection.value?.reason)', SITES_VUE)
+
+
+class AZoneVerdictWaitsForASubdomainTests(unittest.TestCase):
+    """Typing `shop.automizepro.com` drew "Amazon Route 53 zones cannot be moved safely."
+
+    True of `automizepro.com`, which is on Route 53 -- and beside the point. Managed DNS always moves the
+    registrable ROOT (`observe_name_servers` narrows to it before the lookup, `start` narrows again before
+    it detects), so the verdict is about a domain the tenant never typed and does not need to move: a
+    subdomain holds an ordinary CNAME, which is what the Connect button was about to do. The first thing
+    they read was a refusal of something they were not attempting.
+
+    HELD BACK, NOT DROPPED. Choosing "Let us handle the DNS" narrows the box to the root and makes it the
+    subject; the same banner says the same thing there, under the line that explains the narrowing.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if subprocess.run(["node", "--version"], capture_output=True).returncode != 0:
+            raise unittest.SkipTest("node is not available")
+
+    def test_a_refusal_about_moving_the_zone_is_recognised(self):
+        for reason in ("provider", "mail", "unreadable"):
+            with self.subTest(reason=reason):
+                self.assertTrue(node(f'm.refusalIsAboutTheZone({{reason:"{reason}"}})'))
+
+    def test_a_missing_domain_is_not_a_zone_verdict(self):
+        """"We cannot find this domain" is about the NAME, and a subdomain of a root that does not
+        resolve has the same problem. Holding it back would hide a real answer behind a rule written
+        for a different one."""
+        self.assertFalse(node('m.refusalIsAboutTheZone({reason:"undelegated"})'))
+
+    def test_an_eligible_verdict_is_not_a_refusal(self):
+        self.assertFalse(node('m.refusalIsAboutTheZone({eligible:true, reason:""})'))
+
+    def test_nothing_read_yet_is_not_a_refusal(self):
+        """The detection is null between keystrokes. A rule that answers "yes" there would hold back a
+        banner that does not exist and, worse, open the choice cards before any verdict arrived."""
+        self.assertFalse(node("m.refusalIsAboutTheZone(null)"))
+        self.assertFalse(node("m.refusalIsAboutTheZone(undefined)"))
+        self.assertFalse(node("m.refusalIsAboutTheZone({})"))
+
+    def test_the_component_holds_it_back_only_for_a_subdomain(self):
+        self.assertIn("domainIsSubdomain.value && refusalIsAboutTheZone(managedDetection.value)", FLAT)
+
+    def test_a_subdomain_is_decided_against_the_registrable_root(self):
+        """Not by counting dots. `example.co.uk` is an apex with three labels, and `rootDomain` is the
+        one place that knows it -- the same helper `apexAdvice` has gated itself on all along."""
+        self.assertIn("typed !== rootDomain(typed)", FLAT)
+
+    def test_the_banner_waits(self):
+        self.assertIn("&& !managedDetection.eligible && !zoneVerdictHeldBack\" class=\"keys-status-banner info\"",
+                      FLAT)
+
+    def test_the_choice_is_still_offered_while_it_waits(self):
+        """The point of holding the verdict back is that the tenant gets on with connecting their
+        subdomain. Suppressing the banner alone would have left the panel blank, because the cards sit
+        on the other side of a v-else-if and require an eligible verdict to render."""
+        self.assertIn("(managedDetection.eligible || zoneVerdictHeldBack)", FLAT)
+
+    def test_the_verdict_still_arrives_once_the_root_is_the_subject(self):
+        """The managed panel renders the detection unconditionally in its DETECTED state. Nothing there
+        consults the hold-back, which is what makes this a delay rather than a suppression."""
+        detected = FLAT.split('v-else-if="managedState === DETECTED"')[1][:400]
+        self.assertIn("managedDetection.headline", detected)
+        self.assertNotIn("zoneVerdictHeldBack", detected)
+
+    def test_the_narrowing_note_survives_into_the_verdict(self):
+        """It lived inside the CHOOSE template, so it vanished the moment the read came back -- and the
+        read is when a tenant most needs to know why the subject became their root domain."""
+        self.assertIn("v-if=\"managedNarrowedFrom && (managedState === CHOOSE || managedState === DETECTED)\"",
+                      FLAT)

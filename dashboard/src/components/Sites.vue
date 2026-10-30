@@ -352,12 +352,24 @@
               </p>
               <!-- Turned away: say so here, where the choice would have been, rather than letting them
                    pick first. The ordinary route below is unaffected and is what they should use. -->
-              <div v-else-if="domainForm.domain && !dnsChoice && managedDetection && !managedDetection.eligible"
+              <!-- NOT WHILE THE BOX HOLDS A SUBDOMAIN. The verdict is always about the registrable ROOT,
+                   because that is the zone managed DNS would move -- so typing `shop.automizepro.com`
+                   drew "Amazon Route 53 zones cannot be moved safely" about `automizepro.com`, a domain
+                   the tenant had not mentioned and does not need to move: a subdomain takes one CNAME.
+                   The first thing they read was a refusal of something they were not attempting. It is
+                   held back, not dropped -- choosing managed DNS makes the root the subject and the same
+                   banner says the same thing there, under the line explaining the narrowing. -->
+              <div v-else-if="domainForm.domain && !dnsChoice && managedDetection
+                              && !managedDetection.eligible && !zoneVerdictHeldBack"
                    class="keys-status-banner info">
                 <p><strong>{{ managedDetection.headline }}</strong></p>
                 <p>{{ managedDetection.detail }}</p>
               </div>
-              <div v-else-if="domainForm.domain && !dnsChoice && managedDetection?.eligible" class="dns-choice">
+              <!-- A held-back verdict still gets the choice, which is the point of holding it back: the
+                   ordinary route is open to them and managed DNS remains on offer if they want the whole
+                   zone moved anyway. -->
+              <div v-else-if="domainForm.domain && !dnsChoice && managedDetection
+                              && (managedDetection.eligible || zoneVerdictHeldBack)" class="dns-choice">
                 <button type="button" class="dns-choice-card" @click="dnsChoice = 'managed'">
                   <strong>Let us handle the DNS</strong>
                   <small>You change two nameservers at your registrar, once. Your root domain works on
@@ -403,12 +415,19 @@
               <div v-if="dnsChoice === 'managed'" class="managed-dns">
                 <div v-if="managedError" class="keys-status-banner error">{{ managedError }}</div>
 
+                <!-- ABOVE THE VERDICT, NOT ONLY ABOVE THE BUTTON. It rendered inside the CHOOSE template,
+                     so it vanished the moment the read came back -- and the read is exactly when it is
+                     needed. A tenant who typed a subdomain and chose managed DNS is then looking at an
+                     answer about their root domain; without this line, nothing on screen says why the
+                     subject changed. Held across both states for that reason. -->
+                <p v-if="managedNarrowedFrom && (managedState === CHOOSE || managedState === DETECTED)"
+                   class="field-note managed-narrowed">
+                  Managed DNS covers your whole domain, so we will set up
+                  <strong>{{ domainForm.domain }}</strong> — that includes
+                  <strong>{{ managedNarrowedFrom }}</strong>. Both will serve this Site.
+                </p>
+
                 <template v-if="managedState === CHOOSE">
-                  <p v-if="managedNarrowedFrom" class="field-note managed-narrowed">
-                    Managed DNS covers your whole domain, so we will set up
-                    <strong>{{ domainForm.domain }}</strong> — that includes
-                    <strong>{{ managedNarrowedFrom }}</strong>. Both will serve this Site.
-                  </p>
                   <!-- Says only what the button does. It used to promise "we will create the zone and
                        read what is in it", which was honest about the old behaviour and the reason that
                        behaviour was wrong: nothing should be created to answer a question. -->
@@ -774,7 +793,7 @@ import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
-import { BLOCKED, CHOOSE, DELEGATE, DETECTED, LIVE, REVIEW, detectionSummary, importSummary, mailSummary, managedDnsState, nameserverInstructions, waitingMessage } from "../composables/managedDns";
+import { BLOCKED, CHOOSE, DELEGATE, DETECTED, LIVE, REVIEW, detectionSummary, importSummary, mailSummary, managedDnsState, nameserverInstructions, refusalIsAboutTheZone, waitingMessage } from "../composables/managedDns";
 import { rootDomain } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
@@ -1126,6 +1145,19 @@ const isManagedDomain = computed(() =>
 
 const managedRoot = computed(() => rootDomain(domainForm.domain || ""));
 const managedNarrowedFrom = ref("");
+
+// A SUBDOMAIN NEEDS NONE OF THIS. Managed DNS exists to solve one thing -- DNS forbids a CNAME at an
+// apex -- and `shop.example.com` holds a CNAME perfectly well, so the zone verdict is about a root the
+// tenant never typed. Held back until they pick "Let us handle the DNS", which is the moment the root
+// becomes the subject; the banner then renders inside that panel with the narrowing note above it.
+// `apexAdvice` has gated itself on `rootDomain` since it was written -- this is the same guard, on the
+// one piece of apex-shaped advice that never got one.
+const domainIsSubdomain = computed(() => {
+  const typed = (domainForm.domain || "").trim().toLowerCase();
+  return Boolean(typed) && typed.includes(".") && typed !== rootDomain(typed);
+});
+const zoneVerdictHeldBack = computed(() =>
+  domainIsSubdomain.value && refusalIsAboutTheZone(managedDetection.value));
 
 watch(dnsChoice, (choice) => {
   managedNarrowedFrom.value = "";
