@@ -189,3 +189,79 @@ class TheWizardMustSeedTheGridTests(unittest.TestCase):
         seeds = self.BUILDER.split("const SHAPE_SEEDS = {", 1)[1].split("};", 1)[0]
         self.assertIn("lead_roundup", seeds)
         self.assertIn("content_block", seeds)
+
+
+class TheHeadlineOpensTheArticleTests(unittest.TestCase):
+    """A Roundup opens with its headline, then the picture. Every other page opens with the picture.
+
+    `pinned_top` was the ONE band with no rule. A `free` element declares a slot and earns its position;
+    the locked bands "carry no slot and need none", so their order within the band was simply the order
+    their keys happened to sit in the catalog -- fine while every page wanted the same hero, arbitrary the
+    moment one did not.
+
+    A Roundup is that one. It is an article, so it opens the way an article opens: the headline that
+    counts the list ("2 Amazing Gift Ideas for 2026"), then the lead image, then the entries. A sales page
+    opens with the picture. Both are right, and neither is a property of the ELEMENTS -- it belongs to the
+    composition, which is now where it is declared.
+    """
+
+    def test_the_hero_copy_comes_before_the_hero_image(self):
+        from stripe_link.domain.composition import order_section_keys
+        ordered = order_section_keys(["hero_media", "hero", "brand_label"], offer_type="lead_roundup")
+        self.assertLess(ordered.index("hero"), ordered.index("hero_media"))
+
+    def test_the_brand_still_comes_first(self):
+        """It is `lead`, a band above pinned_top, so reordering inside pinned_top must not disturb it --
+        the author asked for the headline "just below the brand"."""
+        from stripe_link.domain.composition import order_section_keys
+        ordered = order_section_keys(["hero_media", "hero", "brand_label"], offer_type="lead_roundup")
+        self.assertEqual(ordered[0], "brand_label")
+
+    def test_every_other_composition_is_untouched(self):
+        """The reason this is scoped to one composition rather than reordering the catalog: flipping the
+        hero globally would move the H1 above the image on every page already published."""
+        from stripe_link.domain.composition import RULES, order_section_keys
+        for offer_type in RULES["offer_types"]:
+            if offer_type == "lead_roundup":
+                continue
+            ordered = order_section_keys(["hero_media", "hero"], offer_type=offer_type)
+            with self.subTest(offer_type=offer_type):
+                self.assertLess(ordered.index("hero_media"), ordered.index("hero"))
+
+    def test_an_unnamed_composition_keeps_the_derived_order(self):
+        from stripe_link.domain.composition import order_section_keys
+        self.assertEqual(order_section_keys(["hero", "hero_media"]), ["hero_media", "hero"])
+
+    def test_a_composition_names_only_what_it_cares_about(self):
+        """Unlisted pinned_top keys keep their catalog position BEHIND the listed ones, so adding a new
+        hero element does not mean editing every composition that declares an order."""
+        from stripe_link.domain.composition import RULES, baseline_order
+        declared = RULES["offer_types"]["lead_roundup"]["pinned_top_order"]
+        every = [key for key, spec in RULES["elements"].items() if spec.get("placement") == "pinned_top"]
+        self.assertTrue(set(declared) < set(every), "the list must be partial or it has to be maintained")
+        order = baseline_order("", "lead_roundup")
+        for unlisted in [key for key in every if key not in declared]:
+            with self.subTest(unlisted=unlisted):
+                self.assertGreater(order.index(unlisted), order.index(declared[-1]))
+
+    def test_every_declared_key_is_really_a_pinned_top_element(self):
+        """A typo, or a key from another band, would silently do nothing at all."""
+        from stripe_link.domain.composition import RULES
+        for offer_type, rule in RULES["offer_types"].items():
+            for key in rule.get("pinned_top_order") or []:
+                with self.subTest(offer_type=offer_type, key=key):
+                    self.assertEqual(RULES["elements"].get(key, {}).get("placement"), "pinned_top")
+
+    def test_the_builder_mirrors_the_renderer(self):
+        """Two implementations of one rule. The builder's row list and the published page disagreeing
+        about where the hero copy sits is precisely the drift `orderEntries` was centralised to stop, so
+        both call sites must pass the composition through."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+        composer = (root / "composables" / "pageComposer.js").read_text(encoding="utf-8")
+        builder = (root / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+        self.assertIn("export function pinnedTopOrder(offerType", composer)
+        self.assertIn('export function baselineOrder(goal = "", offerType = "")', composer)
+        self.assertIn("baselineOrder(goal, offerType)", composer)
+        for call in ("orderSections(", "orderSectionKeys("):
+            self.assertIn("builderOfferType.value", builder.split(call, 1)[1].split(";", 1)[0], call)

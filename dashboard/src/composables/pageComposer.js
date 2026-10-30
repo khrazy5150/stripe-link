@@ -391,11 +391,24 @@ export function elementOrderMode(type) {
 // positions gave a new element no rule about where it belongs, and drifted until the default read as
 // arbitrary. Authored elements are deliberately absent — they sort after everything with a baseline
 // position, i.e. at the end of the free band, in the order they were added.
-export function baselineOrder(goal = "") {
+// A composition's own arrangement of the `pinned_top` band, or [] for the derived one. Mirrors
+// pinned_top_order() in domain/composition.py.
+//
+// THE ONE BAND WITH NO RULE: a `free` element declares a slot and earns its position, while the locked
+// bands carry none, so their order is simply the order their keys sit in the catalog. A Roundup is an
+// article and opens like one -- the headline that counts the list, then the picture -- where a sales page
+// opens with the picture. Neither is a property of the ELEMENTS; it belongs to the composition.
+export function pinnedTopOrder(offerType = "") {
+  return offerType ? [...(offerTypeRule(offerType).pinned_top_order || [])] : [];
+}
+
+export function baselineOrder(goal = "", offerType = "") {
   const override = goal ? rules.goals?.[goal]?.default_order : null;
   if (override) return [...override];
   const slots = new Map(slotOrder(goal).map((slot, index) => [slot, index]));
   const tail = slots.size;
+  const pinned = new Map(pinnedTopOrder(offerType).map((key, index) => [key, index]));
+  const pinnedTail = pinned.size;
   const entries = [];
   Object.entries(rules.elements || {}).forEach(([key, spec], position) => {
     const band = spec.placement || "free";
@@ -403,7 +416,12 @@ export function baselineOrder(goal = "") {
     if (band !== "free") {
       // The locked bands carry no slot and need none — band sorting dominates — but they must be here, or
       // the hero block ties on "not in the baseline" and the H1's position follows the sections array.
-      entries.push([PLACEMENT_BANDS.indexOf(band), -1, 0, position, key]);
+      //
+      // `within` is the catalog position unless this composition named the key, in which case it leads.
+      // Unlisted keys sort after every listed one and keep their order among themselves.
+      const within = band === "pinned_top" && pinned.has(key)
+        ? pinned.get(key) : (band === "pinned_top" ? pinnedTail + position : position);
+      entries.push([PLACEMENT_BANDS.indexOf(band), -1, 0, within, key]);
       return;
     }
     if (elementOrderMode(key) === "authored") return;
@@ -428,8 +446,8 @@ export function baselineOrder(goal = "") {
 // lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Entries absent from tenantOrder fall back to
 // the BASELINE order of their TYPE, so a tenant who never drags anything still gets a researched sequence.
 // An entry in neither list sorts last, never first — an unplaced element must not jump to the top of a page.
-function orderEntries(entries, tenantOrder = [], goal = "") {
-  const order = baselineOrder(goal);
+function orderEntries(entries, tenantOrder = [], goal = "", offerType = "") {
+  const order = baselineOrder(goal, offerType);
   const baseline = new Map(order.map((key, index) => [key, index]));
   const rank = new Map(tenantOrder.map((key, index) => [key, index]));
   const fallback = rank.size;
@@ -476,9 +494,9 @@ function orderEntries(entries, tenantOrder = [], goal = "") {
 // Order a list of section KEYS. A bare string key is its own type; pass {key, type} when they differ, which
 // is exactly the repeatable case. Filters `placement: "none"` because this builds the DRAGGABLE ROW LIST and
 // a none-placed section (structured_data) has no row — that filter belongs here and nowhere else.
-export function orderSectionKeys(keys, tenantOrder = [], goal = "") {
+export function orderSectionKeys(keys, tenantOrder = [], goal = "", offerType = "") {
   const entries = keys.map((key) => (typeof key === "string" ? { key, type: key } : key));
-  return orderEntries(entries, tenantOrder, goal)
+  return orderEntries(entries, tenantOrder, goal, offerType)
     .filter((entry) => elementPlacement(entry.type) !== "none")
     .map((entry) => entry.key);
 }
@@ -495,11 +513,11 @@ export function sectionOrderKey(section) {
 // Order real section objects. Orders; never filters — `placement: "none"` means "not a draggable row", which
 // is orderSectionKeys' business, not "not a section". This used to filter, which silently dropped the
 // structured_data section from every saved page and cost those pages their Product/FAQPage JSON-LD.
-export function orderSections(sections, tenantOrder = [], goal = "") {
+export function orderSections(sections, tenantOrder = [], goal = "", offerType = "") {
   const entries = sections.map((section) => ({
     key: sectionOrderKey(section), type: section?.type || "", section,
   }));
-  return orderEntries(entries, tenantOrder, goal).map((entry) => entry.section);
+  return orderEntries(entries, tenantOrder, goal, offerType).map((entry) => entry.section);
 }
 
 

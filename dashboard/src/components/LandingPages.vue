@@ -5972,7 +5972,8 @@ function buildBuilderPageDocument() {
 }
 
 function builderSections(intent) {
-  return orderSections(builderSectionCandidates(intent), builder.section_order || [], builderGoal.value);
+  return orderSections(builderSectionCandidates(intent), builder.section_order || [], builderGoal.value,
+    builderOfferType.value);
 }
 
 // Assembles every section the page WILL contain. Emission order here is only a default -- placement
@@ -6857,7 +6858,7 @@ const sequenceRows = computed(() => {
   // type's slot, so the form and the preview disagreed about where the content blocks were.
   const order = orderSectionKeys(
     rows.map((row) => ({ key: row.key, type: row.type })),
-    builder.section_order || [], builderGoal.value,
+    builder.section_order || [], builderGoal.value, builderOfferType.value,
   );
   return [...rows].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 });

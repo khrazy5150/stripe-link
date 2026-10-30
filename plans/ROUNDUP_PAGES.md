@@ -496,6 +496,28 @@ by a human holding the real element next to the generated one, not by a test. Th
 now (`.sl-page-ribbon` must set `color`; no `.sl-catalog-card` image rule may use a descendant selector),
 but the lesson is that nesting is the risk and the stylesheet is where it bites.
 
+**The headline opens the article. 2026-10-29.** The page's headline and subheadline now sit ABOVE the
+hero image, just under the brand label, on a Roundup only.
+
+`pinned_top` was the one band with no rule. A `free` element declares a slot and earns its position; the
+locked bands "carry no slot and need none", so their order within the band was simply the order their
+keys happen to sit in `composition_rules.json` — fine while every page wanted the same hero, arbitrary
+the moment one did not. Reordering the catalog would have flipped the H1 above the image on every page
+already published, so a composition may now declare its own arrangement of that band:
+
+```json
+"lead_roundup": { "pinned_top_order": ["seo_title", "hero", "hero_media"] }
+```
+
+A Roundup is an ARTICLE and opens like one; a sales page opens with the picture. Neither is a property of
+the ELEMENTS — it belongs to the composition, which is now where it is stated. The list is PARTIAL:
+unlisted keys keep their catalog position behind the named ones, so a new hero element never has to be
+added to every composition that declares an order. Tests assert that every other composition still
+renders `hero_media` first, that each declared key really is a `pinned_top` element (a typo would
+silently do nothing), and that both call sites in the builder pass the composition through — the
+builder's row list and the published page disagreeing about the hero is exactly the drift the shared
+`orderEntries` was centralised to stop.
+
 **The lesson for the next element like this**: a test that asserts two copies hold the same values
 confirms the duplication rather than removing it, and it passes right up until the copy omits a property
 the original has. `EditorialUsesTheRibbonItselfTests` asserts there is only one set of values — including

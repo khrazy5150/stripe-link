@@ -523,7 +523,7 @@ def compose_page(
     visible += derived_head_sections(offer_type, overrides, goal, visible)
     if authored:
         return visible
-    return order_sections(visible, page.get("section_order") or (), goal)
+    return order_sections(visible, page.get("section_order") or (), goal, offer_type)
 
 
 # Placement governs ORDER + draggability; visibility is the separate `enabled` axis above. Both the
@@ -582,7 +582,24 @@ def element_order_mode(section_type: str) -> str:
     return "authored" if spec.get("order_mode") == "authored" else "ordered"
 
 
-def baseline_order(goal: str = "") -> list[str]:
+def pinned_top_order(offer_type: str = "") -> list[str]:
+    """A composition's own arrangement of the `pinned_top` band, or [] for the derived one.
+
+    THE ONE BAND WITH NO RULE. A `free` element declares a slot and earns its position; the locked bands
+    "carry no slot and need none", so their order within the band is simply the order their keys happen to
+    sit in the catalog — fine while every page wanted the same hero, and arbitrary the moment one did not.
+
+    A Roundup is that one. It is an article, so it opens the way an article opens: the headline that counts
+    the list, then the picture. A sales page opens with the picture. Both are right, and neither is a
+    property of the ELEMENTS — it is a property of the composition, which is what declares it here.
+
+    Listed keys lead, in the order given; anything unlisted keeps its catalog position behind them, so a
+    composition names only what it cares about and a new hero element does not need adding to every list.
+    """
+    return list(_offer_type_rule(offer_type).get("pinned_top_order") or []) if offer_type else []
+
+
+def baseline_order(goal: str = "", offer_type: str = "") -> list[str]:
     """The default section sequence for a page nobody has reordered (plans/BUILDER_SECTION_ORDER.md 4a/4d).
 
     DERIVED from the catalog's slots, not authored. §4a researched a good sequence and shipped it as 39
@@ -592,12 +609,17 @@ def baseline_order(goal: str = "") -> list[str]:
 
     A goal may still override the whole sequence via goals.<goal>.default_order (§4a's hook, kept), or
     reorder the slots via goals.<goal>.slot_order, which is the cheap one. Neither is defined today.
+
+    An OFFER_TYPE may reorder the pinned_top band — see `pinned_top_order`. Scoped to that band on
+    purpose: it is the only one whose sequence was never declared by anything.
     """
     override = ((RULES.get("goals", {}).get(goal) or {}).get("default_order")) if goal else None
     if override:
         return list(override)
     slots = {slot: index for index, slot in enumerate(slot_order(goal))}
     tail = len(slots)
+    pinned = {key: index for index, key in enumerate(pinned_top_order(offer_type))}
+    pinned_tail = len(pinned)
     entries = []
     for position, (key, spec) in enumerate(RULES.get("elements", {}).items()):
         band = spec.get("placement") or "free"
@@ -608,7 +630,11 @@ def baseline_order(goal: str = "") -> list[str]:
             # that matters is their order WITHIN the band. They must still be here: dropping them left the
             # hero block (seo_title/hero_media/hero/headline/subheadline) tying on "not in the baseline",
             # which made the H1's position depend on the sections array.
-            entries.append((PLACEMENT_BANDS.index(band), -1, 0, position, key))
+            #
+            # `within` is the catalog position unless this composition named the key, in which case it
+            # leads. Unlisted keys sort after every listed one and keep their order among themselves.
+            within = pinned.get(key, pinned_tail + position) if band == "pinned_top" else position
+            entries.append((PLACEMENT_BANDS.index(band), -1, 0, within, key))
             continue
         if element_order_mode(key) == "authored":
             continue
@@ -618,7 +644,7 @@ def baseline_order(goal: str = "") -> list[str]:
     return [key for *_, key in sorted(entries)]
 
 
-def _order_entries(entries, tenant_order=(), goal: str = ""):
+def _order_entries(entries, tenant_order=(), goal: str = "", offer_type: str = ""):
     """THE ordering rule, in one place — the JS mirror is pageComposer.orderEntries().
 
     Takes (key, type) pairs and returns the INDICES that sort them, so callers map back to whatever they
@@ -634,7 +660,7 @@ def _order_entries(entries, tenant_order=(), goal: str = ""):
     sequence. An entry in neither list sorts last rather than first. Ties keep their incoming position.
     """
     entries = list(entries)
-    order = baseline_order(goal)
+    order = baseline_order(goal, offer_type)
     baseline = {key: index for index, key in enumerate(order)}
     rank = {key: index for index, key in enumerate(tenant_order)}
     fallback = len(rank)
@@ -677,7 +703,7 @@ def _order_entries(entries, tenant_order=(), goal: str = ""):
     return [index for index, _ in sorted(enumerate(entries), key=sort_key)]
 
 
-def order_section_keys(keys, tenant_order=(), goal: str = "") -> list[str]:
+def order_section_keys(keys, tenant_order=(), goal: str = "", offer_type: str = "") -> list[str]:
     """Order section KEYS. A bare string key is its own type; pass a (key, type) pair when they differ,
     which is exactly the repeatable case.
 
@@ -686,7 +712,7 @@ def order_section_keys(keys, tenant_order=(), goal: str = "") -> list[str]:
     """
     entries = [(key, key) if isinstance(key, str) else (key[0], key[1]) for key in keys]
     return [
-        entries[index][0] for index in _order_entries(entries, tenant_order, goal)
+        entries[index][0] for index in _order_entries(entries, tenant_order, goal, offer_type)
         if element_placement(entries[index][1]) != "none"
     ]
 
@@ -703,7 +729,7 @@ def section_order_key(section: dict[str, Any]) -> str:
     return section_id if (spec.get("repeatable") and section_id) else section_type
 
 
-def order_sections(sections, tenant_order=(), goal: str = "") -> list[dict[str, Any]]:
+def order_sections(sections, tenant_order=(), goal: str = "", offer_type: str = "") -> list[dict[str, Any]]:
     """Order real section objects — the JS mirror is pageComposer.orderSections().
 
     Orders; never filters. `placement: "none"` means "not a draggable row", which is order_section_keys'
@@ -712,7 +738,7 @@ def order_sections(sections, tenant_order=(), goal: str = "") -> list[dict[str, 
     """
     sections = list(sections)
     entries = [(section_order_key(section), str(section.get("type") or "")) for section in sections]
-    return [sections[index] for index in _order_entries(entries, tenant_order, goal)]
+    return [sections[index] for index in _order_entries(entries, tenant_order, goal, offer_type)]
 
 
 def recommended_section_keys(offer_type: str, goal: str = "") -> list[str]:

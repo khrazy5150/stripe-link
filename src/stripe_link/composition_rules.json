@@ -1093,6 +1093,11 @@
         "hero",
         "legal_footer"
       ],
+      "pinned_top_order": [
+        "seo_title",
+        "hero",
+        "hero_media"
+      ],
       "allowed_ctas": [],
       "excludes": [
         "checkout_cta",
