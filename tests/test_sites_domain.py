@@ -615,3 +615,56 @@ class CustomDomainsAreLiveOnlyTests(unittest.TestCase):
             {"body": json.dumps({"tenant_id": "t1", "domain": "shop.example.com"})},
             self.repo, "site_D1")
         self.assertNotEqual(resp["statusCode"], 403)
+
+
+class ADisplacedPageKeepsAReadableAddressTests(unittest.TestCase):
+    """A page pushed off its slug used to land on its primary key.
+
+    Two Roundups whose generator produced the same slug was all it took: attaching the second displaced
+    the first to `/page-k8chttv912n`, an unreadable URL nobody chose, on a page that was otherwise
+    perfectly indexable (found on a live Site, 2026-10-30). The words in the slug it already had are the
+    best thing to name it after -- the tenant, or the generator, meant them.
+    """
+
+    def test_the_words_are_kept_and_the_collision_numbered(self):
+        from handlers.sites import _attach_page_to_site
+        pages = {"/winter-gift-guide": {"page_id": "p_old", "page_type": "landing", "enabled": True}}
+        _attach_page_to_site(pages, page_id="p_new", slug="/winter-gift-guide", page_type="landing")
+        self.assertEqual(pages["/winter-gift-guide"]["page_id"], "p_new")
+        self.assertEqual(pages["/winter-gift-guide-2"]["page_id"], "p_old")
+
+    def test_no_page_is_lost_when_it_happens_again(self):
+        """Uniqueness is checked BEFORE the pop. Against the map after it, the seed would resolve back to
+        the slug just vacated and the incoming page would overwrite the one it had displaced."""
+        from handlers.sites import _attach_page_to_site
+        pages = {"/guide": {"page_id": "p1", "page_type": "landing", "enabled": True}}
+        for page_id in ("p2", "p3", "p4"):
+            _attach_page_to_site(pages, page_id=page_id, slug="/guide", page_type="landing")
+        self.assertEqual(sorted(e["page_id"] for e in pages.values()), ["p1", "p2", "p3", "p4"])
+        self.assertEqual(pages["/guide"]["page_id"], "p4")
+
+    def test_a_label_still_wins(self):
+        from handlers.sites import _attach_page_to_site
+        pages = {"/shop": {"page_id": "p_old", "page_type": "landing",
+                           "label": "Winter Gift Guide", "enabled": True}}
+        _attach_page_to_site(pages, page_id="p_new", slug="/shop", page_type="landing")
+        self.assertEqual(pages["/winter-gift-guide"]["page_id"], "p_old")
+
+    def test_the_root_is_not_a_name(self):
+        """A displaced homepage has no words in its slug -- `_slugify("/")` yields the generic "site" --
+        so it keeps the page_id it always had rather than moving to a meaningless `/site` that could
+        collide with a real page. The homepage path is deliberately left as it was."""
+        from handlers.sites import _attach_page_to_site
+        pages = {"/": {"page_id": "page_home01", "page_type": "landing", "enabled": True}}
+        _attach_page_to_site(pages, page_id="page_new01", slug="/", page_type="homepage")
+        self.assertEqual(pages["/"]["page_id"], "page_new01")
+        self.assertEqual(pages["/page-home01"]["page_id"], "page_home01")
+        self.assertNotIn("/site", pages)
+
+    def test_a_page_genuinely_at_site_is_not_special_cased(self):
+        """The root test is on the slug itself, not on what it slugifies to -- `/site` is a real address
+        a tenant may use, and it must be treated like any other words."""
+        from handlers.sites import _attach_page_to_site
+        pages = {"/site": {"page_id": "p_old", "page_type": "landing", "enabled": True}}
+        _attach_page_to_site(pages, page_id="p_new", slug="/site", page_type="landing")
+        self.assertEqual(pages["/site-2"]["page_id"], "p_old")

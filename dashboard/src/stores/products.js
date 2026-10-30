@@ -480,7 +480,13 @@ export async function buildProductDocument(form) {
   const isLeadGen = form.product_intent === "lead_gen";
   // Intrinsic dimensions of the images this product keeps (base-keyed), so the renderer reserves
   // layout space and hints crawlers. Only images actually referenced are carried.
-  const imageDims = isLeadGen ? {} : imageDimsForUrls(form.image_dims, images);
+  //
+  // A LEAD MAGNET KEEPS THESE TOO. They were emptied for lead_gen alongside the images themselves, on
+  // the same "it is never sold" reasoning -- and when the images were given back (see the note below the
+  // `images` field), their dimensions were not. So every lead_gen picture published with no width or
+  // height: the hero of a Roundup, and every entry whose page is a lead page. Found on a live Roundup
+  // where exactly the two lead_gen images of six were missing them (2026-10-30).
+  const imageDims = imageDimsForUrls(form.image_dims, images);
   const isPhysical = productType === "physical";
   const product = {
     schema_version: "2026-05-29",

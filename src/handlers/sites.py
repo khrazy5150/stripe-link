@@ -285,8 +285,26 @@ def _attach_page_to_site(pages: dict, *, page_id, slug, page_type, category=None
     from any other slug it held (its existing label is kept unless a new one is given). Mutates `pages`."""
     occupant = pages.get(slug)
     if isinstance(occupant, dict) and occupant.get("page_id") and occupant["page_id"] != page_id:
+        # DISPLACED TO A READABLE ADDRESS. The seed used to fall back to the page_id, so a page pushed off
+        # its slug landed on `/page-k8chttv912n` -- an unreadable URL, on a page that is otherwise
+        # perfectly indexable, chosen by nobody. Two Roundups sharing one derived slug was all it took.
+        #
+        # The slug it already HAD is the best thing to name it after: the tenant (or the generator) meant
+        # those words, and `_unique_slug` numbers the collision, so the page moves from
+        # `/winter-gift-guide` to `/winter-gift-guide-2` rather than to its primary key.
+        #
+        # Uniqueness is checked against the map BEFORE the pop, or the seed would resolve straight back to
+        # the slug just vacated and the incoming page would overwrite the occupant it had displaced.
+        #
+        # THE ROOT IS NOT A NAME. A displaced homepage has no words in its slug -- `_slugify("/")` yields
+        # the generic "site" -- so that one keeps the page_id it always had rather than being moved to a
+        # meaningless `/site` that could collide with a real page. The homepage path is left exactly as it
+        # was; this fixes the case where there were words to keep.
+        has_words = bool(str(slug or "").strip("/").strip())
+        seed = occupant.get("label") or (slug if has_words else occupant["page_id"])
+        taken = dict(pages)
         pages.pop(slug)
-        pages[_unique_slug(pages, occupant.get("label") or occupant["page_id"])] = dict(occupant)
+        pages[_unique_slug(taken, seed)] = dict(occupant)
     existing_label = None
     for existing_slug, entry in list(pages.items()):
         if isinstance(entry, dict) and entry.get("page_id") == page_id:
