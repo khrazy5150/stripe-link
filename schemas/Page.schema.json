@@ -238,15 +238,19 @@
         "product_id": { "type": "string" },
         "refund_window": {
           "type": "string",
-          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
+          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "90_days", "custom"]
         },
         "condition": {
           "type": "string",
-          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
+          "enum": ["any", "unused", "unopened", "working_condition", "complete_in_packaging", "any_value_adjusted", "defective_only", "not_downloaded", "custom"]
         },
         "return_method": {
           "type": "string",
           "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+        },
+        "return_shipping": {
+          "type": "string",
+          "enum": ["seller_pays", "buyer_pays", "not_applicable"]
         },
         "short_label": { "type": "string" },
         "full_policy": { "type": "string" }

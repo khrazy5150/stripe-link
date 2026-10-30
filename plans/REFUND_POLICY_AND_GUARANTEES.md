@@ -1,6 +1,21 @@
 # Refund Policy II — the promises the vocabulary cannot make
 
-**Status: planned, nothing built · Written 2026-10-27 · Follows `plans/REFUND_POLICY.md`, which is shipped.**
+**Status: P1 SHIPPED dev 2026-10-30 · P2–P7 planned · Written 2026-10-27 · Follows `plans/REFUND_POLICY.md`,
+which is shipped.**
+
+**P1 done.** Three conditions (`working_condition`, `complete_in_packaging`, `any_value_adjusted`), a
+`90_days` window, and `return_shipping` on the policy. The schema-parity test was widened FIRST, as this
+phase instructs — it walks all four schemas by SHAPE rather than by a list of paths, finds the six policy
+blocks and proved them already in step before the vocabulary grew. `return_shipping` renders with the
+return note rather than inside `full_policy`, keeping the one-source rule that exists because the two were
+once both printing the note. Defaults are the status quo (`buyer_pays` for a real return, `not_applicable`
+wherever nothing travels back), so no stored policy gains a promise nobody made.
+
+**P2 and P3 must ship together.** P3 says so and the reason is the whole risk of this plan: removing the
+stamp without moving `return_requirement` and `_keep_it_below` to `resolve()` in the SAME change means a
+product with no override reads an empty policy, finds no `return_required`, and every physical refund is
+released without the goods coming back. P2 also has a tenant-visible consequence that needs saying first —
+every page carrying the platform default loses its refund section on its next publish.
 
 The first plan stopped a lie: a hardcoded JavaScript literal was authoring every product's refund promise.
 It succeeded — the vocabulary is data, the sentence is generated server-side, and a screen exists. This plan

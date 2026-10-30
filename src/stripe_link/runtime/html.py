@@ -24,6 +24,7 @@ from stripe_link.domain.social_links import section_link_entries as social_secti
 from stripe_link.domain.social_links import linkable_on_platform_host
 from stripe_link.domain.social_links import is_adult_host, network_glyph, network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
+from stripe_link.domain.refund_policy import RETURN_SHIPPING_CLAUSES
 from stripe_link.domain.opportunities import (
     SERVICE_SELECTION_CHOICE,
     STAGE_LANDING,
@@ -6554,7 +6555,15 @@ def refund_policy_return_note(policy: dict[str, Any]) -> str:
             "and dispose of it in a responsible way. The seller may still grant a refund."
         )
     if "return_required" in return_method or "return required" in return_method:
-        return "The customer must return the item according to the seller's return instructions before the refund is completed."
+        note = ("The customer must return the item according to the seller's return instructions "
+                "before the refund is completed.")
+        # WHO PAYS THE POSTAGE, appended to the note rather than to `full_policy`. The policy sentence
+        # belongs to `refund_policy.generate_copy` and the note belongs here -- the one-source rule that
+        # exists because the two were once both printing the return note, so every physical page said it
+        # twice. An explicit `return_note` above wins outright and this never runs: a tenant who wrote
+        # their own instructions has said what they mean about postage too.
+        clause = RETURN_SHIPPING_CLAUSES.get(str(policy.get("return_shipping") or "").lower(), "")
+        return f"{note} {clause}" if clause else note
     return ""
 
 

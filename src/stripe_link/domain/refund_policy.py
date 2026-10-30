@@ -67,6 +67,7 @@ WINDOW_OPTIONS: dict[str, dict[str, Any]] = {
     "14_days": {"short_label": "14-day money-back", "days": 14, "hours": None},
     "30_days": {"short_label": "30-day money-back", "days": 30, "hours": None},
     "60_days": {"short_label": "60-day money-back", "days": 60, "hours": None},
+    "90_days": {"short_label": "90-day money-back", "days": 90, "hours": None},
     # `custom` means the structured fields do not describe this policy -- the tenant's own prose governs.
     # There is no numeric field to hold "45 days", so no deadline can be computed from it. See `Open`.
     CUSTOM: {"short_label": "Refund policy", "select_label": "Custom — write your own",
@@ -79,6 +80,15 @@ CONDITION_OPTIONS: dict[str, str] = {
     "any": "",
     "unused": "in unused condition",
     "unopened": "in unopened condition",
+    # The ordinary physical-goods rule, and the gap that started this plan: the clause making damage
+    # caused by the customer ineligible. `unused` is stricter than most sellers mean and `any` gives away
+    # the only protection they have, so a tenant selling anything mechanical had no honest option.
+    "working_condition": "in working condition",
+    "complete_in_packaging": "unused, in its original packaging, with all parts and accessories",
+    # The honest middle ground. It changes the SENTENCE only -- no refund arithmetic is implied. Refunds
+    # already support a partial amount and the merchant decides it; promising a deduction nothing computes
+    # would be a new implicit promise, which is the thing this family of plans exists to stop.
+    "any_value_adjusted": "in any condition — the refund is reduced to reflect any loss of value",
     "defective_only": "for defective items only",
     "not_downloaded": "provided the file has not been downloaded",
     CUSTOM: "",
@@ -91,6 +101,9 @@ CONDITION_LABELS: dict[str, str] = {
     "any": "Any condition",
     "unused": "Unused",
     "unopened": "Unopened",
+    "working_condition": "In working condition",
+    "complete_in_packaging": "Unused, complete, in original packaging",
+    "any_value_adjusted": "Any condition — refund adjusted for loss of value",
     "defective_only": "Defective items only",
     "not_downloaded": "Not yet downloaded",
     CUSTOM: "Custom",
@@ -108,6 +121,27 @@ CLASS_HINTS: dict[str, str] = {
              "The window runs from purchase.",
     SUBSCRIPTION: "Anything billed on a schedule. The window runs from each renewal, so a buyer who "
                   "forgets to cancel has this long to ask.",
+}
+
+# WHO PAYS THE POSTAGE -- the missing half of "Free returns", and the single most commercially
+# significant fact a returns policy states. `domain/ledger.return_shipping_cost_entry` has recorded who
+# BORE this cost since the shipping work; nothing has ever recorded who was PROMISED to.
+SELLER_PAYS = "seller_pays"
+BUYER_PAYS = "buyer_pays"
+SHIPPING_NOT_APPLICABLE = "not_applicable"
+
+RETURN_SHIPPING_OPTIONS: dict[str, str] = {
+    SELLER_PAYS: "We pay return postage",
+    BUYER_PAYS: "Customer pays return postage",
+    SHIPPING_NOT_APPLICABLE: "Not applicable — nothing is sent back",
+}
+
+# The clause the renderer prints. Empty for `not_applicable`: nothing ships back, so the question does not
+# arise and a sentence about it would be noise on a page about a download.
+RETURN_SHIPPING_CLAUSES: dict[str, str] = {
+    SELLER_PAYS: "Return postage is on us.",
+    BUYER_PAYS: "Return postage is paid by the customer.",
+    SHIPPING_NOT_APPLICABLE: "",
 }
 
 RETURN_METHOD_OPTIONS: dict[str, str] = {
@@ -129,6 +163,17 @@ CLASS_DEFAULTS: dict[str, dict[str, str]] = {
     DIGITAL: {"refund_window": NON_REFUNDABLE, "condition": "any", "return_method": REVOKE},
     SUBSCRIPTION: {"refund_window": "72_hours", "condition": "any", "return_method": KEEPS},
 }
+
+
+def default_return_shipping(return_method: str) -> str:
+    """What `return_shipping` means when the tenant has not chosen.
+
+    `not_applicable` wherever nothing travels back -- a revoked download and a keep-it refund both leave
+    no parcel to pay for, so asking the question there would invent a promise about postage that does not
+    exist. Only a real return defaults to the buyer paying, which is the status quo on every page today:
+    silence has always meant the customer arranges it.
+    """
+    return BUYER_PAYS if return_method == RETURN_REQUIRED else SHIPPING_NOT_APPLICABLE
 
 
 class RefundPolicyError(ValueError):
@@ -262,7 +307,8 @@ def generate_copy(policy_class: str, window: str, condition: str) -> tuple[str, 
 
 def build(policy_class: str, *, refund_window: str, condition: str, return_method: str,
           short_label: str = "", full_policy: str = "", return_note: str = "",
-          keep_it_below: Any = None, source: str = SOURCE_TENANT_DEFAULT) -> dict[str, Any]:
+          keep_it_below: Any = None, source: str = SOURCE_TENANT_DEFAULT,
+          return_shipping: str = "") -> dict[str, Any]:
     """A complete, valid policy object. RAISES on anything unwritable.
 
     The write path is strict on purpose: every value that reaches a stored policy has been through here, so
@@ -276,6 +322,9 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
         raise RefundPolicyError(f"Unknown refund condition '{condition}'.")
     if return_method not in RETURN_METHOD_OPTIONS:
         raise RefundPolicyError(f"Unknown return method '{return_method}'.")
+    return_shipping = _text(return_shipping) or default_return_shipping(return_method)
+    if return_shipping not in RETURN_SHIPPING_OPTIONS:
+        raise RefundPolicyError(f"Unknown return shipping '{return_shipping}'.")
 
     generated_label, generated_full = generate_copy(policy_class, refund_window, condition)
     resolved_full = _text(full_policy) or generated_full
@@ -291,6 +340,7 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
         "return_method": return_method,
         "short_label": _text(short_label) or generated_label,
         "full_policy": resolved_full,
+        "return_shipping": return_shipping,
     }
     if _text(return_note):
         policy["return_note"] = _text(return_note)
@@ -319,6 +369,11 @@ def normalize(policy: Any, *, policy_class: str) -> dict[str, Any]:
     return_method = _text(raw.get("return_method"))
     if return_method not in RETURN_METHOD_OPTIONS:
         return_method = default["return_method"]
+    # Absent on every policy stored before this field existed, which is nearly all of them -- so the
+    # fallback has to be the status quo rather than a new promise. See `default_return_shipping`.
+    return_shipping = _text(raw.get("return_shipping")).lower()
+    if return_shipping not in RETURN_SHIPPING_OPTIONS:
+        return_shipping = default_return_shipping(return_method)
 
     generated_label, generated_full = generate_copy(policy_class, window, condition)
     normalized: dict[str, Any] = {
@@ -328,6 +383,7 @@ def normalize(policy: Any, *, policy_class: str) -> dict[str, Any]:
         "return_method": return_method,
         "short_label": _text(raw.get("short_label")) or generated_label,
         "full_policy": _text(raw.get("full_policy")) or generated_full,
+        "return_shipping": return_shipping,
     }
     if _text(raw.get("return_note")):
         normalized["return_note"] = _text(raw.get("return_note"))
@@ -451,6 +507,13 @@ def vocabulary() -> dict[str, Any]:
                        for key, clause in CONDITION_OPTIONS.items()],
         "return_methods": [{"value": key, "label": label}
                            for key, label in RETURN_METHOD_OPTIONS.items()],
+        # The screen shows this only for `return_required`; the clause travels with it so the preview is
+        # the server's sentence rather than one the browser assembles.
+        "return_shipping": [{"value": key, "label": label,
+                             "clause": RETURN_SHIPPING_CLAUSES[key]}
+                            for key, label in RETURN_SHIPPING_OPTIONS.items()],
+        "return_shipping_defaults": {method: default_return_shipping(method)
+                                     for method in RETURN_METHOD_OPTIONS},
         "class_defaults": {k: dict(v) for k, v in CLASS_DEFAULTS.items()},
         "previews": previews,
     }

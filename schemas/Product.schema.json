@@ -150,6 +150,7 @@
             "14_days",
             "30_days",
             "60_days",
+            "90_days",
             "custom"
           ]
         },
@@ -159,6 +160,9 @@
             "any",
             "unused",
             "unopened",
+            "working_condition",
+            "complete_in_packaging",
+            "any_value_adjusted",
             "defective_only",
             "not_downloaded",
             "custom"
@@ -172,6 +176,15 @@
             "digital_revoke_access",
             "custom"
           ]
+        },
+        "return_shipping": {
+          "type": "string",
+          "enum": [
+            "seller_pays",
+            "buyer_pays",
+            "not_applicable"
+          ],
+          "description": "Who pays return postage. `not_applicable` wherever nothing travels back. Absent on policies stored before this field existed; refund_policy.normalize supplies the status-quo default rather than inventing a promise."
         },
         "short_label": {
           "type": "string"

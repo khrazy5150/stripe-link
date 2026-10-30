@@ -8,12 +8,18 @@ storefront is an offer to a buyer, so resolution must reproduce today's promise 
 deliberately sets their own -- with one exception, proven below, where today's page prints the same
 paragraph twice.
 """
+import pathlib
 import unittest
 
 from stripe_link.domain.refund_policy import (
     CLASS_DEFAULTS,
+    CONDITION_LABELS,
     CONDITION_OPTIONS,
+    CUSTOM,
     DIGITAL,
+    KEEPS,
+    RETURN_REQUIRED,
+    REVOKE,
     NON_REFUNDABLE,
     PHYSICAL,
     RETURN_METHOD_OPTIONS,
@@ -31,7 +37,9 @@ from stripe_link.domain.refund_policy import (
     product_class,
     purchase_class,
     resolve,
+    default_return_shipping,
     tenant_policies,
+    vocabulary,
     window_days,
 )
 
@@ -320,12 +328,61 @@ class TenantDefaults(unittest.TestCase):
 
 
 class VocabularyAgreesWithTheSchema(unittest.TestCase):
-    """The enums live in Product.schema.json. A module that drifts from it writes invalid documents."""
+    """The enums are duplicated across FOUR schema files, and this used to pin one of them.
+
+    `Product`, `Page`, `Offer` and `TenantConfig` (three times, one per class) each carry their own copy
+    of the refund window, condition and return-method enums -- six blocks in all. Pinning only Product
+    let the other five drift silently, so widening the vocabulary would ship a document some other
+    validator refuses. Widened BEFORE the vocabulary grew, so it proved the six were already in step
+    rather than discovering it afterwards (plans/REFUND_POLICY_AND_GUARANTEES.md P1).
+    """
+
+    @staticmethod
+    def _load(name):
+        import json
+        with open(f"schemas/{name}.schema.json") as handle:
+            return json.load(handle)
 
     def _schema(self):
-        import json
-        with open("schemas/Product.schema.json") as handle:
-            return json.load(handle)["properties"]["refund_policy"]["properties"]
+        return self._load("Product")["properties"]["refund_policy"]["properties"]
+
+    def _every_policy_block(self):
+        """Every refund-policy property block in every schema, as (where, properties) pairs.
+
+        Found by SHAPE -- any object whose properties carry all three enums -- rather than by a list of
+        paths. A path list is a second place to keep in step with the schemas, and would miss a block
+        added somewhere new, which is precisely the drift this test exists to catch.
+        """
+        def walk(node, where, out):
+            if isinstance(node, dict):
+                props = node.get("properties")
+                if isinstance(props, dict) and all(
+                        isinstance(props.get(k), dict) and "enum" in props[k]
+                        for k in ("refund_window", "condition", "return_method")):
+                    out.append((where, props))
+                for key, value in node.items():
+                    walk(value, f"{where}.{key}", out)
+            elif isinstance(node, list):
+                for i, value in enumerate(node):
+                    walk(value, f"{where}[{i}]", out)
+            return out
+
+        blocks = []
+        for name in ("Product", "Page", "Offer", "TenantConfig"):
+            walk(self._load(name), name, blocks)
+        return blocks
+
+    def test_every_schema_carries_the_same_vocabulary(self):
+        seen = 0
+        for where, props in self._every_policy_block():
+            with self.subTest(schema=where):
+                self.assertEqual(sorted(WINDOW_OPTIONS), sorted(props["refund_window"]["enum"]))
+                self.assertEqual(sorted(CONDITION_OPTIONS), sorted(props["condition"]["enum"]))
+                self.assertEqual(sorted(RETURN_METHOD_OPTIONS), sorted(props["return_method"]["enum"]))
+                seen += 1
+        # Six blocks, not one. A schema that stops being reachable by the walk above must fail here
+        # rather than quietly reduce the coverage this test claims.
+        self.assertEqual(seen, 6)
 
     def test_windows_match(self):
         self.assertEqual(sorted(WINDOW_OPTIONS), sorted(self._schema()["refund_window"]["enum"]))
@@ -345,3 +402,106 @@ class VocabularyAgreesWithTheSchema(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheVocabularyNamesRulesSellersActuallyUse(unittest.TestCase):
+    """P1 of plans/REFUND_POLICY_AND_GUARANTEES.md.
+
+    The condition list could not express the ordinary physical-goods rule. `unused` is stricter than most
+    sellers mean and `any` gives away the only protection they have, so a tenant selling anything
+    mechanical had no honest option and picked one of the two wrong ones.
+    """
+
+    def test_working_condition_exists_and_reads_as_a_clause(self):
+        self.assertEqual(CONDITION_OPTIONS["working_condition"], "in working condition")
+
+    def test_the_two_other_additions(self):
+        self.assertIn("original packaging", CONDITION_OPTIONS["complete_in_packaging"])
+        self.assertIn("loss of value", CONDITION_OPTIONS["any_value_adjusted"])
+
+    def test_a_ninety_day_window_can_be_expressed(self):
+        self.assertEqual(window_days("90_days"), 90)
+        self.assertEqual(WINDOW_OPTIONS["90_days"]["short_label"], "90-day money-back")
+
+    def test_every_condition_is_labelled(self):
+        """A screen must never have to invent wording for a commercial term."""
+        self.assertEqual(sorted(CONDITION_OPTIONS), sorted(CONDITION_LABELS))
+
+    def test_value_adjusted_promises_no_arithmetic(self):
+        """It changes the SENTENCE only. Refunds already support a partial amount and the merchant
+        decides it; promising a deduction nothing computes would be a new implicit promise."""
+        import stripe_link.domain.refund_policy as module
+        source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
+        block = source.split("any_value_adjusted", 1)[1].split("}", 1)[0]
+        self.assertNotIn("*", block)
+        self.assertNotIn("round", block)
+
+
+class WhoPaysTheReturnPostage(unittest.TestCase):
+    """The missing half of "Free returns", and the single most commercially significant fact a returns
+    policy states. `ledger.return_shipping_cost_entry` has recorded who BORE this cost since the shipping
+    work; nothing has ever recorded who was PROMISED to."""
+
+    def test_a_real_return_defaults_to_the_buyer(self):
+        """The status quo on every page today: silence has always meant the customer arranges it. A
+        seller-pays default would invent a promise no tenant made."""
+        self.assertEqual(default_return_shipping(RETURN_REQUIRED), "buyer_pays")
+
+    def test_nothing_travelling_back_makes_the_question_moot(self):
+        for method in (KEEPS, REVOKE, CUSTOM):
+            with self.subTest(method=method):
+                self.assertEqual(default_return_shipping(method), "not_applicable")
+
+    def test_build_rejects_an_unknown_value(self):
+        with self.assertRaises(RefundPolicyError):
+            build(PHYSICAL, refund_window="30_days", condition="any",
+                  return_method=RETURN_REQUIRED, return_shipping="someone_else")
+
+    def test_a_policy_stored_before_the_field_existed_still_normalises(self):
+        """Nearly every stored policy predates it, so the fallback has to be the status quo."""
+        policy = normalize({"refund_window": "30_days", "condition": "unused",
+                            "return_method": RETURN_REQUIRED}, policy_class=PHYSICAL)
+        self.assertEqual(policy["return_shipping"], "buyer_pays")
+
+    def test_the_screen_is_given_the_options_and_the_defaults(self):
+        vocab = vocabulary()
+        self.assertEqual([o["value"] for o in vocab["return_shipping"]],
+                         ["seller_pays", "buyer_pays", "not_applicable"])
+        self.assertEqual(vocab["return_shipping_defaults"][RETURN_REQUIRED], "buyer_pays")
+
+    def test_the_clause_is_the_servers_sentence(self):
+        """Previewed from the server like every other promise on this screen -- a browser is not allowed
+        to author one."""
+        clauses = {o["value"]: o["clause"] for o in vocabulary()["return_shipping"]}
+        self.assertEqual(clauses["seller_pays"], "Return postage is on us.")
+        self.assertEqual(clauses["not_applicable"], "")
+
+
+class ThePostageClauseRendersWithTheReturnNote(unittest.TestCase):
+    """Appended to the NOTE, not to `full_policy`. The policy sentence belongs to `generate_copy` and the
+    note belongs to the renderer -- the one-source rule that exists because the two were once both
+    printing the return note, so every physical page said it twice."""
+
+    @staticmethod
+    def _note(**policy):
+        from stripe_link.runtime.html import refund_policy_return_note
+        return refund_policy_return_note({"return_method": RETURN_REQUIRED, **policy})
+
+    def test_seller_pays_is_said_out_loud(self):
+        self.assertTrue(self._note(return_shipping="seller_pays").endswith("Return postage is on us."))
+
+    def test_buyer_pays_is_said_out_loud(self):
+        self.assertIn("paid by the customer", self._note(return_shipping="buyer_pays"))
+
+    def test_an_absent_field_adds_nothing(self):
+        """Silence rather than a guess: a policy stored before the field existed must not gain a
+        sentence about postage nobody wrote."""
+        self.assertTrue(self._note().endswith("before the refund is completed."))
+
+    def test_not_applicable_adds_nothing(self):
+        self.assertTrue(self._note(return_shipping="not_applicable").endswith("completed."))
+
+    def test_the_tenants_own_note_still_wins_outright(self):
+        """Someone who wrote their own return instructions has said what they mean about postage too."""
+        self.assertEqual(self._note(return_note="Post it back to us.", return_shipping="seller_pays"),
+                         "Post it back to us.")
