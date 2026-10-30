@@ -3295,10 +3295,6 @@ const headlineBlanks = reactive({ things: "", audience: "", price: "" });
 function blanksIn(pattern) {
   return HEADLINE_BLANKS.filter((blank) => pattern.includes(`{${blank.token}}`));
 }
-/** Whether every blank this pattern needs has been filled in. */
-function patternReady(pattern) {
-  return blanksIn(pattern).every((blank) => headlineBlanks[blank.token].trim());
-}
 // What the tenant still has to say before a pattern (or their current headline) is finished.
 const headlineBlankHint = ref("");
 
