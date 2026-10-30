@@ -1,4 +1,5 @@
 import json
+import pathlib
 import os
 import unittest
 from unittest.mock import patch
@@ -668,3 +669,83 @@ class ADisplacedPageKeepsAReadableAddressTests(unittest.TestCase):
         pages = {"/site": {"page_id": "p_old", "page_type": "landing", "enabled": True}}
         _attach_page_to_site(pages, page_id="p_new", slug="/site", page_type="landing")
         self.assertEqual(pages["/site-2"]["page_id"], "p_old")
+
+
+class TheSlugBoxTakesWhatTheTenantMeantTests(unittest.TestCase):
+    """`normalize_route_path` lowercases and adds the leading slash, and stops there.
+
+    So a space or an underscore survived it and was refused several frames later by `_SITE_SLUG_RE` as
+    "Site page slug '/a b' is invalid" -- a message about a regex, shown to someone who typed a space.
+    The handler sanitizes now, and the input does the same as it is typed, so what the tenant sees is
+    what gets saved.
+    """
+
+    def _attach(self, repo, **body):
+        return handler({"httpMethod": "POST", "resource": "/sites/{site_id}/pages",
+                        "pathParameters": {"site_id": "site_H1"},
+                        "body": json.dumps({"tenant_id": "t1", **body})}, None, repository=repo)
+
+    def test_spaces_and_case_become_a_slug_instead_of_an_error(self):
+        from handlers.sites import normalize_route_path
+        from stripe_link.domain.slugs import sanitize_slug
+
+        def resolved(raw):
+            slug = normalize_route_path(raw)
+            if slug and slug != "/":
+                parts = [sanitize_slug(p, fallback="") for p in slug.lstrip("/").split("/")]
+                slug = "/" + "/".join(p for p in parts if p)
+            return slug
+
+        self.assertEqual(resolved("Amazing Gift Ideas"), "/amazing-gift-ideas")
+        self.assertEqual(resolved("/Amazing_Gift Ideas/"), "/amazing-gift-ideas")
+        self.assertEqual(resolved("amazing--gift  ideas"), "/amazing-gift-ideas")
+
+    def test_a_nested_category_slug_survives(self):
+        """A category page lives at `/category/supplements`, and `_SITE_SLUG_RE` allows the nesting.
+        Sanitising the whole path in one pass folds the separator into a hyphen and quietly moves every
+        nested page to a new address -- the existing attach test is what caught it."""
+        from handlers.sites import normalize_route_path
+        from stripe_link.domain.slugs import sanitize_slug
+        slug = normalize_route_path("/Category/Supplements Plus")
+        parts = [sanitize_slug(p, fallback="") for p in slug.lstrip("/").split("/")]
+        self.assertEqual("/" + "/".join(p for p in parts if p), "/category/supplements-plus")
+
+    def test_the_input_sanitizes_as_it_is_typed(self):
+        vue = (pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "components" / "Sites.vue").read_text(encoding="utf-8")
+        self.assertIn('@input="attachForm.slug = slugPath($event.target.value)"', vue)
+        self.assertIn("function slugPath(value)", vue)
+
+    def test_a_hyphen_being_typed_is_not_eaten(self):
+        """Stripping a trailing hyphen would fight someone midway through "gift-guide", turning every
+        keystroke after the hyphen into a new word boundary they have to re-type."""
+        vue = (pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "components" / "Sites.vue").read_text(encoding="utf-8")
+        self.assertIn('const trailing = /[^a-z0-9/]$/.test(raw) ? "-" : "";', vue)
+
+
+class ARejectedRouteMapIsLoggedTests(unittest.TestCase):
+    """Every rejection in `_save_site_pages` is a sentence the tenant reads and nobody can read later.
+
+    A tenant reporting "setting the homepage gives me an error" left nothing in CloudWatch to search
+    for -- the route map is rebuilt in memory, handed to validate_site, and the failure goes straight to
+    the browser. The only way to learn which rule fired was to ask them to read it back (2026-10-30).
+    """
+
+    SOURCE = (pathlib.Path(__file__).resolve().parents[1]
+              / "src" / "handlers" / "sites.py").read_text(encoding="utf-8")
+
+    def test_the_rejection_is_logged_before_it_is_returned(self):
+        block = self.SOURCE.split("def _save_site_pages", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("logger.warning(", block)
+        self.assertLess(block.index("logger.warning("), block.index('code="invalid_site"'))
+
+    def test_it_carries_the_route_map(self):
+        """WHICH slug is invalid is the whole question, and the message names only one of them."""
+        block = self.SOURCE.split("def _save_site_pages", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('sorted((site.get("pages") or {}).keys())', block)
+
+    def test_the_attach_refusals_are_logged_too(self):
+        block = self.SOURCE.split("def attach_page", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("logger.info(", block)
+        self.assertIn("is reserved", block)

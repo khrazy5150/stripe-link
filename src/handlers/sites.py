@@ -11,6 +11,7 @@ from stripe_link.domain.connect_sync import compute_site_eligibility, connect_st
 from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
+from stripe_link.domain.slugs import sanitize_slug
 from stripe_link.domain.custom_domains import (
     creator_hosting_domain,
     creator_serving_enabled,
@@ -340,6 +341,15 @@ def _save_site_pages(repository, site):
         validate_site(site)
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
+        # LOGGED, not just returned. Every rejection here is a sentence the tenant reads on their screen
+        # and nobody can read afterwards: the route map is rebuilt in memory, handed to validate_site, and
+        # the failure goes straight to the browser. A tenant reporting "setting the homepage gives me an
+        # error" left nothing in CloudWatch to search for, so the only way to learn which of the rules
+        # fired was to ask them to read it back (2026-10-30). The route map goes with it, because WHICH
+        # slug is invalid is the whole question and the message names only one of them.
+        logger.warning("site %s route map rejected for %s: %s | pages=%s",
+                       site.get("site_id"), site.get("tenant_id"), exc,
+                       sorted((site.get("pages") or {}).keys()))
         return None, error_response(str(exc), code="invalid_site")
     _put_site_index_records(saved)  # custom-domain (if any) + the free platform-hostname record
     return saved, None
@@ -384,10 +394,23 @@ def attach_page(event, repository, site_id, mode="test", pages_repo=None):
     page_id = str(body.get("page_id") or "").strip()
     if not page_id:
         return error_response("page_id is required.", code="missing_page")
+    # NORMALIZED, THEN SANITIZED. `normalize_route_path` lowercases and adds the leading slash, and stops
+    # there -- so a space or an underscore survived it and was refused several frames later by
+    # `_SITE_SLUG_RE` as "Site page slug '/a b' is invalid", which reads as a bug rather than as a typo.
+    # Sanitizing here means the tenant gets the slug they meant instead of a rejection; the input does the
+    # same as they type, so what they see is what they get.
     slug = normalize_route_path(body.get("slug"))
+    if slug and slug != "/":
+        # PER SEGMENT. A category page lives at `/category/supplements`, and `_SITE_SLUG_RE` allows the
+        # nesting -- sanitising the whole path in one pass would fold the separator into a hyphen and
+        # quietly move every nested page to a new address.
+        segments = [sanitize_slug(part, fallback="") for part in slug.lstrip("/").split("/")]
+        slug = "/" + "/".join(part for part in segments if part)
     if slug == "/" or not slug:
+        logger.info("attach rejected for %s: slug %r is empty or the root", tenant_id, body.get("slug"))
         return error_response("Use the homepage action to place a page at the root.", code="invalid_slug")
     if is_reserved_slug(slug):
+        logger.info("attach rejected for %s: slug %r is reserved", tenant_id, slug)
         return error_response(
             f"'{slug}' is reserved for the sales funnel and can't be assigned manually.",
             code="reserved_slug",

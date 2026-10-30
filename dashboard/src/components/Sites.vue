@@ -689,7 +689,17 @@
                 <option value="">Choose a page…</option>
                 <option v-for="p in assignablePages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
               </select>
-              <input v-model.trim="attachForm.slug" type="text" placeholder="/slug" class="attach-slug" />
+              <!-- SANITIZED AS IT IS TYPED. The box used to accept anything, lowercase it server-side and
+                   then refuse it several frames later as "Site page slug '/a b' is invalid" -- a message
+                   about a regex, for a tenant who typed a space. What they see here is now what gets
+                   saved. -->
+              <input
+                :value="attachForm.slug"
+                type="text"
+                placeholder="/slug"
+                class="attach-slug"
+                @input="attachForm.slug = slugPath($event.target.value)"
+              />
               <button type="button" class="secondary-action" :disabled="!attachForm.pageId || !attachForm.slug || attachBusy" @click="attachPage">
                 {{ attachBusy ? "Attaching…" : "Attach" }}
               </button>
@@ -793,6 +803,7 @@ import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
+import { sanitizeSlug } from "../composables/slugs";
 import { BLOCKED, CHOOSE, DELEGATE, DETECTED, LIVE, REVIEW, detectionSummary, importSummary, mailSummary, managedDnsState, nameserverInstructions, refusalIsAboutTheZone, waitingMessage } from "../composables/managedDns";
 import { rootDomain } from "../composables/dnsInstructions";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
@@ -1396,6 +1407,20 @@ async function setAsHomepage() {
 }
 
 const attachForm = reactive({ pageId: "", slug: "" });
+// A Site route path: lowercase, hyphen-separated, one leading slash. Mirrors what the handler now does
+// to whatever arrives, so the two cannot disagree about the address being created. A trailing hyphen is
+// kept WHILE TYPING -- stripping it would fight someone midway through "gift-guide", turning each
+// keystroke after the hyphen into a new word boundary they have to re-type.
+function slugPath(value) {
+  const raw = String(value || "").replace(/^\/+/, "");
+  if (!raw) return "";
+  // Per SEGMENT: a category page lives at `/category/supplements`, and folding the separator into a
+  // hyphen would quietly move every nested page to a new address.
+  const trailing = /[^a-z0-9/]$/.test(raw) ? "-" : "";
+  const parts = raw.split("/").map((part) => sanitizeSlug(part, "")).filter(Boolean);
+  if (!parts.length) return "";
+  return "/" + parts.join("/") + trailing + (raw.endsWith("/") && parts.length ? "/" : "");
+}
 const attachBusy = ref(false);
 const attachError = ref("");
 // A category page carries a catalog_grid section with a category key; attach it as page_type=category so the
