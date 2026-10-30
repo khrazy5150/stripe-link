@@ -1045,6 +1045,19 @@ class AnEmptyGridSaysSoAndOffersTheFixTests(unittest.TestCase):
         self.assertIn("openGridCollection", self.VUE)
         self.assertIn("Add pages to this collection", self.VUE)
 
+    def test_a_grid_that_is_already_full_keeps_the_way_through(self):
+        """The first cut showed the link only while the collection was EMPTY, which assumed a tenant
+        goes to Collections to build the list once and never returns. They don't -- the page is where
+        the list is understood, so the page is where they come back to add the next one. Without it, a
+        Roundup with three entries looks like a Roundup that can only ever have three."""
+        self.assertIn("Add or reorder pages in this collection", self.VUE)
+        # Same action either way: one door, two labels, not two code paths that can drift.
+        self.assertEqual(self.FLAT.count('@click="openGridCollection"'), 2)
+
+    def test_only_one_of_them_shows_at_a_time(self):
+        """v-else-if, not a second v-if: an empty grid must not draw the banner's button AND the link."""
+        self.assertIn('<p v-else-if="navigateTo" class="field-note">', self.FLAT)
+
     def test_it_reuses_the_apps_own_banner(self):
         """Not a new callout class with the banner's values copied into it."""
         self.assertIn('class="keys-status-banner is-prose"', self.FLAT)
@@ -1085,3 +1098,57 @@ class AnEmptyGridSaysSoAndOffersTheFixTests(unittest.TestCase):
         block = self.VUE.split("async function openGridCollection", 1)[1].split("\n}", 1)[0]
         self.assertIn("pendingCollectionHandoff.value = true;", block)
         self.assertIn('@confirm="goToGridCollection"', self.VUE)
+
+
+class ARoundupIsNotAMemberTests(unittest.TestCase):
+    """A Roundup page IS a list of other pages, so offering one as a member makes a roundup of roundups --
+    and when the collection is the one that page embeds, a list containing itself.
+
+    The author, 2026-10-30: "It doesn't make any sense to create a Roundup page of a Roundup page."
+    """
+
+    ROOT = pathlib.Path(__file__).resolve().parents[1]
+    VUE = (ROOT / "dashboard" / "src" / "components" / "Collections.vue").read_text(encoding="utf-8")
+
+    def test_the_picker_excludes_them(self):
+        block = self.VUE.split("const addablePages = computed", 1)[1].split("});", 1)[0]
+        self.assertIn("!roundups.has(p.page_id)", block)
+
+    def test_the_offer_is_the_signal(self):
+        """`lead_capture_action === "roundup"` is what decides the composition server-side and what the
+        page builder's own `isRoundupPage` reads. Anything else is a proxy for it."""
+        self.assertIn('o?.lead_capture_action === "roundup"', self.VUE)
+
+    def test_a_draft_roundup_is_caught(self):
+        """The route map records `composition` at PUBLISH, so a draft has nothing on it -- and a draft
+        Roundup is exactly what a tenant picks by mistake while building one. Reading the offers is what
+        covers them, which is why this screen fetches offers at all."""
+        self.assertIn('apiRequest("/offers")', self.VUE)
+
+    def test_a_failed_offers_load_still_excludes_published_ones(self):
+        """A filter built only from data that might be absent passes everything when it is absent. The
+        route map's `composition` is the half that survives, so the degradation is "offers too few"
+        rather than "offers everything"."""
+        block = self.VUE.split("const roundupPageIds = computed", 1)[1].split("});", 1)[0]
+        self.assertIn('entry?.composition === "lead_roundup"', block)
+
+    def test_the_server_writes_that_composition(self):
+        """The fallback is only worth anything if the value it reads is really there."""
+        publishing = (self.ROOT / "src" / "stripe_link" / "runtime" / "publishing.py").read_text(encoding="utf-8")
+        self.assertIn('entry["composition"] = composition', publishing)
+        self.assertIn("composition_key(offer))", publishing)
+
+    def test_the_name_it_matches_is_the_real_composition_key(self):
+        """`lead_roundup` is what `composition_key` returns for a Roundup offer. A typo here would
+        silently filter nothing, and nothing else in the dashboard would notice."""
+        from stripe_link.domain.composition import composition_key
+        self.assertEqual(
+            composition_key({"product_intent": "lead_gen", "lead_capture_action": "roundup"}),
+            "lead_roundup")
+
+    def test_one_already_chosen_is_left_alone(self):
+        """This stops one being ADDED. Quietly dropping a member the tenant put there is a different
+        decision, and not one to take on their behalf inside a picker."""
+        block = self.VUE.split("const addablePages = computed", 1)[1].split("});", 1)[0]
+        self.assertIn("!chosen.has(p.page_id)", block)
+        self.assertNotIn("splice", block)

@@ -849,6 +849,18 @@
                     Your page is saved first.
                   </span>
                 </div>
+                <!-- A FULL GRID NEEDS THE WAY OUT TOO. The first cut showed this only when the collection
+                     was empty, which assumed the tenant goes to Collections to BUILD the list and never
+                     again. They don't: the page is where the list is understood, so the page is where they
+                     come back to add the next one. Without it here, a Roundup with three entries looks
+                     like a Roundup that can only ever have three (author, 2026-10-30). Quieter than the
+                     empty-state button because nothing is wrong -- it is a door, not a warning. -->
+                <p v-else-if="navigateTo" class="field-note">
+                  <button type="button" class="link-action" @click="openGridCollection">
+                    Add or reorder pages in this collection
+                  </button>
+                  <template v-if="!leavingBuilderLosesWork"> Your page is saved first.</template>
+                </p>
                 <!-- Filled in from each entry's own product the first time this opens (name, category,
                      pitch, reason to buy) so the tenant edits wording rather than inventing it. Anything
                      emptied still publishes: the renderer applies the same ladder for a box left blank. -->

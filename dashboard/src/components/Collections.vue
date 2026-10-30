@@ -174,6 +174,10 @@ const productsStore = useProductsStore();
 const takeViewIntent = inject("takeViewIntent", null);
 
 const pages = ref([]);           // all landing pages (GET /pages) — for member names/slugs + candidate lists
+// Offers, for one question only: is this page a Roundup? The composition is a property of the OFFER, and
+// a DRAFT Roundup has nothing recorded on the Site route map yet -- so the page list alone cannot answer
+// it for the pages a tenant is most likely to pick by mistake while building one.
+const offers = ref([]);
 const editing = ref(null);       // working copy of the collection in the modal, or null when closed
 const editorError = ref("");
 const saving = ref(false);
@@ -194,12 +198,45 @@ function pageIdsForSite(siteId) {
   const site = sitesStore.sites.find((s) => s.site_id === siteId);
   return new Set(Object.values(site?.pages || {}).map((e) => e.page_id).filter(Boolean));
 }
-// Candidate member pages: offer pages on the chosen Site not already in the members list.
+
+// A ROUNDUP IS NOT A MEMBER. A Roundup page IS a list of other pages, so putting one inside a collection
+// makes a roundup of roundups -- and when the collection is the one that page embeds, a list containing
+// itself. The author, 2026-10-30: "It doesn't make any sense to create a Roundup page of a Roundup page."
+//
+// Two signals, because neither covers the whole list on its own:
+//
+//   * The OFFER is the answer. `lead_capture_action === "roundup"` is what decides the composition
+//     server-side and what `isRoundupPage` reads in the page builder, and it is true of a DRAFT -- which
+//     matters, because an unpublished Roundup is exactly what a tenant is most likely to pick by mistake
+//     while building one.
+//   * The route map carries `composition` for PUBLISHED pages, written at publish from `composition_key`.
+//     It is here so a failed `/offers` load degrades to offering too few rather than to offering
+//     everything: a filter built only from data that might be absent passes everything when it is.
+const roundupPageIds = computed(() => {
+  const ids = new Set();
+  const roundupOffers = new Set(
+    (offers.value || []).filter((o) => o?.lead_capture_action === "roundup").map((o) => o.offer_id));
+  for (const page of pages.value || []) {
+    if (page?.offer_id && roundupOffers.has(page.offer_id)) ids.add(page.page_id);
+  }
+  for (const site of sitesStore.sites || []) {
+    for (const entry of Object.values(site?.pages || {})) {
+      if (entry?.composition === "lead_roundup" && entry.page_id) ids.add(entry.page_id);
+    }
+  }
+  return ids;
+});
+
+// Candidate member pages: offer pages on the chosen Site not already in the members list, and never a
+// Roundup. A Roundup already in `members` is LEFT ALONE -- this stops one being added, and quietly
+// dropping a member the tenant put there is a different decision that is not ours to make here.
 const addablePages = computed(() => {
   if (!editing.value?.site_id) return [];
   const onSite = pageIdsForSite(editing.value.site_id);
   const chosen = new Set(editing.value.members || []);
-  return pages.value.filter((p) => p.offer_id && onSite.has(p.page_id) && !chosen.has(p.page_id));
+  const roundups = roundupPageIds.value;
+  return pages.value.filter((p) => p.offer_id && onSite.has(p.page_id) && !chosen.has(p.page_id)
+                                   && !roundups.has(p.page_id));
 });
 
 // Distinct product categories the tenant actually uses (matches the storefront/category builder source).
@@ -331,6 +368,14 @@ onMounted(async () => {
     pages.value = Array.isArray(body.pages) ? body.pages : [];
   } catch {
     pages.value = [];
+  }
+  try {
+    const body = await apiRequest("/offers");
+    offers.value = Array.isArray(body.offers) ? body.offers : [];
+  } catch {
+    // Not fatal, and deliberately not an error banner: every other thing this screen does still works.
+    // The Roundup filter falls back to the route map's `composition`, which covers published pages.
+    offers.value = [];
   }
   // AFTER the pages load, not beside it. The editor's member picker draws its candidates from `pages`,
   // so opening the modal first shows a collection with nothing available to add -- which is the exact
