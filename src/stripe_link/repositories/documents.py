@@ -398,15 +398,22 @@ class DynamoDocumentRepository:
             return None
         return self._strip_keys(item)
 
-    def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+    def list_for_tenant(self, tenant_id: str, *, consistent: bool = False) -> list[dict[str, Any]]:
         """Every document of this type for the tenant. Unbounded on purpose — internal callers (publishing,
         sweeps, funnel resolution) genuinely need the whole set. API handlers that answer a browser should
-        prefer list_page_for_tenant, which cannot outgrow the Lambda response limit."""
+        prefer list_page_for_tenant, which cannot outgrow the Lambda response limit.
+
+        `consistent` opts into a strongly-consistent read, for the caller that has just WRITTEN the thing
+        it is about to read. The default stays eventually consistent: it is half the cost, it must not be
+        served by the partition leader, and no browser-facing listing needs the guarantee. Only the base
+        table supports this — the query here is on PK/SK, not a GSI, so it is available.
+        """
         from boto3.dynamodb.conditions import Key
 
         items = _query_all_pages(
             self.table,
-            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(self._list_prefix())
+            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(self._list_prefix()),
+            **({"ConsistentRead": True} if consistent else {}),
         )
         return [self._strip_keys(item) for item in items]
 

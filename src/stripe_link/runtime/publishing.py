@@ -1389,7 +1389,18 @@ def publish_page_document(
     seo_identity_page_id = identity_page_id(tenant_id, page_id, experiments_repository)
     # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
     # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
-    site = find_site_for_page(sites_repository, tenant_id, seo_identity_page_id)
+    #
+    # READ CONSISTENTLY. Publishing is almost always triggered BY a write that just changed the thing this
+    # read depends on: attaching a page or setting a homepage saves the Site and then re-puts the page to
+    # fire this stream, so an eventually-consistent query can return the Site as it was a second earlier.
+    # The page then renders with the slug it USED to have -- and `canonical_path` is derived from it, so
+    # the artifact serving at `/` declared `canonical: /amazing-gift-ideas`, a URL that 404s, on an
+    # indexable homepage (measured 2026-10-30: artifact 08:57:05, written after the move, still stale).
+    #
+    # It usually won the race, which is what made it nasty: intermittent, and the page looks right unless
+    # you read the canonical. One consistent query per publish is the cheapest honest fix -- this is a
+    # background stream handler, not a request path, and the base-table query supports it.
+    site = find_site_for_page(sites_repository, tenant_id, seo_identity_page_id, consistent=True)
     # A catalog_grid (including a collection-embed) resolves its cards from the Site route map BEFORE offers
     # load, so the referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2,
     # plans/SITE_COLLECTIONS.md P1). Collections referenced by the page are loaded here.
