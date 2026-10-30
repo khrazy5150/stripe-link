@@ -337,12 +337,22 @@ class TheOutlineIsOneHeadingPerEntryTests(unittest.TestCase):
         self.assertIn("Security Mini Cam", html)
         self.assertEqual(heading_outline_warnings(html), [])
 
-    def test_the_panel_drops_its_heading_not_the_prose_one(self):
-        """The prose title carries the rank badge -- `.sl-catalog-title::before` is the counter -- so
-        dropping that one would cost the number the whole layout is built around."""
+    def test_the_duplicate_loses_its_HEADING_not_its_words(self):
+        """Dropping the panel's name outright was the first cut, and it took the big bold product name
+        back out of the panel -- the exact thinness the author rejected when the panel carried no
+        headline at all ("Regression", 2026-10-30).
+
+        The name stays, wearing the ribbon's own class so it looks identical (`.sl-ribbon-headline`
+        sets margin:0, so a <p> and an <hN> render the same); only its rank in the document outline
+        goes, which is all the duplicate ever cost. The prose title keeps the heading because it is the
+        one wearing the rank badge -- `.sl-catalog-title::before` is the counter.
+        """
         html = render()
         self.assertIn('class="sl-catalog-title"', html)
-        self.assertNotIn('class="sl-ribbon-headline"', html)
+        self.assertIn('<p class="sl-ribbon-headline">Security Mini Cam</p>', html)
+        self.assertNotIn('<h3 class="sl-ribbon-headline">Security Mini Cam</h3>', html)
+        # And the outline is still one heading per entry, which is what the de-duplication was for.
+        self.assertEqual([level for level, _ in outline(html)], [1, 2, 2])
 
 
 class TheListIsMachineReadableTests(unittest.TestCase):
@@ -583,3 +593,51 @@ class AHeadlinePatternHasTwoKindsOfBraceTests(unittest.TestCase):
     def test_the_builder_is_told(self):
         handler = (ROOT / "src" / "handlers" / "page_render.py").read_text(encoding="utf-8")
         self.assertIn("placeholder_warnings(page, offer)", handler)
+
+
+class APatternsBlanksAreFilledBeforeItBecomesAHeadlineTests(unittest.TestCase):
+    """Clicking a pattern used to drop it into the headline raw, blanks and all.
+
+    `{count}` and `{year}` are the machine's and resolve at publish; `{things}`, `{audience}` and
+    `{price}` are the tenant's. A tenant who picked a pattern and pressed publish shipped
+    "4 {Things} You'll Love in 2026" as the h1 of an indexable page -- title-cased on the way out by the
+    field's own formatter, which is why the page-health notice had to match case-insensitively.
+
+    Filling them BEFORE the pattern becomes a headline is the fix: the blank never enters the field, so
+    there is nothing to forget to replace.
+    """
+
+    VUE = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_raw_pattern_is_no_longer_assigned(self):
+        self.assertNotIn('@click="builder.headline = pattern"', self.VUE)
+        self.assertIn('@click="applyHeadlinePattern(pattern)"', self.VUE)
+
+    def test_a_pattern_is_unusable_until_its_blanks_are_filled(self):
+        self.assertIn(':disabled="!patternReady(pattern)"', self.VUE)
+
+    def test_every_tenant_owned_blank_has_a_field(self):
+        """Driven off the shipped patterns, so one added later with a new blank fails here rather than
+        publishing it."""
+        from stripe_link.domain.composition import RULES
+        offered = set(re.findall(r'\{\s*token:\s*"([a-z_]+)"', self.VUE))
+        machine = {"count", "year"}
+        for pattern in RULES["roundup_headlines"]:
+            for token in re.findall(r"\{([a-z_]+)\}", pattern):
+                if token in machine:
+                    continue
+                with self.subTest(pattern=pattern, token=token):
+                    self.assertIn(token, offered)
+
+    def test_the_machine_tokens_are_not_asked_for(self):
+        """They fill themselves in, and asking a tenant to type the year would be asking them to make a
+        promise that goes stale."""
+        offered = set(re.findall(r'\{\s*token:\s*"([a-z_]+)"', self.VUE))
+        self.assertNotIn("count", offered)
+        self.assertNotIn("year", offered)
+
+    def test_the_notice_remains_as_the_backstop(self):
+        """A headline can still acquire a placeholder another way -- pasted, or typed by hand -- so the
+        page-health check stays."""
+        self.assertEqual(len(placeholder_warnings(
+            {"sections": [{"id": "h", "type": "hero", "headline": "4 {Things} here"}]})), 1)

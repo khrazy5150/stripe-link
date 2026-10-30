@@ -574,13 +574,25 @@
                       </span>
                       <span>Show the year</span>
                     </label>
+                    <!-- The blanks are filled HERE, before a pattern becomes a headline. Clicking one
+                         used to drop `{things}` into the field raw, and a tenant who did not notice
+                         published it. -->
+                    <div class="builder-headline-blanks">
+                      <label v-for="blank in HEADLINE_BLANKS" :key="blank.token" class="offer-field">
+                        <span>{{ blank.label }}</span>
+                        <input v-model.trim="headlineBlanks[blank.token]" type="text"
+                               :placeholder="blank.placeholder" />
+                      </label>
+                    </div>
                     <div class="builder-chip-row">
                       <button
                         v-for="pattern in roundupHeadlinePatterns"
                         :key="pattern"
                         type="button"
                         class="secondary-action builder-chip"
-                        @click="builder.headline = pattern"
+                        :disabled="!patternReady(pattern)"
+                        :title="patternReady(pattern) ? '' : 'Fill in the boxes above to use this one.'"
+                        @click="applyHeadlinePattern(pattern)"
                       >{{ pattern }}</button>
                     </div>
                   </div>
@@ -3247,6 +3259,39 @@ const isRoundupPage = computed(() => builderOffer.value?.lead_capture_action ===
 // Read from the SHARED rules file the Python composer uses, so the builder cannot offer a pattern the
 // publisher would not expand.
 const roundupHeadlinePatterns = computed(() => compositionRules.roundup_headlines || []);
+
+// THE BLANKS A PATTERN LEAVES FOR THE TENANT, and the fields that fill them.
+//
+// `{count}` and `{year}` are the machine's and resolve at publish. `{things}`, `{audience}` and
+// `{price}` are the tenant's, and clicking a pattern used to drop them into the headline raw -- so a
+// tenant who picked one and pressed publish shipped "4 {Things} You'll Love in 2026" as the h1 of an
+// indexable page, title-cased on the way out by the field's own formatter (reported 2026-10-30).
+//
+// Filling them BEFORE the pattern becomes a headline is the fix: the blank never enters the field, so
+// there is nothing to forget to replace. The page-health notice stays as the backstop for a headline
+// that acquires one some other way.
+const HEADLINE_BLANKS = [
+  { token: "things", label: "What are you listing?", placeholder: "gift ideas" },
+  { token: "audience", label: "Who is it for?", placeholder: "coffee lovers" },
+  { token: "price", label: "Under what price?", placeholder: "50" },
+];
+const headlineBlanks = reactive({ things: "", audience: "", price: "" });
+
+/** The tenant-owned blanks this pattern contains, in the order they appear. */
+function blanksIn(pattern) {
+  return HEADLINE_BLANKS.filter((blank) => pattern.includes(`{${blank.token}}`));
+}
+/** Whether every blank this pattern needs has been filled in. */
+function patternReady(pattern) {
+  return blanksIn(pattern).every((blank) => headlineBlanks[blank.token].trim());
+}
+function applyHeadlinePattern(pattern) {
+  let headline = pattern;
+  for (const blank of blanksIn(pattern)) {
+    headline = headline.replace(`{${blank.token}}`, headlineBlanks[blank.token].trim());
+  }
+  builder.headline = headline;
+}
 
 // The two ticks the author asked for: type "Amazing Gift Ideas", tick both, publish "2 Amazing Gift Ideas
 // for 2026". They write the TOKENS into the field rather than setting a flag beside it, so there is no

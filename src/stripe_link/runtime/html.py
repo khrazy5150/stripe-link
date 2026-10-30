@@ -8325,16 +8325,23 @@ def render_catalog_grid(
             # its own falls back to the offer NAME, which is usually the product name, so both resolved
             # to "Security Mini Cam" and every entry published the heading twice.
             #
-            # The PANEL's goes, not the prose one: the prose title is the entry's heading in the outline
-            # and the only thing wearing the rank badge (`.sl-catalog-title::before` is the counter), so
-            # dropping that would cost the number the whole layout is built around. Give an entry a
-            # distinct offer headline and the panel heading comes back, which is the shape the author's
-            # own mock-up has -- a sales line above, the product name in the ribbon.
-            if panel_name and entry_name and panel_name.casefold() == entry_name.casefold():
-                panel_name = ""
-            panel_headline_html = (f'<h{panel_level} class="sl-ribbon-headline">'
-                                   f'{render_headline_markup(panel_name)}</h{panel_level}>'
-                                   if panel_name else "")
+            # The duplicate loses its HEADING, not its words. Dropping the panel's name outright was the
+            # first cut and it took the big bold product name back out of the panel -- the exact thinness
+            # the author rejected when the panel had no headline at all ("Regression", 2026-10-30). The
+            # name stays, carrying the ribbon's own class so it looks identical (`.sl-ribbon-headline`
+            # sets margin:0, so a <p> and an <hN> render the same); only its rank in the document outline
+            # goes, which is all the duplicate ever cost. The prose title keeps the heading because it is
+            # the one wearing the rank badge (`.sl-catalog-title::before` is the counter).
+            same_words = bool(panel_name and entry_name
+                              and panel_name.casefold() == entry_name.casefold())
+            if not panel_name:
+                panel_headline_html = ""
+            elif same_words:
+                panel_headline_html = (f'<p class="sl-ribbon-headline">'
+                                       f'{render_headline_markup(panel_name)}</p>')
+            else:
+                panel_headline_html = (f'<h{panel_level} class="sl-ribbon-headline">'
+                                       f'{render_headline_markup(panel_name)}</h{panel_level}>')
             # THE REASON TO BUY, product-level and asked once (Product.selling_point). The last resort is
             # deliberately bland: "Available now" states a fact about stock and claims nothing about the
             # product, which is the only kind of sentence we may put in a seller's mouth unasked.
