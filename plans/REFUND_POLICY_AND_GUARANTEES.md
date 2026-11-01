@@ -365,11 +365,10 @@ enforced only by a write path that substitutes rather than refuses. It is checke
 `optional_enum` — the pair `require_enum` was missing, which is why several optional enums were guarded
 only by the thing that would quietly paper over them.
 
-**Decided against, for now:** replacement instead of refund (no exchange concept anywhere, and
-`refundType: ExchangeRefund` would be markup for a flow that does not exist); "tags and hygiene seals
-intact" as a `condition` value (cheap, nobody has asked); an extended damaged/defective window, which
-interacts with the per-class window basis already under Open; chargeback and anti-fraud boilerplate, which
-are not rules we enforce and belong in the tenant's own Refund Policy URL.
+**Decided against, for now:** an extended damaged/defective window, which interacts with the per-class
+window basis already under Open; chargeback and anti-fraud boilerplate, which are not rules we enforce and
+belong in the tenant's own Refund Policy URL. Replacement and "tags intact" were on this list and came
+straight back as P9.
 
 **Also refused:** TikTok's retrocharge — recharging a buyer whose refunded parcel never arrived. Same family
 as `late_delivery_credit`: it needs a buyer balance or a card we may re-bill, and neither exists.
@@ -377,3 +376,62 @@ as `late_delivery_credit`: it needs a buyer balance or a card we may re-bill, an
 **Still open, unchanged:** `late_delivery_credit`, a custom window with nowhere to put a number, per-class
 window basis, a structured deduction for `any_value_adjusted` (now also covering the restocking fee), and
 automatic honouring of the delivery guarantees via `delivery_status`.
+
+---
+
+## P9 — what the buyer gets back, and apparel's condition (shipped 2026-10-31)
+
+The two P8 left on the table, asked for immediately after.
+
+### `resolution` — money, or another one
+
+A **fourth field**, not a `return_method` value. `return_method` is about what happens to the *item* (it
+comes back, the buyer keeps it, access is revoked); this is about what travels the other way, and the two
+are independent — "keep the broken one, here is a new one" is an ordinary policy for low-value goods, and a
+test pins that combination.
+
+| value | clause |
+|---|---|
+| `refund_only` *(default)* | nothing |
+| `replacement_or_refund` | "We replace it or refund you — your choice." |
+| `replacement_first` | "We replace the item. Where we cannot, we refund you instead." |
+
+`refund_only` prints **nothing**, and that is a different silence from `original_shipping: unstated`. There
+no question is open: a refund policy saying nothing about replacements refunds you, so a sentence saying so
+would be the noise `CONDITION_OPTIONS["any"]` already omits. "Your choice" is the construction
+`buyer_guarantees` uses for the same promise, so a buyer meets one idea once.
+
+**Physical only.** A month of a subscription cannot be replaced, and re-granting a download is
+`digital_revoke_access` running backwards rather than a replacement. It prints **first** in the list,
+because what you get precedes what comes off it and when it lands.
+
+**Suppressed on non-refundable, and the published copy settles that rather than judgement:** the
+non-refundable sentence already reads "no item can be returned, *replaced*, or refunded in full or in
+part". A tenant wanting "final sale, but we replace faulty goods" has `defective_only` with a real window,
+which is that policy stated as what it is.
+
+**Nothing checks stock.** The hint says so. Honouring it is the tenant's, exactly as with the guarantees —
+and the alternative is holding the promise hostage to an inventory check nobody asked for.
+
+`refundType` is a third recommended `MerchantReturnPolicy` property never sent. It is emitted on every
+policy now: this node is only built for a finite window, which *means* a refund is available, so
+`FullRefund` is the honest default rather than an assumption. Single-valued — Google documents "one or
+more" for `returnMethod` and says no such thing for `refundType`, and both its examples carry one value, so
+an array is not a thing to find out about in production. `replacement_or_refund` therefore marks up the
+money, the claim that holds either way; only `replacement_first` is `ExchangeRefund`.
+
+### `tags_intact` — apparel's `complete_in_packaging`
+
+Not a stricter form of it. A garment has no packaging worth the name, and the two things a clothing seller
+needs intact are the price tag and the hygiene seal — so a tenant selling swimwear had to choose between
+`unused` (unprovable) and `complete_in_packaging` (describing a box that never existed). Clause: "with tags
+attached and any hygiene seals intact". Sits next to `complete_in_packaging` in the picker because that is
+the option a tenant reaches for and rejects.
+
+The preview matrix grows from 126 to 240 generated sentences, and a test now asserts every condition has
+one — a value added to `CONDITION_OPTIONS` and not `CONDITION_LABELS` would leave a picker option whose
+preview is *missing* rather than wrong, which is the harder failure to notice.
+
+**Still open, unchanged:** `late_delivery_credit`, a custom window with nowhere to put a number, per-class
+window basis, a structured deduction for `any_value_adjusted` and the restocking fee, automatic honouring
+of the delivery guarantees via `delivery_status`, and an extended damaged/defective window.

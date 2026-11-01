@@ -85,6 +85,11 @@ CONDITION_OPTIONS: dict[str, str] = {
     # the only protection they have, so a tenant selling anything mechanical had no honest option.
     "working_condition": "in working condition",
     "complete_in_packaging": "unused, in its original packaging, with all parts and accessories",
+    # APPAREL's version of `complete_in_packaging`, and it is not a stricter form of it: a garment has no
+    # packaging worth the name, and the two things a clothing seller actually needs intact are the price
+    # tag and the hygiene seal. A tenant selling swimwear had to choose between `unused` (unprovable) and
+    # `complete_in_packaging` (describing a box that never existed).
+    "tags_intact": "with tags attached and any hygiene seals intact",
     # The honest middle ground. It changes the SENTENCE only -- no refund arithmetic is implied. Refunds
     # already support a partial amount and the merchant decides it; promising a deduction nothing computes
     # would be a new implicit promise, which is the thing this family of plans exists to stop.
@@ -103,6 +108,7 @@ CONDITION_LABELS: dict[str, str] = {
     "unopened": "Unopened",
     "working_condition": "In working condition",
     "complete_in_packaging": "Unused, complete, in original packaging",
+    "tags_intact": "Tags attached, hygiene seals intact",
     "any_value_adjusted": "Any condition — refund adjusted for loss of value",
     "defective_only": "Defective items only",
     "not_downloaded": "Not yet downloaded",
@@ -198,6 +204,32 @@ ORIGINAL_SHIPPING_CLAUSES: dict[str, str] = {
     ORIGINAL_SHIPPING_NOT_REFUNDED: "Your original shipping charge is not refunded.",
 }
 
+# WHAT THE BUYER GETS BACK -- money, or another one. A fourth field rather than a `return_method` value,
+# because `return_method` is about what happens to the ITEM (it comes back, the buyer keeps it, access is
+# revoked) and this is about what travels the other way. The two are independent: "keep the broken one, here
+# is a new one" is an ordinary policy for low-value goods.
+#
+# `refund_only` is the default and prints NOTHING. Unlike `original_shipping`, where silence genuinely leaves
+# a question open, there is no question here: a refund policy that says nothing about replacements refunds
+# you, and a sentence saying so would be the noise `CONDITION_OPTIONS["any"]` deliberately omits.
+RESOLUTION_REFUND_ONLY = "refund_only"
+RESOLUTION_REPLACEMENT_OR_REFUND = "replacement_or_refund"
+RESOLUTION_REPLACEMENT_FIRST = "replacement_first"
+
+RESOLUTION_OPTIONS: dict[str, str] = {
+    RESOLUTION_REFUND_ONLY: "Refund",
+    RESOLUTION_REPLACEMENT_OR_REFUND: "Replacement or refund — buyer chooses",
+    RESOLUTION_REPLACEMENT_FIRST: "Replacement, refund only if we cannot",
+}
+
+# "Your choice" is the construction `buyer_guarantees` already uses for the same promise ("we refund it or
+# send it again -- your choice"), so a buyer meets one idea once.
+RESOLUTION_CLAUSES: dict[str, str] = {
+    RESOLUTION_REFUND_ONLY: "",
+    RESOLUTION_REPLACEMENT_OR_REFUND: "We replace it or refund you — your choice.",
+    RESOLUTION_REPLACEMENT_FIRST: "We replace the item. Where we cannot, we refund you instead.",
+}
+
 RETURN_METHOD_OPTIONS: dict[str, str] = {
     RETURN_REQUIRED: "Customer returns the item",
     KEEPS: "No return — customer keeps the item",
@@ -290,11 +322,26 @@ def refund_terms(policy: dict[str, Any] | None) -> list[str]:
     if window == NON_REFUNDABLE:
         # There is no refund, so there is nothing to deduct from and nothing to time. A page that said
         # "all sales are final" and then "we deduct 15%" would be describing two different policies.
+        #
+        # The replacement clause goes with them, and here the published copy settles it rather than
+        # judgement: the non-refundable sentence reads "no item can be returned, REPLACED, or refunded in
+        # full or in part". A tenant wanting "final sale, but we replace faulty goods" has `defective_only`
+        # with a real window, which is that policy stated as what it is.
         return []
     policy_class = _text(policy.get("policy_class")).lower()
     return_method = _text(policy.get("return_method"))
+    # Absent on a stored policy and present on a resolved one; an absent class reads as physical, because
+    # the only way one of these clauses is reached is that a tenant chose it on the physical card.
+    shipped = policy_class in ("", PHYSICAL)
 
     clauses: list[str] = []
+    # FIRST, because it answers what the buyer gets before the clauses saying what comes off it and when it
+    # lands. Physical only: a month of a subscription cannot be replaced, and re-granting a download is
+    # `digital_revoke_access` running backwards rather than a replacement.
+    resolution = _text(policy.get("resolution")).lower()
+    if shipped and RESOLUTION_CLAUSES.get(resolution):
+        clauses.append(RESOLUTION_CLAUSES[resolution])
+
     fee = restocking_fee_percent(policy.get("restocking_fee_percent"))
     # Nothing is restocked when nothing comes back. On a keep-it refund or a revoked download the fee
     # would be a deduction for a cost the tenant never incurs.
@@ -303,14 +350,9 @@ def refund_terms(policy: dict[str, Any] | None) -> list[str]:
 
     original = _text(policy.get("original_shipping")).lower()
     # Only where something SHIPPED. Nothing was posted to a subscriber or a download buyer, so there is no
-    # outbound charge to refund or withhold, and the sentence would be about a line that is not on the
-    # order. `policy_class` is absent on a stored policy and present on a resolved one, and an absent class
-    # is read as physical -- the clause is only ever reached because a tenant chose it, and they chose it on
-    # the physical card.
-    if original in ORIGINAL_SHIPPING_CLAUSES and policy_class in ("", PHYSICAL):
-        clause = ORIGINAL_SHIPPING_CLAUSES[original]
-        if clause:
-            clauses.append(clause)
+    # outbound charge to refund or withhold, and the sentence would be about a line that is not on the order.
+    if shipped and ORIGINAL_SHIPPING_CLAUSES.get(original):
+        clauses.append(ORIGINAL_SHIPPING_CLAUSES[original])
 
     days = refund_processing_days(policy.get("refund_processing_days"))
     if days:
@@ -320,8 +362,8 @@ def refund_terms(policy: dict[str, Any] | None) -> list[str]:
     return clauses
 
 
-def _attach_terms(policy: dict[str, Any], restocking_fee: Any,
-                  original_shipping: Any, processing_days: Any) -> None:
+def _attach_terms(policy: dict[str, Any], restocking_fee: Any, original_shipping: Any,
+                  processing_days: Any, resolution: Any = None) -> None:
     """Put the three P8 terms on a policy, in place, omitting any the tenant did not set.
 
     Shared by `build` and `normalize` so the write path and the read path cannot disagree about when a term
@@ -337,6 +379,9 @@ def _attach_terms(policy: dict[str, Any], restocking_fee: Any,
     days = refund_processing_days(processing_days)
     if days:
         policy["refund_processing_days"] = days
+    resolved = _text(resolution).lower()
+    if resolved in RESOLUTION_OPTIONS and resolved != RESOLUTION_REFUND_ONLY:
+        policy["resolution"] = resolved
 
 
 class RefundPolicyError(ValueError):
@@ -472,7 +517,8 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
           short_label: str = "", full_policy: str = "", return_note: str = "",
           keep_it_below: Any = None, source: str = SOURCE_TENANT_DEFAULT,
           return_shipping: str = "", restocking_fee: Any = None,
-          original_shipping: str = "", processing_days: Any = None) -> dict[str, Any]:
+          original_shipping: str = "", processing_days: Any = None,
+          resolution: str = "") -> dict[str, Any]:
     """A complete, valid policy object. RAISES on anything unwritable.
 
     The write path is strict on purpose: every value that reaches a stored policy has been through here, so
@@ -492,6 +538,9 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
     original_shipping = _text(original_shipping) or ORIGINAL_SHIPPING_UNSTATED
     if original_shipping not in ORIGINAL_SHIPPING_OPTIONS:
         raise RefundPolicyError(f"Unknown original shipping '{original_shipping}'.")
+    resolution = _text(resolution) or RESOLUTION_REFUND_ONLY
+    if resolution not in RESOLUTION_OPTIONS:
+        raise RefundPolicyError(f"Unknown resolution '{resolution}'.")
 
     generated_label, generated_full = generate_copy(policy_class, refund_window, condition)
     resolved_full = _text(full_policy) or generated_full
@@ -518,7 +567,7 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
     # `original_shipping: "unstated"` would be an absence dressed as a decision, and `tenant_policies`
     # hands these straight to a settings screen that would then show a fee of nothing as the tenant's own
     # choice.
-    _attach_terms(policy, restocking_fee, original_shipping, processing_days)
+    _attach_terms(policy, restocking_fee, original_shipping, processing_days, resolution)
     return policy
 
 
@@ -565,8 +614,8 @@ def normalize(policy: Any, *, policy_class: str) -> dict[str, Any]:
     # Unrecognised values here fall AWAY rather than to a class default, unlike the three enums above. A
     # window has to be something; a restocking fee does not, and coercing a nonsense value into a real
     # percentage would invent a deduction the tenant never chose.
-    _attach_terms(normalized, raw.get("restocking_fee_percent"),
-                  raw.get("original_shipping"), raw.get("refund_processing_days"))
+    _attach_terms(normalized, raw.get("restocking_fee_percent"), raw.get("original_shipping"),
+                  raw.get("refund_processing_days"), raw.get("resolution"))
     return normalized
 
 
@@ -663,7 +712,7 @@ def vocabulary() -> dict[str, Any]:
 
     The previews are precomputed here rather than left to the client, and that is the whole point. A
     JavaScript copy of this sentence template is how the bug in `stores/products.js` happened: the browser
-    became the author of a commercial promise. 126 short strings is a cheap price for the server staying the
+    became the author of a commercial promise. 240 short strings is a cheap price for the server staying the
     only thing that can write one.
     """
     previews: dict[str, dict[str, str]] = {}
@@ -694,6 +743,8 @@ def vocabulary() -> dict[str, Any]:
         "original_shipping": [{"value": key, "label": label,
                                "clause": ORIGINAL_SHIPPING_CLAUSES[key]}
                               for key, label in ORIGINAL_SHIPPING_OPTIONS.items()],
+        "resolutions": [{"value": key, "label": label, "clause": RESOLUTION_CLAUSES[key]}
+                        for key, label in RESOLUTION_OPTIONS.items()],
         # The two numeric terms, as the server's own sentence with ONE slot for a digit. The screen fills
         # `{n}` with the number the tenant typed and owns nothing else about the wording -- see the
         # constants for why that is not the fault this module exists to end. Bounds travel with them so the
@@ -756,6 +807,7 @@ def apply_to_product(document: dict[str, Any], tenant_config: dict[str, Any] | N
                 restocking_fee=stored.get("restocking_fee_percent"),
                 original_shipping=_text(stored.get("original_shipping")),
                 processing_days=stored.get("refund_processing_days"),
+                resolution=_text(stored.get("resolution")),
                 full_policy=_text(stored.get("full_policy")),
                 return_note=_text(stored.get("return_note")),
                 keep_it_below=stored.get("keep_it_below"),

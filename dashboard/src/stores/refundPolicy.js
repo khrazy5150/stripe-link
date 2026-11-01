@@ -31,6 +31,7 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
     returnMethods: (state) => state.options.return_methods || [],
     returnShipping: (state) => state.options.return_shipping || [],
     originalShipping: (state) => state.options.original_shipping || [],
+    resolutions: (state) => state.options.resolutions || [],
     classLabels: (state) => state.options.class_labels || {},
     classHints: (state) => state.options.class_hints || {},
     classDefaults: (state) => state.options.class_defaults || {},
@@ -98,13 +99,20 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
       if (entry.refund_window === "non_refundable") return [];
       const templates = this.options.terms || {};
       const returning = entry.return_method === "return_required";
+      const shipped = policyClass === "physical";
       const out = [];
+      // First, because it answers what the buyer gets before the clauses saying what comes off it.
+      if (shipped) {
+        const clause = (this.options.resolutions || [])
+          .find((o) => o.value === entry.resolution)?.clause;
+        if (clause) out.push(clause);
+      }
       const fee = parseInt(String(entry.restocking_fee_percent || ""), 10);
       if (returning && Number.isFinite(fee) && fee > 0 && templates.restocking_fee?.template) {
         const capped = Math.min(fee, templates.restocking_fee.max || 50);
         out.push(templates.restocking_fee.template.replace("{n}", String(capped)));
       }
-      if (policyClass === "physical") {
+      if (shipped) {
         const clause = (this.options.original_shipping || [])
           .find((o) => o.value === entry.original_shipping)?.clause;
         if (clause) out.push(clause);

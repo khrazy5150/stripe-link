@@ -219,7 +219,7 @@ class WhatTheScreenReceives(unittest.TestCase):
         self.assertEqual(body["refund_policies"][PHYSICAL]["refund_window"], "60_days")
         self.assertNotIn(DIGITAL, body["refund_policies"])
 
-    def test_the_20kb_vocabulary_is_opt_in(self):
+    def test_the_bulky_vocabulary_is_opt_in(self):
         """Every other screen that reads /config should not pay for the pickers' option tables."""
         repository = FakeRepository(stored=with_policies({PHYSICAL: VALID_PHYSICAL}))
         plain = json.loads(config_handler(event("GET"), None, repository=repository)["body"])

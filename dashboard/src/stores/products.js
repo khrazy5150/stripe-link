@@ -671,6 +671,9 @@ function refundPolicy(form) {
   if (form.refund_original_shipping && form.refund_original_shipping !== "unstated") {
     policy.original_shipping = form.refund_original_shipping;
   }
+  if (form.refund_resolution && form.refund_resolution !== "refund_only") {
+    policy.resolution = form.refund_resolution;
+  }
   const days = parseInt(String(form.refund_processing_days || ""), 10);
   if (Number.isFinite(days) && days > 0) {
     policy.refund_processing_days = Math.min(days, caps.processing_days?.max || 30);

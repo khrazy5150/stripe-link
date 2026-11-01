@@ -636,6 +636,7 @@
             "unopened",
             "working_condition",
             "complete_in_packaging",
+            "tags_intact",
             "any_value_adjusted",
             "defective_only",
             "not_downloaded",
@@ -681,6 +682,15 @@
           "minimum": 1,
           "maximum": 30,
           "description": "How long the tenant takes to ISSUE the refund once the return arrives or the request is approved. Not the date the money lands: the card network's clock is not ours. Absent means the page says nothing."
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "refund_only",
+            "replacement_or_refund",
+            "replacement_first"
+          ],
+          "description": "What the buyer gets back: their money, or another one. Independent of return_method, which is about what happens to the ITEM. Absent (or `refund_only`) prints nothing -- a refund policy silent on replacements refunds you (plans/REFUND_POLICY_AND_GUARANTEES.md P9)."
         },
         "short_label": {
           "type": "string"

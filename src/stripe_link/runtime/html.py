@@ -26,6 +26,8 @@ from stripe_link.domain.social_links import is_adult_host, network_glyph, networ
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.refund_policy import RETURN_SHIPPING_CLAUSES
 from stripe_link.domain.refund_policy import refund_terms as refund_policy_terms
+from stripe_link.domain.refund_policy import PHYSICAL as PHYSICAL_POLICY_CLASS
+from stripe_link.domain.refund_policy import RESOLUTION_REPLACEMENT_FIRST
 from stripe_link.domain.refund_policy import restocking_fee_percent
 from stripe_link.domain.returns import RETURN_REQUIRED
 from stripe_link.domain.opportunities import (
@@ -6155,6 +6157,19 @@ def merchant_return_policy(policy: dict[str, Any]) -> dict[str, Any] | None:
     fee = restocking_fee_percent(policy.get("restocking_fee_percent"))
     if fee and str(policy.get("return_method") or "") == RETURN_REQUIRED:
         node["restockingFee"] = fee
+    # WHAT THE BUYER GETS BACK. Another recommended property never sent, and this node is only built for a
+    # finite window -- which means a refund IS available, so `FullRefund` is the honest default rather than
+    # an assumption. SINGLE-VALUED: Google documents "one or more" for `returnMethod` and says no such thing
+    # for `refundType`, and both its examples carry one value, so an array is not something to find out
+    # about from a search result. `replacement_or_refund` therefore marks up the money, which is the claim
+    # that holds either way; only `replacement_first` is an exchange before it is a refund.
+    #
+    # Gated on the physical class as the prose clause is, so markup and page cannot disagree: nothing is
+    # exchanged on a download or a renewal, and a resolved policy carries its class.
+    exchange = (str(policy.get("resolution") or "") == RESOLUTION_REPLACEMENT_FIRST
+                and str(policy.get("policy_class") or PHYSICAL_POLICY_CLASS) == PHYSICAL_POLICY_CLASS)
+    node["refundType"] = ("https://schema.org/ExchangeRefund" if exchange
+                          else "https://schema.org/FullRefund")
     # `refund_processing_days` and `original_shipping` have no MerchantReturnPolicy field between them, so
     # they stay prose on the page. Inventing a property name a crawler does not read would be markup for
     # nobody.

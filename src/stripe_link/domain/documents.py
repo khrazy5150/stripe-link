@@ -1021,7 +1021,8 @@ def validate_product_document(document: dict[str, Any]) -> None:
         # Imported here rather than at module scope, matching `validate_refund_policies` below: the
         # vocabulary lives in the domain module and this one is imported by it in places.
         from stripe_link.domain.refund_policy import (
-            ORIGINAL_SHIPPING_OPTIONS, REFUND_PROCESSING_MAX_DAYS, RESTOCKING_FEE_MAX_PERCENT,
+            ORIGINAL_SHIPPING_OPTIONS, REFUND_PROCESSING_MAX_DAYS, RESOLUTION_OPTIONS,
+            RESTOCKING_FEE_MAX_PERCENT,
         )
         _refund_term_percent(refund_policy, "restocking_fee_percent", RESTOCKING_FEE_MAX_PERCENT,
                              "Product refund_policy.restocking_fee_percent")
@@ -1029,6 +1030,8 @@ def validate_product_document(document: dict[str, Any]) -> None:
                              "Product refund_policy.refund_processing_days")
         optional_enum(refund_policy, "original_shipping", set(ORIGINAL_SHIPPING_OPTIONS),
                       "Product refund_policy.original_shipping")
+        optional_enum(refund_policy, "resolution", set(RESOLUTION_OPTIONS),
+                      "Product refund_policy.resolution")
 
     sync = document.get("sync")
     if not isinstance(sync, dict):
@@ -2264,7 +2267,8 @@ def validate_refund_policies(policies: Any, label: str) -> None:
         return
     from stripe_link.domain.refund_policy import (
         CLASSES, CONDITION_OPTIONS, ORIGINAL_SHIPPING_OPTIONS, REFUND_PROCESSING_MAX_DAYS,
-        RESTOCKING_FEE_MAX_PERCENT, RETURN_METHOD_OPTIONS, RETURN_SHIPPING_OPTIONS, WINDOW_OPTIONS,
+        RESOLUTION_OPTIONS, RESTOCKING_FEE_MAX_PERCENT, RETURN_METHOD_OPTIONS,
+        RETURN_SHIPPING_OPTIONS, WINDOW_OPTIONS,
     )
     if not isinstance(policies, dict):
         raise DocumentValidationError(f"{label} must be an object.")
@@ -2289,6 +2293,8 @@ def validate_refund_policies(policies: Any, label: str) -> None:
                       f"{label}.{policy_class}.return_shipping")
         optional_enum(policy, "original_shipping", set(ORIGINAL_SHIPPING_OPTIONS),
                       f"{label}.{policy_class}.original_shipping")
+        optional_enum(policy, "resolution", set(RESOLUTION_OPTIONS),
+                      f"{label}.{policy_class}.resolution")
         _refund_term_percent(policy, "restocking_fee_percent", RESTOCKING_FEE_MAX_PERCENT,
                              f"{label}.{policy_class}.restocking_fee_percent")
         _refund_term_percent(policy, "refund_processing_days", REFUND_PROCESSING_MAX_DAYS,

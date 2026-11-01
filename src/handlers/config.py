@@ -65,7 +65,7 @@ def save_config(event, repository):
 def _refund_payload(config, event):
     """The refund half of a /config answer: resolved defaults, and optionally the pickers' vocabulary.
 
-    Separated so the NOT-FOUND path can return it too. Three small objects for every caller; the 20KB of
+    Separated so the NOT-FOUND path can return it too. Three small objects for every caller; the ~40KB of
     generated previews only when asked, so no other screen reading /config pays for the pickers.
     """
     policies = tenant_policies(config)
@@ -84,7 +84,7 @@ def _refund_payload(config, event):
         # read, so the screen previews exactly what publishes (P4).
         "buyer_guarantees": resolve_buyer_guarantees(config),
     }
-    # The vocabulary carries a generated sentence for all 126 class/window/condition combinations, because the
+    # The vocabulary carries a generated sentence for every class/window/condition combination, because the
     # server must stay the only thing that can author a commercial promise -- a JavaScript copy of that
     # template is exactly how the literal in stores/products.js came to be published.
     if str(query_params(event).get("refund_options") or "").strip() in {"1", "true", "yes"}:
@@ -127,6 +127,7 @@ def _generate_refund_copy(document):
                 restocking_fee=policy.get("restocking_fee_percent"),
                 original_shipping=str(policy.get("original_shipping") or ""),
                 processing_days=policy.get("refund_processing_days"),
+                resolution=str(policy.get("resolution") or ""),
                 short_label=str(policy.get("short_label") or ""),
                 full_policy=str(policy.get("full_policy") or ""),
                 return_note=str(policy.get("return_note") or ""),

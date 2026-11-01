@@ -1,4 +1,4 @@
-"""What comes off the refund, and when it lands (plans/REFUND_POLICY_AND_GUARANTEES.md P8).
+"""What comes off the refund, when it lands, and what you get back (P8 and P9).
 
 A restocking fee, the outbound postage the buyer already paid, and how long the refund takes. Three facts
 every mainstream returns policy states and this vocabulary could not express -- checked against TikTok
@@ -13,6 +13,8 @@ import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_refund_policies
 from stripe_link.domain.refund_policy import (
+    CONDITION_LABELS,
+    CONDITION_OPTIONS,
     DIGITAL,
     NON_REFUNDABLE,
     ORIGINAL_SHIPPING_NOT_REFUNDED,
@@ -20,10 +22,15 @@ from stripe_link.domain.refund_policy import (
     ORIGINAL_SHIPPING_UNSTATED,
     PHYSICAL,
     REFUND_PROCESSING_MAX_DAYS,
+    RESOLUTION_OPTIONS,
+    RESOLUTION_REFUND_ONLY,
+    RESOLUTION_REPLACEMENT_FIRST,
+    RESOLUTION_REPLACEMENT_OR_REFUND,
     RESTOCKING_FEE_MAX_PERCENT,
     SUBSCRIPTION,
     RefundPolicyError,
     build,
+    generate_copy,
     normalize,
     refund_processing_days,
     refund_terms,
@@ -41,6 +48,7 @@ FULL = {
     "restocking_fee_percent": 15,
     "original_shipping": ORIGINAL_SHIPPING_NOT_REFUNDED,
     "refund_processing_days": 7,
+    "resolution": RESOLUTION_REPLACEMENT_OR_REFUND,
     "policy_class": PHYSICAL,
 }
 
@@ -77,10 +85,11 @@ class TheClauses(unittest.TestCase):
         """Order is load-bearing, for GUARANTEES' reason: less what, and when do I see the money. A buyer
         who has read one tenant's policy knows where to look on the next."""
         terms = refund_terms(FULL)
-        self.assertEqual(len(terms), 3)
-        self.assertIn("restocking fee of 15%", terms[0])
-        self.assertIn("original shipping charge is not refunded", terms[1])
-        self.assertIn("within 7 days of receiving your return", terms[2])
+        self.assertEqual(len(terms), 4)
+        self.assertIn("replace it or refund you", terms[0])
+        self.assertIn("restocking fee of 15%", terms[1])
+        self.assertIn("original shipping charge is not refunded", terms[2])
+        self.assertIn("within 7 days of receiving your return", terms[3])
 
     def test_non_refundable_states_none_of_them(self):
         """There is no refund, so there is nothing to deduct from and nothing to time. A page saying "all
@@ -114,6 +123,30 @@ class TheClauses(unittest.TestCase):
         terms = refund_terms(dict(FULL, original_shipping=ORIGINAL_SHIPPING_UNSTATED))
         self.assertFalse(any("shipping charge" in term for term in terms))
 
+    def test_a_replacement_is_physical_only(self):
+        """A month of a subscription cannot be replaced, and re-granting a download is
+        `digital_revoke_access` running backwards rather than a replacement."""
+        for policy_class in (DIGITAL, SUBSCRIPTION):
+            with self.subTest(policy_class=policy_class):
+                terms = refund_terms(dict(FULL, policy_class=policy_class))
+                self.assertFalse(any("replace" in term for term in terms))
+
+    def test_a_replacement_survives_the_customer_keeping_the_item(self):
+        """"Keep the broken one, here is a new one" is an ordinary policy for low-value goods, and the two
+        fields are independent: `return_method` is about the ITEM, `resolution` about what travels back."""
+        terms = refund_terms(dict(FULL, return_method=KEEPS))
+        self.assertTrue(any("replace it or refund you" in term for term in terms))
+
+    def test_replacement_first_reads_as_an_exchange_before_a_refund(self):
+        terms = refund_terms(dict(FULL, resolution=RESOLUTION_REPLACEMENT_FIRST))
+        self.assertIn("We replace the item. Where we cannot, we refund you instead.", terms)
+
+    def test_refund_only_states_nothing(self):
+        """There is no open question: a refund policy silent on replacements refunds you, and a sentence
+        saying so is the noise CONDITION_OPTIONS["any"] deliberately omits."""
+        terms = refund_terms(dict(FULL, resolution=RESOLUTION_REFUND_ONLY))
+        self.assertFalse(any("replace" in term for term in terms))
+
     def test_nothing_set_states_nothing(self):
         self.assertEqual(refund_terms({"refund_window": "30_days", "return_method": RETURN_REQUIRED}), [])
 
@@ -128,7 +161,9 @@ class TheClauses(unittest.TestCase):
         """Pressing the button is the merchant's act and the only part of this they control. The card
         network then takes its own week, and promising the landing date would be promising a clock nobody
         in this system holds."""
-        term = refund_terms(FULL)[2]
+        # From the END: the timing clause is last by design, and a positional index from the front rots
+        # every time a term is added above it -- which it just did.
+        term = refund_terms(FULL)[-1]
         self.assertIn("issue your refund", term)
         self.assertIn("Your bank may take a few days longer", term)
 
@@ -145,11 +180,13 @@ class TheClauses(unittest.TestCase):
 
 
 class WritingThem(unittest.TestCase):
-    def test_build_keeps_all_three(self):
+    def test_build_keeps_all_four(self):
         policy = build(PHYSICAL, refund_window="30_days", condition="unused",
                        return_method=RETURN_REQUIRED, restocking_fee=15,
-                       original_shipping=ORIGINAL_SHIPPING_NOT_REFUNDED, processing_days=7)
+                       original_shipping=ORIGINAL_SHIPPING_NOT_REFUNDED, processing_days=7,
+                       resolution=RESOLUTION_REPLACEMENT_FIRST)
         self.assertEqual(policy["restocking_fee_percent"], 15)
+        self.assertEqual(policy["resolution"], RESOLUTION_REPLACEMENT_FIRST)
         self.assertEqual(policy["original_shipping"], ORIGINAL_SHIPPING_NOT_REFUNDED)
         self.assertEqual(policy["refund_processing_days"], 7)
 
@@ -159,13 +196,19 @@ class WritingThem(unittest.TestCase):
         settings screen reads these straight back."""
         policy = build(PHYSICAL, refund_window="30_days", condition="unused",
                        return_method=RETURN_REQUIRED)
-        for field in ("restocking_fee_percent", "original_shipping", "refund_processing_days"):
+        for field in ("restocking_fee_percent", "original_shipping", "refund_processing_days",
+                      "resolution"):
             self.assertNotIn(field, policy)
 
     def test_build_refuses_an_unknown_original_shipping(self):
         with self.assertRaises(RefundPolicyError):
             build(PHYSICAL, refund_window="30_days", condition="unused",
                   return_method=RETURN_REQUIRED, original_shipping="half_of_it")
+
+    def test_build_refuses_an_unknown_resolution(self):
+        with self.assertRaises(RefundPolicyError):
+            build(PHYSICAL, refund_window="30_days", condition="unused",
+                  return_method=RETURN_REQUIRED, resolution="store_credit")
 
     def test_normalize_drops_rubbish_rather_than_coercing_it(self):
         """Unlike the three enums, which fall back to a class seed. A window has to be something; a
@@ -192,6 +235,13 @@ class WritingThem(unittest.TestCase):
         self.assertTrue(values[ORIGINAL_SHIPPING_NOT_REFUNDED])
         self.assertTrue(values[ORIGINAL_SHIPPING_REFUNDED])
 
+    def test_the_vocabulary_offers_the_resolutions_with_their_clauses(self):
+        values = {o["value"]: o["clause"] for o in vocabulary()["resolutions"]}
+        self.assertEqual(sorted(values), sorted(RESOLUTION_OPTIONS))
+        self.assertEqual(values[RESOLUTION_REFUND_ONLY], "")
+        self.assertTrue(values[RESOLUTION_REPLACEMENT_OR_REFUND])
+        self.assertTrue(values[RESOLUTION_REPLACEMENT_FIRST])
+
 
 class TheValidator(unittest.TestCase):
     def policies(self, **overrides):
@@ -212,6 +262,10 @@ class TheValidator(unittest.TestCase):
     def test_zero_is_refused_rather_than_stored_as_a_non_choice(self):
         with self.assertRaises(DocumentValidationError):
             validate_refund_policies(self.policies(restocking_fee_percent=0), "cfg")
+
+    def test_an_unknown_resolution_is_refused(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_refund_policies(self.policies(resolution="store_credit"), "cfg")
 
     def test_an_unknown_outbound_choice_is_refused(self):
         with self.assertRaises(DocumentValidationError):
@@ -254,6 +308,31 @@ class WhatGoogleReads(unittest.TestCase):
         self.assertEqual(node["restockingFee"], 15)
         self.assertNotEqual(node["returnFees"], "https://schema.org/RestockingFees")
 
+    def test_a_refund_type_is_always_stated(self):
+        """This node is only built for a finite window, which means a refund IS available -- so FullRefund
+        is the honest default rather than an assumption, and it is another recommended property that was
+        never sent."""
+        self.assertEqual(merchant_return_policy(dict(FULL, resolution=RESOLUTION_REFUND_ONLY))["refundType"],
+                         "https://schema.org/FullRefund")
+
+    def test_replacement_first_marks_up_an_exchange(self):
+        node = merchant_return_policy(dict(FULL, resolution=RESOLUTION_REPLACEMENT_FIRST))
+        self.assertEqual(node["refundType"], "https://schema.org/ExchangeRefund")
+
+    def test_a_choice_marks_up_the_money(self):
+        """Google documents "one or more" for returnMethod and says no such thing for refundType, and both
+        its examples carry one value -- so an array is not something to find out about in production. The
+        money is the claim that holds either way."""
+        node = merchant_return_policy(FULL)
+        self.assertEqual(node["refundType"], "https://schema.org/FullRefund")
+
+    def test_no_exchange_is_claimed_off_the_physical_class(self):
+        """Markup and prose have to agree: `refund_terms` suppresses the clause there, so the property
+        must suppress too, or a crawler reads a promise the page does not make."""
+        node = merchant_return_policy(dict(FULL, resolution=RESOLUTION_REPLACEMENT_FIRST,
+                                           policy_class=DIGITAL))
+        self.assertEqual(node["refundType"], "https://schema.org/FullRefund")
+
     def test_no_fee_is_claimed_when_nothing_comes_back(self):
         """A tenant who set a fee and later switched to "customer keeps it" leaves the number in the
         document, and markup that still charged it would contradict the page."""
@@ -268,13 +347,13 @@ class OnThePage(unittest.TestCase):
     def test_the_terms_render_as_a_list(self):
         html = self.render(FULL)
         self.assertIn('<ul class="sl-refund-policy-terms">', html)
-        self.assertEqual(html.count("<li>"), 3)
+        self.assertEqual(html.count("<li>"), 4)
 
     def test_no_empty_list_when_nothing_is_set(self):
         """An empty <ul> is a visible gap in a grid with a gap, and it says nothing."""
         html = self.render({k: v for k, v in FULL.items()
                             if k not in ("restocking_fee_percent", "original_shipping",
-                                         "refund_processing_days")})
+                                         "refund_processing_days", "resolution")})
         self.assertNotIn("sl-refund-policy-terms", html)
 
     def test_the_renderer_does_not_compose_the_wording(self):
@@ -286,6 +365,30 @@ class OnThePage(unittest.TestCase):
         source = inspect.getsource(html_module.render_refund_policy)
         self.assertIn("refund_policy_terms(policy)", source)
         self.assertNotIn("restocking", source)
+
+
+class TagsAndHygieneSeals(unittest.TestCase):
+    """APPAREL's `complete_in_packaging`, and not a stricter form of it: a garment has no packaging worth
+    the name, and the two things a clothing seller needs intact are the price tag and the hygiene seal. A
+    tenant selling swimwear had to choose between `unused` (unprovable) and `complete_in_packaging`
+    (describing a box that never existed)."""
+
+    def test_it_is_in_the_vocabulary_with_a_label(self):
+        self.assertIn("tags_intact", CONDITION_OPTIONS)
+        self.assertIn("tags_intact", CONDITION_LABELS)
+
+    def test_it_reads_as_a_sentence(self):
+        _, full = generate_copy(PHYSICAL, "30_days", "tags_intact")
+        self.assertEqual(full, "Refunds are available within 30 days of delivery with tags attached "
+                               "and any hygiene seals intact.")
+
+    def test_every_condition_still_has_a_preview(self):
+        """The matrix is generated, so a value added to one table and not the other would leave a picker
+        option whose preview is missing rather than wrong -- the harder failure to notice."""
+        previews = vocabulary()["previews"]
+        for condition in CONDITION_OPTIONS:
+            with self.subTest(condition=condition):
+                self.assertIn(f"{PHYSICAL}|30_days|{condition}", previews)
 
 
 if __name__ == "__main__":

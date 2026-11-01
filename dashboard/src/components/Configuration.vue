@@ -271,10 +271,21 @@
               they read the window.</small>
           </label>
 
-          <!-- THE THREE TERMS EVERY MAINSTREAM POLICY STATES AND THIS CARD COULD NOT. Each is optional and
+          <!-- THE TERMS EVERY MAINSTREAM POLICY STATES AND THIS CARD COULD NOT. Each is optional and
                silent when left blank: a policy that says nothing about a restocking fee is a policy
-               without one. -->
+               without one. In the order the clauses print -- what you get, less what, and when. -->
           <div v-if="form.refund_policies[cls].enabled" class="offer-three-column">
+            <!-- Physical only: a month of a subscription cannot be replaced, and re-granting a download
+                 is `digital_revoke_access` running backwards rather than a replacement. -->
+            <label v-if="cls === 'physical'" class="offer-field">
+              <span>What the buyer gets</span>
+              <select v-model="form.refund_policies[cls].resolution">
+                <option v-for="o in refundOptions.resolutions || []" :key="o.value" :value="o.value">
+                  {{ o.label }}</option>
+              </select>
+              <small class="field-note">Yours to honour, and it needs stock — nothing here checks
+                inventory before the page promises a replacement.</small>
+            </label>
             <!-- Nothing is restocked when nothing comes back, so this is offered only on a real return. -->
             <label v-if="form.refund_policies[cls].return_method === 'return_required'" class="offer-field">
               <span>Restocking fee <em>(optional, %)</em></span>
@@ -522,7 +533,7 @@ function blankGuarantees() {
 function blankRefundPolicy() {
   return { enabled: false, refund_window: "", condition: "", return_method: "", return_shipping: "",
            full_policy: "", keep_it_below: "", restocking_fee_percent: "", original_shipping: "unstated",
-           refund_processing_days: "" };
+           refund_processing_days: "", resolution: "refund_only" };
 }
 
 // The server's bounds and sentence templates for the two numeric terms, so the hints quote the real cap
@@ -791,6 +802,7 @@ function applyConfig(config) {
       restocking_fee_percent: stored && stored.restocking_fee_percent
         ? String(stored.restocking_fee_percent) : "",
       original_shipping: (stored && stored.original_shipping) || "unstated",
+      resolution: (stored && stored.resolution) || "refund_only",
       refund_processing_days: stored && stored.refund_processing_days
         ? String(stored.refund_processing_days) : "",
     };
@@ -897,6 +909,9 @@ function refundPoliciesPayload() {
     }
     if (cls === "physical" && entry.original_shipping && entry.original_shipping !== "unstated") {
       policy.original_shipping = entry.original_shipping;
+    }
+    if (cls === "physical" && entry.resolution && entry.resolution !== "refund_only") {
+      policy.resolution = entry.resolution;
     }
     const days = parseInt(String(entry.refund_processing_days || ""), 10);
     if (Number.isFinite(days) && days > 0) {

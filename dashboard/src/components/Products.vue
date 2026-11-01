@@ -556,10 +556,15 @@
                     <option v-for="o in refundStore.returnShipping" :key="o.value" :value="o.value">{{ o.label }}</option>
                   </select>
                 </label>
-                <!-- The same three extra terms the Configuration card offers, gated identically: nothing
-                     is restocked when nothing comes back, and nothing shipped on a download or a
-                     subscription. An override that could not express them would send a tenant back to
-                     their default for the one product that needed different terms. -->
+                <!-- The same extra terms the Configuration card offers, in the same order and gated
+                     identically: nothing is restocked when nothing comes back, and nothing shipped on a
+                     download or a subscription. An override that could not express them would send a
+                     tenant back to their default for the one product that needed different terms. -->
+                <label v-if="refundClass === 'physical'">What the buyer gets
+                  <select v-model="form.refund_resolution">
+                    <option v-for="o in refundStore.resolutions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </label>
                 <label v-if="form.refund_return_method === 'return_required'">Restocking fee <em>(optional, %)</em>
                   <input v-model="form.refund_restocking_fee" type="text" inputmode="numeric"
                          placeholder="e.g. 15" />
@@ -1063,6 +1068,7 @@ const refundTermPreview = computed(() => {
     restocking_fee_percent: form.value.refund_restocking_fee,
     original_shipping: form.value.refund_original_shipping,
     refund_processing_days: form.value.refund_processing_days,
+    resolution: form.value.refund_resolution,
   });
 });
 
@@ -1089,6 +1095,9 @@ watch(() => form.value.refund_source, (source) => {
   }
   if (form.value.refund_original_shipping === "unstated" && effective.original_shipping) {
     form.value.refund_original_shipping = effective.original_shipping;
+  }
+  if (form.value.refund_resolution === "refund_only" && effective.resolution) {
+    form.value.refund_resolution = effective.resolution;
   }
   if (!form.value.refund_processing_days && effective.refund_processing_days) {
     form.value.refund_processing_days = String(effective.refund_processing_days);
@@ -1184,6 +1193,7 @@ function defaultProductForm() {
     refund_restocking_fee: "",
     refund_original_shipping: "unstated",
     refund_processing_days: "",
+    refund_resolution: "refund_only",
     refund_full_policy: "",
     images: "",
     uploaded_images: [],
@@ -1320,6 +1330,7 @@ function productFormFromDocument(product) {
     refund_restocking_fee: isRefundOverride(refundPolicy) && refundPolicy.restocking_fee_percent
       ? String(refundPolicy.restocking_fee_percent) : "",
     refund_original_shipping: (isRefundOverride(refundPolicy) && refundPolicy.original_shipping) || "unstated",
+    refund_resolution: (isRefundOverride(refundPolicy) && refundPolicy.resolution) || "refund_only",
     refund_processing_days: isRefundOverride(refundPolicy) && refundPolicy.refund_processing_days
       ? String(refundPolicy.refund_processing_days) : "",
     refund_full_policy: isRefundOverride(refundPolicy) ? refundPolicy.full_policy || "" : "",
