@@ -44,9 +44,22 @@ class ThePicker(unittest.TestCase):
         self.assertIn('value="a" checked', markup)
 
     def test_each_option_carries_its_date_and_zone(self):
-        """A one-line <select> truncates exactly that on a phone, which is why these are radios."""
+        """A one-line <select> truncates exactly that on a phone, which is why these are radios.
+
+        The abbreviation is DERIVED, not spelled. It used to assert "EDT", which was true only while a
+        session a day or two from now fell inside US daylight saving -- so the suite went red on
+        2026-11-01 for everyone, on a test about radio buttons. The zone the renderer is given is the
+        zone to expect, whichever side of the changeover the clock is on.
+        """
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
         markup = render_occurrence_picker([occ("a"), occ("b", LATER)])
-        self.assertIn("EDT", markup)
+        for stamp in (SOON, LATER):
+            expected = datetime.fromtimestamp(stamp, tz=timezone.utc).astimezone(
+                ZoneInfo("America/New_York")).strftime("%Z")
+            with self.subTest(stamp=stamp):
+                self.assertIn(expected, markup)
         self.assertRegex(markup, r"<span>\w+day, \w+ \d+, \d{4} at ")
 
     def test_seats_show_only_when_nearly_gone(self):
