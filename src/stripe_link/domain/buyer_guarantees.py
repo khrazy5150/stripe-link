@@ -16,8 +16,15 @@ voice and must never imply that Junior Bay backs the promise, because it does no
 
 **Honouring them is manual in this phase, and this says so rather than implying otherwise.** Enabling
 `no_delivery_refund` publishes a promise; the merchant still handles the request, exactly as with every
-refund today. `delivery_status` already exists, so automatic detection is a credible later phase --
-shipping the promise and the automation together would hold the promise hostage to the harder half.
+refund today. Shipping the promise and the automation together would hold the promise hostage to the
+harder half.
+
+**`delivery_status` existing was NOT the same as automation being close**, which an earlier note here
+implied. It read a `tracking_status` nothing ever wrote -- one reader, zero writers -- so this system knew
+when a parcel shipped and never learned whether it arrived, and a sweep over the clock alone would have
+refunded every order old enough including every one delivered on time. `domain/tracking.py` is that
+missing feed (plans/DELIVERY_TRACKING.md); the sweep is the phase after it, and it must read "no delivery
+known" apart from "did not arrive" -- `tracking.has_arrived` says so in its own docstring.
 
 `late_delivery_credit` from the example is deliberately absent: a store credit needs a buyer balance, and
 this platform has no buyer accounts at all. A credit we cannot issue is a promise we cannot keep.

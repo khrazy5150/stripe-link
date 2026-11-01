@@ -255,7 +255,12 @@ survived a year.
   nobody has asked for it yet.
 - **`any_value_adjusted` describes a deduction nothing computes.** If tenants use it heavily, a structured
   reduction on the refund request is the follow-on.
-- **Automatic honouring of the delivery guarantees** via `delivery_status`. The promise ships first.
+- ~~**Automatic honouring of the delivery guarantees.**~~ **DONE** (plans/DELIVERY_TRACKING.md). Recorded
+  here as "via `delivery_status`", which was wrong in a way worth keeping: that function read a
+  `tracking_status` nothing ever wrote, so there was no delivery signal to sweep on at all. The feed had to
+  be built first; the sweep then rode the orders scan, and it NOTIFIES rather than refunds because the
+  published sentence says the buyer chooses. Still open from it: a buyer-facing "it hasn't arrived" claim,
+  which is also the only cover for a tenant with no provider key.
 
 
 ---
