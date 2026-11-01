@@ -58,16 +58,27 @@ if [[ -z "${API_BASE}" || "${API_BASE}" == "None" ]]; then
 fi
 
 echo
+echo "In the PLATFORM tracking account (the one whose key ./deploy/shippo-tracking-key.sh holds, NOT a"
+echo "tenant's), create a Track Updated webhook for EACH of these."
+echo
+echo "TWO URLS FOR THIS ONE DEPLOYMENT, because ${ENVIRONMENT} serves BOTH Stripe modes -- that is the"
+echo "decoupling, and it is why the Shippo environment cannot stand in for a deployment or for a mode."
+echo "Register the test URL under Shippo's TEST environment and the live URL under its LIVE one; the"
+echo "other deployment needs its own pair, so four webhooks in total across dev and prod."
+echo
 if [[ -n "${API_BASE}" && "${API_BASE}" != "None" ]]; then
-  echo "Paste this into the PLATFORM tracking account's Shippo -> Settings -> Webhooks"
-  echo "(event: Track Updated) -- the account whose key ./deploy/shippo-tracking-key.sh holds,"
-  echo "NOT a tenant's. There is only one account to do this on, which is the point of that key:"
-  echo "  ${API_BASE%/}/webhook/shipping-tracking?token=${TOKEN}"
+  echo "  Shippo environment TEST  ->  ${API_BASE%/}/webhook/shipping-tracking?token=${TOKEN}&mode=test"
+  echo "  Shippo environment LIVE  ->  ${API_BASE%/}/webhook/shipping-tracking?token=${TOKEN}&mode=live"
 else
-  echo "Stack output ApiBase not readable; the webhook URL is:"
-  echo "  <your api base>/webhook/shipping-tracking?token=${TOKEN}"
+  echo "  Stack output not readable; the URLs are <your api base> plus:"
+  echo "    /webhook/shipping-tracking?token=${TOKEN}&mode=test"
+  echo "    /webhook/shipping-tracking?token=${TOKEN}&mode=live"
 fi
 echo
-echo "Shippo's URL limit is 200 characters, which this is comfortably inside."
+echo "'mode' is a QUERY parameter, not a #fragment -- a fragment never leaves the browser and would"
+echo "arrive here as nothing at all. Without it the handler searches both partitions, which works until"
+echo "one shipment id exists in both and a test event lands on a live parcel."
+echo
+echo "Shippo's URL limit is 200 characters, which these are comfortably inside."
 echo "Lambdas cache the token per process, so a rotation takes effect as containers recycle --"
 echo "update Shippo FIRST when rotating, or events in flight will be rejected until they do."

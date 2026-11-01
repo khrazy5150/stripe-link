@@ -11,10 +11,15 @@ from handlers import shipping_tracking
 from handlers.shipping_tracking import handler
 
 
-def event(body, *, token="s3cret", method="POST"):
+def event(body, *, token="s3cret", method="POST", mode=None):
+    params = {}
+    if token is not None:
+        params["token"] = token
+    if mode is not None:
+        params["mode"] = mode
     return {
         "httpMethod": method,
-        "queryStringParameters": {"token": token} if token is not None else None,
+        "queryStringParameters": params or None,
         "body": json.dumps(body) if not isinstance(body, str) else body,
     }
 
@@ -184,9 +189,42 @@ class WhatItDoes(TrackingWebhookCase):
                            secrets_client=FakeSecrets("s3cret"))
         self.assertEqual(response["statusCode"], 405)
 
+    def test_a_declared_mode_is_never_widened(self):
+        """THE MODE IS CARRIED, NEVER INFERRED. Each deployment serves both modes, so neither the Shippo
+        environment nor the hostname identifies one -- it travels in the URL we hand Shippo. Searching the
+        other partition anyway is how a test-mode carrier event comes to apply to a LIVE shipment."""
+        seen = []
+
+        def repo_fn(mode=None):
+            seen.append(mode)
+            return FakeRepo(None)
+
+        handler(event(payload(), mode="live"), None, repo_fn=repo_fn,
+                secrets_client=FakeSecrets("s3cret"))
+        self.assertEqual(seen, ["live"])
+
+    def test_a_declared_test_mode_never_reaches_live(self):
+        live_only = FakeRepo(SHIPMENT)
+        response = handler(event(payload(), mode="test"), None,
+                           repo_fn=lambda mode=None: live_only if mode == "live" else FakeRepo(None),
+                           secrets_client=FakeSecrets("s3cret"))
+        self.assertEqual(json.loads(response["body"])["reason"], "unknown_shipment")
+        self.assertIsNone(live_only.written)
+
+    def test_rubbish_in_the_mode_param_falls_back_rather_than_failing(self):
+        seen = []
+
+        def repo_fn(mode=None):
+            seen.append(mode)
+            return FakeRepo(None)
+
+        handler(event(payload(), mode="production"), None, repo_fn=repo_fn,
+                secrets_client=FakeSecrets("s3cret"))
+        self.assertEqual(seen, ["test", "live"])
+
     def test_both_stripe_modes_are_tried(self):
-        """A tracker is registered under whichever mode the shipment lives in, and a carrier's event
-        cannot say which."""
+        """A webhook registered before the mode param existed must keep working, and trying both is the
+        old behaviour rather than a new guess."""
         seen = []
 
         def repo_fn(mode=None):

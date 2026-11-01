@@ -112,6 +112,29 @@ for everything else — which is what a tenant's label is from this account's po
 comparison quotes $0.02 per track; Shippo's own API pricing page says contact sales, so that figure is
 unconfirmed. The module therefore registers exactly once per shipment and never polls.
 
+### The mode is carried, never inferred
+
+**A Shippo environment does not identify a deployment, and a deployment does not identify a mode.** Each
+deployment serves *both* Stripe modes — that is the decoupling — so "Live webhook to prod, Test webhook to
+dev" is the abolished `environment == prod` coupling wearing a new hat
+(`feedback_mode_not_environment`). It was written into this plan's first draft and is wrong.
+
+The mode therefore travels in the webhook URL we hand Shippo: `?mode=live`. **Four webhooks**, one per
+(Shippo environment × deployment):
+
+| Shippo environment | URL |
+|---|---|
+| Test | `<dev api>/webhook/shipping-tracking?token=…&mode=test` |
+| Test | `<prod api>/webhook/shipping-tracking?token=…&mode=test` |
+| Live | `<dev api>/webhook/shipping-tracking?token=…&mode=live` |
+| Live | `<prod api>/webhook/shipping-tracking?token=…&mode=live` |
+
+A **query parameter**, not a `#fragment` — a fragment never leaves the browser and would arrive as nothing
+at all. Without it the handler searches the test partition then the live one, which works right up until a
+shipment id exists in both and a test-mode carrier event applies to a LIVE shipment. A webhook registered
+before the parameter existed still works, because an absent mode keeps the old both-partitions behaviour;
+a DECLARED mode is never widened.
+
 **Two keys, because Shippo's test mode is the rehearsal.** Live tracks real parcels and bills; test accepts
 Shippo's mock tracking numbers and costs nothing. Selected by the shipment's Stripe mode, so a test-mode
 order never burns a paid track on a parcel that does not exist, and an unrecognised mode falls back to the

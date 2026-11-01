@@ -26,9 +26,19 @@ from stripe_link.common import error_response, json_response, query_params
 from stripe_link.domain.tracking import fields_to_write, reading, shipment_id_from
 from stripe_link.repositories.documents import shipments_repository
 
-# A tracker is registered under whichever Stripe mode the shipment lives in, and the webhook cannot know
-# which -- it carries a carrier's words, not ours. Both partitions are tried, test first because that is
-# where a tenant's first parcels are. Two point lookups on a GSI, only on an event we are going to act on.
+# THE MODE IS CARRIED, NEVER INFERRED. Each deployment serves BOTH Stripe modes -- that is the whole point
+# of the decoupling -- so the Shippo environment an event came from does not identify a deployment, and a
+# deployment does not identify a mode. Shippo has no idea which of ours a parcel belongs to either, so the
+# mode travels in the webhook URL we hand it: `?mode=live`, one webhook per (Shippo environment,
+# deployment).
+#
+# Without it this handler searched the test partition and then the live one, which works right up until a
+# shipment id exists in both -- and then a test-mode carrier event applies to a LIVE shipment. That is the
+# mode bleed this repo has already paid for twice (`feedback_mode_not_environment`, and the shipping keys'
+# own schema records a tenant in test mode buying real labels).
+#
+# Absent, both are still tried: a webhook registered before this existed must keep working, and trying is
+# the old behaviour rather than a new guess. A DECLARED mode is never widened.
 MODES = ("test", "live")
 
 _TOKEN_CACHE: dict[str, str] = {}
@@ -74,14 +84,20 @@ def _authentic(event, token: str) -> bool:
     return hmac.compare_digest(supplied, token)
 
 
-def _find_shipment(shipment_id: str, *, repo_fn=shipments_repository):
+def _modes_for(event) -> tuple[str, ...]:
+    """The partition(s) to search: the one the URL declares, or both when it declares none."""
+    declared = str(query_params(event).get("mode") or "").strip().lower()
+    return (declared,) if declared in MODES else MODES
+
+
+def _find_shipment(shipment_id: str, *, repo_fn=shipments_repository, modes=MODES):
     """`(shipment, repo)` for the first mode that holds it, or `(None, None)`.
 
     `find_by_id` is a GSI1 query, so this is cross-tenant on purpose: the carrier does not know our
     tenants, and the document it finds carries the `tenant_id` the write needs.
     """
     failures = []
-    for mode in MODES:
+    for mode in modes:
         try:
             repo = repo_fn(mode=mode)
             found = repo.find_by_id(shipment_id)
@@ -90,7 +106,7 @@ def _find_shipment(shipment_id: str, *, repo_fn=shipments_repository):
             continue
         if found:
             return found, repo
-    if len(failures) == len(MODES):
+    if len(failures) == len(modes):
         # BOTH lookups ERRORED, which is not the same as neither finding anything -- an unset table name
         # or a denied query would otherwise read as "we do not know this parcel" and every delivery would
         # be dropped in silence, looking exactly like ordinary traffic (`feedback_one_guess_hides_the_cause`).
@@ -126,7 +142,7 @@ def handler(event, context, repo_fn=shipments_repository, secrets_client=None,
         # Shippo account) and statuses we do not model. Both are ordinary, and both are nothing to do.
         return json_response({"applied": False, "reason": "nothing_to_apply"})
 
-    shipment, repo = _find_shipment(shipment_id, repo_fn=repo_fn)
+    shipment, repo = _find_shipment(shipment_id, repo_fn=repo_fn, modes=_modes_for(event))
     if not shipment or repo is None:
         return json_response({"applied": False, "reason": "unknown_shipment"})
 
