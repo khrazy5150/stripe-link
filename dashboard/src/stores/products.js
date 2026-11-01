@@ -651,6 +651,11 @@ function refundPolicy(form) {
     condition: form.refund_condition || "",
     return_method: form.refund_return_method || "",
   };
+  // Only where something comes back. Sent for anything else it would be a promise about postage on a
+  // download; omitted, the server supplies the status-quo default rather than inventing one.
+  if (form.refund_return_method === "return_required" && form.refund_return_shipping) {
+    policy.return_shipping = form.refund_return_shipping;
+  }
   const wording = String(form.refund_full_policy || "").trim();
   if (wording) policy.full_policy = wording;
   return policy;

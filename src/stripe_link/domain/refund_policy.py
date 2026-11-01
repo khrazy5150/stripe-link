@@ -581,6 +581,11 @@ def apply_to_product(document: dict[str, Any], tenant_config: dict[str, Any] | N
                 refund_window=_text(stored.get("refund_window")),
                 condition=_text(stored.get("condition")),
                 return_method=_text(stored.get("return_method")),
+                # Carried through like every other structured choice. Left out, `build` supplied the
+                # status-quo default instead and a tenant who overrode a product to promise free returns
+                # silently got "paid by the customer" -- their choice discarded by the write path that
+                # exists to honour it.
+                return_shipping=_text(stored.get("return_shipping")),
                 full_policy=_text(stored.get("full_policy")),
                 return_note=_text(stored.get("return_note")),
                 keep_it_below=stored.get("keep_it_below"),

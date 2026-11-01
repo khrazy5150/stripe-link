@@ -548,6 +548,14 @@
                     <option v-for="m in refundStore.returnMethods" :key="m.value" :value="m.value">{{ m.label }}</option>
                   </select>
                 </label>
+                <!-- Only when something travels back, exactly as on the Configuration card. On a revoked
+                     download or a keep-it refund the question does not arise, and offering it there
+                     invents a promise about postage. -->
+                <label v-if="form.refund_return_method === 'return_required'">Who pays return postage?
+                  <select v-model="form.refund_return_shipping">
+                    <option v-for="o in refundStore.returnShipping" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </label>
               </div>
               <label v-if="form.refund_window === 'custom'">Your policy wording <em>(required)</em>
                 <textarea v-model="form.refund_full_policy" rows="3"
@@ -1036,6 +1044,7 @@ watch(() => form.value.refund_source, (source) => {
   if (!form.value.refund_window) form.value.refund_window = effective.refund_window || "";
   if (!form.value.refund_condition) form.value.refund_condition = effective.condition || "";
   if (!form.value.refund_return_method) form.value.refund_return_method = effective.return_method || "";
+  if (!form.value.refund_return_shipping) form.value.refund_return_shipping = effective.return_shipping || "";
 });
 const hydratingForm = ref(false);
 
@@ -1123,6 +1132,7 @@ function defaultProductForm() {
     refund_window: "",
     refund_condition: "",
     refund_return_method: "",
+    refund_return_shipping: "",
     refund_full_policy: "",
     images: "",
     uploaded_images: [],
@@ -1252,6 +1262,7 @@ function productFormFromDocument(product) {
     refund_window: isRefundOverride(refundPolicy) ? refundPolicy.refund_window || "" : "",
     refund_condition: isRefundOverride(refundPolicy) ? refundPolicy.condition || "" : "",
     refund_return_method: isRefundOverride(refundPolicy) ? refundPolicy.return_method || "" : "",
+    refund_return_shipping: isRefundOverride(refundPolicy) ? refundPolicy.return_shipping || "" : "",
     refund_full_policy: isRefundOverride(refundPolicy) ? refundPolicy.full_policy || "" : "",
     uploaded_images: images,
     images: "",

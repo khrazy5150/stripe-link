@@ -29,6 +29,7 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
     windows: (state) => state.options.windows || [],
     conditions: (state) => state.options.conditions || [],
     returnMethods: (state) => state.options.return_methods || [],
+    returnShipping: (state) => state.options.return_shipping || [],
     classLabels: (state) => state.options.class_labels || {},
     classHints: (state) => state.options.class_hints || {},
     classDefaults: (state) => state.options.class_defaults || {},

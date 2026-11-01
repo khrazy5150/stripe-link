@@ -259,3 +259,55 @@ class ThroughTheHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnOverrideCanPromiseFreeReturns(unittest.TestCase):
+    """`return_shipping` reached the product override's write path through nothing at all.
+
+    `apply_to_product` rebuilds an override from its structured choices, and that list did not include
+    `return_shipping` -- so `build` supplied the status-quo default and a tenant who overrode a product
+    to promise free returns silently got "paid by the customer", their choice discarded by the very
+    path that exists to honour it. Found when the prepaid-label option was added and the product form
+    had nowhere to put it (2026-10-31).
+    """
+
+    @staticmethod
+    def _override(**extra):
+        from stripe_link.domain.refund_policy import apply_to_product
+        document = product(refund_policy={
+            "source": "product_override", "refund_window": "30_days",
+            "condition": "working_condition", "return_method": "return_required", **extra})
+        apply_to_product(document, TENANT_CONFIG)
+        return document["refund_policy"]
+
+    def test_the_choice_survives_the_write(self):
+        self.assertEqual(self._override(return_shipping="seller_pays_label")["return_shipping"],
+                         "seller_pays_label")
+
+    def test_every_option_survives(self):
+        from stripe_link.domain.refund_policy import RETURN_SHIPPING_OPTIONS
+        for value in RETURN_SHIPPING_OPTIONS:
+            with self.subTest(value=value):
+                self.assertEqual(self._override(return_shipping=value)["return_shipping"], value)
+
+    def test_omitting_it_still_gets_the_status_quo(self):
+        """Silence has always meant the customer arranges it, and an override that says nothing about
+        postage must not start promising free returns."""
+        self.assertEqual(self._override()["return_shipping"], "buyer_pays")
+
+    def test_the_product_form_offers_it(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        vue = (root / "dashboard" / "src" / "components" / "Products.vue").read_text(encoding="utf-8")
+        self.assertIn("Who pays return postage?", vue)
+        self.assertIn("form.refund_return_shipping", vue)
+        # Only where something comes back, exactly as on the Configuration card.
+        self.assertIn('v-if="form.refund_return_method === \'return_required\'"', vue)
+
+    def test_the_form_actually_sends_it(self):
+        """A select the payload drops is worse than no select: the tenant sees their choice saved and
+        the page says the opposite."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        store = (root / "dashboard" / "src" / "stores" / "products.js").read_text(encoding="utf-8")
+        self.assertIn("policy.return_shipping = form.refund_return_shipping;", store)
