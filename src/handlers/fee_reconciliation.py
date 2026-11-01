@@ -26,8 +26,8 @@ from stripe_link.domain.orphan_charges import charge_window, orphans, summarize
 from stripe_link.silo import current_silo
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (ledger_repository, notifications_repository,
-                                                orders_repository, shipments_repository,
-                                                stripe_keys_repository)
+                                                orders_repository, platform_config_repository,
+                                                shipments_repository, stripe_keys_repository)
 from stripe_link.stripe_platform_secrets import checkout_credentials
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,8 @@ MODES = ("test", "live")
 
 def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=None,
             secret_cipher=None, fetch_fees=None, true_up=None, now_fn=None, modes=MODES,
-            shipments_repo=None, notifications_repo=None, list_charges=None, this_silo=None):
+            shipments_repo=None, notifications_repo=None, list_charges=None, this_silo=None,
+            config_repo=None):
     """Reconcile both Stripe modes. Returns a per-mode tally, which is also what the logs carry."""
     from handlers.stripe_webhook import fetch_actual_fees, true_up_fees
 
@@ -69,6 +70,13 @@ def handler(event, context, *, orders_repo=None, ledger_repo=None, stripe_repo=N
         tally[mode]["overdue_notified"] = _notify_overdue(
             mode, now, orders_repo=orders_for_mode, shipments_repo=shipments_repo,
             notifications_repo=notifications_repo)
+        # A FOURTH PASS over the same scan, and the one the tracking feed was built for
+        # (plans/DELIVERY_TRACKING.md). The pass above asks "should this have shipped by now?"; this one
+        # asks "did it ARRIVE by the date the tenant promised?" -- a question that was unanswerable until
+        # `tracking_status` had a writer, and which this deliberately only asks of parcels we can see.
+        tally[mode]["guarantees_due"] = _notify_guarantees_due(
+            mode, now, orders_repo=orders_for_mode, shipments_repo=shipments_repo,
+            notifications_repo=notifications_repo, config_repo=config_repo)
         # A THIRD PASS, and the only one that reads the other direction. The two above walk our orders
         # and ask Stripe about them, so neither can ever find a sale we never recorded -- which is
         # exactly what happened twice on 2026-10-07, and was caught by the operator reading the Stripe
@@ -386,31 +394,208 @@ def _notify_overdue(mode, now, *, orders_repo, shipments_repo=None, notification
         today = datetime.fromtimestamp(now, _tz.utc).date()
         notifications = notifications_repo or (notifications_repository(mode=mode)
                                                if os.environ.get("NOTIFICATIONS_TABLE") else None)
-        shipments = shipments_repo or (shipments_repository(mode=mode)
-                                       if os.environ.get("SHIPMENTS_TABLE") else None)
+        shipments = _ShipmentsByOrder(shipments_repo or (shipments_repository(mode=mode)
+                                      if os.environ.get("SHIPMENTS_TABLE") else None))
         if notifications is None:
             return 0
+        expected: dict[str, set[str]] = {}
         for order in orders_repo.scan_type():
             try:
+                tenant_id = str(order.get("tenant_id") or "")
+                expected.setdefault(tenant_id, set())
                 if not is_overdue(order, _shipment_for(shipments, order), today):
                     continue
-                notifications.put(overdue_notification(order, today))
+                notice = overdue_notification(order, today)
+                notifications.put(notice)
+                # WHAT SHOULD STILL BE THERE. The notice mirrors `is_overdue`, so anything under this
+                # prefix that this pass did not just write is a notice whose cause has gone.
+                expected[tenant_id].add(notice["notification_id"])
                 sent += 1
             except Exception as exc:  # noqa: BLE001 - one bad order never stops the pass
                 logger.warning("overdue notice failed for %s: %s: %s",
                                order.get("order_id"), type(exc).__name__, exc)
+        # Only where the shipments table ANSWERED. With no table at all `_shipment_for` returns the
+        # "assume shipped" sentinel, so nothing is overdue and an unguarded clear would empty every bell.
+        if shipments.readable:
+            _clear_stale_notices(expected, "notif_overdue_", notifications, skip=shipments.failed)
     except Exception as exc:  # noqa: BLE001 - and a broken pass never stops the fee reconciliation
         logger.warning("overdue sweep could not run for %s: %s: %s", mode, type(exc).__name__, exc)
     return sent
 
 
-def _shipment_for(shipments_repo, order):
-    """This order's shipment, or None. A missing shipments table means every order looks unshipped, which
-    would notify about all of them -- so no repo means no answer and `is_overdue` is never asked."""
-    if shipments_repo is None:
-        return {"status": "shipped"}      # unknowable: assume shipped rather than cry wolf
+def _notify_guarantees_due(mode, now, *, orders_repo, shipments_repo=None, notifications_repo=None,
+                           config_repo=None) -> int:
+    """Put a bell notice on every order that has outrun a delivery guarantee its tenant enabled.
+
+    NOTIFIES, NEVER REFUNDS. The published sentence says "we refund it or send it again -- your choice",
+    so a sweep that moved money would deny the buyer the choice the page promised them; and nobody has
+    asked them anything yet. What has come due is a conversation.
+
+    Reports only on promises the TENANT made: `buyer_guarantees.resolve` returns the ones they enabled
+    with the day counts they set, and a tenant who enabled none is never asked about again. The config is
+    read once per tenant rather than once per order -- the scan walks a tenant's orders together.
+
+    Never raises, on either scale. One bad order does not stop the tenant; one bad tenant does not stop
+    the pass; and a broken pass does not stop the fee reconciliation it is riding on.
+    """
+    from stripe_link.domain.buyer_guarantees import resolve as resolve_guarantees
+    from stripe_link.domain.guarantee_due import due_guarantees, guarantee_notification
+
+    sent = 0
     try:
-        return shipments_repo.get(str(order.get("tenant_id") or ""), str(order.get("order_id") or ""))
+        notifications = notifications_repo or (notifications_repository(mode=mode)
+                                               if os.environ.get("NOTIFICATIONS_TABLE") else None)
+        if notifications is None:
+            return 0
+        shipments_source = shipments_repo or (shipments_repository(mode=mode)
+                                              if os.environ.get("SHIPMENTS_TABLE") else None)
+        if shipments_source is None:
+            # NO SHIPMENTS TABLE MEANS NO NOTICES, which is the opposite of the overdue pass's answer and
+            # right for the opposite reason. There, unknowable has to read as "shipped" or it cries wolf
+            # about every order; here, unknowable means we cannot see a delivery -- and announcing a
+            # broken promise from an absence is exactly the fault this sweep is gated to avoid.
+            return 0
+        shipments = _ShipmentsByOrder(shipments_source)
+        configs = config_repo or (platform_config_repository()
+                                  if os.environ.get("PLATFORM_CONFIG_TABLE") else None)
+        if configs is None:
+            # The promises live on TenantConfig. Without it we do not know what anyone promised, and a
+            # guarantee nobody enabled must never produce a notice.
+            return 0
+
+        promises: dict[str, list] = {}
+        expected: dict[str, set[str]] = {}
+        for order in orders_repo.scan_type():
+            try:
+                tenant_id = str(order.get("tenant_id") or "")
+                expected.setdefault(tenant_id, set())
+                if tenant_id not in promises:
+                    promises[tenant_id] = resolve_guarantees(configs.get(tenant_id) or {})
+                if not promises[tenant_id]:
+                    continue
+                for overdue in due_guarantees(order, shipments.for_order(order),
+                                              promises[tenant_id], now=now):
+                    notice = guarantee_notification(order, overdue, now=now)
+                    notifications.put(notice)
+                    expected[tenant_id].add(notice["notification_id"])
+                    sent += 1
+            except Exception as exc:  # noqa: BLE001 - one bad order never stops the pass
+                logger.warning("guarantee notice failed for %s: %s: %s",
+                               order.get("order_id"), type(exc).__name__, exc)
+        # A parcel that arrives LATE settles the promise, and the notice has to go with it. Without this
+        # a guarantee that came due on Tuesday and was delivered on Wednesday would sit in the bell for
+        # ever, telling the tenant to settle something already settled.
+        _clear_stale_notices(expected, "notif_guarantee_", notifications, skip=shipments.failed)
+    except Exception as exc:  # noqa: BLE001 - and a broken pass never stops the fee reconciliation
+        logger.warning("guarantee sweep could not run for %s: %s: %s", mode, type(exc).__name__, exc)
+    return sent
+
+
+def _clear_stale_notices(expected, prefix, notifications, *, skip=()) -> int:
+    """Delete every notice under `prefix` whose condition no longer holds. Returns how many.
+
+    **A notice must exist exactly while the thing it reports is true**, and nothing in this codebase ever
+    took the second half of that seriously: every emitter writes, none withdraws. So a notice outlived its
+    cause and sat `unread` in the bell for ever -- a tenant who shipped the parcel still had "Order waiting
+    to ship" telling them to.
+
+    That was survivable while the notices were right. It stopped being survivable when `_shipment_for`
+    asked DynamoDB for a key that could not exist, so the overdue pass fired on orders that HAD shipped:
+    fixing the lookup stops new false notices and leaves every one already written sitting there. This
+    clears them, and the sweep runs every five minutes -- so the backlog drains itself rather than needing
+    a migration nobody would run twice.
+
+    ONE LIST PER TENANT, and deletes only where something actually changed. The alternative -- a point
+    delete per non-overdue order, idempotent and tempting -- is a write per order per sweep for ever, which
+    is real money for a table that is almost always already correct.
+
+    `expected` is `{tenant_id: {notification_id, ...}}` built by the pass that owns the prefix, so a tenant
+    absent from it has no notices of this kind to keep and all of theirs go.
+
+    **`skip` IS LOAD-BEARING: A FAILED READ MUST NOT BECOME A DELETE.** Every predicate here depends on
+    the shipments table, and when that table will not answer nothing looks overdue -- so an empty
+    `expected` would mean "withdraw every notice this tenant has" on the strength of an outage. Withdrawing
+    a true notice is worse than keeping a stale one: the tenant stops being told about a parcel that really
+    is late. So a tenant whose shipments could not be listed is left exactly as they were.
+    """
+    cleared = 0
+    skip = set(skip or ())
+    for tenant_id, keep in expected.items():
+        if tenant_id in skip:
+            continue
+        try:
+            for notice in notifications.list_for_tenant(tenant_id) or []:
+                notice_id = str(notice.get("notification_id") or "")
+                if notice_id.startswith(prefix) and notice_id not in keep:
+                    notifications.delete(tenant_id, notice_id)
+                    cleared += 1
+        except Exception as exc:  # noqa: BLE001 - one tenant's bell never stops the others
+            logger.warning("stale notice sweep failed for %s: %s: %s",
+                           tenant_id, type(exc).__name__, exc)
+    return cleared
+
+
+class _ShipmentsByOrder:
+    """This pass's shipment lookup, BY ORDER, built once per tenant.
+
+    **It used to be `repo.get(tenant_id, order_id)`, and that key can never exist.** A shipment is stored
+    under its own id -- `shp_<order_id>_outbound_1` from `shipment_id_for` -- so the lookup asked DynamoDB
+    for `SHIPMENT#<mode>#order_1` and got None every time. `has_shipped(None)` is False, so the overdue
+    notice fired on every paid order carrying a promised ship date INCLUDING the ones already posted. The
+    unit test passed throughout because its fake repository was keyed by order id, which is the shape the
+    bug assumed rather than the shape the table has.
+
+    So the index is built the way `fulfilment.fulfilment_context` builds it -- list the tenant's shipments
+    and key them by `order_id`, newest wins, because a re-shipped order has more than one and the latest
+    is the true state. Cached per tenant: the orders scan is cross-tenant and walks each tenant's orders
+    together, so this is one list call per tenant rather than one per order.
+    """
+
+    def __init__(self, repo):
+        self._repo = repo
+        self._cache: dict[str, dict] = {}
+        # Tenants whose listing FAILED, kept apart from tenants who simply have no shipments. A caller
+        # withdrawing notices has to know the difference: an empty index because the tenant ships nothing
+        # is an answer, and an empty index because the table would not answer is not.
+        self.failed: set[str] = set()
+
+    @property
+    def readable(self) -> bool:
+        return self._repo is not None
+
+    def for_order(self, order):
+        """The shipment, `None` when the tenant has none for it, or the unknowable sentinel."""
+        if self._repo is None:
+            # Unknowable: assume shipped rather than cry wolf about every order the tenant has.
+            return {"status": "shipped"}
+        tenant_id = str(order.get("tenant_id") or "")
+        if tenant_id not in self._cache:
+            self._cache[tenant_id] = self._build(tenant_id)
+        return self._cache[tenant_id].get(str(order.get("order_id") or ""))
+
+    def _build(self, tenant_id):
+        index: dict[str, dict] = {}
+        try:
+            rows = self._repo.list_for_tenant(tenant_id) or []
+        except Exception as exc:  # noqa: BLE001 - an unreadable tenant is skipped, never guessed at
+            logger.warning("shipment index unreadable for %s: %s: %s",
+                           tenant_id, type(exc).__name__, exc)
+            self.failed.add(tenant_id)
+            return index
+        for shipment in rows:
+            order_id = str(shipment.get("order_id") or "")
+            if not order_id:
+                continue
+            kept = index.get(order_id) or {}
+            if int(shipment.get("updated_at") or 0) >= int(kept.get("updated_at") or 0):
+                index[order_id] = shipment
+        return index
+
+
+def _shipment_for(shipments, order):
+    """Kept as the name both passes call. `shipments` is a `_ShipmentsByOrder`."""
+    try:
+        return shipments.for_order(order)
     except Exception:  # noqa: BLE001
         return {"status": "shipped"}
 

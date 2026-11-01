@@ -90,7 +90,8 @@ class TheNoticeNamesTheActionTests(unittest.TestCase):
 
 
 class TheSweepPassTests(unittest.TestCase):
-    def _run(self, orders, shipments=None, notifications=None, now=1_791_500_000):
+    def _run(self, orders, shipments=None, notifications=None, now=1_791_500_000,
+             existing=()):
         from handlers.fee_reconciliation import _notify_overdue
 
         class Orders:
@@ -98,40 +99,84 @@ class TheSweepPassTests(unittest.TestCase):
                 return list(orders)
 
         class Shipments:
-            def get(self, _tenant, order_id):
-                return (shipments or {}).get(order_id)
+            """Keyed BY TENANT, listing shipments that carry their own `order_id` -- the shape the table
+            actually has. It used to expose `get(tenant, order_id)` and return by order id, which is the
+            shape the sweep's bug ASSUMED: a shipment is stored under `shp_<order>_outbound_1`, so the
+            real lookup asked for a key that can never exist and got None every time. This fake passed
+            throughout and hid a notice firing on every shipped order."""
+
+            def list_for_tenant(self, _tenant):
+                return [dict(row, order_id=order_id)
+                        for order_id, row in (shipments or {}).items()]
 
         sent = []
+        deleted = []
+        rows = [dict(row) for row in (existing or [])]
 
         class Notifications:
             def put(self, doc):
                 sent.append(doc)
+                rows[:] = [r for r in rows
+                           if r.get("notification_id") != doc.get("notification_id")] + [doc]
                 return doc
+
+            def list_for_tenant(self, tenant_id):
+                return [r for r in rows if r.get("tenant_id") == tenant_id]
+
+            def delete(self, tenant_id, notification_id):
+                deleted.append((tenant_id, notification_id))
+                rows[:] = [r for r in rows if r.get("notification_id") != notification_id]
 
         count = _notify_overdue("test", now, orders_repo=Orders(),
                                 shipments_repo=Shipments() if shipments is not None else None,
                                 notifications_repo=Notifications())
-        return count, sent
+        return count, sent, deleted
 
     def test_it_notifies_an_overdue_order(self):
-        count, sent = self._run([ORDER], shipments={})
+        count, sent, _ = self._run([ORDER], shipments={})
         self.assertEqual(count, 1)
         self.assertEqual(sent[0]["notification_id"], "notif_overdue_order_1")
 
     def test_it_leaves_a_shipped_one_alone(self):
-        count, _ = self._run([ORDER], shipments={"order_1": {"status": "shipped"}})
+        count, _, _ = self._run([ORDER], shipments={"order_1": {"status": "shipped"}})
         self.assertEqual(count, 0)
+
+    def test_a_shipped_order_has_its_stale_notice_withdrawn(self):
+        """THE CLEANUP FOR THE LIVE BUG. `_shipment_for` asked DynamoDB for a key that could not exist, so
+        this notice was written for orders already posted. Fixing the lookup stops new ones and leaves
+        every one already in the bell; the sweep runs every five minutes, so the backlog drains itself
+        rather than needing a migration nobody would run twice."""
+        stale = {"tenant_id": "t1", "notification_id": "notif_overdue_order_1",
+                 "status": "unread", "document_type": "notification"}
+        count, _, deleted = self._run([ORDER], shipments={"order_1": {"status": "shipped"}},
+                                      existing=[stale])
+        self.assertEqual(count, 0)
+        self.assertEqual(deleted, [("t1", "notif_overdue_order_1")])
+
+    def test_a_genuinely_overdue_notice_is_kept(self):
+        stale = {"tenant_id": "t1", "notification_id": "notif_overdue_order_1",
+                 "status": "unread", "document_type": "notification"}
+        _, _, deleted = self._run([ORDER], shipments={}, existing=[stale])
+        self.assertEqual(deleted, [])
+
+    def test_no_shipments_table_withdraws_nothing(self):
+        """Nothing looks overdue there either, and an unguarded clear would empty every tenant's bell on
+        the strength of a table that would not answer."""
+        stale = {"tenant_id": "t1", "notification_id": "notif_overdue_order_1",
+                 "status": "unread", "document_type": "notification"}
+        _, _, deleted = self._run([ORDER], shipments=None, existing=[stale])
+        self.assertEqual(deleted, [])
 
     def test_NO_shipments_table_means_no_notices(self):
         """Every order would look unshipped, and the tenant would get a bell full of parcels they posted
         weeks ago. Not knowing is a reason to stay quiet, not to guess."""
-        count, _ = self._run([ORDER], shipments=None)
+        count, _, _ = self._run([ORDER], shipments=None)
         self.assertEqual(count, 0)
 
     def test_one_bad_order_never_stops_the_pass(self):
         broken = {"order_id": "bad", "tenant_id": "t1", "status": "paid",
                   "delivery_estimate": {"ships_on": "2026-10-05"}, "customer": "not a dict"}
-        count, sent = self._run([broken, ORDER], shipments={})
+        count, sent, _ = self._run([broken, ORDER], shipments={})
         self.assertEqual(count, 2)       # the bad one is tolerated, not skipped
         self.assertEqual(len(sent), 2)
 
