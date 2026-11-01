@@ -117,6 +117,16 @@ def _generate_refund_copy(document):
                 refund_window=str(policy.get("refund_window") or ""),
                 condition=str(policy.get("condition") or ""),
                 return_method=str(policy.get("return_method") or ""),
+                # CARRIED THROUGH, every one of them. Left out, `build` substitutes its own default and the
+                # tenant's choice never reaches storage -- which is what was happening to `return_shipping`
+                # here: a tenant who picked "we send you a prepaid label" on the Configuration card had it
+                # silently rewritten to "paid by the customer" on save, because this call did not pass it.
+                # The same omission was found and fixed in `apply_to_product` a day earlier; this was its
+                # twin, and it was live. Any new structured field MUST be added here too.
+                return_shipping=str(policy.get("return_shipping") or ""),
+                restocking_fee=policy.get("restocking_fee_percent"),
+                original_shipping=str(policy.get("original_shipping") or ""),
+                processing_days=policy.get("refund_processing_days"),
                 short_label=str(policy.get("short_label") or ""),
                 full_policy=str(policy.get("full_policy") or ""),
                 return_note=str(policy.get("return_note") or ""),

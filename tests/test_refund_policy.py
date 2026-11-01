@@ -22,6 +22,9 @@ from stripe_link.domain.refund_policy import (
     REVOKE,
     NON_REFUNDABLE,
     PHYSICAL,
+    ORIGINAL_SHIPPING_OPTIONS,
+    REFUND_PROCESSING_MAX_DAYS,
+    RESTOCKING_FEE_MAX_PERCENT,
     RETURN_METHOD_OPTIONS,
     RETURN_SHIPPING_CLAUSES,
     RETURN_SHIPPING_OPTIONS,
@@ -401,6 +404,15 @@ class VocabularyAgreesWithTheSchema(unittest.TestCase):
                 # `return_shipping` is duplicated across the same six blocks and drifts the same way.
                 # Added when a fourth option landed, which is exactly when the drift would have started.
                 self.assertEqual(sorted(RETURN_SHIPPING_OPTIONS), sorted(props["return_shipping"]["enum"]))
+                # The three P8 terms, in the same six blocks for the same reason. `additionalProperties`
+                # is false on every one of them, so a block that missed a field would reject the document
+                # the dashboard sends -- a 400 on save, with the tenant's choice as the only clue.
+                self.assertEqual(sorted(ORIGINAL_SHIPPING_OPTIONS),
+                                 sorted(props["original_shipping"]["enum"]))
+                self.assertEqual(RESTOCKING_FEE_MAX_PERCENT,
+                                 props["restocking_fee_percent"]["maximum"])
+                self.assertEqual(REFUND_PROCESSING_MAX_DAYS,
+                                 props["refund_processing_days"]["maximum"])
                 seen += 1
         # Six blocks, not one. A schema that stops being reachable by the walk above must fail here
         # rather than quietly reduce the coverage this test claims.

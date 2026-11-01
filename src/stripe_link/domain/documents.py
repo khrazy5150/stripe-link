@@ -604,6 +604,15 @@ def require_enum(document: dict[str, Any], field: str, allowed: set[str], label:
     return value
 
 
+def optional_enum(document: dict[str, Any], field: str, allowed: set[str], label: str | None = None) -> None:
+    """Absent or null is fine; present and wrong is refused. The pair `require_enum` was missing, which is
+    why several optional enums were checked only by the write path that then quietly substituted a
+    default."""
+    if document.get(field) is None:
+        return
+    require_enum(document, field, allowed, label)
+
+
 def optional_string_list(document: dict[str, Any], field: str, label: str | None = None) -> None:
     value = document.get(field)
     if value is None:
@@ -1005,6 +1014,21 @@ def validate_product_document(document: dict[str, Any]) -> None:
         require_string(refund_policy, "full_policy", "Product refund_policy.full_policy")
         optional_string(refund_policy, "condition", "Product refund_policy.condition")
         optional_string(refund_policy, "return_method", "Product refund_policy.return_method")
+        # The three P8 terms, checked here as they are on the tenant default. The enums above stay loose
+        # strings because 29 live products carry a policy written by the old JavaScript literal and
+        # tightening them would refuse a document the tenant can no longer edit; these fields cannot exist
+        # on one of those, so they can be strict from the start.
+        # Imported here rather than at module scope, matching `validate_refund_policies` below: the
+        # vocabulary lives in the domain module and this one is imported by it in places.
+        from stripe_link.domain.refund_policy import (
+            ORIGINAL_SHIPPING_OPTIONS, REFUND_PROCESSING_MAX_DAYS, RESTOCKING_FEE_MAX_PERCENT,
+        )
+        _refund_term_percent(refund_policy, "restocking_fee_percent", RESTOCKING_FEE_MAX_PERCENT,
+                             "Product refund_policy.restocking_fee_percent")
+        _refund_term_percent(refund_policy, "refund_processing_days", REFUND_PROCESSING_MAX_DAYS,
+                             "Product refund_policy.refund_processing_days")
+        optional_enum(refund_policy, "original_shipping", set(ORIGINAL_SHIPPING_OPTIONS),
+                      "Product refund_policy.original_shipping")
 
     sync = document.get("sync")
     if not isinstance(sync, dict):
@@ -2206,6 +2230,24 @@ def validate_buyer_guarantees(value: Any, label: str) -> None:
             raise DocumentValidationError(f"{label}.{key}.days must be between {low} and {high}.")
 
 
+def _refund_term_percent(policy: dict[str, Any], field: str, ceiling: int, label: str) -> None:
+    """A whole number in 1..ceiling, or absent. Refused on write, CLAMPED on read.
+
+    The asymmetry is deliberate and is this module's standing split: `refund_policy.normalize` clamps so a
+    stored document always renders something true, and the validator refuses so a bad value cannot get
+    stored in the first place. A tenant typing 80 sees the form hold them to 50; a client posting 80 past
+    the form is a bug and gets told so, rather than having a different promise written for it.
+    """
+    value = policy.get(field)
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise DocumentValidationError(f"{label} must be an integer.")
+    number = int(value)
+    if number < 1 or number > ceiling:
+        raise DocumentValidationError(f"{label} must be between 1 and {ceiling}.")
+
+
 def validate_refund_policies(policies: Any, label: str) -> None:
     """The tenant's per-class refund defaults, validated against the ONE vocabulary.
 
@@ -2221,7 +2263,8 @@ def validate_refund_policies(policies: Any, label: str) -> None:
     if policies is None:
         return
     from stripe_link.domain.refund_policy import (
-        CLASSES, CONDITION_OPTIONS, RETURN_METHOD_OPTIONS, WINDOW_OPTIONS,
+        CLASSES, CONDITION_OPTIONS, ORIGINAL_SHIPPING_OPTIONS, REFUND_PROCESSING_MAX_DAYS,
+        RESTOCKING_FEE_MAX_PERCENT, RETURN_METHOD_OPTIONS, RETURN_SHIPPING_OPTIONS, WINDOW_OPTIONS,
     )
     if not isinstance(policies, dict):
         raise DocumentValidationError(f"{label} must be an object.")
@@ -2238,6 +2281,18 @@ def validate_refund_policies(policies: Any, label: str) -> None:
         optional_string(policy, "short_label", f"{label}.{policy_class}.short_label", max_length=120)
         optional_string(policy, "full_policy", f"{label}.{policy_class}.full_policy", max_length=2000)
         optional_string(policy, "return_note", f"{label}.{policy_class}.return_note", max_length=2000)
+        # `return_shipping` was never checked here, which left one of the six vocabularies enforced only by
+        # `build` -- and `build` substitutes a default rather than refusing, so a typo became "the customer
+        # pays" silently. An enum this screen offers from a server-supplied list should still be refused
+        # when it arrives as something else: that is how a stale bundle gets caught instead of guessed at.
+        optional_enum(policy, "return_shipping", set(RETURN_SHIPPING_OPTIONS),
+                      f"{label}.{policy_class}.return_shipping")
+        optional_enum(policy, "original_shipping", set(ORIGINAL_SHIPPING_OPTIONS),
+                      f"{label}.{policy_class}.original_shipping")
+        _refund_term_percent(policy, "restocking_fee_percent", RESTOCKING_FEE_MAX_PERCENT,
+                             f"{label}.{policy_class}.restocking_fee_percent")
+        _refund_term_percent(policy, "refund_processing_days", REFUND_PROCESSING_MAX_DAYS,
+                             f"{label}.{policy_class}.refund_processing_days")
         threshold = policy.get("keep_it_below")
         if threshold is not None:
             if isinstance(threshold, bool) or not isinstance(threshold, (int, float, Decimal)):

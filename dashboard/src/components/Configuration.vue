@@ -271,6 +271,45 @@
               they read the window.</small>
           </label>
 
+          <!-- THE THREE TERMS EVERY MAINSTREAM POLICY STATES AND THIS CARD COULD NOT. Each is optional and
+               silent when left blank: a policy that says nothing about a restocking fee is a policy
+               without one. -->
+          <div v-if="form.refund_policies[cls].enabled" class="offer-three-column">
+            <!-- Nothing is restocked when nothing comes back, so this is offered only on a real return. -->
+            <label v-if="form.refund_policies[cls].return_method === 'return_required'" class="offer-field">
+              <span>Restocking fee <em>(optional, %)</em></span>
+              <input v-model="form.refund_policies[cls].restocking_fee_percent" type="text"
+                     inputmode="numeric" placeholder="e.g. 15" />
+              <small class="field-note">Deducted from the refund. Capped at
+                {{ refundTerms.restocking_fee?.max || 50 }}% — above that it is a cancellation penalty, and
+                several countries treat it as one. Check it is allowed where you sell.</small>
+            </label>
+            <!-- Only where something SHIPPED. There is no outbound postage on a download or a renewal. -->
+            <label v-if="cls === 'physical'" class="offer-field">
+              <span>Original shipping charge</span>
+              <select v-model="form.refund_policies[cls].original_shipping">
+                <option v-for="o in refundOptions.original_shipping || []" :key="o.value" :value="o.value">
+                  {{ o.label }}</option>
+              </select>
+              <small class="field-note">What the buyer paid to receive it — not the cost of sending it
+                back.</small>
+            </label>
+            <label class="offer-field">
+              <span>Refund issued within <em>(optional, days)</em></span>
+              <input v-model="form.refund_policies[cls].refund_processing_days" type="text"
+                     inputmode="numeric" placeholder="e.g. 7" />
+              <small class="field-note">How long you take to issue it. Yours to honour — nothing here
+                presses the button for you.</small>
+            </label>
+          </div>
+
+          <!-- READ-ONLY, and every word of it comes from the server. The only thing this screen fills in
+               is the digit the tenant just typed. -->
+          <ul v-if="form.refund_policies[cls].enabled && refundTermPreview(cls).length"
+              class="refund-preview-terms">
+            <li v-for="(term, i) in refundTermPreview(cls)" :key="i">{{ term }}</li>
+          </ul>
+
           <label v-if="form.refund_policies[cls].enabled && form.refund_policies[cls].refund_window === 'custom'" class="offer-field">
             <span>Your policy wording <em>(required for a custom window)</em></span>
             <textarea v-model="form.refund_policies[cls].full_policy" rows="3"
@@ -482,7 +521,16 @@ function blankGuarantees() {
 
 function blankRefundPolicy() {
   return { enabled: false, refund_window: "", condition: "", return_method: "", return_shipping: "",
-           full_policy: "", keep_it_below: "" };
+           full_policy: "", keep_it_below: "", restocking_fee_percent: "", original_shipping: "unstated",
+           refund_processing_days: "" };
+}
+
+// The server's bounds and sentence templates for the two numeric terms, so the hints quote the real cap
+// rather than a number typed into this file that could drift from it.
+const refundTerms = computed(() => refundOptions.value.terms || {});
+
+function refundTermPreview(cls) {
+  return refundStore.termsPreview(cls, form.refund_policies[cls]);
 }
 
 function refundPreview(cls) {
@@ -736,6 +784,15 @@ function applyConfig(config) {
       return_shipping: (stored || fallback).return_shipping || "",
       full_policy: stored ? stored.full_policy || "" : "",
       keep_it_below: stored && stored.keep_it_below ? (stored.keep_it_below / 100).toFixed(2) : "",
+      // From the STORED policy only, never the resolved fallback. The three enums above seed the form
+      // from the server's starting values because every policy has to answer them; these three are
+      // absent unless the tenant chose them, so seeding them would put a restocking fee in the box of a
+      // tenant who has never set one.
+      restocking_fee_percent: stored && stored.restocking_fee_percent
+        ? String(stored.restocking_fee_percent) : "",
+      original_shipping: (stored && stored.original_shipping) || "unstated",
+      refund_processing_days: stored && stored.refund_processing_days
+        ? String(stored.refund_processing_days) : "",
     };
   });
 }
@@ -830,6 +887,20 @@ function refundPoliciesPayload() {
     const threshold = Math.round(Number(entry.keep_it_below) * 100);
     if (entry.return_method === "return_required" && Number.isFinite(threshold) && threshold > 0) {
       policy.keep_it_below = threshold;
+    }
+    // The three P8 terms, each sent only where it means something and only when actually set -- absence
+    // is what "no restocking fee" looks like in the document, and the validator refuses a number out of
+    // range rather than storing a different promise, so the form clamps before it sends.
+    const fee = parseInt(String(entry.restocking_fee_percent || ""), 10);
+    if (entry.return_method === "return_required" && Number.isFinite(fee) && fee > 0) {
+      policy.restocking_fee_percent = Math.min(fee, refundTerms.value.restocking_fee?.max || 50);
+    }
+    if (cls === "physical" && entry.original_shipping && entry.original_shipping !== "unstated") {
+      policy.original_shipping = entry.original_shipping;
+    }
+    const days = parseInt(String(entry.refund_processing_days || ""), 10);
+    if (Number.isFinite(days) && days > 0) {
+      policy.refund_processing_days = Math.min(days, refundTerms.value.processing_days?.max || 30);
     }
     out[cls] = policy;
   });
@@ -1004,4 +1075,17 @@ onMounted(load);
   color: var(--text-muted);
 }
 .refund-preview .field-note { margin: 0; }
+/* The extra terms, previewed in the same quiet register as the sentence above them and reading as the
+   list they publish as. Its own block rather than nested inside .refund-preview, because the sentence
+   comes from the window and condition while these come from three separate boxes -- showing them in one
+   panel would suggest editing any of them changes all of it. */
+.refund-preview-terms {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
 </style>

@@ -25,6 +25,9 @@ from stripe_link.domain.social_links import linkable_on_platform_host
 from stripe_link.domain.social_links import is_adult_host, network_glyph, network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.refund_policy import RETURN_SHIPPING_CLAUSES
+from stripe_link.domain.refund_policy import refund_terms as refund_policy_terms
+from stripe_link.domain.refund_policy import restocking_fee_percent
+from stripe_link.domain.returns import RETURN_REQUIRED
 from stripe_link.domain.opportunities import (
     SERVICE_SELECTION_CHOICE,
     STAGE_LANDING,
@@ -816,6 +819,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-refund-policy-applies{font-size:1.3rem;line-height:1.55;font-weight:700;color:var(--sl-refund-applies)}",
     "    .sl-refund-policy-copy{padding-left:2rem}",
     "    .sl-refund-policy-return{padding-left:2rem;color:var(--sl-refund-return)!important;font-weight:800}",
+    # The grid gap already separates the body's children, so the list needs no margin of its own -- only
+    # its own indent, matching the copy and the return note above it, and a tighter rhythm between terms
+    # than the 1.4rem the grid would give three one-line paragraphs.
+    "    .sl-refund-policy-terms{margin:0;padding-left:3.6rem;display:grid;gap:0.6rem}",
+    "    .sl-refund-policy-terms li{color:var(--sl-refund-text);line-height:1.6;font-size:1.4rem}",
     "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center}",
     # The rule above used to carry `border-top` + `padding-top`, so every content block drew a line above
     # itself whether or not the page wanted one. A plain paragraph is the common case now that a title is
@@ -6116,13 +6124,41 @@ def merchant_return_policy(policy: dict[str, Any]) -> dict[str, Any] | None:
     days = _return_window_days(policy)
     if days <= 0:
         return None
-    return {
+    node = {
         "@type": "MerchantReturnPolicy",
         "applicableCountry": "US",
         "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
         "merchantReturnDays": days,
         "returnMethod": "https://schema.org/ReturnByMail",
     }
+    # WHO PAYS, in the vocabulary Google reads. `returnFees` is a recommended property we have never sent,
+    # so a tenant who pays the postage has been getting no credit for it in the markup.
+    #
+    # Only the two fee-free values are reachable. `ReturnShippingFees` is the third, and Google requires a
+    # non-zero `returnShippingFeesAmount` with it -- the buyer arranges that postage themselves and nothing
+    # in this system knows what it cost them, so claiming the category without the amount would be markup
+    # that fails its own validator. A buyer-paid return is `ReturnFeesCustomerResponsibility`, which is
+    # exactly what `buyer_pays` means and which must NOT carry an amount.
+    shipping = str(policy.get("return_shipping") or "").lower()
+    if shipping in ("seller_pays", "seller_pays_label"):
+        node["returnFees"] = "https://schema.org/FreeReturn"
+    elif shipping == "buyer_pays":
+        node["returnFees"] = "https://schema.org/ReturnFeesCustomerResponsibility"
+    # INDEPENDENT of `returnFees`, which is about postage only. `RestockingFees` is a schema.org value
+    # Google's ReturnFeesEnumeration does not accept, so the fee travels in its own property -- as a bare
+    # Number, which Google reads as a percentage of what the buyer paid. That is what the tenant typed, so
+    # no conversion and no currency are involved.
+    #
+    # Gated on a return being required, for the reason `refund_terms` gates the prose clause: nothing is
+    # restocked when nothing comes back. A tenant who set a fee and later switched to "customer keeps it"
+    # leaves the number in the document, and markup that still charged it would contradict the page.
+    fee = restocking_fee_percent(policy.get("restocking_fee_percent"))
+    if fee and str(policy.get("return_method") or "") == RETURN_REQUIRED:
+        node["restockingFee"] = fee
+    # `refund_processing_days` and `original_shipping` have no MerchantReturnPolicy field between them, so
+    # they stay prose on the page. Inventing a property name a crawler does not read would be markup for
+    # nobody.
+    return node
 
 
 def selected_landing_page_price(
@@ -6566,6 +6602,12 @@ def render_refund_policy(
     full_policy = escape(str(policy.get("full_policy") or ""))
     return_note = escape(refund_policy_return_note(policy))
     applies_to = escape(", ".join(refund_policy_applies_to(offer, products_by_id)))
+    # COMPOSED IN THE DOMAIN, printed here. `refund_terms` has to clamp the numbers, read the return method
+    # and know that nothing ships to a subscriber -- all of which is what a policy MEANS, and this function's
+    # job is markup. A <ul> because they are discrete terms and the markup should say so, for the reason
+    # `buyer_guarantees` renders an <ol>: the structure is information, not styling.
+    terms = refund_policy_terms(policy)
+    term_items = "".join(f"<li>{escape(term)}</li>" for term in terms)
     return "\n".join([
         f"    <details class=\"sl-refund-policy\" data-section-id=\"{escape(str(section.get('id', 'refund-policy')))}\" data-section-type=\"refund_policy\">",
         f"      <summary>{short_label}</summary>",
@@ -6574,6 +6616,7 @@ def render_refund_policy(
         f"        <p class=\"sl-refund-policy-applies\">Applies to: {applies_to}</p>" if applies_to else "",
         f"        <p class=\"sl-refund-policy-copy\">{full_policy}</p>" if full_policy else "",
         f"        <p class=\"sl-refund-policy-return\">{return_note}</p>" if return_note else "",
+        f"        <ul class=\"sl-refund-policy-terms\">{term_items}</ul>" if term_items else "",
         "      </div>",
         "    </details>",
     ])

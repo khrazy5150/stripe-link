@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { fetchFullDocument, filterRows, loadIndex } from "../composables/indexedList.js";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
+import { useRefundPolicyStore } from "./refundPolicy";
 import { imageDimsForUrls } from "../utils/imageDims";
 
 function productLifecycleStatus(product) {
@@ -655,6 +656,24 @@ function refundPolicy(form) {
   // download; omitted, the server supplies the status-quo default rather than inventing one.
   if (form.refund_return_method === "return_required" && form.refund_return_shipping) {
     policy.return_shipping = form.refund_return_shipping;
+  }
+  // The three extra terms, each gated as its clause is and sent only when actually set. Absence is what
+  // "no restocking fee" looks like in the document; the server clamps the numbers and the validator
+  // refuses one out of range, so nothing here can write a promise the tenant did not type.
+  // The caps come from the SERVER's vocabulary, not from a literal here. The validator refuses a number
+  // out of range rather than clamping it, so the form has to hold the tenant to the real bound -- and a
+  // number typed into this file is how the last promise in this area came to live in a browser.
+  const caps = useRefundPolicyStore().options.terms || {};
+  const fee = parseInt(String(form.refund_restocking_fee || ""), 10);
+  if (form.refund_return_method === "return_required" && Number.isFinite(fee) && fee > 0) {
+    policy.restocking_fee_percent = Math.min(fee, caps.restocking_fee?.max || 50);
+  }
+  if (form.refund_original_shipping && form.refund_original_shipping !== "unstated") {
+    policy.original_shipping = form.refund_original_shipping;
+  }
+  const days = parseInt(String(form.refund_processing_days || ""), 10);
+  if (Number.isFinite(days) && days > 0) {
+    policy.refund_processing_days = Math.min(days, caps.processing_days?.max || 30);
   }
   const wording = String(form.refund_full_policy || "").trim();
   if (wording) policy.full_policy = wording;

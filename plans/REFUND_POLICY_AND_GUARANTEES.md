@@ -293,3 +293,87 @@ window with nowhere to put a number, per-class window basis, a structured deduct
 `any_value_adjusted`, and automatic honouring of the delivery guarantees via `delivery_status`. The
 promise ships first; the automation is a later phase, and shipping them together would have held the
 promise hostage to the harder half.
+
+---
+
+## P8 — the two deductions and the clock (shipped 2026-10-31)
+
+Prompted by reading TikTok Shop's returns policy for a clothing item against ours. Nine of its clauses we
+could already express, near-verbatim in two cases — `complete_in_packaging` is "unused, in original
+packaging, with all accessories", and `any_value_adjusted` is "handling may reduce the value of your
+refund". Three it states and we had no way to say:
+
+| TikTok states | We had |
+|---|---|
+| a restocking fee | nothing |
+| original shipping is not refunded | nothing — `return_shipping` is the *return* leg, a different charge |
+| refunds processed within N days of receiving the return | nothing; no timing vocabulary at all |
+
+So: `restocking_fee_percent`, `original_shipping` and `refund_processing_days`, as **fields on the refund
+policy** rather than a third primitive. `buyer_guarantees` earned its own module because "we refund if
+tracking stops moving" is not a rule about sending an item back; these three *are* — they qualify the same
+refund the window governs, so a second home for them would be the duplicate source of truth this family of
+plans keeps paying off.
+
+Each is **absent unless the tenant sets it**, like `keep_it_below`. Absence means the page says nothing,
+which is the only honest answer when nobody has chosen (P2). The clauses render as a `<ul>` after the
+window sentence and the return note, in the order a buyer wants them: may I send it back, how, less what,
+and when do I see the money — load-bearing for `GUARANTEES`' reason.
+
+**Gates, each for a thing that does not happen.** Non-refundable states none of the three: there is no
+refund to deduct from or to time. A restocking fee is silent unless a return is required — nothing is
+restocked when nothing comes back. The outbound-postage clause is silent off the physical class, because
+nothing was posted to a subscriber or a download buyer and the sentence would be about a line that is not
+on the order.
+
+**No arithmetic, deliberately, and it is safe here.** The sentence is the deliverable; `handlers/refunds.py`
+already supports a partial amount the merchant sets. A tenant who forgets to deduct their own restocking fee
+refunds *more* than they promised, which is a gift to the buyer and never a dispute — the opposite direction
+from the faults this plan family exists to stop. Computing the suggested deduction on the refund request is
+the follow-on, recorded under Open with `any_value_adjusted`.
+
+**"Issue", not "arrive".** Pressing the refund button is the merchant's act and the only part of the clock
+they hold; the card network then takes its own five to ten business days. The clause says so in a second
+sentence, which costs the tenant nothing and saves them the support ticket.
+
+**`{n}` is the one thing a browser may fill in.** The screens preview these live as the tenant types, and
+asking the server per keystroke is not a thing a settings form does — so the server owns every word and
+hands over a slot for a digit the tenant typed. `store.termsPreview` is one copy shared by the Configuration
+card and the product override, including the gates, because a preview showing a clause the page will
+suppress is worse than no preview. Verified: the bundle contains none of the wording.
+
+**Markup.** `returnFees` is a recommended `MerchantReturnPolicy` property we had never sent, so a tenant who
+paid return postage got no credit for it. Now derived from `return_shipping` — `FreeReturn` or
+`ReturnFeesCustomerResponsibility`, never `ReturnShippingFees`, which Google requires a non-zero
+`returnShippingFeesAmount` with and the buyer arranges that postage themselves. `restockingFee` travels as a
+bare Number, which Google reads as a percentage of what the buyer paid; `RestockingFees` is a schema.org
+value Google's `ReturnFeesEnumeration` does not accept, so it is **not** a `returnFees` value. Timing and
+outbound postage have no property between them and stay prose.
+
+### A live bug found on the way
+
+`handlers/config._generate_refund_copy` rebuilds each policy through `build`, and `build` substitutes its
+own default for anything the call leaves out. It did not pass `return_shipping` — so a tenant who chose "we
+send you a prepaid label" on the Configuration card had it **saved as "paid by the customer"**, and the
+screen reloaded from storage and showed them the value they had not picked. Shipped to prod with P5. The
+twin of this omission was found in `apply_to_product` a day earlier; this one was reachable from the
+settings screen. `test_every_structured_choice_reaches_storage` now asserts the whole set, so the next field
+added to the form cannot be lost the same way.
+
+`validate_refund_policies` also never checked `return_shipping`, leaving one of the six vocabularies
+enforced only by a write path that substitutes rather than refuses. It is checked now, via a new
+`optional_enum` — the pair `require_enum` was missing, which is why several optional enums were guarded
+only by the thing that would quietly paper over them.
+
+**Decided against, for now:** replacement instead of refund (no exchange concept anywhere, and
+`refundType: ExchangeRefund` would be markup for a flow that does not exist); "tags and hygiene seals
+intact" as a `condition` value (cheap, nobody has asked); an extended damaged/defective window, which
+interacts with the per-class window basis already under Open; chargeback and anti-fraud boilerplate, which
+are not rules we enforce and belong in the tenant's own Refund Policy URL.
+
+**Also refused:** TikTok's retrocharge — recharging a buyer whose refunded parcel never arrived. Same family
+as `late_delivery_credit`: it needs a buyer balance or a card we may re-bill, and neither exists.
+
+**Still open, unchanged:** `late_delivery_credit`, a custom window with nowhere to put a number, per-class
+window basis, a structured deduction for `any_value_adjusted` (now also covering the restocking fee), and
+automatic honouring of the delivery guarantees via `delivery_status`.

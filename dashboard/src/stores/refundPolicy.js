@@ -30,6 +30,7 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
     conditions: (state) => state.options.conditions || [],
     returnMethods: (state) => state.options.return_methods || [],
     returnShipping: (state) => state.options.return_shipping || [],
+    originalShipping: (state) => state.options.original_shipping || [],
     classLabels: (state) => state.options.class_labels || {},
     classHints: (state) => state.options.class_hints || {},
     classDefaults: (state) => state.options.class_defaults || {},
@@ -78,6 +79,43 @@ export const useRefundPolicyStore = defineStore("refundPolicy", {
         short_label: generated.short_label || "",
         full_policy: wording || generated.full_policy || "",
       };
+    },
+
+    /**
+     * The extra clauses a policy will publish, at the numbers currently in the boxes.
+     *
+     * ONE COPY, shared by both screens -- the Configuration card and the product override ask the same
+     * question and must not answer it differently. Every word comes from the server's templates; the only
+     * thing filled in here is `{n}`, the digit the tenant just typed. That is formatting the server's
+     * sentence, not composing one, and the published clause is regenerated server-side at publish
+     * regardless, so the two cannot drift into disagreeing.
+     *
+     * The gates mirror `domain/refund_policy.refund_terms` and exist for the same reasons: no refund means
+     * nothing to deduct from, nothing is restocked when nothing comes back, and nothing shipped to a
+     * subscriber. A preview that showed a clause the page will suppress is worse than no preview.
+     */
+    termsPreview(policyClass, entry = {}) {
+      if (entry.refund_window === "non_refundable") return [];
+      const templates = this.options.terms || {};
+      const returning = entry.return_method === "return_required";
+      const out = [];
+      const fee = parseInt(String(entry.restocking_fee_percent || ""), 10);
+      if (returning && Number.isFinite(fee) && fee > 0 && templates.restocking_fee?.template) {
+        const capped = Math.min(fee, templates.restocking_fee.max || 50);
+        out.push(templates.restocking_fee.template.replace("{n}", String(capped)));
+      }
+      if (policyClass === "physical") {
+        const clause = (this.options.original_shipping || [])
+          .find((o) => o.value === entry.original_shipping)?.clause;
+        if (clause) out.push(clause);
+      }
+      const days = parseInt(String(entry.refund_processing_days || ""), 10);
+      const processing = templates.processing_days || {};
+      const template = returning ? processing.template_after_return : processing.template_after_approval;
+      if (Number.isFinite(days) && days > 0 && template) {
+        out.push(template.replace("{n}", String(Math.min(days, processing.max || 30))));
+      }
+      return out;
     },
 
     /** The tenant's default for a class, or the platform's fallback -- whichever actually applies. */

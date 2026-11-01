@@ -556,6 +556,23 @@
                     <option v-for="o in refundStore.returnShipping" :key="o.value" :value="o.value">{{ o.label }}</option>
                   </select>
                 </label>
+                <!-- The same three extra terms the Configuration card offers, gated identically: nothing
+                     is restocked when nothing comes back, and nothing shipped on a download or a
+                     subscription. An override that could not express them would send a tenant back to
+                     their default for the one product that needed different terms. -->
+                <label v-if="form.refund_return_method === 'return_required'">Restocking fee <em>(optional, %)</em>
+                  <input v-model="form.refund_restocking_fee" type="text" inputmode="numeric"
+                         placeholder="e.g. 15" />
+                </label>
+                <label v-if="refundClass === 'physical'">Original shipping charge
+                  <select v-model="form.refund_original_shipping">
+                    <option v-for="o in refundStore.originalShipping" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </label>
+                <label>Refund issued within <em>(optional, days)</em>
+                  <input v-model="form.refund_processing_days" type="text" inputmode="numeric"
+                         placeholder="e.g. 7" />
+                </label>
               </div>
               <label v-if="form.refund_window === 'custom'">Your policy wording <em>(required)</em>
                 <textarea v-model="form.refund_full_policy" rows="3"
@@ -567,6 +584,10 @@
               <span class="refund-preview-badge">{{ refundPreview.short_label || "No policy" }}</span>
               <p v-if="refundPreview.full_policy">{{ refundPreview.full_policy }}</p>
               <p v-else class="field-note">Write your wording above — a custom window has nothing to show without it.</p>
+              <!-- Server-composed, like the sentence above it. This screen fills in the digit only. -->
+              <ul v-if="refundTermPreview.length" class="refund-preview-terms">
+                <li v-for="(term, i) in refundTermPreview" :key="i">{{ term }}</li>
+              </ul>
               <small class="field-note">{{ refundSourceNote }}</small>
             </div>
           </section>
@@ -1029,6 +1050,22 @@ const refundPreview = computed(() => {
   });
 });
 
+// The three extra clauses, from the form while overriding and from the resolved default otherwise. Shared
+// with the Configuration card through the store so the two screens cannot answer the same question
+// differently -- and so neither of them owns a word of the wording.
+const refundTermPreview = computed(() => {
+  if (form.value.refund_source !== "product_override") {
+    return refundStore.termsPreview(refundClass.value, refundStore.effective(refundClass.value));
+  }
+  return refundStore.termsPreview(refundClass.value, {
+    refund_window: form.value.refund_window,
+    return_method: form.value.refund_return_method,
+    restocking_fee_percent: form.value.refund_restocking_fee,
+    original_shipping: form.value.refund_original_shipping,
+    refund_processing_days: form.value.refund_processing_days,
+  });
+});
+
 const refundSourceNote = computed(() => {
   if (form.value.refund_source === "product_override") {
     return "Only this product. Your default still applies to everything else.";
@@ -1045,6 +1082,17 @@ watch(() => form.value.refund_source, (source) => {
   if (!form.value.refund_condition) form.value.refund_condition = effective.condition || "";
   if (!form.value.refund_return_method) form.value.refund_return_method = effective.return_method || "";
   if (!form.value.refund_return_shipping) form.value.refund_return_shipping = effective.return_shipping || "";
+  // Seeded from the default like the rest: a tenant narrowing ONE product's terms should start from what
+  // it promises today. Blank in the default stays blank here -- there is nothing to copy.
+  if (!form.value.refund_restocking_fee && effective.restocking_fee_percent) {
+    form.value.refund_restocking_fee = String(effective.restocking_fee_percent);
+  }
+  if (form.value.refund_original_shipping === "unstated" && effective.original_shipping) {
+    form.value.refund_original_shipping = effective.original_shipping;
+  }
+  if (!form.value.refund_processing_days && effective.refund_processing_days) {
+    form.value.refund_processing_days = String(effective.refund_processing_days);
+  }
 });
 const hydratingForm = ref(false);
 
@@ -1133,6 +1181,9 @@ function defaultProductForm() {
     refund_condition: "",
     refund_return_method: "",
     refund_return_shipping: "",
+    refund_restocking_fee: "",
+    refund_original_shipping: "unstated",
+    refund_processing_days: "",
     refund_full_policy: "",
     images: "",
     uploaded_images: [],
@@ -1263,6 +1314,14 @@ function productFormFromDocument(product) {
     refund_condition: isRefundOverride(refundPolicy) ? refundPolicy.condition || "" : "",
     refund_return_method: isRefundOverride(refundPolicy) ? refundPolicy.return_method || "" : "",
     refund_return_shipping: isRefundOverride(refundPolicy) ? refundPolicy.return_shipping || "" : "",
+    // Absent unless the tenant set them, so they hydrate as blank rather than from the default -- a
+    // restocking fee nobody chose must not appear in the box of a product being edited for some other
+    // reason, which is how the old literal spread in the first place.
+    refund_restocking_fee: isRefundOverride(refundPolicy) && refundPolicy.restocking_fee_percent
+      ? String(refundPolicy.restocking_fee_percent) : "",
+    refund_original_shipping: (isRefundOverride(refundPolicy) && refundPolicy.original_shipping) || "unstated",
+    refund_processing_days: isRefundOverride(refundPolicy) && refundPolicy.refund_processing_days
+      ? String(refundPolicy.refund_processing_days) : "",
     refund_full_policy: isRefundOverride(refundPolicy) ? refundPolicy.full_policy || "" : "",
     uploaded_images: images,
     images: "",

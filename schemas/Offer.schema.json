@@ -661,6 +661,27 @@
           ],
           "description": "Who pays return postage. `not_applicable` wherever nothing travels back. Absent on policies stored before this field existed; refund_policy.normalize supplies the status-quo default rather than inventing a promise."
         },
+        "restocking_fee_percent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "A restocking fee as a whole percent of what the buyer paid, deducted from the refund. Absent means none. Only stated when the policy requires a return -- nothing is restocked when nothing comes back (plans/REFUND_POLICY_AND_GUARANTEES.md P8)."
+        },
+        "original_shipping": {
+          "type": "string",
+          "enum": [
+            "unstated",
+            "refunded",
+            "not_refunded"
+          ],
+          "description": "What happens to the OUTBOUND postage the buyer already paid. Distinct from return_shipping, which is the cost of sending the goods back. Absent means the page says nothing either way."
+        },
+        "refund_processing_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "description": "How long the tenant takes to ISSUE the refund once the return arrives or the request is approved. Not the date the money lands: the card network's clock is not ours. Absent means the page says nothing."
+        },
         "short_label": {
           "type": "string"
         },

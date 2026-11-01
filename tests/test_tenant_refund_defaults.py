@@ -178,6 +178,30 @@ class TheServerWritesTheSentence(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertIsNone(repository.written)
 
+    def test_every_structured_choice_reaches_storage(self):
+        """THE REGRESSION. `_generate_refund_copy` rebuilds the policy through `build`, and `build`
+        substitutes its own default for anything the call leaves out -- so a field this handler forgets to
+        pass is silently rewritten rather than dropped.
+
+        It forgot `return_shipping`, and that shipped: a tenant who chose "we send you a prepaid label" on
+        the Configuration card had it saved as "paid by the customer", with the screen reloading from
+        storage and showing them the value they did not pick. The twin of this omission was found in
+        `apply_to_product` the day before. This asserts the whole set, so the next field added to the form
+        cannot be lost the same way.
+        """
+        repository = FakeRepository()
+        response = config_handler(event("PUT", body=with_policies({PHYSICAL: dict(
+            VALID_PHYSICAL, return_method="return_required", return_shipping="seller_pays_label",
+            restocking_fee_percent=15, original_shipping="not_refunded",
+            refund_processing_days=7, keep_it_below=2000)})), None, repository=repository)
+        self.assertEqual(response["statusCode"], 201)
+        written = stored_policies(repository.written)[PHYSICAL]
+        self.assertEqual(written["return_shipping"], "seller_pays_label")
+        self.assertEqual(written["restocking_fee_percent"], 15)
+        self.assertEqual(written["original_shipping"], "not_refunded")
+        self.assertEqual(written["refund_processing_days"], 7)
+        self.assertEqual(written["keep_it_below"], 2000)
+
     def test_a_config_with_no_policies_is_untouched(self):
         repository = FakeRepository()
         response = config_handler(event("PUT", body=config_document(legal_defaults={

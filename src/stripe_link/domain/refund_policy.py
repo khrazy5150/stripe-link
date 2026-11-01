@@ -155,6 +155,49 @@ RETURN_SHIPPING_CLAUSES: dict[str, str] = {
     SHIPPING_NOT_APPLICABLE: "",
 }
 
+# WHAT COMES OFF THE REFUND, AND WHEN IT LANDS (plans/REFUND_POLICY_AND_GUARANTEES.md P8).
+#
+# Three facts every mainstream returns policy states and this vocabulary could not: a restocking fee, what
+# happens to the outbound postage the buyer already paid, and how long the refund takes. Checked against
+# TikTok Shop's clothing policy, which states all three; ours could express neither of the first two and
+# said nothing at all about timing.
+#
+# They are FIELDS ON THE POLICY, not a third primitive. `buyer_guarantees` earned its own module because
+# "we refund if tracking stops moving" is not a rule about sending an item back and no amount of
+# window/condition/return-method vocabulary could express one. These three ARE rules about sending an item
+# back -- they qualify the same refund the window governs -- so a second home for them would be the
+# duplicate source of truth this family of plans keeps paying off.
+#
+# Each is ABSENT unless the tenant sets it, exactly like `keep_it_below`. Absence means the page says
+# nothing, which is the one honest answer when nobody has chosen (P2).
+
+# A restocking fee above half the price is not a restocking fee, it is a cancellation penalty, and several
+# consumer regimes treat it as one. Clamped rather than refused, for `clamp_days`' reason: a form that
+# rejects 80 teaches the tenant to fight it.
+RESTOCKING_FEE_MAX_PERCENT = 50
+# A month. "We issue your refund within 45 days" is not a promise anyone acts on, and a tenant who needs
+# longer than 30 days is describing a dispute process rather than a refund.
+REFUND_PROCESSING_MAX_DAYS = 30
+
+# What happens to the postage the buyer ALREADY PAID to receive the goods. Distinct from `return_shipping`,
+# which is the postage of sending them back -- two different charges, two different answers, and conflating
+# them is how "free returns" came to mean four different things across the industry.
+ORIGINAL_SHIPPING_UNSTATED = "unstated"
+ORIGINAL_SHIPPING_REFUNDED = "refunded"
+ORIGINAL_SHIPPING_NOT_REFUNDED = "not_refunded"
+
+ORIGINAL_SHIPPING_OPTIONS: dict[str, str] = {
+    ORIGINAL_SHIPPING_UNSTATED: "Don't say either way",
+    ORIGINAL_SHIPPING_REFUNDED: "Refunded with the order",
+    ORIGINAL_SHIPPING_NOT_REFUNDED: "Not refunded",
+}
+
+ORIGINAL_SHIPPING_CLAUSES: dict[str, str] = {
+    ORIGINAL_SHIPPING_UNSTATED: "",
+    ORIGINAL_SHIPPING_REFUNDED: "We refund your original shipping charge too.",
+    ORIGINAL_SHIPPING_NOT_REFUNDED: "Your original shipping charge is not refunded.",
+}
+
 RETURN_METHOD_OPTIONS: dict[str, str] = {
     RETURN_REQUIRED: "Customer returns the item",
     KEEPS: "No return — customer keeps the item",
@@ -197,6 +240,103 @@ def default_return_shipping(return_method: str) -> str:
     silence has always meant the customer arranges it.
     """
     return BUYER_PAYS if return_method == RETURN_REQUIRED else SHIPPING_NOT_APPLICABLE
+
+
+# `{n}` is the ONE thing a browser may fill in. The settings screens preview these live as the tenant types
+# a number, and asking the server per keystroke is not a thing a settings form does -- so the server owns
+# every word and hands over a slot for a digit the tenant typed themselves. That is categorically different
+# from the fault this module exists to end, where a JavaScript file owned the sentence.
+RESTOCKING_FEE_CLAUSE = "We deduct a restocking fee of {n}% from your refund."
+# "ISSUE", not "you get your money back". Pressing the button is the merchant's act and the only part of
+# this they control; the card network then takes its own five to ten business days, and a policy that
+# promised the landing date would be promising a clock nobody in this system holds. The second sentence
+# says so, which costs the tenant nothing and saves them the support ticket.
+PROCESSING_CLAUSE_AFTER_RETURN = ("We issue your refund within {n} days of receiving your return. "
+                                  "Your bank may take a few days longer to show it.")
+PROCESSING_CLAUSE_AFTER_APPROVAL = ("We issue your refund within {n} days of approving your request. "
+                                    "Your bank may take a few days longer to show it.")
+
+
+def restocking_fee_percent(value: Any) -> int:
+    """The fee as a whole percent, or 0 for none. Clamped into what the term can honestly mean.
+
+    0 rather than None so callers can treat it as a number throughout; `build` and `normalize` then omit the
+    field entirely, because a stored `restocking_fee_percent: 0` would be a tenant's choice of "no fee"
+    sitting in the document as if it were a fee of nothing.
+    """
+    percent = _whole(value)
+    if percent is None or percent < 1:
+        return 0
+    return min(RESTOCKING_FEE_MAX_PERCENT, percent)
+
+
+def refund_processing_days(value: Any) -> int:
+    """How long the tenant takes to issue the refund, in whole days, or 0 for "nothing said"."""
+    days = _whole(value)
+    if days is None or days < 1:
+        return 0
+    return min(REFUND_PROCESSING_MAX_DAYS, days)
+
+
+def refund_terms(policy: dict[str, Any] | None) -> list[str]:
+    """The extra clauses this policy states, in the order a buyer wants them. [] when it states none.
+
+    ORDER IS LOAD-BEARING, for `buyer_guarantees.GUARANTEES`' reason: may I send it back, how, less what,
+    and when do I see the money. A buyer who has read one tenant's policy knows where to look on the next.
+    The first two answers are the window and the return note; these are the last two.
+    """
+    policy = policy if isinstance(policy, dict) else {}
+    window = _text(policy.get("refund_window")).lower()
+    if window == NON_REFUNDABLE:
+        # There is no refund, so there is nothing to deduct from and nothing to time. A page that said
+        # "all sales are final" and then "we deduct 15%" would be describing two different policies.
+        return []
+    policy_class = _text(policy.get("policy_class")).lower()
+    return_method = _text(policy.get("return_method"))
+
+    clauses: list[str] = []
+    fee = restocking_fee_percent(policy.get("restocking_fee_percent"))
+    # Nothing is restocked when nothing comes back. On a keep-it refund or a revoked download the fee
+    # would be a deduction for a cost the tenant never incurs.
+    if fee and return_method == RETURN_REQUIRED:
+        clauses.append(RESTOCKING_FEE_CLAUSE.format(n=fee))
+
+    original = _text(policy.get("original_shipping")).lower()
+    # Only where something SHIPPED. Nothing was posted to a subscriber or a download buyer, so there is no
+    # outbound charge to refund or withhold, and the sentence would be about a line that is not on the
+    # order. `policy_class` is absent on a stored policy and present on a resolved one, and an absent class
+    # is read as physical -- the clause is only ever reached because a tenant chose it, and they chose it on
+    # the physical card.
+    if original in ORIGINAL_SHIPPING_CLAUSES and policy_class in ("", PHYSICAL):
+        clause = ORIGINAL_SHIPPING_CLAUSES[original]
+        if clause:
+            clauses.append(clause)
+
+    days = refund_processing_days(policy.get("refund_processing_days"))
+    if days:
+        template = (PROCESSING_CLAUSE_AFTER_RETURN if return_method == RETURN_REQUIRED
+                    else PROCESSING_CLAUSE_AFTER_APPROVAL)
+        clauses.append(template.format(n=days))
+    return clauses
+
+
+def _attach_terms(policy: dict[str, Any], restocking_fee: Any,
+                  original_shipping: Any, processing_days: Any) -> None:
+    """Put the three P8 terms on a policy, in place, omitting any the tenant did not set.
+
+    Shared by `build` and `normalize` so the write path and the read path cannot disagree about when a term
+    counts as chosen -- the exact kind of split that let `return_shipping` reach storage from one path and
+    be discarded by another.
+    """
+    fee = restocking_fee_percent(restocking_fee)
+    if fee:
+        policy["restocking_fee_percent"] = fee
+    original = _text(original_shipping).lower()
+    if original in ORIGINAL_SHIPPING_OPTIONS and original != ORIGINAL_SHIPPING_UNSTATED:
+        policy["original_shipping"] = original
+    days = refund_processing_days(processing_days)
+    if days:
+        policy["refund_processing_days"] = days
 
 
 class RefundPolicyError(ValueError):
@@ -331,7 +471,8 @@ def generate_copy(policy_class: str, window: str, condition: str) -> tuple[str, 
 def build(policy_class: str, *, refund_window: str, condition: str, return_method: str,
           short_label: str = "", full_policy: str = "", return_note: str = "",
           keep_it_below: Any = None, source: str = SOURCE_TENANT_DEFAULT,
-          return_shipping: str = "") -> dict[str, Any]:
+          return_shipping: str = "", restocking_fee: Any = None,
+          original_shipping: str = "", processing_days: Any = None) -> dict[str, Any]:
     """A complete, valid policy object. RAISES on anything unwritable.
 
     The write path is strict on purpose: every value that reaches a stored policy has been through here, so
@@ -348,6 +489,9 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
     return_shipping = _text(return_shipping) or default_return_shipping(return_method)
     if return_shipping not in RETURN_SHIPPING_OPTIONS:
         raise RefundPolicyError(f"Unknown return shipping '{return_shipping}'.")
+    original_shipping = _text(original_shipping) or ORIGINAL_SHIPPING_UNSTATED
+    if original_shipping not in ORIGINAL_SHIPPING_OPTIONS:
+        raise RefundPolicyError(f"Unknown original shipping '{original_shipping}'.")
 
     generated_label, generated_full = generate_copy(policy_class, refund_window, condition)
     resolved_full = _text(full_policy) or generated_full
@@ -370,6 +514,11 @@ def build(policy_class: str, *, refund_window: str, condition: str, return_metho
     threshold = _whole(keep_it_below)
     if threshold and threshold > 0:
         policy["keep_it_below"] = threshold
+    # OMITTED WHEN UNSET, like `keep_it_below`. A stored `restocking_fee_percent: 0` or
+    # `original_shipping: "unstated"` would be an absence dressed as a decision, and `tenant_policies`
+    # hands these straight to a settings screen that would then show a fee of nothing as the tenant's own
+    # choice.
+    _attach_terms(policy, restocking_fee, original_shipping, processing_days)
     return policy
 
 
@@ -413,6 +562,11 @@ def normalize(policy: Any, *, policy_class: str) -> dict[str, Any]:
     threshold = _whole(raw.get("keep_it_below"))
     if threshold and threshold > 0:
         normalized["keep_it_below"] = threshold
+    # Unrecognised values here fall AWAY rather than to a class default, unlike the three enums above. A
+    # window has to be something; a restocking fee does not, and coercing a nonsense value into a real
+    # percentage would invent a deduction the tenant never chose.
+    _attach_terms(normalized, raw.get("restocking_fee_percent"),
+                  raw.get("original_shipping"), raw.get("refund_processing_days"))
     return normalized
 
 
@@ -537,6 +691,19 @@ def vocabulary() -> dict[str, Any]:
                             for key, label in RETURN_SHIPPING_OPTIONS.items()],
         "return_shipping_defaults": {method: default_return_shipping(method)
                                      for method in RETURN_METHOD_OPTIONS},
+        "original_shipping": [{"value": key, "label": label,
+                               "clause": ORIGINAL_SHIPPING_CLAUSES[key]}
+                              for key, label in ORIGINAL_SHIPPING_OPTIONS.items()],
+        # The two numeric terms, as the server's own sentence with ONE slot for a digit. The screen fills
+        # `{n}` with the number the tenant typed and owns nothing else about the wording -- see the
+        # constants for why that is not the fault this module exists to end. Bounds travel with them so the
+        # form can clamp before it previews, instead of showing a promise the server will quietly shrink.
+        "terms": {
+            "restocking_fee": {"template": RESTOCKING_FEE_CLAUSE, "max": RESTOCKING_FEE_MAX_PERCENT},
+            "processing_days": {"template_after_return": PROCESSING_CLAUSE_AFTER_RETURN,
+                                "template_after_approval": PROCESSING_CLAUSE_AFTER_APPROVAL,
+                                "max": REFUND_PROCESSING_MAX_DAYS},
+        },
         # The form's starting values, not a policy. The key name is the dashboard's and is kept.
         "class_defaults": {k: dict(v) for k, v in CLASS_FORM_SEEDS.items()},
         "previews": previews,
@@ -586,6 +753,9 @@ def apply_to_product(document: dict[str, Any], tenant_config: dict[str, Any] | N
                 # silently got "paid by the customer" -- their choice discarded by the write path that
                 # exists to honour it.
                 return_shipping=_text(stored.get("return_shipping")),
+                restocking_fee=stored.get("restocking_fee_percent"),
+                original_shipping=_text(stored.get("original_shipping")),
+                processing_days=stored.get("refund_processing_days"),
                 full_policy=_text(stored.get("full_policy")),
                 return_note=_text(stored.get("return_note")),
                 keep_it_below=stored.get("keep_it_below"),
