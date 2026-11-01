@@ -381,6 +381,41 @@ class DynamoDocumentRepository:
             if "ConditionalCheckFailed" not in str(type(exc).__name__) + str(exc):
                 raise
 
+    def update_tracking(self, tenant_id: str, document_id: str, fields: dict[str, Any]) -> bool:
+        """Write a carrier's tracking reading onto a Shipment, WITHOUT rewriting the document.
+
+        Same reason as the two sweeps above, and a sharper version of it: this document has two writers
+        now. A carrier can scan a parcel in the same minute a tenant voids its label or marks it shipped
+        by hand, and a read-modify-write from the webhook would restore whatever it had read a moment
+        earlier over the tenant's own change -- silently, and the artifact would still look right because
+        it was built from the in-memory copy (`feedback_shared_document_read_modify_write`).
+
+        So only the `tracking_*` and `delivered_at` attributes are touched, each by name. Returns False
+        when the shipment has gone, which is not an error: a webhook for a deleted test shipment is a
+        thing Shippo will keep sending for a while and there is nothing to do about it.
+        """
+        if not fields:
+            return False
+        names = {f"#f{i}": key for i, key in enumerate(fields)}
+        values = {f":v{i}": value for i, value in enumerate(fields.values())}
+        sets = ", ".join(f"{n} = :v{i}" for i, n in enumerate(names))
+        try:
+            self.table.update_item(
+                Key=self._key(tenant_id, document_id),
+                UpdateExpression=f"SET {sets}",
+                # The shipment must already exist. Without this an event for a shipment we never had
+                # would CREATE a key-only row, which `list_for_tenant` would then hand the Orders screen
+                # as a shipment with no order, no status and no label.
+                ConditionExpression="attribute_exists(PK)",
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=dynamo_safe(values),
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            if "ConditionalCheckFailed" in str(type(exc).__name__) + str(exc):
+                return False
+            raise
+
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key=self._key(tenant_id, document_id))
         item = response.get("Item")

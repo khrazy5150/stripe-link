@@ -97,6 +97,21 @@ class ShippingProvider:
         """The end-of-day handover document (USPS calls it a SCAN form)."""
         raise NotImplementedError
 
+    def register_tracking(self, *, carrier: str, tracking_number: str,
+                          reference: str = "") -> dict[str, Any]:
+        """Ask the provider to TELL US when this parcel moves. Returns the current reading, if it has one.
+
+        The missing half of this adapter: it has always bought labels and never asked what became of them,
+        so `fulfilment.delivery_status` had a tracking status to read and nothing to read
+        (`domain/tracking.py`). `reference` is our own shipment id, which comes back on every event and is
+        the only identifier we are willing to resolve.
+
+        `{}` by default rather than NotImplementedError, for `parcel_templates`' reason: a provider with
+        no tracking feed is a provider that tells us nothing, which is a true answer and not a crash. The
+        caller treats an empty reading as "no delivery known", never as "not delivered".
+        """
+        return {}
+
 
 class ShippoProvider(ShippingProvider):
     """Shippo over its REST API. Test mode is carried by the KEY -- a test token returns test rates and
@@ -229,6 +244,32 @@ def _shippo_buy(self, *, rate_id: str, label_format: str = "PDF",
     }
 
 
+def _shippo_register_tracking(self, *, carrier: str, tracking_number: str,
+                              reference: str = "") -> dict[str, Any]:
+    """`POST /tracks` -- register the parcel and start the `track_updated` webhooks.
+
+    DONE FOR BOUGHT LABELS TOO, although Shippo creates a tracker for those by itself. Two reasons, and
+    neither is belt-and-braces: a tracker Shippo made carries no `metadata`, so an event from it cannot be
+    matched to a shipment without a new index on a number that is not ours; and one registration path
+    means a hand-typed number and a bought label arrive through the same door, rather than the manual half
+    being the one nobody tested. Re-registering is safe -- Shippo returns the existing tracker.
+
+    The reading comes back on this very call, so a parcel already delivered by the time it is registered
+    is not waiting on an event that has already been and gone.
+    """
+    number = str(tracking_number or "").strip()
+    token = str(carrier or "").strip().lower()
+    if not number or not token:
+        # Not an error: USPS First-Class carries no tracking number at all, and `mark_shipped` says so
+        # explicitly. Nothing to register is a true answer.
+        return {}
+    payload: dict[str, Any] = {"carrier": token, "tracking_number": number}
+    if str(reference or "").strip():
+        # Shippo echoes this on every event. It is OUR shipment id and nothing else goes in here.
+        payload["metadata"] = str(reference).strip()[:100]
+    return self._request("/tracks", payload=payload)
+
+
 def _shippo_carrier_accounts(self) -> list[dict[str, Any]]:
     body = self._request("/carrier_accounts", params={"results": 50})
     return [
@@ -335,6 +376,7 @@ def _shippo_create_address(self, address: dict[str, Any]) -> str:
 
 
 ShippoProvider.buy_label = _shippo_buy
+ShippoProvider.register_tracking = _shippo_register_tracking
 ShippoProvider.carrier_accounts = _shippo_carrier_accounts
 ShippoProvider.schedule_pickup = _shippo_pickup
 ShippoProvider.create_manifest = _shippo_manifest
@@ -441,6 +483,24 @@ class MockProvider(ShippingProvider):
     def carrier_accounts(self) -> list[dict[str, Any]]:
         return [{"account_id": f"mock_acct_{carrier}", "carrier": carrier, "active": True}
                 for carrier in ("usps", "ups", "fedex")]
+
+    def register_tracking(self, *, carrier: str, tracking_number: str,
+                          reference: str = "") -> dict[str, Any]:
+        """A parcel that has just been handed over, which is what one looks like at registration.
+
+        PRE_TRANSIT rather than DELIVERED, deliberately: the whole flow can be walked with no provider
+        account, and a mock that reported every parcel delivered the moment it shipped would make a
+        delivery guarantee untestable in exactly the state that matters.
+        """
+        if not str(tracking_number or "").strip() or not str(carrier or "").strip():
+            return {}
+        return {
+            "carrier": str(carrier).strip().lower(),
+            "tracking_number": str(tracking_number).strip(),
+            "metadata": str(reference or ""),
+            "tracking_status": {"status": "PRE_TRANSIT", "status_date": "",
+                                "status_details": "Label created, awaiting the carrier."},
+        }
 
     def validate_address(self, address: dict) -> dict[str, Any]:
         """Deliverable unless the street says otherwise, so the undeliverable branch can be walked."""

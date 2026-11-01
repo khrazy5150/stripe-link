@@ -299,6 +299,12 @@ Globals:
         # Debounce email validation. The secret holds {"api_key": "..."}; with no secret, or no key in it,
         # validation simply stays off — it fails OPEN by design (plans/TENANT_SENDER_IDENTITY.md).
         DEBOUNCE_SECRET_NAME: !Sub "jb/debounce/${Environment}"
+        # Shippo's track_updated webhook. The secret holds {"token": "..."} and is compared against the
+        # ?token= Shippo echoes back. Unlike Debounce this fails CLOSED: with no secret the endpoint
+        # rejects everything, because an unconfigured deploy must not accept anonymous writes to delivery
+        # state. Shippo's HMAC option needs their solutions team to provision a shared secret, so the
+        # echoed token is the mechanism available (domain/tracking.py).
+        SHIPPO_WEBHOOK_SECRET_NAME: !Sub "jb/shippo-webhook/${Environment}"
         PAGES_BUCKET: !Ref PagesBucket
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
         MEDIA_BUCKET: !Ref MediaBucket
@@ -3954,6 +3960,45 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /experiments/{experiment_id}/complete
             Method: POST
+  ShippingTrackingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-shipping-tracking-${Environment}"
+      CodeUri: src/
+      Handler: handlers.shipping_tracking.handler
+      Description: Public Shippo track_updated webhook -- the writer `tracking_status` never had. Authenticated by the ?token= Shippo echoes back, fails CLOSED with no secret, and resolves the shipment by OUR id carried in Shippo metadata (domain/tracking.py).
+      Environment:
+        Variables:
+          # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
+          # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
+          # A missing name here is a RUNTIME failure, not a deploy failure.
+          SHIPMENTS_TABLE: !Ref ShipmentsTable
+          # Inherited from importing `repositories/documents.py`, which calls `tenant_profiles_repository`
+          # inside `tenant_profiles_registration_repositories` -- so every importer of that module reaches
+          # the name whether it uses it or not. Declared, and deliberately NOT granted: this function
+          # never touches that table, and the grant test agrees.
+          TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+      Policies:
+        # Crud rather than Read: the whole job is a targeted update_item, and the GSI1 lookup needs the
+        # index arn that this policy already grants.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ShipmentsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/shippo-webhook/${Environment}-*"
+      Events:
+        ShippingTracking:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /webhook/shipping-tracking
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
   SupportContactFunction:
     Type: AWS::Serverless::Function
     Properties:

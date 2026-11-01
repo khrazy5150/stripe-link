@@ -270,7 +270,11 @@ def delivery_status(order: dict[str, Any], state: dict[str, Any] | None = None) 
 
     tracked = _TRACKING.get(str(shipment.get("tracking_status") or "").strip().upper())
     if tracked:
-        return _status(tracked, "")
+        # The CARRIER's own sentence for the latest scan as the note -- "Left with resident", "Delivery
+        # attempted, no answer". It was "" here while nothing wrote a tracking status at all; now that
+        # `domain/tracking.py` feeds this, an empty note would store the one line a tenant chasing a
+        # parcel actually wants and never show it.
+        return _status(tracked, str(shipment.get("tracking_detail") or ""))
 
     if str(shipment.get("status") or "") == "failed":
         return _status("failed", str(shipment.get("error") or ""))

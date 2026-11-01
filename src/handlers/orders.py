@@ -34,6 +34,7 @@ from stripe_link.domain.order_reference import matches_reference, short_refs
 from stripe_link.domain.shipment_notice import notify_buyer
 from stripe_link.domain.shipping_quotes import order_variance
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
+from stripe_link.domain.tracking import register as register_tracking
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.domain.shipping import ShipmentError, build_manual_shipment, label_readiness
 from stripe_link.repositories.documents import (
@@ -225,8 +226,40 @@ def fulfilment_context(tenant_id, mode, products_repo=None, shipments_repo=None,
     }
 
 
+def _register_tracking(shipment, tenant_id, mode, *, shipping_config_repo=None, secret_cipher=None,
+                       now=0):
+    """Ask the carrier to report on a HAND-TYPED tracking number. Returns the fields its reading sets.
+
+    The half Shippo does not do for us. It creates a tracker automatically for a label bought through it;
+    a number the tenant typed in from a post-office receipt is unknown to them until someone registers it,
+    and that is the path most small sellers use.
+
+    **Only works for a tenant who HAS a provider key.** Someone who posts at their local counter and types
+    the number has no Shippo account, so there is nothing to register and no delivery feed for their
+    parcels -- the honest limit of this phase, not a failure. `{}` covers that and every other way this can
+    come to nothing; the parcel is already gone and the buyer already told.
+    """
+    try:
+        repo = shipping_config_repo or shipping_config_repository()
+        cipher = secret_cipher if secret_cipher is not None else KmsSecretCipher()
+        config = resolve_for_mode(repo.get(tenant_id) or {}, tenant_id, mode, cipher)
+        provider_config = dict(config.get("provider") or {})
+        name = str(provider_config.get("name") or "")
+        if not name:
+            return {}
+        secret_ref = str(provider_config.get("api_key_ref") or "")
+        api_key = cipher.decrypt(secret_ref, tenant_id=tenant_id, mode=SECRET_MODE,
+                                 field=SECRET_FIELD) if secret_ref else ""
+        return register_tracking(provider_for(name, api_key), shipment, now=now)
+    except Exception as exc:  # noqa: BLE001 - logged rather than guessed at; never fails the shipment
+        print(f"[tracking] registration skipped for {shipment.get('shipment_id')}: "
+              f"{type(exc).__name__}: {exc}")
+        return {}
+
+
 def mark_shipped(event, repository, order_id, mode, *, shipments_repo=None, user_profiles_repo=None,
-                 mailer_send=None, quotes_repo=None, now_fn=lambda: int(time.time())):
+                 mailer_send=None, quotes_repo=None, shipping_config_repo=None, secret_cipher=None,
+                 now_fn=lambda: int(time.time())):
     """The manual path: the tenant posted it themselves and is telling the buyer so.
 
     The tracking number is OPTIONAL -- USPS First-Class Mail carries none. What is NOT optional is honesty
@@ -278,6 +311,12 @@ def mark_shipped(event, repository, order_id, mode, *, shipments_repo=None, user
         shipment["notified_at"] = now
     elif notified.get("error"):
         shipment["notify_error"] = str(notified["error"])[:300]
+
+    # BEFORE the put, unlike the bought-label path, because this one has not written the shipment yet:
+    # merging first means one write rather than a put followed by an update of what it just stored.
+    shipment.update(_register_tracking(shipment, tenant_id, mode,
+                                       shipping_config_repo=shipping_config_repo,
+                                       secret_cipher=secret_cipher, now=now))
 
     try:
         repo = shipments_repo or shipments_repository(mode=mode)

@@ -32,6 +32,7 @@ from stripe_link.domain.shipping_rating import rate_parcels
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
+from stripe_link.domain.tracking import register as register_tracking
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.domain.fulfilment_groups import group_parcels
 from stripe_link.domain.shipment_notice import notify_buyer, revision_for
@@ -1752,6 +1753,25 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # sixth component (plans/MONEY_ACROSS_SILOS.md P3). The ledger above stays canonical; this is the
     # portable copy.
     record_shipping_cost_metadata(order, saved, tenant_id, mode=mode, secret_cipher=secret_cipher)
+
+    # AND ASK THE CARRIER TO TELL US WHAT BECOMES OF IT. Until now this adapter bought a label and never
+    # asked again, so `fulfilment.delivery_status` had a tracking status to read that nothing ever wrote
+    # (`domain/tracking.py`). Registered explicitly even though Shippo makes its own tracker for a bought
+    # label: that one carries no `metadata`, so its events cannot be matched to a shipment without
+    # indexing a number that is not ours.
+    #
+    # Best-effort, like every write after the purchase: the postage is paid and the parcel is going.
+    # `provider_for` raises on a provider it cannot build, and it is called INSIDE the guard for that
+    # reason: constructing it outside would put a tracking failure on the one code path that must not fail
+    # once money has been spent.
+    try:
+        tracking_fields = register_tracking(provider_for(name, api_key) if name else None, saved, now=now)
+        if tracking_fields:
+            saved.update(tracking_fields)
+            shipments.update_tracking(tenant_id, str(saved.get("shipment_id") or ""), tracking_fields)
+    except Exception as exc:  # noqa: BLE001 - never fails a bought label; logged, never guessed at
+        print(f"[tracking] registration skipped for {saved.get('shipment_id')}: "
+              f"{type(exc).__name__}: {exc}")
 
     # The buyer is told the same way the manual path tells them -- one builder, one mailer. Best-effort
     # HERE, unlike the manual path: the label is already bought and paid for, so a bounced address must

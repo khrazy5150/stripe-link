@@ -197,6 +197,39 @@
     "shipped_at": {
       "type": "integer"
     },
+    "tracking_status": {
+      "type": "string",
+      "enum": ["PRE_TRANSIT", "TRANSIT", "DELIVERED", "RETURNED", "FAILURE", "UNKNOWN"],
+      "description": "The CARRIER's own word for where this parcel is, written by the Shippo track_updated webhook (domain/tracking.py). Deliberately the provider's vocabulary rather than ours: fulfilment._TRACKING has translated these for the Orders screen since the shipping work and a second copy of that table is how two readers of one fact come to disagree. Absent on every shipment predating the feed, and on any carrier that never scans."
+    },
+    "tracking_substatus": {
+      "type": "string",
+      "description": "The carrier's finer-grained code, when it sends one. Display only."
+    },
+    "tracking_detail": {
+      "type": "string",
+      "description": "The carrier's own sentence for the latest scan, shown as the Status cell's note."
+    },
+    "tracking_status_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "When the CARRIER says the latest scan happened. The ordering key for the feed: two events can reach us in either order and only the carrier knows which actually happened first, so a reading with an older timestamp is refused. 0 means the event carried no date."
+    },
+    "tracking_updated_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "When WE last recorded a reading. Distinct from tracking_status_at, which is the carrier's clock; this one answers whether the feed is alive."
+    },
+    "tracking_registered_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "When the tracker was registered with the provider. Present with no tracking_status means registered but not yet scanned, which is the ordinary state of a label bought seconds ago -- and is what distinguishes it from a parcel nobody ever registered."
+    },
+    "delivered_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "When the parcel arrived. WRITTEN ONCE and never moved: this is the fact a delivery guarantee is measured against, and a parcel delivered, returned and redelivered did still arrive on the first date. ABSENT IS NOT \"did not arrive\" -- it is \"no delivery is known\", which is also the answer for every shipment predating the tracking feed. Anything deciding about money must treat the two apart (buyer_guarantees.no_delivery_refund)."
+    },
     "notified_at": {
       "type": "integer"
     },
