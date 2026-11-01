@@ -181,6 +181,7 @@
           "type": "string",
           "enum": [
             "seller_pays",
+            "seller_pays_label",
             "buyer_pays",
             "not_applicable"
           ],

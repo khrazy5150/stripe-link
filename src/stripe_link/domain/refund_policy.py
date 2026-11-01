@@ -127,19 +127,30 @@ CLASS_HINTS: dict[str, str] = {
 # significant fact a returns policy states. `domain/ledger.return_shipping_cost_entry` has recorded who
 # BORE this cost since the shipping work; nothing has ever recorded who was PROMISED to.
 SELLER_PAYS = "seller_pays"
+# WHO PAYS and HOW IT TRAVELS are two facts, and this value is the one buyers look for. "Free returns"
+# on its own leaves them wondering how; a prepaid label is the answer, and the platform really does buy
+# one (`handlers/shipping.buy_return_label`, recorded on the refund request with an expiry), so the
+# claim has something behind it rather than being a sentence we hope the tenant honours.
+SELLER_PAYS_LABEL = "seller_pays_label"
 BUYER_PAYS = "buyer_pays"
 SHIPPING_NOT_APPLICABLE = "not_applicable"
 
 RETURN_SHIPPING_OPTIONS: dict[str, str] = {
     SELLER_PAYS: "We pay return postage",
+    SELLER_PAYS_LABEL: "We pay — prepaid label",
     BUYER_PAYS: "Customer pays return postage",
     SHIPPING_NOT_APPLICABLE: "Not applicable — nothing is sent back",
 }
 
 # The clause the renderer prints. Empty for `not_applicable`: nothing ships back, so the question does not
 # arise and a sentence about it would be noise on a page about a download.
+#
+# "SEND", not "email". Nothing emails a return label automatically -- `buy_return_label` buys it and
+# records it on the request, and the tenant passes it on. Naming the channel would promise a mechanism
+# the platform does not perform, which is the exact fault this family of plans exists to stop.
 RETURN_SHIPPING_CLAUSES: dict[str, str] = {
     SELLER_PAYS: "Return postage is on us.",
+    SELLER_PAYS_LABEL: "Returns are free — we send you a prepaid label.",
     BUYER_PAYS: "Return postage is paid by the customer.",
     SHIPPING_NOT_APPLICABLE: "",
 }

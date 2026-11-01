@@ -23,6 +23,8 @@ from stripe_link.domain.refund_policy import (
     NON_REFUNDABLE,
     PHYSICAL,
     RETURN_METHOD_OPTIONS,
+    RETURN_SHIPPING_CLAUSES,
+    RETURN_SHIPPING_OPTIONS,
     SOURCE_PLATFORM_DEFAULT,
     SOURCE_PRODUCT_OVERRIDE,
     SOURCE_TENANT_DEFAULT,
@@ -396,6 +398,9 @@ class VocabularyAgreesWithTheSchema(unittest.TestCase):
                 self.assertEqual(sorted(WINDOW_OPTIONS), sorted(props["refund_window"]["enum"]))
                 self.assertEqual(sorted(CONDITION_OPTIONS), sorted(props["condition"]["enum"]))
                 self.assertEqual(sorted(RETURN_METHOD_OPTIONS), sorted(props["return_method"]["enum"]))
+                # `return_shipping` is duplicated across the same six blocks and drifts the same way.
+                # Added when a fourth option landed, which is exactly when the drift would have started.
+                self.assertEqual(sorted(RETURN_SHIPPING_OPTIONS), sorted(props["return_shipping"]["enum"]))
                 seen += 1
         # Six blocks, not one. A schema that stops being reachable by the walk above must fail here
         # rather than quietly reduce the coverage this test claims.
@@ -483,7 +488,7 @@ class WhoPaysTheReturnPostage(unittest.TestCase):
     def test_the_screen_is_given_the_options_and_the_defaults(self):
         vocab = vocabulary()
         self.assertEqual([o["value"] for o in vocab["return_shipping"]],
-                         ["seller_pays", "buyer_pays", "not_applicable"])
+                         ["seller_pays", "seller_pays_label", "buyer_pays", "not_applicable"])
         self.assertEqual(vocab["return_shipping_defaults"][RETURN_REQUIRED], "buyer_pays")
 
     def test_the_clause_is_the_servers_sentence(self):
@@ -522,3 +527,48 @@ class ThePostageClauseRendersWithTheReturnNote(unittest.TestCase):
         """Someone who wrote their own return instructions has said what they mean about postage too."""
         self.assertEqual(self._note(return_note="Post it back to us.", return_shipping="seller_pays"),
                          "Post it back to us.")
+
+
+class FreeReturnsViaAPrepaidLabel(unittest.TestCase):
+    """"Who pays" and "how it travels back" are two facts, and the second is the one buyers look for.
+
+    "Free returns" alone leaves them wondering how. A prepaid label is the answer, and the platform
+    really does buy one -- `handlers/shipping.buy_return_label`, recorded on the refund request with an
+    expiry -- so the claim has something behind it rather than being a sentence we hope is honoured.
+    """
+
+    def test_the_option_exists_and_is_labelled_for_the_picker(self):
+        self.assertEqual(RETURN_SHIPPING_OPTIONS["seller_pays_label"], "We pay — prepaid label")
+
+    def test_the_sentence_says_free_and_says_how(self):
+        clause = RETURN_SHIPPING_CLAUSES["seller_pays_label"]
+        self.assertIn("free", clause.lower())
+        self.assertIn("prepaid label", clause.lower())
+
+    def test_it_does_not_promise_a_channel_nothing_performs(self):
+        """Nothing emails a return label automatically: `buy_return_label` buys it and records it on the
+        request, and the tenant passes it on. Naming the channel would promise a mechanism the platform
+        does not perform."""
+        self.assertNotIn("email", RETURN_SHIPPING_CLAUSES["seller_pays_label"].lower())
+
+    def test_it_is_buildable_and_reaches_the_policy(self):
+        policy = build(PHYSICAL, refund_window="30_days", condition="working_condition",
+                       return_method=RETURN_REQUIRED, return_shipping="seller_pays_label")
+        self.assertEqual(policy["return_shipping"], "seller_pays_label")
+
+    def test_the_renderer_prints_it_after_the_return_note(self):
+        from stripe_link.runtime.html import refund_policy_return_note
+        note = refund_policy_return_note({"return_method": RETURN_REQUIRED,
+                                          "return_shipping": "seller_pays_label"})
+        self.assertTrue(note.endswith("Returns are free — we send you a prepaid label."))
+
+    def test_the_other_three_are_untouched(self):
+        """Buyer-pays stays available: it is right for plenty of sellers, and this adds an option
+        rather than replacing one."""
+        for value in ("seller_pays", "buyer_pays", "not_applicable"):
+            with self.subTest(value=value):
+                self.assertIn(value, RETURN_SHIPPING_OPTIONS)
+
+    def test_the_default_is_still_the_status_quo(self):
+        """Nothing silently starts promising free returns. A tenant has to choose this."""
+        self.assertEqual(default_return_shipping(RETURN_REQUIRED), "buyer_pays")
