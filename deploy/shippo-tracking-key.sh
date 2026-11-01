@@ -13,6 +13,18 @@
 # follow parcels "created outside of Shippo" by carrier and tracking number. It buys no labels and needs no
 # partner agreement.
 #
+# USE A DEDICATED KEY, NOT THE ONE A TENANT'S SHIPPING CONFIG ALREADY HOLDS. Shippo allows two live keys
+# and two test keys per account, and spending one on tracking buys rotation independence: regenerating the
+# tracking key then cannot stop labels being bought, and a leaked platform secret costs one key rather than
+# both. The alternative -- the same value in the per-tenant shipping config AND in Secrets Manager -- fails
+# in the shape that is hardest to read: labels keep working while tracking goes quiet, which looks like
+# Shippo being slow rather than an auth failure.
+#
+# Note the consequence once both live slots are in use: a future rotation cannot do create-new-then-swap,
+# so it has to delete first and run briefly on one key. Harmless for THIS key (registrations stop for the
+# gap and those parcels carry no feed, which everything already handles) and not harmless for the label
+# key, so rotate that one deliberately.
+#
 # TWO KEYS. The live key tracks real parcels and is billed per tracking number, since a label bought on a
 # tenant's account is "not created on" this one. The test key accepts Shippo's mock tracking numbers and
 # costs nothing, so a test-mode order never burns a paid track on a parcel that does not exist. They are
