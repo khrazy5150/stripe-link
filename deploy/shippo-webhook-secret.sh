@@ -59,7 +59,9 @@ fi
 
 echo
 if [[ -n "${API_BASE}" && "${API_BASE}" != "None" ]]; then
-  echo "Paste this into Shippo -> Settings -> Webhooks (event: Track Updated):"
+  echo "Paste this into the PLATFORM tracking account's Shippo -> Settings -> Webhooks"
+  echo "(event: Track Updated) -- the account whose key ./deploy/shippo-tracking-key.sh holds,"
+  echo "NOT a tenant's. There is only one account to do this on, which is the point of that key:"
   echo "  ${API_BASE%/}/webhook/shipping-tracking?token=${TOKEN}"
 else
   echo "Stack output ApiBase not readable; the webhook URL is:"

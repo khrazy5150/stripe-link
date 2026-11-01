@@ -305,6 +305,11 @@ Globals:
         # state. Shippo's HMAC option needs their solutions team to provision a shared secret, so the
         # echoed token is the mechanism available (domain/tracking.py).
         SHIPPO_WEBHOOK_SECRET_NAME: !Sub "jb/shippo-webhook/${Environment}"
+        # The PLATFORM's Shippo key, used only to register trackers. Shipping is BYOK per tenant, but a
+        # tracker registered with a tenant's key reports to a webhook on THEIR account -- so tracking is
+        # the one Shippo call this platform makes with its own credentials. Holds {"test_key", "live_key"};
+        # with neither, registration is simply off and parcels carry no feed (domain/tracking.py).
+        SHIPPO_TRACKING_SECRET_NAME: !Sub "jb/shippo-tracking/${Environment}"
         PAGES_BUCKET: !Ref PagesBucket
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
         MEDIA_BUCKET: !Ref MediaBucket
@@ -4377,6 +4382,13 @@ Resources:
               Condition:
                 StringEquals:
                   kms:EncryptionContext:service: stripe-link
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/shippo-tracking/${Environment}-*"
+
       Events:
         GetShipping:
           Type: Api
@@ -5240,6 +5252,13 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Ref StripePlatformSecretArn
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/shippo-tracking/${Environment}-*"
+
       Events:
         OrdersList:
           Type: Api

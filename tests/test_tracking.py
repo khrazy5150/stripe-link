@@ -7,6 +7,7 @@ un-deliver a parcel, and that "no delivery known" is never confused with "did no
 """
 
 import json
+import os
 import pathlib
 import unittest
 
@@ -244,6 +245,73 @@ class TheSchemaAgrees(unittest.TestCase):
         self.assertEqual(sorted(self.schema()["tracking_status"]["enum"]),
                          sorted({PRE_TRANSIT, TRANSIT, DELIVERED, RETURNED, FAILURE, "UNKNOWN"}))
 
+
+
+class ThePlatformKey(unittest.TestCase):
+    """Shipping is BYOK per tenant; tracking is the one Shippo call this platform makes with its own
+    credentials. A tracker registered with a TENANT's key reports to a webhook on their account -- which is
+    not ours -- and it would still register, so `guarantee_due.observable` would count the parcel as
+    visible while no delivery ever arrived."""
+
+    def setUp(self):
+        from stripe_link import shippo_tracking
+        shippo_tracking._KEY_CACHE.clear()
+        self._prev = os.environ.get("SHIPPO_TRACKING_SECRET_NAME")
+        os.environ["SHIPPO_TRACKING_SECRET_NAME"] = "jb/shippo-tracking/test"
+
+    def tearDown(self):
+        from stripe_link import shippo_tracking
+        shippo_tracking._KEY_CACHE.clear()
+        if self._prev is None:
+            os.environ.pop("SHIPPO_TRACKING_SECRET_NAME", None)
+        else:
+            os.environ["SHIPPO_TRACKING_SECRET_NAME"] = self._prev
+
+    def secrets(self, payload, *, raises=False):
+        class Fake:
+            def get_secret_value(self, SecretId=None):  # noqa: N803 - boto3's own parameter name
+                if raises:
+                    raise RuntimeError("AccessDenied")
+                return {"SecretString": json.dumps(payload)}
+        return Fake()
+
+    def test_the_mode_picks_the_key(self):
+        """A test-mode order must never burn a PAID track on a parcel that does not exist, and Shippo's
+        test key only accepts their mock numbers."""
+        from stripe_link.shippo_tracking import load_key
+        both = {"live_key": "shippo_live_1", "test_key": "shippo_test_1"}
+        self.assertEqual(load_key("live", client=self.secrets(both)), "shippo_live_1")
+        self.assertEqual(load_key("test", client=self.secrets(both)), "shippo_test_1")
+
+    def test_an_unknown_mode_is_treated_as_test(self):
+        """Fail-safe in the same direction as `resolve_stripe_mode`: a caller that forgets the mode gets
+        the key that cannot spend money."""
+        from stripe_link.shippo_tracking import load_key
+        both = {"live_key": "shippo_live_1", "test_key": "shippo_test_1"}
+        for mode in ("", None, "nonsense"):
+            with self.subTest(mode=mode):
+                self.assertEqual(load_key(mode, client=self.secrets(both)), "shippo_test_1")
+
+    def test_no_secret_means_tracking_is_simply_off(self):
+        from stripe_link.shippo_tracking import platform_tracker
+        self.assertIsNone(platform_tracker("live", secrets_client=self.secrets({})))
+
+    def test_a_denied_secret_is_off_rather_than_an_error(self):
+        """The parcel is already gone and the buyer already told. No feed is where every parcel started."""
+        from stripe_link.shippo_tracking import platform_tracker
+        self.assertIsNone(platform_tracker("live", secrets_client=self.secrets({}, raises=True)))
+
+    def test_a_configured_key_builds_a_shippo_client(self):
+        from stripe_link.shippo_tracking import platform_tracker
+        tracker = platform_tracker("live", secrets_client=self.secrets({"live_key": "shippo_live_1"}))
+        self.assertEqual(tracker.name, "shippo")
+        self.assertTrue(hasattr(tracker, "register_tracking"))
+
+    def test_tracking_off_registers_nothing_rather_than_failing(self):
+        """`register` already treats a falsy provider as nothing to do, so the whole chain degrades to
+        "this parcel has no feed" -- and the sweep stays silent on it by the gate's own rule."""
+        self.assertEqual(register(None, {"shipment_id": "s", "carrier": "usps",
+                                         "tracking_number": "1"}, now=5), {})
 
 if __name__ == "__main__":
     unittest.main()

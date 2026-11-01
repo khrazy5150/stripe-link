@@ -85,12 +85,43 @@ shipment predating this feed, for every carrier that never scans, and for a parc
 deciding about money must treat the two apart. That is written into the function's own docstring because
 the next phase is exactly the caller that would get it wrong.
 
-## The honest limit
+## Registration is the PLATFORM's call, not the tenant's
 
-A tenant who posts at their local counter and types the number in has **no Shippo account**, so there is
-nothing to register and their parcels have no delivery feed. Registration covers every label bought through
-us and every hand-typed number belonging to a tenant who has a provider key. That is the shape of the
-coverage, not a bug, and the guarantee sweep must read it as "unknown" rather than "undelivered".
+**First shipped using the tenant's own key, and that was wrong in a way that mattered.** Shipping is BYOK
+per tenant, so a tracker registered with their key reports to a webhook configured on *their* Shippo
+account — which is not ours, and which no tenant is going to paste a URL into. Registration would still
+succeed, so `guarantee_due.observable` would count those parcels as visible to us while no delivery ever
+arrived: the sweep could then report a guarantee due on a parcel the buyer already has. The gate would be
+reporting on parcels it cannot actually see, which is the exact fault it exists to prevent.
+
+So tracking moved to **one platform account** (`src/stripe_link/shippo_tracking.py`), with one webhook
+registered once. Shippo's Tracking API tracks parcels "created outside of Shippo" by carrier and tracking
+number, which is what makes this possible — and it is an ordinary account, not the platform/partner
+agreement BYOK exists because we could not get.
+
+It also closes a limit this plan previously recorded as permanent: a tenant who posts at their local
+counter and types the number in has no Shippo account, so there was nothing to register and their parcels
+could never have a feed. They are probably the largest group of sellers here, and they were the group the
+guarantee sweep could never see. Now we register their number ourselves.
+
+It **removed** code: `orders.py` no longer resolves the tenant's config, cipher and provider to register a
+hand-typed number, which is net −11 lines on the path that needed it most and could serve it least.
+
+**It costs.** Shippo includes tracking for shipments created on the account and charges per tracking number
+for everything else — which is what a tenant's label is from this account's point of view. A third-party
+comparison quotes $0.02 per track; Shippo's own API pricing page says contact sales, so that figure is
+unconfirmed. The module therefore registers exactly once per shipment and never polls.
+
+**Two keys, because Shippo's test mode is the rehearsal.** Live tracks real parcels and bills; test accepts
+Shippo's mock tracking numbers and costs nothing. Selected by the shipment's Stripe mode, so a test-mode
+order never burns a paid track on a parcel that does not exist, and an unrecognised mode falls back to the
+key that cannot spend money.
+
+**A carrier that will not third-party track degrades correctly and needs no list.** Canada Post, Colissimo,
+DHL Germany and Ontrac only track shipments created through Shippo; Australia Post, Purolator and Swyft
+need a carrier account. Any of those makes `POST /tracks` fail, `register` returns `{}`, no
+`tracking_registered_at` is written, and the parcel stays unobservable — so the sweep says nothing about
+it. A hardcoded carrier list would only drift from Shippo's.
 
 ## The sweep — shipped
 
@@ -170,9 +201,10 @@ first permits a withdrawal.
    promise says *they* choose, so nothing should auto-refund without them.
 2. **Adjudication.** With the feed live, a tenant seeing "Delivered 3 days ago" beside a claim can decline
    it with evidence. That is the real value of the feed: not detection, adjudication.
-3. **Coverage for the counter-poster.** A tenant with no provider key has no feed, so their parcels are
-   permanently unobservable and this sweep stays silent on them. A buyer-facing claim is what covers them,
-   which is part of why it is next.
+3. **Confirm the per-track price with Shippo**, and whether a label bought on another Shippo account
+   counts as "created on Shippo" for ours. The $0.02 figure is a third-party one and the architecture is
+   cheap to keep either way — it registers once per parcel and never polls — but the number should be
+   known rather than assumed.
 
 Deliberately not now: HMAC (blocked on Shippo's solutions team), and a tracking-number index (unnecessary
 while `metadata` carries our own id).

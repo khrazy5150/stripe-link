@@ -33,6 +33,7 @@ from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.carriers import carrier_options
 from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.domain.tracking import register as register_tracking
+from stripe_link.shippo_tracking import platform_tracker
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.domain.fulfilment_groups import group_parcels
 from stripe_link.domain.shipment_notice import notify_buyer, revision_for
@@ -1761,11 +1762,13 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # indexing a number that is not ours.
     #
     # Best-effort, like every write after the purchase: the postage is paid and the parcel is going.
-    # `provider_for` raises on a provider it cannot build, and it is called INSIDE the guard for that
-    # reason: constructing it outside would put a tracking failure on the one code path that must not fail
-    # once money has been spent.
+    # THE PLATFORM'S KEY, not the tenant's. A tracker registered with their key reports to a webhook on
+    # THEIR Shippo account, which is not ours and which no tenant is going to configure -- and it would
+    # still register, so `guarantee_due.observable` would count the parcel as visible while no delivery
+    # ever arrived (src/stripe_link/shippo_tracking.py). Built inside the guard because anything that
+    # throws here must not fail a label that has already been paid for.
     try:
-        tracking_fields = register_tracking(provider_for(name, api_key) if name else None, saved, now=now)
+        tracking_fields = register_tracking(platform_tracker(mode), saved, now=now)
         if tracking_fields:
             saved.update(tracking_fields)
             shipments.update_tracking(tenant_id, str(saved.get("shipment_id") or ""), tracking_fields)
