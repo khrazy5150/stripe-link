@@ -80,7 +80,10 @@ class TheStoredSectionTests(unittest.TestCase):
 
 class TheBuilderTests(unittest.TestCase):
     def test_a_new_faq_starts_with_it_on(self):
-        new_element = BUILDER.split('if (type === "faq") return', 1)[1].split(";", 1)[0]
+        # Anchored on the branch rather than on `return`: the factory became a block when an FAQ started
+        # seeding its questions from the offer's objections (2026-11-01), and a test pinned to the exact
+        # statement shape fails on a change that did not touch the behaviour it guards.
+        new_element = BUILDER.split('if (type === "faq")', 1)[1][:600]
         self.assertIn("one_at_a_time: true", new_element)
 
     def test_it_is_stored_only_when_turned_OFF(self):

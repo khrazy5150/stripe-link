@@ -326,5 +326,50 @@ class TheDashboardView(unittest.TestCase):
         self.assertIn("First touch wins", self.builder)
 
 
+class ObjectionsSeedTheFAQ(unittest.TestCase):
+    """The SECOND consumer of `positioning`, and the one that settles why it lives on the shared model
+    rather than inside the Attention plan. An FAQ exists to answer friction blocking the purchase, which
+    is what `objections` is — so a tenant who enhanced their offer gets the questions written for them."""
+
+    @property
+    def builder(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "LandingPages.vue").read_text()
+
+    def test_an_faq_element_seeds_its_questions_from_objections(self):
+        block = self.builder.split('if (type === "faq")', 1)[1][:400]
+        self.assertIn("offerObjections", block)
+
+    def test_the_answers_are_left_empty(self):
+        """We know what worries a buyer; we do not know this tenant's policy. A generated answer would be
+        the platform making a commercial promise on their behalf."""
+        block = self.builder.split('if (type === "faq")', 1)[1][:400]
+        self.assertIn('answer: ""', block)
+
+    def test_an_offer_with_no_objections_still_gets_a_blank_row(self):
+        """An FAQ with no items is not a valid page section, so the fallback has to stay."""
+        block = self.builder.split('if (type === "faq")', 1)[1][:400]
+        self.assertIn('seeded.length ? seeded : [{ question: "", answer: "" }]', block)
+
+    def test_the_model_is_fetched_not_read_off_the_listing(self):
+        """`offer_index_entry` deliberately leaves the semantic model out — kilobytes per row to serve a
+        panel most tenants never open."""
+        self.assertIn("async function loadOfferObjections(", self.builder)
+        self.assertIn("objectionsLoadedFor", self.builder)
+
+    def test_a_failed_fetch_never_blocks_adding_an_element(self):
+        block = self.builder.split("async function loadOfferObjections(", 1)[1][:700]
+        self.assertIn("catch", block)
+        self.assertIn("offerObjections.value = []", block)
+
+    def test_the_offer_index_really_does_omit_the_model(self):
+        """The premise of the fetch. If this ever changes, the fetch becomes dead weight."""
+        import pathlib
+        index = (pathlib.Path(__file__).resolve().parents[1]
+                 / "src" / "stripe_link" / "domain" / "offer_index.py").read_text()
+        self.assertNotIn("semantic_model", index)
+
+
 if __name__ == "__main__":
     unittest.main()

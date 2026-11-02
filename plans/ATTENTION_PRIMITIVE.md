@@ -96,10 +96,14 @@ Derived from the semantic model + tenant business profile; cached per offer, reg
 > **So A1 reduces to:** `hooks`, the five-pillar prompt templates, and the per-offer campaign-side cache.
 > All three live in `../sam/attention`, which does not exist yet.
 >
-> **Second-consumer debt:** `positioning` currently has ONE reader — the offer modal's Understanding panel,
-> which only displays it. The argument for putting it on the shared model was that a page would use it too;
-> until something does (seeding an FAQ's questions from `objections` is the obvious candidate), that
-> argument is unpaid.
+> **Second-consumer debt: PAID 2026-11-01.** An FAQ element now seeds its questions from
+> `positioning.objections` — an FAQ exists to answer friction blocking the purchase, which is exactly what
+> that field is. So a tenant who enhanced their offer stops facing one blank row and only has to write the
+> ANSWERS. The answers are deliberately left empty: we know what worries a buyer, we do not know this
+> tenant's policy, and generating one would be the platform making a commercial promise on their behalf.
+>
+> That settles why `positioning` lives on the shared model rather than inside this plan — a page and a
+> campaign now both read it, from one derivation, and cannot disagree.
 
 | Attribute | Semantic role |
 |---|---|

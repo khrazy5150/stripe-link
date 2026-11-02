@@ -3298,6 +3298,26 @@ const selectedOfferIsSocialPage = computed(() =>
   selectedOffer.value?.lead_capture_action === "social_redirect"
   || selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
+// The offer's objections, for seeding an FAQ. Fetched rather than read off `builderOffer`: the offers
+// LISTING holds index rows, and `offer_index_entry` deliberately leaves the semantic model out -- it is
+// kilobytes per row to serve a panel most tenants never open. So this is one document read, done when an
+// offer is chosen or a page is opened, and skipped entirely when the id has not changed.
+const offerObjections = ref([]);
+let objectionsLoadedFor = "";
+async function loadOfferObjections(offerId) {
+  const id = String(offerId || "");
+  if (!id || id === objectionsLoadedFor) return;
+  objectionsLoadedFor = id;
+  offerObjections.value = [];
+  try {
+    const body = await apiRequest(`/offers/${encodeURIComponent(id)}`);
+    const positioning = body?.offer?.semantic_model?.facts?.positioning || {};
+    offerObjections.value = (positioning.objections || []).filter((q) => String(q || "").trim());
+  } catch (err) {
+    // A seed is a convenience. Never let it stop a tenant adding an element.
+    offerObjections.value = [];
+  }
+}
 // A Roundup lists this Site's own pages under a headline that counts itself (plans/ROUNDUP_PAGES.md).
 const isRoundupPage = computed(() => builderOffer.value?.lead_capture_action === "roundup");
 // Read from the SHARED rules file the Python composer uses, so the builder cannot offer a pattern the
@@ -6819,7 +6839,19 @@ function newElement(type) {
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
-  if (type === "faq") return { ...base, heading: "Frequently Asked Questions", one_at_a_time: true, items: [{ question: "", answer: "" }] };
+  // SEEDED WITH THE QUESTIONS THEIR BUYERS ACTUALLY ASK. `positioning.objections` on the offer's semantic
+  // model is "friction blocking the purchase", which is the same list an FAQ exists to answer -- so a
+  // tenant who has enhanced their offer gets the questions written for them and only has to supply the
+  // answers. Without it this element opens as one blank row, which is the hardest kind of form to start.
+  //
+  // The ANSWERS are deliberately left empty. We know what worries a buyer; we do not know this tenant's
+  // policy, and a generated answer would be the platform making a commercial promise on their behalf --
+  // the fault plans/REFUND_POLICY.md exists to stop.
+  if (type === "faq") {
+    const seeded = offerObjections.value.map((question) => ({ question, answer: "" }));
+    return { ...base, heading: "Frequently Asked Questions", one_at_a_time: true,
+             items: seeded.length ? seeded : [{ question: "", answer: "" }] };
+  }
   if (type === "related_products") return { ...base, heading: "Related products" };
   // The reviews are the tenant's customers' words, not content typed here. The element exists so the block
   // can be MOVED, RETITLED and REMOVED -- it was appended after the body, below the footer, with no way to
@@ -7996,6 +8028,7 @@ function elementsFromPage(sections) {
 async function onBuilderOfferChange() {
   const offer = builderOffer.value;
   if (!offer) return;
+  loadOfferObjections(offer.offer_id);  // not awaited: seeding is for a LATER click
   // The offer's presentation (name/description/hero/prices) resolves against products+services;
   // ensure they're loaded before seeding so defaults come from the offer contract, not fallbacks.
   await ensureCatalogLoaded();
@@ -8107,6 +8140,7 @@ function editPage(page) {
   // not what was broken. `editOfferlessPage` is kept for the grid-membership edit it still owns.
   populateBuilderFromPage(page);
   loadPageNumbers(page.page_id);
+  loadOfferObjections(page.offer_id);
   builderExistingPageId.value = page.page_id;
   builderOriginalPage.value = { ...page };
   builderOpen.value = true;
