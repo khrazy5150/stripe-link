@@ -125,8 +125,11 @@ class TheRequestTests(unittest.TestCase):
         self.assertNotIn("mode: getStripeMode()", ADAPTER)
 
     def test_changing_the_channel_does_not_fire_an_unasked_request(self):
-        handler = OFFERS.split("function onAttentionChannelChange()", 1)[1][:300]
-        self.assertIn("if (attentionBriefs.value.length) loadAttention()", handler)
+        """Picking a platform before pressing the button must not fetch. Anchored on the early return
+        rather than on a one-line `if`, which is what it was before copy generation was added."""
+        handler = OFFERS.split("function onAttentionChannelChange()", 1)[1][:600]
+        self.assertIn("if (!attentionBriefs.value.length) return;", handler)
+        self.assertIn("loadAttention()", handler)
 
     def test_angles_are_cleared_when_another_offer_is_opened(self):
         """Carrying them over would show a tenant one offer's post plan for a different offer."""
@@ -153,12 +156,17 @@ class TheDeliverableTests(unittest.TestCase):
         self.assertIn("brief.seconds?.length === 2", shape)
         self.assertIn("brief.slides?.length === 2", shape)
 
-    def test_no_cost_is_claimed_because_there_is_none(self):
-        """Derivation is deterministic and server-side. A "uses one generation" note here -- copied from
-        the Understanding panel above -- would be a false statement about the tenant's allowance."""
+    def test_the_free_half_and_the_paid_half_are_labelled_SEPARATELY(self):
+        """Deriving angles is deterministic and server-side, so claiming a cost for it would be a false
+        statement about the tenant's allowance. WRITING a post is a real generation, so the button that
+        does it says so. Two different claims, and neither may be applied to the other half."""
         section = OFFERS.split("<h3>Attention</h3>", 1)[1].split("</section>", 1)[0]
-        self.assertIn("no AI generation", section)
-        self.assertNotIn("Uses one AI generation", section)
+        derive = section.split("Show post angles", 1)[1].split("</div>", 1)[0] + section.split(
+            "Show post angles", 1)[1].split("</div>", 2)[1]
+        self.assertIn("no AI generation", derive)
+        self.assertNotIn("Uses one AI generation", derive)
+        write = section.split("writeAttentionPost(brief)", 1)[1][:400]
+        self.assertIn("Uses one AI generation", write)
 
 
 class TheConfigExampleTests(unittest.TestCase):
@@ -172,6 +180,61 @@ class TheConfigExampleTests(unittest.TestCase):
             with self.subTest(channel=channel):
                 base = example["environments"][channel].get("attention_api_base") or ""
                 self.assertTrue(re.match(r"^https://\S+$", base), base)
+
+
+class WritingFinishedCopyTests(unittest.TestCase):
+    """#2: the post itself, generated in stripe-link because the provider adapter, the BYOK config and the
+    usage counter all live on that function (author decision 2026-11-02)."""
+
+    def test_it_calls_the_shared_ai_route_not_the_attention_service(self):
+        """A second service generating would mean a second service reaching the tenant's provider key."""
+        writer = OFFERS.split("async function writeAttentionPost(", 1)[1][:900]
+        self.assertIn('apiRequest("/ai/generate"', writer)
+        self.assertIn('operation: "generate_copy"', writer)
+
+    def test_the_brief_travels_as_DATA(self):
+        """The service composes the prompt from fields it names, so nothing sent here is an instruction."""
+        writer = OFFERS.split("async function writeAttentionPost(", 1)[1][:900]
+        self.assertIn("brief,", writer)
+        self.assertNotIn("prompt", writer)
+
+    def test_it_is_PER_ANGLE_not_all_five(self):
+        """Writing five posts a tenant wants one of spends five generations on four they discard."""
+        self.assertIn("writeAttentionPost(brief)", OFFERS)
+        self.assertIn("attentionWriting === brief.pillar", OFFERS)
+
+    def test_the_cost_is_stated_BEFORE_the_click(self):
+        """Discovering the price afterwards is the whole class of complaint this prevents -- the same
+        sentence the Understanding button above already shows."""
+        section = OFFERS.split("<h3>Attention</h3>", 1)[1].split("</section>", 1)[0]
+        self.assertIn("Uses one AI generation{{ enrichRemaining }}", section)
+
+    def test_the_button_is_disabled_when_they_cannot_SPEND(self):
+        """Same gate as the Understanding button: no plan, or no generations left."""
+        self.assertIn('attentionWriting === brief.pillar || !canEnrich', OFFERS)
+
+    def test_a_refunded_generation_is_said_plainly(self):
+        """"Nothing came back" and "you paid for nothing" are different things, and the server already
+        released the slot."""
+        writer = OFFERS.split("async function writeAttentionPost(", 1)[1][:1400]
+        self.assertIn("your generation was not used", writer)
+
+    def test_the_allowance_counter_is_refreshed_after_spending(self):
+        """It is printed beside every button, so leaving it stale shows a number that is wrong."""
+        writer = OFFERS.split("async function writeAttentionPost(", 1)[1][:1400]
+        self.assertIn("aiProviderStore.load()", writer)
+
+    def test_changing_the_platform_DISCARDS_copy_written_for_the_old_one(self):
+        """A 7-second TikTok script under an Instagram carousel brief is wrong in a way that looks right."""
+        handler = OFFERS.split("function onAttentionChannelChange()", 1)[1][:600]
+        self.assertIn("attentionCopy.value = {}", handler)
+
+    def test_paragraph_breaks_are_PRESERVED_in_the_markup(self):
+        """A model writes in paragraphs; collapsing them is the defect the landing renderer shipped once."""
+        self.assertIn('class="offer-attention-body"', OFFERS)
+        css = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
+        block = css.split(".offer-attention-body", 1)[1][:120]
+        self.assertIn("pre-wrap", block)
 
 
 if __name__ == "__main__":

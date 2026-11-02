@@ -60,6 +60,11 @@ OPERATION_IMAGE = "image"
 # third number for a tenant to understand, for a call that costs a fraction of a page; if the ledger later
 # shows enrichment crowding out real page generations, giving it its own counter is a one-line branch.
 OPERATION_ENRICH = "enrich_offer"
+# Attention copy shares the page counter for the same reason enrichment does, and the reason is stronger
+# here: a tenant deriving five angles and generating copy for two of them is doing ONE piece of work, and
+# splitting it across two allowances would make them budget against themselves. `entitlement_for` branches
+# only on OPERATION_IMAGE, so naming it here routes it to the page path with no code.
+OPERATION_COPY = "generate_copy"
 IMAGE_PREFIX = "images#"
 
 

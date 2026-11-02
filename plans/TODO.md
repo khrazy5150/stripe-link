@@ -3625,6 +3625,17 @@ choice.
   a per-offer cache, the entitlement gate, `GET /health|/me/context|/me/briefs`, `template.yaml` and a
   deploy script. 133 tests. Still open in A1: the generation call over the BYO-key adapter and a dashboard
   surface (today the API answers only to `curl` with an id_token). See `ATTENTION_PRIMITIVE.md` §10a.
+- **A1 COMPLETE, dev 2026-11-02.** Attention panel in the offer modal (angles + per-channel hooks +
+  copy-all), and `operation: "generate_copy"` on `/ai/generate` writes the finished post. Generation runs
+  in stripe-link, NOT in attention: that function owns the provider adapter, the BYOK config and the usage
+  counter. Spends the PAGE counter like enrichment does. Prod needs one non-code write:
+  `environments.{dev,prod}.attention_api_base` in the prod `app_config` document (the panel is gated on
+  it, so prod shows nothing until then).
+- ⚠️ **PRE-EXISTING BYOK GAP found 2026-11-02, not fixed:** nothing in the generation path decrypts
+  `ai_provider_config.api_key_ref`. The page, enrich and copy operations all pass no `api_key`, so a BYOK
+  tenant admitted by `can_use_ai_builder` reaches `_byok_loop` with an EMPTY key. Everything runs on
+  platform Bedrock today. Fix is one resolver all three call — deliberately not papered over with a fourth
+  private decrypt.
 - **`attention` is now a CAPABILITY, and the FIRST member of `BETA_CAPABILITIES`** (`domain/entitlements.py`).
   That keeps an unreleased, unpriced feature off every comped account and every live trial — the one thing a
   beta must not do. The ways in today are a `beta: ["attention"]` grant on the tenant profile or a plan that

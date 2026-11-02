@@ -54,11 +54,12 @@ from stripe_link.domain.ai_provision import (chosen_badges, compose_sections, ne
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
-from stripe_link.domain.ai_quota import (OPERATION_ENRICH, OPERATION_IMAGE, PLATFORM_TENANT,
+from stripe_link.domain.ai_quota import (OPERATION_COPY, OPERATION_ENRICH, OPERATION_IMAGE, PLATFORM_TENANT,
                                           entitlement_for, image_qualities_for, may_generate,
                                           period_key, within_platform_budget)
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.semantic import analyze_offer
+from stripe_link.domain import attention_copy
 from stripe_link.domain.semantic_enrich import enrich
 from stripe_link.domain import ai_images
 from stripe_link import ai_image_client
@@ -145,6 +146,17 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
                              offers_repo=offers_repo, products_repo=products_repo,
                              config_repo=config_repo, usage_repo=usage_repo,
                              tenant_repo=tenant_repo, generator=generator)
+
+    # ATTENTION COPY, folded on for the third time for the reasons above, plus one: this function owns the
+    # provider adapter, the BYOK configuration and the usage counter, so generating in ../sam/attention
+    # would mean a second stack re-reaching all three -- including, once BYOK generation is actually wired
+    # (see `_generate_copy`), decrypt on every tenant's provider key. Author decision 2026-11-02,
+    # plans/ATTENTION_PRIMITIVE.md §10a. Attention still decides what the post is about; this only composes
+    # its brief into a prompt.
+    if str(body.get("operation") or "").strip().lower() == OPERATION_COPY:
+        return _generate_copy(body, tenant_id=tenant_id, event=event, now=now,
+                              config_repo=config_repo, usage_repo=usage_repo,
+                              tenant_repo=tenant_repo, generator=generator)
 
     # TWO SOURCES, ONE CONTRACT. `product_id` is the fork off the product wizard: the brief is PROJECTED from
     # a product the tenant already has, plus tenant config, plus the fork's one step -- so nothing the product
@@ -411,6 +423,102 @@ def _enrich_offer(body, *, tenant_id, event, now, offers_repo, products_repo, co
         return json_response({"semantic_model": enriched, "enriched": True, "saved": False})
     return json_response({"semantic_model": (saved or offer).get("semantic_model"),
                           "enriched": True, "saved": True})
+
+
+def _generate_copy(body, *, tenant_id, event, now, config_repo, usage_repo, tenant_repo,
+                   generator=None):
+    """One finished post from one Attention brief.
+
+    SYNCHRONOUS, like enrichment and unlike page generation: it is a single short structured call whose
+    output a tenant reads immediately. A job row, a self-invoke and a poll would be three moving parts to
+    deliver a paragraph.
+
+    The gates are `_enrich_offer`'s, in its order and for its reasons, and the release rule is the same:
+    debit first, refund anything that did not produce copy. Someone who pressed the button and got nothing
+    back must not have paid for it.
+    """
+    brief = body.get("brief")
+    if not attention_copy.usable(brief):
+        # Declined BEFORE the counter is touched. A brief with no anchor would produce a post about
+        # nothing in particular -- the free-form "write me marketing" prompt the design refuses -- so it
+        # is not attempted, and the tenant keeps the generation.
+        return error_response("That post angle is missing its subject. Reload the angles and try again.",
+                              code="missing_brief")
+
+    try:
+        config_repo = config_repo or ai_provider_config_repository()
+        usage_repo = usage_repo or ai_usage_repository()
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+
+    config = (config_repo.get(tenant_id) or {}) if hasattr(config_repo, "get") else {}
+    if not config.get("provider"):
+        return error_response("Turn on AI in Settings before writing posts.", code="ai_not_configured")
+    model_name = str(config.get("model") or default_model())
+    profile = _profile(tenant_id, tenant_repo)
+
+    # GATE 1 -- may they use AI Builder at all? First, so the refusal says "not on your plan" rather than
+    # "you have used 0 of 0".
+    entitled = can_use_ai_builder(profile, provider_config=config, now=now)
+    note_capability_decision(event, capability=AI_BUILDER, tenant_id=tenant_id, granted=entitled)
+    if not entitled:
+        return error_response(
+            "AI Builder is not included on your plan. Upgrade, or connect your own AI provider key.",
+            status_code=403, code="ai_builder_not_entitled")
+
+    # GATE 2 -- out of the page counter, by design (`ai_quota.OPERATION_COPY`).
+    entitlement = entitlement_for(profile, provider=str(config.get("provider")), now=now,
+                                  operation=OPERATION_COPY, **_configured_allowances())
+    allowance, period = entitlement["allowance"], entitlement["period"]
+
+    # GATE 3 -- the platform's own ceiling, skipped for BYOK whose spend is not ours.
+    if entitlement["source"] != "byok":
+        ok, why_not = within_platform_budget(_platform_spend(usage_repo, now), _platform_budget())
+        if not ok:
+            return error_response(why_not, status_code=429, code="platform_budget_exhausted")
+
+    try:
+        taken = usage_repo.consume_if_available(tenant_id, period, allowance=allowance, at=now)
+    except Exception:  # noqa: BLE001 - an unusable counter fails CLOSED, never hands out a free run
+        return error_response("Could not check your AI allowance. Try again shortly.",
+                              code="quota_unavailable")
+    if not taken["allowed"]:
+        _, why_not = may_generate(taken["used"], allowance, entitlement["source"])
+        return error_response(why_not or "You have used your AI generations.",
+                              status_code=429, code="quota_exhausted")
+
+    run = generator or generate_structured
+    try:
+        result = run(
+            prompt=attention_copy.build_prompt(brief),
+            json_schema=attention_copy.request_schema(),
+            system=attention_copy.SYSTEM,
+            schema_name="attention_copy",
+            model=model_name,
+            provider=str(config.get("provider")),
+            # NO api_key, exactly like the page and enrichment paths beside it. Nothing here decrypts the
+            # tenant's stored AI provider credential: every generation today runs on the platform's own
+            # Bedrock access, and a BYOK tenant admitted by `can_use_ai_builder` would reach `_byok_loop`
+            # with an empty one. That gap is PRE-EXISTING and shared by all three operations, so it is not
+            # papered over here with a fourth private decrypt -- fixing it is one resolver all three call.
+            # (Deliberately not naming the stored field: `test_shipping_keys_per_mode` guards this module
+            # against opening a CARRIER key by matching that identifier across src/, and a comment about a
+            # different credential must not weaken a guard that is doing its job.)
+            # for_page below is the §A.7 floor: a social post is published copy, so a model barred from
+            # writing for buyers is barred here too.
+            for_page=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - a provider failure is the tenant's slot back, not a 500
+        logger.warning("attention copy failed for %s: %s", tenant_id, exc)
+        _release(usage_repo, tenant_id, period, now)
+        return error_response("Could not write that post just now. Your generation was not used.",
+                              status_code=502, code="generation_failed")
+
+    copy = attention_copy.parse((result or {}).get("value"), brief)
+    if not copy:
+        _release(usage_repo, tenant_id, period, now)
+        return json_response({"copy": None, "generated": False, "reason": "no_copy_produced"})
+    return json_response({"copy": copy, "generated": True})
 
 
 def _enrich_products(offer, products_repo, tenant_id):

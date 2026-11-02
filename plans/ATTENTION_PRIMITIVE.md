@@ -578,8 +578,35 @@ anchor and every hook come from the service; the component contributes a label m
 asserts the Attention code names no pillar, format or hook style. **Copy-all exports the set as plain
 text**, which is the whole deliverable until A5 can publish, and is worth more than nothing by a long way.
 
-**Still open in A1:** the five-pillar generation call over the BYO-key adapter — turning a brief into
-finished copy. The angles themselves are usable by a human today.
+### Finished copy — generation runs in `stripe-link` (author decision 2026-11-02)
+
+`operation: "generate_copy"` on `stripe-link`'s existing `POST /ai/generate`, the third operation folded
+onto that route. **Not in `../sam/attention`**, and the reason is the comment already written above
+`_enrich_offer`: that function owns the provider adapter, the BYOK configuration and the usage counter, so
+generating anywhere else means a second service re-reaching all three — including, once BYOK generation is
+wired, decrypt on every tenant's provider key. It also costs no route budget, against a guard at 225/240.
+
+The division of labour holds §2 and §3 intact. **Attention decides what a post is about** — pillar, goal,
+instruction, anchor, hooks, native format; that is §3's "five-pillar prompt templates" and it stays there.
+`domain/attention_copy.py` only composes those given fields into a prompt, and a test asserts it names no
+pillar: add a pillar in Attention and that module does not change.
+
+**The brief arrives via a browser, so it is input, not instruction.** The prompt is assembled field by
+named field, every field whitespace-collapsed and length-capped, so a crafted brief cannot append an
+instruction of unbounded length or introduce a field the module does not name. The schema carries **no
+`maxItems`** — Bedrock rejects it and the failure is silent — so lengths are clamped in Python instead.
+`for_page=True`: a social post is published copy, so §A.7's floor applies as it does to a landing page.
+
+**The ledger rule is `enrich`'s**: debit first, refund anything that did not produce copy — a provider
+failure, an empty answer, a carousel that came back without slides. Copy is generated **per angle, on
+request**, because writing five posts a tenant wants one of would spend five generations on four they
+discard, and the cost is stated before the click.
+
+⚠️ **Pre-existing gap, found while building this and not introduced by it:** nothing in the generation
+path decrypts `ai_provider_config.api_key_ref`. The page, enrichment and copy operations all pass no
+`api_key`, so a BYOK tenant admitted by `can_use_ai_builder` reaches `_byok_loop` with an empty key.
+Everything today runs on the platform's own Bedrock access. The fix is one resolver all three call; it was
+deliberately not papered over with a fourth private decrypt.
 
 **Prod needs one write** that is not code: `environments.{dev,prod}.attention_api_base` in the prod
 `app_config` document. Until then the prod dashboard shows no panel, which is the gate working.

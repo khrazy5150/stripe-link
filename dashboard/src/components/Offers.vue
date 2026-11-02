@@ -668,6 +668,38 @@
                   </li>
                 </ul>
                 <p class="field-note">{{ brief.brief }}</p>
+
+                <!-- FINISHED COPY, per angle and on request. Per angle because writing five posts a
+                     tenant may want one of would spend five generations on four they discard; the angle
+                     above is already usable without this. The cost is said BEFORE the click, which is the
+                     whole class of complaint that prevents. -->
+                <div class="offer-enrich-row">
+                  <button class="secondary-action" type="button"
+                          :disabled="attentionWriting === brief.pillar || !canEnrich"
+                          @click="writeAttentionPost(brief)">
+                    {{ attentionWriting === brief.pillar
+                        ? "Writing…"
+                        : (attentionCopy[brief.pillar] ? "Rewrite this post" : "Write this post") }}
+                  </button>
+                  <small v-if="canEnrich" class="field-note">
+                    Uses one AI generation{{ enrichRemaining }}.
+                  </small>
+                </div>
+                <div v-if="attentionWriteError[brief.pillar]" class="keys-status-banner error">
+                  {{ attentionWriteError[brief.pillar] }}
+                </div>
+                <div v-if="attentionCopy[brief.pillar]" class="offer-attention-copy">
+                  <p><strong>{{ attentionCopy[brief.pillar].hook }}</strong></p>
+                  <!-- `white-space: pre-wrap` territory: the model's paragraph breaks are the content,
+                       and flattening them is the bug the landing renderer already had once. -->
+                  <p v-if="attentionCopy[brief.pillar].body" class="offer-attention-body">{{ attentionCopy[brief.pillar].body }}</p>
+                  <ol v-if="attentionCopy[brief.pillar].slides.length">
+                    <li v-for="(slide, i) in attentionCopy[brief.pillar].slides" :key="i">{{ slide }}</li>
+                  </ol>
+                  <button class="link-action" type="button" @click="copyAttentionPost(brief.pillar)">
+                    {{ attentionCopied === brief.pillar ? "Copied" : "Copy this post" }}
+                  </button>
+                </div>
               </div>
 
               <!-- WHICH PILLARS ARE MISSING, and why. The service answers this; showing four angles
@@ -1535,6 +1567,8 @@ function attentionShape(brief) {
 
 function resetAttention() {
   attentionBriefs.value = [];
+  attentionCopy.value = {};
+  attentionWriteError.value = {};
   attentionMissing.value = [];
   attentionError.value = "";
   attentionNeedsUnderstanding.value = false;
@@ -1570,7 +1604,12 @@ async function loadAttention() {
 function onAttentionChannelChange() {
   // Only re-fetch if angles are already on screen. Changing the platform before pressing the button
   // should not fire a request the tenant did not ask for.
-  if (attentionBriefs.value.length) loadAttention();
+  if (!attentionBriefs.value.length) return;
+  // Copy written for the previous platform is not copy for this one -- a 7-second TikTok script shown
+  // under an Instagram carousel brief would be wrong in a way that looks right.
+  attentionCopy.value = {};
+  attentionWriteError.value = {};
+  loadAttention();
 }
 
 async function copyAttentionText(text, token) {
@@ -1584,6 +1623,52 @@ async function copyAttentionText(text, token) {
 
 function copyAttentionHook(hook) {
   return copyAttentionText(hook, hook);
+}
+
+// FINISHED COPY. Generated in stripe-link, not in Attention: the provider adapter, the BYOK config and
+// the usage counter all live on that function, so writing it elsewhere would mean a second service
+// re-reaching all three (author decision 2026-11-02). The brief travels there as DATA -- the service
+// composes the prompt from named fields, so nothing the dashboard sends becomes an instruction.
+const attentionCopy = ref({});
+const attentionWriting = ref("");
+const attentionWriteError = ref({});
+
+async function writeAttentionPost(brief) {
+  if (!brief?.pillar || attentionWriting.value) return;
+  attentionWriting.value = brief.pillar;
+  attentionWriteError.value = { ...attentionWriteError.value, [brief.pillar]: "" };
+  try {
+    const body = await apiRequest("/ai/generate", {
+      method: "POST",
+      body: { operation: "generate_copy", brief, mode: getStripeMode() },
+    });
+    if (body.generated && body.copy) {
+      attentionCopy.value = { ...attentionCopy.value, [brief.pillar]: body.copy };
+    } else {
+      // The server already refunded the generation. Said plainly, because "nothing came back" and "you
+      // paid for nothing" are different things and only one of them needs an apology.
+      attentionWriteError.value = {
+        ...attentionWriteError.value,
+        [brief.pillar]: "Nothing usable came back — your generation was not used.",
+      };
+    }
+    // The allowance just moved, so the counter beside every button is now stale.
+    aiProviderStore.load().catch(() => {});
+  } catch (error) {
+    attentionWriteError.value = {
+      ...attentionWriteError.value,
+      [brief.pillar]: error.message || "Could not write that post.",
+    };
+  } finally {
+    attentionWriting.value = "";
+  }
+}
+
+function copyAttentionPost(pillar) {
+  const copy = attentionCopy.value[pillar];
+  if (!copy) return;
+  const text = [copy.hook, copy.body, ...(copy.slides || [])].filter(Boolean).join("\n\n");
+  return copyAttentionText(text, pillar);
 }
 
 function copyAttentionAll() {

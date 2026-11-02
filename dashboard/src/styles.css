@@ -8310,6 +8310,22 @@ a.orders-place { text-decoration: underline; }
 .offer-enrich-block ul { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.25rem; }
 .offer-enrich-block li { line-height: 1.5; }
 
+/* Attention angles and the copy written from them (plans/ATTENTION_PRIMITIVE.md §10a). */
+.offer-attention-anchor { margin: 0.2rem 0 0.4rem; line-height: 1.5; }
+.offer-attention-copy {
+  margin-top: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.25));
+  border-radius: 8px;
+}
+.offer-attention-copy p { margin: 0 0 0.5rem; line-height: 1.55; }
+.offer-attention-copy ol { margin: 0 0 0.5rem; padding-left: 1.3rem; display: grid; gap: 0.3rem; }
+/* THE PARAGRAPH BREAKS ARE THE CONTENT. A model writes a post in paragraphs, and collapsing them is the
+   same defect the landing renderer shipped once: the breaks were already stored and the output dropped
+   them. `pre-wrap` keeps them without turning the text into a <pre> block. */
+.offer-attention-body { white-space: pre-wrap; }
+
 /* Per-source attribution in the builder (plans/ATTENTION_PRIMITIVE.md §8). Numbers right-aligned and
    tabular so columns line up when they differ in width -- a revenue column that wanders is unreadable. */
 .attribution-table { width: 100%; border-collapse: collapse; margin-top: 0.7rem; font-size: 0.86rem; }
