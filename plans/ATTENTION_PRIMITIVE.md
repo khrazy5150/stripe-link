@@ -44,7 +44,10 @@ doesn't expose, extend the **analyzer**, not a private copy here.
 
 ## 2a. Where it lives — its own project, `../sam/attention`
 
-**Name CONFIRMED by the author 2026-11-01.** Not scaffolded: an empty stack is how `../sam/ai-video-generator` became the three-file trap documented below, and nothing can be built here until A0's consumers exist. The folder appears when the work starts.
+**Name CONFIRMED by the author 2026-11-01, and SCAFFOLDED the same day** once A0 had shipped and there
+was real work to put in it — deliberately not before, because an empty stack is how
+`../sam/ai-video-generator` became the three-file trap documented below. It holds A1's domain layer and
+no `template.yaml`: a project, not yet a deployment. See §10a.
 
 **Not `stripe-link`.** That stack is at CloudFormation's 1MB transform limit with ~138KB of headroom, at
 ~441 of 500 resources, and at 225 of a 240-event route guard. This plan needs tables, a post queue, a
@@ -94,7 +97,8 @@ Derived from the semantic model + tenant business profile; cached per offer, reg
 > It stays here, derived per channel, which is exactly what AttentionContext is for.
 >
 > **So A1 reduces to:** `hooks`, the five-pillar prompt templates, and the per-offer campaign-side cache.
-> All three live in `../sam/attention`, which does not exist yet.
+> All three live in `../sam/attention`, which now exists — `hooks` and the pillar templates are built,
+> the cache's *identity* is built and its *store* is not. See §10a.
 >
 > **Second-consumer debt: PAID 2026-11-01.** An FAQ element now seeds its questions from
 > `positioning.objections` — an FAQ exists to answer friction blocking the purchase, which is exactly what
@@ -434,14 +438,51 @@ mistaken for a generation endpoint. A5 automates the posting; it is not what mak
 
 | Phase | Deliverable |
 |---|---|
-| **A0 — Prereq** | `OfferSemanticAnalyzer` (its own plan; also independently improves SEO/slug/title) |
-| **A1 — Context** | AttentionContext derivation + cache; 5-pillar prompt templates over the BYO-key adapter |
+| **A0 — Prereq** | ✅ **SHIPPED 2026-11-01** — `OfferSemanticAnalyzer` + the `facts.positioning` enrichment tier |
+| **A1 — Context** | 🟡 **domain layer built 2026-11-01, NOTHING DEPLOYED** — see §10a |
 | **A2 — Attribution** | `?src=` slugs, click ingestion, checkout attribution, per-post/per-pillar GMV *(early — see §8)* |
 | **A3 — Campaign engine** | intensity-aware 30-day generation; batch-write the post queue |
 | **A4 — Calendar UI** | edit/drag/reschedule/inject; **export & copy-to-clipboard** (delivers value with zero publishing APIs) |
 | **A5 — Publishing** | adapter interface + Outstand (Managed Keys); reconnection state; the 15-min publish sweep |
 | **A6 — BYOK migration** | own developer apps once reviews land; guided reconnect while tenant count is small |
 | **Later** | performance-weighted pillar selection; more platforms; direct per-platform adapters |
+
+## 10a. A1 as built — `../sam/attention`, domain only (2026-11-01)
+
+The project §2a described now exists, with its own git repo like every sibling. **No `template.yaml`, no
+stack, nothing deployed** — `rm -rf` is still the whole rollback.
+
+```
+src/attention/domain/pillars.py    the five pillars -- WHAT to say, pure meaning, no platform
+src/attention/domain/channels.py   formats + hooks -- HOW it opens, the ONLY channel-aware module
+src/attention/domain/context.py    AttentionContext: the join, the cache identity, a brief sequence
+```
+
+§2's hard rule is enforced one level down, which is the point of the split: `pillars.py` names, per pillar,
+the single field of `OfferSemanticModel` it is grounded in (`positioning.problems`, `taxonomy.hierarchy`,
+`positioning.misconceptions`, `positioning.transformations`, `positioning.objections`), and a *test* asserts
+no platform word appears in it. A fourth channel therefore costs one entry in `channels.FORMATS`, not five
+rewritten pillars.
+
+Two guarantees are structural rather than remembered:
+
+- **A pillar with no material is SKIPPED, not filled.** `available()` returns only supported pillars, so an
+  un-enriched offer supports **Education alone** — a true answer, and the reason the "Understanding" button
+  exists upstream. Inventing a Problem post about a real product is exactly the sludge §1 refuses.
+- **Every hook pattern contains `{anchor}`.** A hook cannot drift off the offer's own material into a stock
+  opener, which is what "high-contrast pattern interrupt" degenerates into when generated free-form. Hooks
+  are anchored in `problems` and `misconceptions` only — never in `transformations`, because opening on the
+  payoff is the "amazing results!" post everybody scrolls past.
+
+`AttentionContext` **joins rather than extracts**: four of §3's five attributes are read straight from
+`facts.positioning`, and only `hooks` is derived. Its `cache_key` folds in `model_version`, so the day a
+pillar's grounding changes every cached context is stale by construction instead of by someone remembering
+to purge — and an unknown cache state counts as **stale, not fresh**, since a gate built from absences
+passes anything that does not exist.
+
+**Still open in A1:** the campaign-side cache *store* (a table — the identity exists, the persistence does
+not), the handlers, the five-pillar generation call over the BYO-key adapter, `template.yaml` and a deploy
+script. The repo has no remote; creating one is the author's call.
 
 ## 11. Verify before A5 hardens
 Run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a video,

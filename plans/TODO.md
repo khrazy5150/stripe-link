@@ -3617,7 +3617,14 @@ choice.
   be ordinary tenant entities (reuse existing repos/validators/screens).
 - **Money flow:** platform is the seller → rides the **existing platform-billing rail** (as Premium), not Connect.
 
-### ⭐⭐ HIGH — Attention Primitive (offer → campaign → attribution) — plan 2026-08-28, not built
+### ⭐⭐ HIGH — Attention Primitive (offer → campaign → attribution) — plan 2026-08-28; **A0+A2 SHIPPED, A1 domain built**
+- **STATUS 2026-11-01.** **A0 shipped** (`facts.positioning` on the semantic model + the enrich operation +
+  the "Understanding" button). **A2 shipped dev+prod** (`?src=` first-touch capture, per-source arrivals and
+  GMV, the Traffic sources panel and its link builder). **A1's domain layer is built in `../sam/attention`**
+  — its own git repo, five pillars + per-channel hooks + AttentionContext and its model-keyed cache
+  identity, 59 tests — but **nothing is deployed**: no `template.yaml`, no stack, no remote. Still open in
+  A1: the cache *store*, the handlers, the generation call over the BYO-key adapter, and the deploy script.
+  See `plans/ATTENTION_PRIMITIVE.md` §10a.
 - **NEW 2026-09-02 — §4a, the OWNED channel.** Every channel in the plan is RENTED (IG/TikTok/YT decide who
   sees a post); the tenant's published page is the one surface they own, and it carries no attention surface
   today. **Attention Block** is the primitive, **Page Ribbon** its first presentation (image · eyebrow ·
