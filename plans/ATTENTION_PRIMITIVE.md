@@ -78,9 +78,28 @@ call, as `platform_status` and `entitlements` already do.
 an unrelated idea ("workout videos with music"), with its own Cognito pool and Python 3.11. The name is the
 trap; see `plans/HIGGSFIELD_INTEGRATION.md` §1.
 
-## 3. Attention Context
+## 3. Attention Context — **4 of 5 SHIPPED 2026-11-01, inside the semantic model**
 
 Derived from the semantic model + tenant business profile; cached per offer, regenerated on offer change.
+
+> **A0 absorbed most of this.** `problems`, `misconceptions`, `transformations` and `objections` now live
+> on `OfferSemanticModel.facts.positioning`, derived by `domain/semantic_enrich.py` and cached on the offer
+> — not because A1 was built early, but because §2's own rule says a consumer needing a fact the analyzer
+> does not expose must EXTEND THE ANALYZER rather than keep a private copy. More than one consumer wants
+> these: a landing page answering objections and a campaign answering objections must not derive them
+> twice and disagree.
+>
+> **`hooks` deliberately did NOT move.** A high-contrast pattern interrupt is a FORMAT decision — how to
+> open a Reel versus a subject line — and §2's hard rule is that channel logic never enters the model.
+> It stays here, derived per channel, which is exactly what AttentionContext is for.
+>
+> **So A1 reduces to:** `hooks`, the five-pillar prompt templates, and the per-offer campaign-side cache.
+> All three live in `../sam/attention`, which does not exist yet.
+>
+> **Second-consumer debt:** `positioning` currently has ONE reader — the offer modal's Understanding panel,
+> which only displays it. The argument for putting it on the shared model was that a page would use it too;
+> until something does (seeding an FAQ's questions from `objections` is the obvious candidate), that
+> argument is unpaid.
 
 | Attribute | Semantic role |
 |---|---|
