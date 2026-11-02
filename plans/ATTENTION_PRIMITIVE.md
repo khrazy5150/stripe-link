@@ -560,10 +560,29 @@ The 404 rather than a 503 also proves the prod function's cross-stack read of `j
 | API | `bjhabjf4q1` | `n1fpqq3mae` |
 | tenant entitled | ✅ | ✅ |
 
-**Still open in A1:** the five-pillar generation call over the BYO-key adapter, and a dashboard surface —
-the API answers today only to `curl` with an id_token. **The one unproven link is the happy path**: no dev
-offer is enriched, so nothing has returned a populated context from the deployed service yet. Pressing
-"Understanding" on any dev offer closes it.
+### The dashboard surface — shipped dev 2026-11-02
+
+An **Attention** panel in the offer edit modal, immediately after Understanding. That adjacency is the
+design: post angles are derived from that understanding and nothing else, so the service's commonest
+refusal is answered by the button directly above the banner reporting it.
+
+It is **gated on `attention_api_base` being configured** for the channel (`app_config`, per environment,
+no hardcoded host) — so an environment without it renders nothing rather than firing at a guessed host.
+The sibling base is an *argument* to the dashboard's existing `apiRequest`, not a second fetch wrapper:
+the id-token choice, the proactive renewal and the single 401 retry are what matter around that fetch, and
+a copy of them would be a second place for the 2026-10 access-token bug to return. `apiRequest` already
+sends the current Stripe mode, which is exactly what the service requires.
+
+The panel holds **no campaign logic** — §2 again. Which pillars an offer supports, which it cannot, every
+anchor and every hook come from the service; the component contributes a label map and a clipboard. A test
+asserts the Attention code names no pillar, format or hook style. **Copy-all exports the set as plain
+text**, which is the whole deliverable until A5 can publish, and is worth more than nothing by a long way.
+
+**Still open in A1:** the five-pillar generation call over the BYO-key adapter — turning a brief into
+finished copy. The angles themselves are usable by a human today.
+
+**Prod needs one write** that is not code: `environments.{dev,prod}.attention_api_base` in the prod
+`app_config` document. Until then the prod dashboard shows no panel, which is the gate working.
 
 ## 11. Verify before A5 hardens
 Run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a video,

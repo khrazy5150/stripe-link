@@ -17,7 +17,8 @@
         "s3_page_publish": true
       },
       "pages_preview_base_url": "https://dev-live.juniorbay.com",
-      "test_pages_host": "dev-test.juniorbay.com"
+      "test_pages_host": "dev-test.juniorbay.com",
+      "attention_api_base": "https://bjhabjf4q1.execute-api.us-west-2.amazonaws.com/dev"
     },
     "prod": {
       "label": "Live",
@@ -32,7 +33,8 @@
         "s3_page_publish": true
       },
       "pages_preview_base_url": "https://prod-live.juniorbay.com",
-      "test_pages_host": "prod-test.juniorbay.com"
+      "test_pages_host": "prod-test.juniorbay.com",
+      "attention_api_base": "https://n1fpqq3mae.execute-api.us-west-2.amazonaws.com/prod"
     }
   },
   "dashboard": {

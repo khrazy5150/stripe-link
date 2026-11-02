@@ -91,6 +91,15 @@ export function getEnvironmentConfig(channel = hostnameReleaseChannel()) {
   return {};
 }
 
+export function getAttentionApiBase(channel = hostnameReleaseChannel()) {
+  // Attention is its OWN stack (../sam/attention), so its base cannot be derived from this one. Read from
+  // app_config per channel like every other base here -- no hardcoded fallback, which means an empty
+  // string until it is configured, and callers GATE on that rather than firing at a guessed host. Same
+  // pattern the Traffic sources panel uses for its tracked-link base.
+  const configured = getEnvironmentConfig(channel).attention_api_base;
+  return configured ? configured.replace(/\/$/, "") : "";
+}
+
 export function getPagesBaseUrl(channel = hostnameReleaseChannel()) {
   // Config-driven per channel (pages_base_url, deploy-populated from the stack's PagesDistributionDomainName).
   // No hardcoded CDN fallback; empty only until app_config loads (bootstrap).
@@ -309,10 +318,15 @@ export async function refreshSession() {
   return refreshInFlight;
 }
 
-export async function apiRequest(path, { method = "GET", body, params = {}, mode, raw = false, anonymous = false } = {}) {
+export async function apiRequest(path, { method = "GET", body, params = {}, mode, raw = false, anonymous = false, base: baseOverride } = {}) {
   // Backend base is hostname-derived (release channel). `mode` (test/live) is a DATA filter sent as ?mode=;
   // pass an explicit `mode` to target the OTHER Stripe mode on the same backend (cross-mode copy).
-  const base = getApiBase();
+  //
+  // `base` targets a SIBLING SERVICE on the same Cognito pool -- today only Attention. It is an argument
+  // rather than a second fetch wrapper because everything around the fetch is what matters: the id-token
+  // choice, the proactive renewal, the single 401 retry, and the error that keeps its status and payload.
+  // A second copy of that would be a second place for the 2026-10 access-token bug to come back.
+  const base = baseOverride || getApiBase();
   const url = new URL(`${base.replace(/\/$/, "")}${path}`, window.location.origin);
   const stripeMode = normalizeStripeMode(mode || getStripeMode());
   Object.entries({ tenant_id: getTenantId(), client_id: getClientId(), mode: stripeMode, ...params }).forEach(([key, value]) => {

@@ -611,6 +611,77 @@
             </div>
           </section>
 
+          <!-- ATTENTION. Placed immediately AFTER Understanding on purpose: post angles are derived from
+               that understanding and nothing else, so when the service refuses for want of one the fix is
+               the button directly above, and the banner below says exactly that
+               (plans/ATTENTION_PRIMITIVE.md §10a).
+
+               Gated on the service being CONFIGURED for this environment rather than assumed present --
+               Attention is a separate stack and its base comes from app_config, so an unconfigured
+               dashboard shows nothing instead of failing at a guessed host. Read-only and free: the
+               service derives these deterministically, which is why there is no cost sentence here. -->
+          <section v-if="editingOfferId && attentionAvailable" class="modal-form-section">
+            <header class="modal-section-header">
+              <div>
+                <h3>Attention</h3>
+                <p>
+                  Post angles for this offer — one per content pillar, shaped for the platform you pick.
+                  Nothing is posted anywhere; copy what you want to use.
+                </p>
+              </div>
+            </header>
+
+            <div class="offer-enrich-row">
+              <button class="secondary-action" type="button" :disabled="attentionLoading"
+                      @click="loadAttention">
+                {{ attentionLoading ? "Deriving…" : (attentionBriefs.length ? "Refresh angles" : "Show post angles") }}
+              </button>
+              <select v-model="attentionChannel" @change="onAttentionChannelChange">
+                <option v-for="channel in attentionChannels" :key="channel.key" :value="channel.key">
+                  {{ channel.label }}
+                </option>
+              </select>
+              <small class="field-note">Derived from the understanding above — no AI generation.</small>
+            </div>
+
+            <!-- The 409, answered with the action that fixes it. `semantic_model` is written by the button
+                 above and by nothing else, so "no analysis yet" is the common first answer here. -->
+            <div v-if="attentionNeedsUnderstanding" class="keys-status-banner is-prose">
+              <span class="banner-line">
+                Run “{{ enrichedModel ? "Refresh understanding" : "Enhance with AI" }}” above first — these
+                angles are derived from that understanding, and saving the offer does not produce it.
+              </span>
+            </div>
+            <div v-else-if="attentionError" class="keys-status-banner error">{{ attentionError }}</div>
+
+            <div v-if="attentionBriefs.length" class="offer-enrich-result">
+              <div v-for="brief in attentionBriefs" :key="brief.pillar" class="offer-enrich-block">
+                <h4>{{ attentionPillarLabel(brief.pillar) }}</h4>
+                <p class="field-note">{{ brief.goal }} · {{ attentionShape(brief) }}</p>
+                <p class="offer-attention-anchor"><strong>{{ brief.anchor }}</strong></p>
+                <ul>
+                  <li v-for="(hook, i) in brief.hooks" :key="i">
+                    {{ hook }}
+                    <button class="link-action" type="button" @click="copyAttentionHook(hook)">
+                      {{ attentionCopied === hook ? "Copied" : "Copy" }}
+                    </button>
+                  </li>
+                </ul>
+                <p class="field-note">{{ brief.brief }}</p>
+              </div>
+
+              <!-- WHICH PILLARS ARE MISSING, and why. The service answers this; showing four angles
+                   instead of five without saying so reads as a bug rather than as an un-enriched field. -->
+              <p v-if="attentionMissing.length" class="field-note">
+                Not shown: {{ attentionMissing.map(attentionPillarLabel).join(", ") }} — this offer's
+                understanding has nothing recorded for {{ attentionMissing.length === 1 ? "it" : "them" }} yet.
+              </p>
+              <button class="secondary-action" type="button" @click="copyAttentionAll">
+                {{ attentionCopied === "__all__" ? "Copied" : "Copy all angles" }}
+              </button>
+            </div>
+          </section>
+
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
           <details v-if="latestDraftOffer" class="offer-json-preview">
@@ -771,6 +842,14 @@ import SelectorCard from "./SelectorCard.vue";
 import { leadActionIcon } from "../utils/leadActionIcon";
 import { recurringSuffix } from "../utils/priceForm";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
+import {
+  CHANNELS as ATTENTION_CHANNELS,
+  NO_SEMANTIC_MODEL,
+  attentionConfigured,
+  fetchBriefs,
+  fetchContext,
+  pillarLabel,
+} from "../api/attention";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, useProductsStore } from "../stores/products";
 import { defaultCtaLabel } from "../composables/pageComposer";
@@ -1426,6 +1505,101 @@ async function enrichOffer() {
   }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// ATTENTION. A thin view over ../sam/attention: it decides which pillars an offer supports, what each
+// post is anchored to and how it opens per platform. Nothing here re-derives any of that -- a second
+// derivation in a Vue component is exactly what ATTENTION_PRIMITIVE.md §2 forbids.
+// ---------------------------------------------------------------------------------------------------
+const attentionChannels = ATTENTION_CHANNELS;
+const attentionAvailable = attentionConfigured();
+const attentionChannel = ref(ATTENTION_CHANNELS[0].key);
+const attentionBriefs = ref([]);
+const attentionMissing = ref([]);
+const attentionLoading = ref(false);
+const attentionError = ref("");
+// Its OWN flag rather than a substring match on the error text: this one refusal has an action attached
+// (the button above), and matching on a message would break the moment the service rewords it.
+const attentionNeedsUnderstanding = ref(false);
+const attentionCopied = ref("");
+
+const attentionPillarLabel = pillarLabel;
+
+function attentionShape(brief) {
+  // The platform's native format, in the units that platform uses. A carousel has no duration and a
+  // video has no slide count, so neither is invented -- the service omits whichever does not apply.
+  const parts = [brief.format_label];
+  if (brief.seconds?.length === 2) parts.push(`${brief.seconds[0]}–${brief.seconds[1]}s`);
+  if (brief.slides?.length === 2) parts.push(`${brief.slides[0]}–${brief.slides[1]} slides`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function resetAttention() {
+  attentionBriefs.value = [];
+  attentionMissing.value = [];
+  attentionError.value = "";
+  attentionNeedsUnderstanding.value = false;
+  attentionCopied.value = "";
+}
+
+async function loadAttention() {
+  if (!editingOfferId.value || attentionLoading.value) return;
+  attentionLoading.value = true;
+  attentionError.value = "";
+  attentionNeedsUnderstanding.value = false;
+  try {
+    // Both calls, because they answer different halves and only one of them is per-channel: the context
+    // says which pillars this offer CANNOT support (so the panel can explain a short list instead of
+    // looking broken), and the briefs are the posts for the chosen platform. The context is cached
+    // service-side on the offer's own model, so asking for it again costs a key lookup.
+    const [context, briefs] = await Promise.all([
+      fetchContext(editingOfferId.value),
+      fetchBriefs(editingOfferId.value, attentionChannel.value),
+    ]);
+    attentionMissing.value = context.missing_pillars || [];
+    attentionBriefs.value = briefs.briefs || [];
+  } catch (error) {
+    if (error.code === NO_SEMANTIC_MODEL) attentionNeedsUnderstanding.value = true;
+    else attentionError.value = error.message || "Could not derive post angles.";
+    attentionBriefs.value = [];
+    attentionMissing.value = [];
+  } finally {
+    attentionLoading.value = false;
+  }
+}
+
+function onAttentionChannelChange() {
+  // Only re-fetch if angles are already on screen. Changing the platform before pressing the button
+  // should not fire a request the tenant did not ask for.
+  if (attentionBriefs.value.length) loadAttention();
+}
+
+async function copyAttentionText(text, token) {
+  if (!text) return;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text).catch(() => {});
+  }
+  attentionCopied.value = token;
+  setTimeout(() => { if (attentionCopied.value === token) attentionCopied.value = ""; }, 2000);
+}
+
+function copyAttentionHook(hook) {
+  return copyAttentionText(hook, hook);
+}
+
+function copyAttentionAll() {
+  // Plain text, grouped the way it is shown. This is the whole deliverable until A5 can publish: a
+  // tenant pastes it into whatever they already use, which is worth more than nothing by a long way.
+  const text = attentionBriefs.value
+    .map((brief) => [
+      `${attentionPillarLabel(brief.pillar)} — ${brief.goal} (${attentionShape(brief)})`,
+      `Anchor: ${brief.anchor}`,
+      ...(brief.hooks || []).map((hook) => `  • ${hook}`),
+      brief.brief,
+    ].join("\n"))
+    .join("\n\n");
+  return copyAttentionText(text, "__all__");
+}
+
 function openOfferModal(offer = null) {
   resetForm();
   // Best-effort and not awaited: the panel renders immediately and the allowance fills in when it
@@ -1436,6 +1610,9 @@ function openOfferModal(offer = null) {
   enriching.value = false;
   enrichError.value = "";
   enrichNotice.value = "";
+  // Angles belong to ONE offer. Carrying the previous offer's over would show a tenant someone else's
+  // post plan for the thing they just opened.
+  resetAttention();
   // Only an AI model is shown. The deterministic one is recomputed on every read and says nothing here
   // that the form above does not already show.
   const stored = offer?.semantic_model;
