@@ -71,6 +71,13 @@ The test to apply to every tool added later: **could the tenant get this by sign
 directly?** If yes, it is relayed access and does not belong. If no — because it required their catalogue,
 their brand, their funnel, their published page — it is an application.
 
+**The strongest form of that answer is DISTRIBUTION, not prompt composition** (author, 2026-11-01).
+Composing a prompt from the offer is transformed input, and it is an argument that has to be made. Being
+the thing that schedules a Reel, posts it to three platforms on a calendar and then reports which post
+produced a sale is not an argument at all — Higgsfield does none of it and cannot. **The video is an
+ingredient; the product is the channel.** That is why generation lives inside
+`plans/ATTENTION_PRIMITIVE.md` and is sold at no lower rung.
+
 This is the same conclusion `plans/MCP_SERVER.md` reaches about tool design, from a different direction:
 high-level intents that carry the platform's opinion, never a thin relay over someone else's primitive.
 Both features fail the same way if built the lazy way, and the lazy way is also the weaker product.
@@ -305,10 +312,12 @@ prudent.
 
 ## 8. Decided, and open
 
-### DECIDED 2026-11-01 — a premium tier with an allowance that EXPIRES
+### DECIDED 2026-11-01 — video starts at the ATTENTION tier (~$69), with an allowance that EXPIRES
 
-Sold as a premium rung ($39+) including a number of generations that rises with the plan, **not priced per
-generation**. No rollover, no purchased tokens in Phase 1.
+**There is no standalone video rung.** Generation is not sold on its own at any price: it exists only
+inside `plans/ATTENTION_PRIMITIVE.md`, as an ingredient of a campaign product. An intermediate "$39
+creative" rung was proposed and **rejected 2026-11-01** — see "Why no lower rung" below. Allowance per
+plan, **not priced per generation**. No rollover, no purchased tokens in Phase 1.
 
 That is not what makes it compliant — §0b is — but it removes the appearance of unit resale: the tenant
 buys Junior Bay premium, not Higgsfield inventory counted out by us. It also inverts §4's cash-flow risk,
@@ -337,9 +346,15 @@ possibly in a month when the rolling 28-day window has already dropped the tier.
 downgrade or cancellation**: a balance that survives cancellation is a liability someone cashes out on the
 way out, while a forfeitable one is a switching cost. Same feature, opposite effect on retention.
 
-**The rung has to earn its price on more than video** (author, 2026-11-01). That is a commercial
-requirement, and it is also the §0b argument — the more the tier is Junior Bay capability rather than
-generation minutes, the further it sits from "Developer Access on a standalone basis".
+**Why no lower rung** (author, 2026-11-01). A rung selling generation *without distribution* is the
+weakest §11.5 position available — "pay us monthly for generated assets" is the closest thing to a service
+bureau that could be shipped, and it is the rung most likely to attract the tenant who signs up to farm
+cheap generation. Under a platform key that farming is billed to US, so price is the cheapest filter and it
+works before any of §4's gates fire. $69 also leaves COGS headroom for a vendor whose unit cost is an order
+of magnitude above images.
+
+**The consequence, accepted:** video earns no revenue until Attention ships. There is no "ship the
+generator first and fund the rest" path, because the generator has no standalone home. See §7.
 
 ### Still open
 

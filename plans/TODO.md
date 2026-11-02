@@ -3871,7 +3871,7 @@ worker must discover capacity and back off on the retryable error, never assert 
 signature failure is a constant that changed without telling anyone. Per-tenant cap of ~2 active jobs so
 one tenant cannot take every platform slot.
 
-**PRICING DECIDED 2026-11-01: a premium tier ($39+) with a monthly allowance that EXPIRES.** No rollover,
+**PRICING DECIDED 2026-11-01: video starts at the ATTENTION tier (~$69). There is NO standalone video rung** — a $39 creative tier was proposed and rejected, because selling generation without distribution is the weakest §11.5 position and the one that attracts generation-farming billed to us. Monthly allowance that EXPIRES. No rollover,
 no per-generation pricing, no purchased tokens in Phase 1. Expiry because the choices are not equally
 reversible — adding rollover later is a gift, removing it is a clawback — and because there is no usage
 data yet. Accepted cost: a month-end rush against the concurrency ceiling, absorbed by the QUEUE rather

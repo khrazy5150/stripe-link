@@ -1,6 +1,8 @@
 # ATTENTION_PRIMITIVE.md — customer acquisition as a native primitive
 
 Status: **design draft, not built** (author direction 2026-08-28). HIGH priority, **extra-premium tier (~$69/mo)**.
+**Video generation lives here and nowhere else (2026-11-01)** — see §9a. Consumes
+`plans/HIGGSFIELD_INTEGRATION.md`.
 Companion plan: `plans/DIGITAL_MARKETPLACE.md` (the inventory half of the same flywheel).
 Consumes: `plans/OFFER_SEMANTIC_ANALYZER.md` (**prerequisite**, design-locked, not built).
 Reuses: `plans/AI_AND_COMMERCE_ARCHITECTURE.md` §A.1–A.2 (BYO AI provider + adapter).
@@ -272,6 +274,38 @@ product), platform spend stays near zero, and the promise remains true.
 ### 9.4 Tier
 Extra-premium, **~$69/mo** (author). Model it as a **higher plan tier**, not a stackable add-on — the billing
 rail is single-line-item today (see `docs/PLATFORM_PLANS.md`); multi-item add-on billing is deferred work.
+
+## 9a. ⭐ Video generation belongs to THIS tier, and to no lower one (2026-11-01)
+
+`plans/HIGGSFIELD_INTEGRATION.md` supplies the video; this plan supplies the reason anyone may buy it. A
+"$39 creative" rung selling generation without distribution was proposed and **rejected**: it is the
+weakest §11.5 position available, it is the rung that attracts the tenant who signs up to farm cheap
+generation, and under a platform key that farming is billed to us.
+
+**The product is the channel, not the clip.** A tenant holding a Higgsfield key can generate video. They
+cannot schedule a Reel, post to three platforms on a calendar, or learn which post produced a sale. That
+is the independent value Higgsfield's §11.5 requires, and it needs no argument — it is a capability the
+vendor does not have. The five pillars in §4 are what the video is *for*; §8's attribution is what makes
+it worth paying for twice.
+
+**Consequences for this plan:**
+
+- **The $69 allowance is in SECONDS of video** (`video#<period>`), expiring monthly, no rollover — the
+  reasoning is in the Higgsfield plan's §8 and is not repeated here.
+- **The allowance is large because campaigns consume it**, not because the tier is expensive. A 30-day
+  plan across five pillars needs an order of magnitude more clips than a landing page would. That is what
+  makes the number defensible rather than arbitrary.
+- **Generation is bounded by AttentionContext** (§3), which is the same bound that separates this from
+  sludge — and it is also the §0b "generate from the offer" rule arriving from the other direction.
+- **Nothing ships before this tier does.** There is no earlier rung to fund the build, so A0–A4 are the
+  runway and the revenue starts at launch.
+- **Do not fund the Higgsfield balance early.** Concurrency is tiered on a ROLLING 28-day window, so money
+  added before there is traffic buys capacity that expires unused. Fund it as launch approaches.
+
+**The earliest defensible launch point is A4, not A5.** With attribution (A2) and the calendar's export /
+copy-to-clipboard (A4), the tenant gets a derived 30-day campaign, the generated assets, a schedule, and a
+report of what sold — a complete product with **zero publishing APIs**, and one that still cannot be
+mistaken for a generation endpoint. A5 automates the posting; it is not what makes the tier legitimate.
 
 ## 10. Phases
 
