@@ -54,6 +54,12 @@ TRIAL_PERIOD = "trial"
 # longer generate a page.
 OPERATION_PAGE = "page"
 OPERATION_IMAGE = "image"
+# Enrichment SHARES THE PAGE COUNTER, deliberately (author 2026-11-01). It is the same class of spend --
+# one structured call on the tenant's configured provider -- and `entitlement_for` branches only on
+# OPERATION_IMAGE, so naming it here routes it to the page path with no code. A third allowance would be a
+# third number for a tenant to understand, for a call that costs a fraction of a page; if the ledger later
+# shows enrichment crowding out real page generations, giving it its own counter is a one-line branch.
+OPERATION_ENRICH = "enrich_offer"
 IMAGE_PREFIX = "images#"
 
 

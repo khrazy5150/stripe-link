@@ -35,6 +35,7 @@ then drops it silently, and a dropped job is indistinguishable from a slow one -
 `queued` forever while the tenant's generation was never refunded. Nothing else can tell the
 difference, so something has to look.
 """
+import functools
 import json
 import logging
 import os
@@ -53,9 +54,12 @@ from stripe_link.domain.ai_provision import (chosen_badges, compose_sections, ne
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
-from stripe_link.domain.ai_quota import (OPERATION_IMAGE, PLATFORM_TENANT, entitlement_for,
-                                          image_qualities_for, may_generate, period_key,
-                                          within_platform_budget)
+from stripe_link.domain.ai_quota import (OPERATION_ENRICH, OPERATION_IMAGE, PLATFORM_TENANT,
+                                          entitlement_for, image_qualities_for, may_generate,
+                                          period_key, within_platform_budget)
+from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
+from stripe_link.domain.semantic import analyze_offer
+from stripe_link.domain.semantic_enrich import enrich
 from stripe_link.domain import ai_images
 from stripe_link import ai_image_client
 from stripe_link.api_auth import note_capability_decision
@@ -130,6 +134,17 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
         return _generate_image(body, tenant_id=tenant_id, event=event, now=now, pick=pick,
                                jobs_repo=jobs_repo, usage_repo=usage_repo, tenant_repo=tenant_repo,
                                events_repo=events_repo)
+
+    # THE ENRICHMENT OPERATION, folded on for the same reason the image one was: 225 Api events against a
+    # guard that trips at 240, and this is this route's question asked about a different thing -- same
+    # tenant, same three gates, same counter. It is also the only function with Bedrock, the BYOK provider
+    # config and the usage counter already in reach, so hanging it elsewhere would mean widening another
+    # function's grants to re-reach what this one holds.
+    if str(body.get("operation") or "").strip().lower() == OPERATION_ENRICH:
+        return _enrich_offer(body, tenant_id=tenant_id, event=event, now=now,
+                             offers_repo=offers_repo, products_repo=products_repo,
+                             config_repo=config_repo, usage_repo=usage_repo,
+                             tenant_repo=tenant_repo, generator=generator)
 
     # TWO SOURCES, ONE CONTRACT. `product_id` is the fork off the product wizard: the brief is PROJECTED from
     # a product the tenant already has, plus tenant config, plus the fork's one step -- so nothing the product
@@ -296,6 +311,120 @@ def _configured_image_allowances():
     except Exception as exc:  # noqa: BLE001 - an unreadable config must not take the screen down
         print(f"[ai] image allowances unreadable, using fallbacks: {type(exc).__name__}: {exc}")
         return {}
+
+
+def _enrich_offer(body, *, tenant_id, event, now, offers_repo, products_repo, config_repo,
+                  usage_repo, tenant_repo, generator=None):
+    """Fill the offer's semantic model with what a catalogue cannot say (plans/OFFER_SEMANTIC_P4.md P4.1).
+
+    SYNCHRONOUS, unlike page and image generation. Those queue a job because they take tens of seconds and
+    produce something a tenant then reviews; this is one small structured call whose whole output is a
+    cached model nobody looks at directly. A job row, a self-invoke and a poll would be three moving parts
+    to deliver a field.
+
+    The gates are the page path's, in the page path's order, because this spends the page counter -- it is
+    the same class of spend on the same configured provider, and a third allowance would be a third number
+    for a tenant to understand (`ai_quota.OPERATION_ENRICH`).
+
+    **The slot is RELEASED when the model says nothing.** `enrich` degrades to the deterministic model on
+    any failure, which is right for the caller and wrong for the ledger: a tenant who pressed the button
+    and got nothing back must not have paid for it. Debit first, refund on anything that did not produce
+    enrichment -- the rule `plans/HIGGSFIELD_INTEGRATION.md` §2 states for the same shape.
+    """
+    offer_id = str(body.get("offer_id") or "").strip()
+    if not offer_id:
+        return error_response("offer_id is required.", code="missing_offer")
+
+    mode = _mode_of(body)
+    try:
+        offers_repo = offers_repo or offers_repository(mode=mode)
+        products_repo = products_repo or products_repository(mode=mode)
+        config_repo = config_repo or ai_provider_config_repository()
+        usage_repo = usage_repo or ai_usage_repository()
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+
+    offer = offers_repo.get(tenant_id, offer_id)
+    if not offer:
+        return error_response("That offer was not found.", status_code=404, code="not_found")
+
+    config = (config_repo.get(tenant_id) or {}) if hasattr(config_repo, "get") else {}
+    if not config.get("provider"):
+        return error_response("Turn on AI in Settings before enriching an offer.",
+                              code="ai_not_configured")
+    model_name = str(config.get("model") or default_model())
+    profile = _profile(tenant_id, tenant_repo)
+
+    # GATE 1 -- may they use AI Builder at all? Asked first so the refusal says "not on your plan" rather
+    # than "you have used 0 of 0".
+    entitled = can_use_ai_builder(profile, provider_config=config, now=now)
+    note_capability_decision(event, capability=AI_BUILDER, tenant_id=tenant_id, granted=entitled)
+    if not entitled:
+        return error_response(
+            "AI Builder is not included on your plan. Upgrade, or connect your own AI provider key.",
+            status_code=403, code="ai_builder_not_entitled")
+
+    # GATE 2 -- how many, and out of which counter. The page one, by design.
+    entitlement = entitlement_for(profile, provider=str(config.get("provider")), now=now,
+                                  operation=OPERATION_ENRICH, **_configured_allowances())
+    allowance, period = entitlement["allowance"], entitlement["period"]
+
+    # GATE 3 -- the platform's own ceiling, skipped for BYOK whose spend is not ours.
+    if entitlement["source"] != "byok":
+        ok, why_not = within_platform_budget(_platform_spend(usage_repo, now), _platform_budget())
+        if not ok:
+            return error_response(why_not, status_code=429, code="platform_budget_exhausted")
+
+    try:
+        taken = usage_repo.consume_if_available(tenant_id, period, allowance=allowance, at=now)
+    except Exception:  # noqa: BLE001 - an unusable counter fails CLOSED, never hands out a free run
+        return error_response("Could not check your AI allowance. Try again shortly.",
+                              code="quota_unavailable")
+    if not taken["allowed"]:
+        _, why_not = may_generate(taken["used"], allowance, entitlement["source"])
+        return error_response(why_not or "You have used your AI generations.",
+                              status_code=429, code="quota_exhausted")
+
+    base = analyze_offer(offer, _enrich_products(offer, products_repo, tenant_id))
+    run = generator or generate_structured
+    enriched = enrich(
+        base,
+        generate=functools.partial(run, model=model_name, provider=str(config.get("provider"))),
+        business=str((profile or {}).get("business_name") or ""),
+        now=now,
+    )
+
+    if (enriched.get("interpretation") or {}).get("source") != "ai":
+        # Nothing was produced -- no provider reachable, a refusal, or an answer that said nothing. The
+        # tenant keeps their slot, and the deterministic model they already had is returned unchanged.
+        _release(usage_repo, tenant_id, period, now)
+        return json_response({"semantic_model": base, "enriched": False,
+                              "reason": "no_enrichment_produced"})
+
+    offer["semantic_model"] = enriched
+    try:
+        saved = offers_repo.put(offer)
+    except RepositoryError as exc:
+        # The call was made and the tokens spent, so the slot is NOT released -- but the tenant gets the
+        # model back so the work is not lost to a storage failure they cannot act on.
+        logger.warning("enriched model not saved for %s: %s", offer_id, exc)
+        return json_response({"semantic_model": enriched, "enriched": True, "saved": False})
+    return json_response({"semantic_model": (saved or offer).get("semantic_model"),
+                          "enriched": True, "saved": True})
+
+
+def _enrich_products(offer, products_repo, tenant_id):
+    """The offer's landing products, keyed by id. Mirrors `handlers/offers._landing_products` rather than
+    importing it: one is the save path's naming input and this is the enrichment path's grounding, and a
+    cross-handler import to share four lines would couple two deploys."""
+    out = {}
+    for opp in stage_opportunities(offer, STAGE_LANDING):
+        product_id = str((opp or {}).get("product_id") or "")
+        if product_id and product_id not in out:
+            product = products_repo.get(tenant_id, product_id)
+            if product:
+                out[product_id] = product
+    return out
 
 
 def _generate_image(body, *, tenant_id, event, now, pick, jobs_repo, usage_repo, tenant_repo,

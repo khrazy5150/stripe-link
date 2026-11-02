@@ -17,9 +17,31 @@ Status: **P4.0 SHIPPED. P4.1 BUILT 2026-11-01 (domain layer; no trigger yet).** 
 > `plans/ATTENTION_PRIMITIVE.md`, whose own rule says a consumer needing a fact the analyzer does not
 > expose must extend the ANALYZER. `hooks` stayed in Attention: a pattern interrupt is a format decision.
 >
-> **What is NOT built: the trigger.** `enrich()` takes `generate` injected and nothing calls it — no
-> handler, no quota check, no write to `offer.semantic_model`. The open decision below (button vs
-> auto-at-save) is still open.
+> **The trigger landed 2026-11-01 too**, as `operation: "enrich_offer"` on the existing
+> `POST /ai/generate` — **no new route, no new function, no new table, no new grant.** It is folded onto
+> that route for the reason the image operation already records there: 225 Api events against a guard that
+> trips at 240, and it is the same question about a different thing. `AiGenerateFunction` is also the only
+> function already holding Bedrock, the BYOK provider config and the usage counter, so hanging it elsewhere
+> would mean widening another function's grants to re-reach what this one has.
+>
+> **It spends the PAGE counter** (`ai_quota.OPERATION_ENRICH`), decided 2026-11-01: enrichment is "a
+> specialised page" — the same class of spend on the same configured provider — and a third allowance is a
+> third number for a tenant to understand. `entitlement_for` branches only on `OPERATION_IMAGE`, so naming
+> the operation routes it to the page path with no code. If the ledger later shows enrichment crowding out
+> real page generations, its own counter is a one-line branch.
+>
+> **Synchronous, unlike page and image generation.** Those queue a job because they take tens of seconds
+> and produce something a tenant reviews; this is one small call whose whole output is a cached model
+> nobody looks at directly. A job row, a self-invoke and a poll would be three moving parts to deliver a
+> field.
+>
+> **The slot is RELEASED when the model says nothing.** `enrich` degrades to the deterministic model on any
+> failure, which is right for the caller and wrong for the ledger — a tenant who pressed the button and got
+> nothing must not have paid for it. A storage failure after a successful call does NOT release: the tokens
+> were really spent, and the model is returned anyway so the work is not lost to something they cannot act
+> on.
+>
+> **Still not built: the dashboard button.** The endpoint is callable; nothing in the UI calls it.
 >
 > **Verified against real Bedrock on a real dev offer**, which found a bug no unit test could: Bedrock's
 > structured-output subset **rejects `maxItems`**, so every call failed validation and `enrich`'s graceful
@@ -170,8 +192,10 @@ instead. Folds into that plan's generation pipeline rather than standing alone.
 ---
 
 ## Open decisions (recommendation first)
-1. **Enrichment trigger — on-demand button vs auto-at-save.** *Recommend:* an **"✨ Enhance with AI"** button
-   first — tenant-triggered, cost-visible, human-in-the-loop (A.5); auto-at-save later once trusted.
+1. ~~**Enrichment trigger — on-demand button vs auto-at-save.**~~ **DECIDED 2026-11-01: on-demand.** The
+   endpoint exists (`operation: "enrich_offer"`); it is tenant-triggered, cost-visible and
+   human-in-the-loop, and nothing calls it automatically. Auto-at-save remains possible later once the
+   ledger shows what it actually costs. The **button itself is not built**.
 2. **Merchant feed transport — hosted file vs Content API.** *Recommend:* **hosted scheduled feed file** first
    (no per-tenant OAuth); Content API when per-tenant push is worth the auth cost.
 3. **Do enriched soft facts write back to the Product?** (e.g., extracted flavor/size.) *Recommend:* **no** —
