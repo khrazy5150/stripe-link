@@ -416,6 +416,36 @@
                   </label>
                 </div>
             </SettingsAccordion>
+            <!-- WHICH POST SENT THEM, and what it earned (plans/ATTENTION_PRIMITIVE.md §8). Only on a
+                 page that has actually been arrived at by a named source: the rows come from the
+                 PUBLISHED artifact's tracker, so an unpublished page has nothing here rather than a table
+                 of zeros standing in for traffic nobody counted. -->
+            <SettingsAccordion v-if="pageAttribution.length" label="Traffic sources"
+                               hint="Who sent them, and what it earned"
+                               :icon="SETTINGS_ICONS['Traffic sources']"
+                               :open="openSetting === 'Traffic sources'"
+                               @toggle="toggleSetting('Traffic sources')">
+              <small class="field-note">
+                Add <code>?src=your-label</code> to the link you post. First touch wins, so a visitor who
+                comes back later is still credited to the post that found them.
+              </small>
+              <table class="attribution-table">
+                <thead>
+                  <tr><th>Source</th><th>People</th><th>Sales</th><th>Revenue</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in pageAttribution" :key="row.source">
+                    <td class="attribution-source">{{ row.source }}</td>
+                    <!-- An em dash, not 0: this source has sales but was never seen arriving, which
+                         happens when someone bought before the tracker shipped. -->
+                    <td>{{ row.arrivals === undefined ? "—" : row.arrivals }}</td>
+                    <td>{{ row.conversions }}</td>
+                    <td>{{ formatMoney(row.revenue_cents) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </SettingsAccordion>
+
             <SettingsAccordion label="Favicon" hint="The browser-tab icon" :icon="SETTINGS_ICONS['Favicon']" :open="openSetting === 'Favicon'" @toggle="toggleSetting('Favicon')">
                 <label class="offer-field">
                   <span>Favicon</span>
@@ -5185,15 +5215,22 @@ const previewNeedsSite = computed(() =>
 // to URLs -- the id is a hash we own, and the dashboard should never have to reproduce it to read its own
 // numbers.
 const linkClicks = ref({});
-async function loadLinkClicks(pageId) {
+// Per-source arrivals joined to the money they produced (plans/ATTENTION_PRIMITIVE.md §8). Comes from the
+// SAME single-page read as the link clicks rather than a second request: the server already resolves both,
+// and a separate call would double the cost of opening the builder to show two panels of the same page.
+const pageAttribution = ref([]);
+async function loadPageNumbers(pageId) {
   linkClicks.value = {};
+  pageAttribution.value = [];
   if (!pageId) return;
   try {
     const body = await apiRequest(`/pages/${encodeURIComponent(pageId)}`);
     linkClicks.value = body?.page?.link_clicks || {};
+    pageAttribution.value = body?.page?.attribution || [];
   } catch (err) {
     // Numbers are decoration on a builder. Never let them stop a tenant editing the page.
     linkClicks.value = {};
+    pageAttribution.value = [];
   }
 }
 function linkClicksFor(url) {
@@ -7082,6 +7119,7 @@ const SETTINGS_ICONS = {
   "SEO": ["M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z", "M21 21l-5.2-5.2"],
   "Discoverability": ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M3.6 9h16.8M3.6 15h16.8", "M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18Z"],
   "Analytics": ["M4.5 19.5V13M9.75 19.5V8.25M15 19.5v-4.5M20.25 19.5V5.25"],
+  "Traffic sources": ["M3.75 19.5h16.5", "M7.5 19.5v-6M12 19.5V7.5M16.5 19.5v-9", "M4.5 4.5l4.5 3 4.5-3 4.5 3"],
   "Favicon": ["M12 3.75l2.5 5.2 5.75.83-4.16 4.02 1 5.7L12 16.83l-5.09 2.67 1-5.7L3.75 9.78l5.75-.83L12 3.75Z"],
 };
 
@@ -8068,7 +8106,7 @@ function editPage(page) {
   // The wizard still CREATES them: picking a Site, a kind and a collection is a good creation flow and is
   // not what was broken. `editOfferlessPage` is kept for the grid-membership edit it still owns.
   populateBuilderFromPage(page);
-  loadLinkClicks(page.page_id);
+  loadPageNumbers(page.page_id);
   builderExistingPageId.value = page.page_id;
   builderOriginalPage.value = { ...page };
   builderOpen.value = true;

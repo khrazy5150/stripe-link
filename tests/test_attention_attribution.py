@@ -292,5 +292,39 @@ class TheReportRows(unittest.TestCase):
         self.assertEqual(self.rows(None, None), [])
 
 
+class TheDashboardView(unittest.TestCase):
+    """The rows have a reader. Pinned here because a field written and never displayed is the fault this
+    whole feature was built to avoid repeating."""
+
+    @property
+    def builder(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "LandingPages.vue").read_text()
+
+    def test_one_fetch_serves_both_panels(self):
+        """A second request would double the cost of opening the builder to show two panels of the same
+        document, and the server already resolves both on that read."""
+        block = self.builder.split("async function loadPageNumbers(", 1)[1][:700]
+        self.assertIn("link_clicks", block)
+        self.assertIn("attribution", block)
+        self.assertEqual(block.count("await apiRequest"), 1)
+
+    def test_the_panel_hides_when_nothing_was_measured(self):
+        """The rows come from the PUBLISHED artifact's tracker, so an unpublished page shows nothing
+        rather than a table of zeros standing in for traffic nobody counted."""
+        self.assertIn('v-if="pageAttribution.length"', self.builder)
+
+    def test_a_source_with_no_arrivals_shows_a_dash_not_a_zero(self):
+        """It has sales and was never seen arriving — someone bought before the tracker shipped. Zero
+        would claim we measured and found none."""
+        self.assertIn('row.arrivals === undefined ? "—" : row.arrivals', self.builder)
+
+    def test_it_tells_the_tenant_how_to_use_it(self):
+        """A report nobody knows how to feed is a report nobody feeds."""
+        self.assertIn("?src=", self.builder)
+        self.assertIn("First touch wins", self.builder)
+
+
 if __name__ == "__main__":
     unittest.main()

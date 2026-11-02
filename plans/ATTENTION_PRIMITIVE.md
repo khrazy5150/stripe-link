@@ -310,7 +310,18 @@ established patterns, and costs essentially nothing.
 >
 > **Still to build:** the per-PILLAR view and the weighting loop — "problem carousels convert 3.8x better
 > than transformation videos". That needs campaigns to exist before a pillar is a thing, so it waits for
-> A3. Per-POST is answerable today. The dashboard does not render the rows yet either.
+> A3. Per-POST is answerable today.
+>
+> **The dashboard renders it** as a "Traffic sources" accordion in the builder — source, people, sales,
+> revenue — shown only when something was actually measured, because the rows come from the published
+> artifact's tracker and a table of zeros would stand in for traffic nobody counted. A source with sales
+> and no arrivals shows an em dash rather than 0: someone bought before the tracker shipped, and zero
+> would claim we measured and found none. The panel also says how to feed it (`?src=your-label`, first
+> touch wins), because a report nobody knows how to feed is a report nobody feeds.
+>
+> It rides the SAME single-page read the link clicks already used (`loadPageNumbers`, renamed from
+> `loadLinkClicks`) — a second request would double the cost of opening the builder to show two panels of
+> one document.
 
 
 

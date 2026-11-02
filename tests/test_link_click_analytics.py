@@ -154,11 +154,16 @@ class DashboardTests(unittest.TestCase):
     def test_counts_are_fetched_lazily_when_a_page_is_opened(self):
         # Not attached to the listing: it is one query per page, so the listing would pay for it on every row
         # while only a link hub has anything to show.
-        self.assertIn("async function loadLinkClicks(", BUILDER)
-        self.assertIn("loadLinkClicks(page.page_id);", BUILDER)
+        #
+        # Renamed from `loadLinkClicks` 2026-11-01: the same single-page read now also carries per-source
+        # attribution (plans/ATTENTION_PRIMITIVE.md §8), so the name says numbers rather than clicks. ONE
+        # fetch for both -- a second request would double the cost of opening the builder to show two
+        # panels of the same document.
+        self.assertIn("async function loadPageNumbers(", BUILDER)
+        self.assertIn("loadPageNumbers(page.page_id);", BUILDER)
 
     def test_a_failed_fetch_never_blocks_editing(self):
-        block = BUILDER.split("async function loadLinkClicks(", 1)[1][:600]
+        block = BUILDER.split("async function loadPageNumbers(", 1)[1][:600]
         self.assertIn("catch", block)
         self.assertIn("linkClicks.value = {};", block)
 

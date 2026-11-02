@@ -8309,3 +8309,24 @@ a.orders-place { text-decoration: underline; }
 }
 .offer-enrich-block ul { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.25rem; }
 .offer-enrich-block li { line-height: 1.5; }
+
+/* Per-source attribution in the builder (plans/ATTENTION_PRIMITIVE.md §8). Numbers right-aligned and
+   tabular so columns line up when they differ in width -- a revenue column that wanders is unreadable. */
+.attribution-table { width: 100%; border-collapse: collapse; margin-top: 0.7rem; font-size: 0.86rem; }
+.attribution-table th {
+  text-align: right;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 0 0.35rem;
+}
+.attribution-table th:first-child, .attribution-table td:first-child { text-align: left; }
+.attribution-table td {
+  text-align: right;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border, rgba(148, 163, 184, 0.25));
+  font-variant-numeric: tabular-nums;
+}
+.attribution-source { font-weight: 600; word-break: break-all; }
