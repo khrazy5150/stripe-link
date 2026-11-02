@@ -1724,10 +1724,21 @@ what sold, which orders, build me a landing page for this product. Full write-up
 MCP is the delivery surface for something already designed. It also needs no new API Gateway resources,
 so unlike every other integration it does not wait on the SAM transform limit.
 
-**The prerequisite is Phase 2 of `plans/API_AUTHENTICATION.md`** — the authorizer, which that plan says is
-all that remains. An MCP server is an authentication product: "let a third party act on a tenant's behalf"
-cannot ship while a caller who knows a `tenant_id` is that tenant. Not a reason to defer the idea so much
-as a reason it is useful, since it gives Phase 2 a consumer.
+~~**The prerequisite is Phase 2 of `plans/API_AUTHENTICATION.md`**~~ — **CLEARED 2026-10-11.** The
+authorizer is enforcing: a private route with no token returns 401 on dev AND prod (verified 2026-11-01).
+Nothing blocks this now except priority.
+
+**The commercial case got stronger (2026-11-01).** `ai_byok.py` already lets a tenant pay for their own AI
+with their own API key — but a Claude or ChatGPT **subscription is not an API key**, so subscribers cannot
+use what they already pay for. MCP is the only door that reaches them, because the inference happens inside
+their client. Treat it as DISTRIBUTION ("start a store from inside Claude") rather than cost: it is a third
+door beside Bedrock and BYOK, not a replacement, and publish-time generation can never move to it.
+
+**Build it as a thin adapter over the domain layer the dashboard already calls**, never a second code path,
+or the two doors drift on what a valid offer is. Measured: a v1 surface (offers, products, pages, config,
+collections) is 1,270 lines with 48 `event` call sites to lift, and repos are already injected. Do the
+spine extraction plus a LOCAL MCP server first — it defers OAuth/DCR, which is the whole cost — and the
+extraction is worth having even if MCP never ships.
 
 **Phased read-only → drafts → nothing that moves money.** No refunds, no live price changes, ever. A
 republish is what fixed the funnel on 2026-10-08 and a misfired one is what served a buyer the wrong page;
