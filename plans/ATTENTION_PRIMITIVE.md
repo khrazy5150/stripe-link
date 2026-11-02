@@ -42,6 +42,40 @@ named consumers — not a second, parallel semantic extraction.**
 AttentionContext is the channel-aware consumer. If a campaign needs a fact about the offer that the analyzer
 doesn't expose, extend the **analyzer**, not a private copy here.
 
+## 2a. Where it lives — its own project, `../sam/attention` (author 2026-11-01)
+
+**Not `stripe-link`.** That stack is at CloudFormation's 1MB transform limit with ~138KB of headroom, at
+~441 of 500 resources, and at 225 of a 240-event route guard. This plan needs tables, a post queue, a
+scheduling sweep, publishing adapters and an OAuth reconnection flow — it would not fit, and it would be
+competing for the budget every other feature needs.
+
+**And not `../sam/ai-image-generator`.** That is the GENERATOR service: metered media against a platform
+key, a server-side quality ceiling, permanent CDN URLs, takedown with purge. `plans/HIGGSFIELD_INTEGRATION.md`
+§1 puts video generation there because video is another generator beside images. **Attention is not a
+generator — it is a consumer of one.** Campaign derivation, scheduling, publishing and attribution have
+nothing in common with "turn a prompt into a file", and folding them together would make one service with
+two unrelated failure modes and two unrelated deploy cadences.
+
+So: **two distinct projects**, and the dependency runs one way.
+
+```
+  stripe-link            offer, semantic model, attribution sink
+       │
+       ▼
+  attention              AttentionContext, campaigns, calendar, publishing, attribution
+       │
+       ▼
+  ai-image-generator     images + video, metered against the platform key
+```
+
+It shares what the admin site already shares, the same way: the **Cognito pool** by parameter and the
+**tenant profile** by a scoped IAM read. Being signed in is not being entitled — entitlement is read per
+call, as `platform_status` and `entitlements` already do.
+
+**NOT `../sam/ai-video-generator`** either. That folder exists and is an abandoned three-file scaffold for
+an unrelated idea ("workout videos with music"), with its own Cognito pool and Python 3.11. The name is the
+trap; see `plans/HIGGSFIELD_INTEGRATION.md` §1.
+
 ## 3. Attention Context
 
 Derived from the semantic model + tenant business profile; cached per offer, regenerated on offer change.
