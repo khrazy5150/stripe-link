@@ -529,8 +529,12 @@ Three things only a real deployment could establish:
 - **The cross-stack read works.** Invoking the dev function with a real tenant's claims returns
   `403 not_entitled`, not `503 profile_unavailable`. A wrong key or a missing IAM grant would have produced
   the 503, so the 403 proves the profile read end to end — and proves the beta gate refuses a live trial.
-- **The key formats match real data.** Dev offers are stored exactly `PK=TENANT#<tenant>`,
-  `SK=OFFER#<mode>#<offer_id>`, and a profile's PK and SK are both `TENANT#<tenant>`.
+- **The key formats match real data, and the read is genuinely MODE-SCOPED.** Dev offers are stored
+  exactly `PK=TENANT#<tenant>`, `SK=OFFER#<mode>#<offer_id>`, and a profile's PK and SK are both
+  `TENANT#<tenant>`. Proven against a pair that exists in one mode only: `offer_EpxWZToCae7` (test-only)
+  resolves in `?mode=test` and **404s in `?mode=live`**, and `offer_Ou5hhPV3WNf` (live-only) does the
+  reverse. A mode-blind read would have answered both. A probe that accidentally sent an empty mode got
+  `400 mode_required`, which is the never-default rule holding on real traffic rather than in a test.
 - **⚠️ `semantic_model` is persisted by ONE thing, and almost no offer has it.** 0 of 12 dev offers carried
   one. It is written only by the enrich operation behind the "Understanding" button (`ai_generate.py:404`);
   **saving an offer does not produce it** — `offers.py` derives a model transiently for the slug and throws
@@ -539,9 +543,15 @@ Three things only a real deployment could establish:
   nobody has enriched, so **enrichment is a prerequisite step in the campaign flow**, not an optional
   polish — either the UI walks the tenant through it or the campaign route runs it on their behalf.
 
+The dev tenant `586173f0…` now carries `beta: ["attention"]` (granted 2026-11-02 with a targeted
+`update_item` using `list_append(if_not_exists(beta, []), …)`, not a load-mutate-put — a profile has many
+writers and a wholesale put loses the siblings). The gate moved from `403 not_entitled` to `409
+no_semantic_model`, which is the grant working.
+
 **Still open in A1:** the five-pillar generation call over the BYO-key adapter, and a dashboard surface —
-the API answers today only to `curl` with an id_token. And nobody is entitled yet: a tenant needs
-`beta: ["attention"]` on their profile.
+the API answers today only to `curl` with an id_token. **The one unproven link is the happy path**: no dev
+offer is enriched, so nothing has returned a populated context from the deployed service yet. Pressing
+"Understanding" on any dev offer closes it.
 
 ## 11. Verify before A5 hardens
 Run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a video,
