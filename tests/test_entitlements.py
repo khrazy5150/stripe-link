@@ -6,8 +6,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from stripe_link.domain.entitlements import (
-    CAPABILITIES,
     FREE_TIER_CAPABILITIES,
+    GENERAL_CAPABILITIES,
     EntitlementError,
     assert_entitled,
     is_entitled,
@@ -15,7 +15,12 @@ from stripe_link.domain.entitlements import (
     tenant_entitlement_set,
 )
 
-CAPABILITIES_KEYS = set(CAPABILITIES)
+# What "everything" means: the SHIPPED catalogue. Not `CAPABILITIES`, which includes anything named but
+# beta-only -- the three "full access" assertions below used to be able to say CAPABILITIES only because
+# BETA_CAPABILITIES was empty, and `attention` (2026-11-01) made that accident visible. The distinction is
+# the point of the set: a beta feature must not land on every exempt tenant and every trial the day it is
+# named. See test_beta_capabilities.py.
+EVERYTHING = set(GENERAL_CAPABILITIES)
 from stripe_link.entitlement_gate import require_capability
 from handlers import pages, services
 
@@ -42,14 +47,14 @@ class EntitlementModelTests(unittest.TestCase):
 
     def test_platform_trial_gets_full_access(self):
         # A fresh signup (trial, no subscription) sees ALL features until the trial expires.
-        self.assertEqual(tenant_entitlement_set({"billing_status": "trial"}), set(CAPABILITIES_KEYS))
-        self.assertEqual(tenant_entitlement_set({}), set(CAPABILITIES_KEYS))  # missing status defaults to trial
+        self.assertEqual(tenant_entitlement_set({"billing_status": "trial"}), EVERYTHING)
+        self.assertEqual(tenant_entitlement_set({}), EVERYTHING)  # missing status defaults to trial
 
     def test_expired_platform_trial_downgrades_to_free_tier(self):
         # Free-forever model: expiry is a downgrade to the free floor, not a wall.
         expired = {"billing_status": "trial", "trial_ends_at": 1000}
         self.assertEqual(tenant_entitlement_set(expired, now=2000), set(FREE_TIER_CAPABILITIES))
-        self.assertEqual(tenant_entitlement_set(expired, now=500), set(CAPABILITIES_KEYS))  # before expiry
+        self.assertEqual(tenant_entitlement_set(expired, now=500), EVERYTHING)  # before expiry
 
     def test_suspended_gets_no_free_floor(self):
         suspended = {"billing_status": "suspended", "entitlements": ["booking"]}
@@ -63,7 +68,7 @@ class EntitlementModelTests(unittest.TestCase):
         self.assertNotIn("booking", tenant_entitlement_set(trialing))
 
     def test_exempt_gets_everything(self):
-        self.assertEqual(tenant_entitlement_set({"billing_exempt": True}), set(CAPABILITIES_KEYS))
+        self.assertEqual(tenant_entitlement_set({"billing_exempt": True}), EVERYTHING)
 
     def test_is_entitled_and_assert(self):
         sub = {"billing_status": "active", "stripe_subscription_id": "sub_1", "entitlements": ["landing_pages"]}

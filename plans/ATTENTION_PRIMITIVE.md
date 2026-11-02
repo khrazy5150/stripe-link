@@ -447,15 +447,19 @@ mistaken for a generation endpoint. A5 automates the posting; it is not what mak
 | **A6 — BYOK migration** | own developer apps once reviews land; guided reconnect while tenant count is small |
 | **Later** | performance-weighted pillar selection; more platforms; direct per-platform adapters |
 
-## 10a. A1 as built — `../sam/attention`, domain only (2026-11-01)
+## 10a. A1 as built — `../sam/attention` (2026-11-01)
 
-The project §2a described now exists, with its own git repo like every sibling. **No `template.yaml`, no
-stack, nothing deployed** — `rm -rf` is still the whole rollback.
+The project §2a described exists, with its own private GitHub repo and its own SAM stack, like every
+sibling. **A1's read surface is complete**; A3 onwards is not started.
 
 ```
 src/attention/domain/pillars.py    the five pillars -- WHAT to say, pure meaning, no platform
 src/attention/domain/channels.py   formats + hooks -- HOW it opens, the ONLY channel-aware module
 src/attention/domain/context.py    AttentionContext: the join, the cache identity, a brief sequence
+src/attention/entitlement.py       the gate -- a mirror of stripe-link's rule, fail-closed
+src/attention/stripe_link.py       the ONLY file that knows stripe-link's storage shape
+src/attention/cache.py             the per-offer context store, read-through and allowed to fail
+src/handlers/api.py                /health, /me/context, /me/briefs
 ```
 
 §2's hard rule is enforced one level down, which is the point of the split: `pillars.py` names, per pillar,
@@ -480,9 +484,42 @@ pillar's grounding changes every cached context is stale by construction instead
 to purge — and an unknown cache state counts as **stale, not fresh**, since a gate built from absences
 passes anything that does not exist.
 
-**Still open in A1:** the campaign-side cache *store* (a table — the identity exists, the persistence does
-not), the handlers, the five-pillar generation call over the BYO-key adapter, `template.yaml` and a deploy
-script. The repo has no remote; creating one is the author's call.
+### How the offer reaches this stack — decided 2026-11-01
+
+§2 forbids a second extraction, so the offer's cached `semantic_model` is the only input, and there were two
+ways to get it. **A scoped cross-stack `GetItem`, not an HTTP hop.** §2a had already accepted that shape for
+the tenant profile, entitlement must be read per call so that read is not optional, and `stripe-link` sits
+at 225 of a 240-event route guard — a second hop would spend route budget to re-fetch data the caller's own
+IAM role can already see.
+
+The cost is a **schema coupling**: this stack knows that an offer is `PK=TENANT#<tenant>`,
+`SK=OFFER#<mode>#<offer_id>` and that a profile's PK and SK are both `TENANT#<tenant>`. That is contained in
+one file, `attention/stripe_link.py`, whose tests are keyed by the literal PK/SK strings — a fake keyed by
+arguments would accept any format the code invented, which is how the sibling stack once shipped a lookup
+for a key that could never exist. The IAM policy grants `GetItem` on two named tables and nothing else: no
+`Scan` (one bug would otherwise read every tenant's catalogue) and no write at all.
+
+### The gate, and the one bug a test found
+
+Entitlement is read **before** the offer, because a read performed first has already answered the question
+the gate exists to ask. `attention` is now a capability in `stripe-link`'s `CAPABILITIES` **and in its
+`BETA_CAPABILITIES`** — the first member that set has ever had. That is what keeps an unreleased, unpriced
+feature off every comped account and every live trial, which is the one thing a beta must not do. Today the
+ways in are a `beta: ["attention"]` grant or a plan that sells it explicitly. **Graduating it means deleting
+it from `BETA_CAPABILITIES` here AND from `BETA_ONLY` in `attention/entitlement.py`** — doing one without
+the other makes two stacks disagree about who may use a paid feature.
+
+The mirror diverges from the original three times, all fail-closed, and the second was found by a test
+rather than by review: run unchanged, `stripe-link`'s rules compose into a **free pass for `{}`** — no
+status means "trial", no subscription means a platform trial, no clock means grandfathered, and a live trial
+is feature-complete. Three correct rules, one free pass. Right in the original, whose question is "may this
+store keep selling?"; wrong for admitting someone to a paid tier.
+
+Relatedly, an **unreadable** profile is a 503, never a 403. An outage reported as an upgrade prompt sends a
+tenant to buy something they already have.
+
+**Still open in A1:** the five-pillar generation call over the BYO-key adapter, and a dashboard surface —
+the API answers today only to `curl` with an id_token.
 
 ## 11. Verify before A5 hardens
 Run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a video,

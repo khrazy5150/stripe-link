@@ -27,6 +27,12 @@ CAPABILITIES: dict[str, dict[str, str]] = {
     # away from their own catalogue.
     "ai_builder": {"label": "AI Builder", "view": ""},
     "bnpl": {"label": "Buy Now, Pay Later", "view": ""},
+    # Attention lives in ANOTHER STACK (../sam/attention) and is gated there, by a mirror of the rule
+    # below reading this same profile. It is named here because this dict is what a plan's `entitlements`
+    # map can switch on and what `beta` is filtered against -- a capability absent from here is grantable
+    # by nobody. No menu `view`: there is no dashboard screen for it yet, and the service it gates is not
+    # deployed. See plans/ATTENTION_PRIMITIVE.md.
+    "attention": {"label": "Attention", "view": ""},
 }
 
 
@@ -47,9 +53,12 @@ FREE_TIER_CAPABILITIES: frozenset[str] = frozenset({"landing_pages", "sites", "c
 # that prompted the question, rebuilt deliberately. A flag in production gives them the feature on their
 # real data, and graduating it is deleting a line from this set.
 #
-# EMPTY TODAY, and that is the correct starting state: every capability currently in CAPABILITIES has
-# shipped. Adding a name here is the act of making a feature beta-only.
-BETA_CAPABILITIES: frozenset[str] = frozenset()
+# `attention` is beta-only (2026-11-01): its service exists but is not deployed, and there is no ~$69 rung
+# on sale yet. Being here rather than in GENERAL_CAPABILITIES is what stops it landing on every comped
+# account and every live trial the day it was named -- the one thing a beta must not do. Graduating it is
+# deleting this line, AND the matching line in ../sam/attention's `entitlement.py`, which mirrors this rule
+# across the stack boundary.
+BETA_CAPABILITIES: frozenset[str] = frozenset({"attention"})
 
 # What "everything" means for a comped account or a live trial. **Not `CAPABILITIES`**, which is the
 # whole catalogue including anything unreleased -- declaring a beta feature would otherwise hand it to
