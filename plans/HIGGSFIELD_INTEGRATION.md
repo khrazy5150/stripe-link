@@ -105,6 +105,13 @@ server-side quality ceiling as config data, permanent CDN URLs, and takedown wit
 generation is **another generator in the same service**, not a new one beside it. Creating a third repo to
 do metered media would be the duplicate-source fault this codebase keeps paying for, at the service level.
 
+**NOT `../sam/ai-video-generator`.** That folder exists and is a trap: three files, no git history, a
+template describing *"AI Video Generator Stack - Workout videos with music"*, its **own** Cognito pool
+rather than the shared one, and Python 3.11 against the estate's 3.12. It is an abandoned scaffold for an
+unrelated idea, and the name is close enough that anyone looking for "where does video generation live"
+will find it first. Either delete it or leave it knowing this paragraph is the only thing pointing the
+other way (noted 2026-11-01).
+
 The two hard limits that forced it out of `stripe-link` still hold and still apply to the queue in §5:
 
 1. **`stripe-link` is near CloudFormation's 1MB transform limit** — ~138KB of headroom after
