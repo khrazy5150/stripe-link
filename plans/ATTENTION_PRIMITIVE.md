@@ -518,8 +518,30 @@ store keep selling?"; wrong for admitting someone to a paid tier.
 Relatedly, an **unreadable** profile is a 503, never a 403. An outage reported as an upgrade prompt sends a
 tenant to buy something they already have.
 
+### Deployed, and what dev proved
+
+`jb-attention-stack-dev` is **live** (2026-11-02): one table, one function, `GET /health` answering
+unauthenticated. The prod changeset is created and audited — 9 adds, no modifications, parameters pointing
+at the prod tables — and awaits execution.
+
+Three things only a real deployment could establish:
+
+- **The cross-stack read works.** Invoking the dev function with a real tenant's claims returns
+  `403 not_entitled`, not `503 profile_unavailable`. A wrong key or a missing IAM grant would have produced
+  the 503, so the 403 proves the profile read end to end — and proves the beta gate refuses a live trial.
+- **The key formats match real data.** Dev offers are stored exactly `PK=TENANT#<tenant>`,
+  `SK=OFFER#<mode>#<offer_id>`, and a profile's PK and SK are both `TENANT#<tenant>`.
+- **⚠️ `semantic_model` is persisted by ONE thing, and almost no offer has it.** 0 of 12 dev offers carried
+  one. It is written only by the enrich operation behind the "Understanding" button (`ai_generate.py:404`);
+  **saving an offer does not produce it** — `offers.py` derives a model transiently for the slug and throws
+  it away. So A1's `409 no_semantic_model` is the common FIRST answer rather than an edge case, and its
+  message names that button. The consequence for A3 is larger: a campaign cannot be generated for an offer
+  nobody has enriched, so **enrichment is a prerequisite step in the campaign flow**, not an optional
+  polish — either the UI walks the tenant through it or the campaign route runs it on their behalf.
+
 **Still open in A1:** the five-pillar generation call over the BYO-key adapter, and a dashboard surface —
-the API answers today only to `curl` with an id_token.
+the API answers today only to `curl` with an id_token. And nobody is entitled yet: a tenant needs
+`beta: ["attention"]` on their profile.
 
 ## 11. Verify before A5 hardens
 Run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a video,
