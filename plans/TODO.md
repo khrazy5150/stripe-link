@@ -183,7 +183,8 @@ Two findings that reshaped the ask, both worth knowing before anyone picks this 
 **DECIDED 2026-10-20: its own repo, `../sam/ai-image-generator`.** I argued for building it in
 stripe-link and was wrong. The transform budget is the reason: **902,362 / 1,000,000 bytes, 219 Api
 events, guard trips at 240** — about 21 routes left for the Site object, collections, business profile,
-reviews elements, ads, GBP and ViralSpy, on a stack that has already failed a deploy at this ceiling. A
+reviews elements, ads, GBP and ViralSpy (now Higgsfield, and no longer competing for these routes --
+it lives in the image-generator service), on a stack that has already failed a deploy at this ceiling. A
 nice-to-have does not get to spend them.
 
 My objection was that a separate service would re-implement auth, plans and metering. It does not,
@@ -3835,26 +3836,50 @@ path. Nothing of the tenant's is deleted.
 4. **Resolving an abuse report** still has no screen — a suspension does not close the report that
    prompted it.
 
-### ⭐ NEW — ViralSpy integration: plan written 2026-10-16, nothing built
+### ⭐ NEW — Higgsfield video generation: VENDOR CLEARED 2026-11-01, nothing built
 
-plans/VIRALSPY_INTEGRATION.md. A metered gateway in front of a third-party API: check balance, debit,
-add the master key, forward. Its own stack (stripe-link is at the 1MB transform limit AND ~441/500
-CloudFormation resources).
+plans/HIGGSFIELD_INTEGRATION.md (was VIRALSPY_INTEGRATION.md). A metered gateway in front of a third-party
+generation API: check balance, debit, add the platform key, forward.
 
-**BLOCKED ON THE VENDOR.** `viralspy.ai` checked 2026-10-16: it has **no API at all**, and its terms say
-*"Accounts are for a single user. Do not share or resell access."* (§3) and *"Do not scrape, resell, or
-redistribute ViralSpy data or outputs"* plus *"Do not attempt to bypass usage limits, authentication, or
-rate limiting"* (§6). A shared master key is a shared single-seat account; metering tokens against it is
-reselling; and with no API the only way to call it is to drive their web app, which is the bypass clause.
+**THE VENDOR BLOCK IS GONE.** The predecessor died because `viralspy.ai` has no API and sells single-seat
+accounts. Higgsfield is the opposite: a documented API, **"pay per generation, no subscriptions and no
+seats"**, and a licence covering *"building applications for end users"* with End User defined as someone
+using YOUR application. Multi-tenant is contemplated, not tolerated. **The gateway design applied
+unchanged** — it was written against "a metered REST API behind a master key", not against a vendor.
 
-Not a technicality and not fixable in code. Either get a partner agreement in writing, or pick a vendor
-that sells API access (Virlo, Zyla, licensed providers) — **the gateway design applies unchanged**, it was
-written against "a metered REST API behind a master key", not against this vendor.
+**§11.5 IS THE BINDING CONSTRAINT, AND IT INVALIDATES THE ORIGINAL SKETCH.** No pass-through or service
+bureau "without independent value added". "Check balance → debit → forward" is a billing wrapper around
+someone else's endpoint; metering is not value. **So: generate from the OFFER, never a prompt box.** The
+test for any tool added later — *could the tenant get this by signing up to Higgsfield directly?* If yes it
+is relayed access; if no, because it needed their catalogue, brand and funnel, it is an application. Same
+conclusion `plans/MCP_SERVER.md` reaches from the other direction.
 
-The three things the original sketch left out: the debit and the upstream call are a distributed
-transaction (debit first, refund on anything not 2xx, idempotent by request id); a token is not a unit
-until a per-action cost table exists AS DATA; and the master key spends the PLATFORM's money, so the
-controls protect us rather than the tenant.
+**Still to confirm IN WRITING before building:** the current §11 and the content-licence clause. Secondary
+coverage disagrees about whether the July 2026 update grants a broad perpetual licence over user inputs and
+outputs — and we would be passing tenant product photography into it. Cheap to ask; the predecessor died at
+exactly this step.
+
+**Goes in `../sam/ai-image-generator`, not a third repo** — that sibling already does metered generation
+against a platform key, with a quality ceiling as config, CDN URLs and takedown-with-purge. Video is
+another generator in the same service. `stripe-link` keeps the quota rail (`ai_quota.entitlement_for` is
+already parameterised by operation); video is `video#<period>` and the unit is **SECONDS**, because
+Higgsfield bills video per second and a flat "20 videos" allowance is a bill nobody predicted.
+
+**Capacity is a VARIABLE.** Concurrency is account-level and funding-tiered (2/10/20/40) on a **rolling
+28-day window**, so a quiet month silently halves it, and excess may be REJECTED rather than queued. The
+worker must discover capacity and back off on the retryable error, never assert it — this codebase's
+signature failure is a constant that changed without telling anyone. Per-tenant cap of ~2 active jobs so
+one tenant cannot take every platform slot.
+
+**Free reuse:** the completion webhook is the shape `src/handlers/shipping_tracking.py` shipped 2026-11-01
+— URL token compared constant-time, fails closed, OUR id in the vendor's metadata so we resolve by our
+identifier, idempotent on replay, ordering guards. Lift it.
+
+The original sketch's other gaps still stand: the debit and the upstream call are a distributed transaction
+(debit first, refund on anything not 2xx, idempotent by request id); the cost table is DATA not code; and
+the platform key spends OUR money, so the controls protect us rather than the tenant. **The cache lever is
+gone** — a video bound to one tenant's offer is useless to anyone else, so margin has to come from an
+honest allowance instead of a shared hit rate.
 
 ### ⭐⭐ HIGH — mode-decoupling sweep (2026-10-18): one fixed, one real leak found
 
