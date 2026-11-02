@@ -3871,6 +3871,14 @@ worker must discover capacity and back off on the retryable error, never assert 
 signature failure is a constant that changed without telling anyone. Per-tenant cap of ~2 active jobs so
 one tenant cannot take every platform slot.
 
+**PRICING DECIDED 2026-11-01: a premium tier ($39+) with a monthly allowance that EXPIRES.** No rollover,
+no per-generation pricing, no purchased tokens in Phase 1. Expiry because the choices are not equally
+reversible — adding rollover later is a gift, removing it is a clawback — and because there is no usage
+data yet. Accepted cost: a month-end rush against the concurrency ceiling, absorbed by the QUEUE rather
+than by changing `ai_quota.period_key`, which chose calendar month deliberately for legibility. Revisit if
+the ledger shows most tenants using under half their allowance (churn signal, not breakage); if rollover
+ever lands, cap at one month and forfeit on downgrade.
+
 **Free reuse:** the completion webhook is the shape `src/handlers/shipping_tracking.py` shipped 2026-11-01
 — URL token compared constant-time, fails closed, OUR id in the vendor's metadata so we resolve by our
 identifier, idempotent on replay, ordering guards. Lift it.
