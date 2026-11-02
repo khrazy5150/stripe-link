@@ -41,7 +41,11 @@ Status: **P4.0 SHIPPED. P4.1 BUILT 2026-11-01 (domain layer; no trigger yet).** 
 > were really spent, and the model is returned anyway so the work is not lost to something they cannot act
 > on.
 >
-> **Still not built: the dashboard button.** The endpoint is callable; nothing in the UI calls it.
+> **The button landed 2026-11-01**: an "Understanding" section in the offer edit modal, shown only for an
+> EXISTING offer because enrichment reads the saved document. It says the cost before the click ("uses one
+> AI generation"), renders the positioning blocks and the audience, and distinguishes *"nothing could be
+> added -- your generation was not used"* from an error, because being charged for nothing and nothing
+> happening are different things and only one needs an apology.
 >
 > **Verified against real Bedrock on a real dev offer**, which found a bug no unit test could: Bedrock's
 > structured-output subset **rejects `maxItems`**, so every call failed validation and `enrich`'s graceful

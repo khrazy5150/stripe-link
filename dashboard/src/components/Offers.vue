@@ -559,6 +559,47 @@
             <PurchaseFlowDiagram :offer-name="form.name" :stages="offerFunnelStages" />
           </section>
 
+          <!-- WHAT THE PLATFORM UNDERSTANDS about this offer. The deterministic half is computed on every
+               read and needs no button; this is the half only a model can answer, and it costs a
+               generation, so it is tenant-triggered and the cost is said before the click
+               (plans/OFFER_SEMANTIC_P4.md P4.1). Only on an EXISTING offer: enrichment reads the SAVED
+               document, so there is nothing to enrich until there is one. -->
+          <section v-if="editingOfferId" class="modal-form-section">
+            <header class="modal-section-header">
+              <div>
+                <h3>Understanding</h3>
+                <p>
+                  What this offer is <em>for</em> — the problems it solves, the objections it meets, who it
+                  is aimed at. Your pages and campaigns read this; a catalogue cannot answer it.
+                </p>
+              </div>
+            </header>
+
+            <div class="offer-enrich-row">
+              <button class="secondary-action" type="button" :disabled="enriching" @click="enrichOffer">
+                {{ enriching ? "Thinking…" : (enrichedModel ? "Refresh understanding" : "✨ Enhance with AI") }}
+              </button>
+              <!-- SAID BEFORE THE CLICK. Discovering the price afterwards is the entire class of
+                   complaint this prevents. -->
+              <small class="field-note">Uses one AI generation. Reads the offer as last saved.</small>
+            </div>
+
+            <div v-if="enrichError" class="keys-status-banner error">{{ enrichError }}</div>
+            <div v-else-if="enrichNotice" class="keys-status-banner is-prose">
+              <span class="banner-line">{{ enrichNotice }}</span>
+            </div>
+
+            <div v-if="enrichedPositioning" class="offer-enrich-result">
+              <div v-for="block in enrichedPositioning" :key="block.key" class="offer-enrich-block">
+                <h4>{{ block.label }}</h4>
+                <ul>
+                  <li v-for="(line, i) in block.items" :key="i">{{ line }}</li>
+                </ul>
+              </div>
+              <p v-if="enrichedAudience" class="field-note">Aimed at: {{ enrichedAudience }}</p>
+            </div>
+          </section>
+
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
           <details v-if="latestDraftOffer" class="offer-json-preview">
@@ -1301,8 +1342,66 @@ function resetForm() {
   couponSearch.value = "";
 }
 
+const enriching = ref(false);
+const enrichError = ref("");
+const enrichNotice = ref("");
+// The model as the SERVER last stored it, seeded when the modal opens so a tenant sees what exists before
+// deciding whether to spend a generation refreshing it.
+const enrichedModel = ref(null);
+
+const POSITIONING_LABELS = [
+  ["problems", "Problems it solves"],
+  ["objections", "Objections to meet"],
+  ["misconceptions", "Misconceptions to correct"],
+  ["transformations", "Before and after"],
+];
+
+const enrichedPositioning = computed(() => {
+  const positioning = enrichedModel.value?.facts?.positioning;
+  if (!positioning) return null;
+  const blocks = POSITIONING_LABELS
+    .map(([key, label]) => ({ key, label, items: positioning[key] || [] }))
+    .filter((block) => block.items.length);
+  return blocks.length ? blocks : null;
+});
+
+const enrichedAudience = computed(() => enrichedModel.value?.facts?.intent?.audience || "");
+
+/** Spend one generation to fill what the catalogue cannot say. */
+async function enrichOffer() {
+  if (!editingOfferId.value || enriching.value) return;
+  enriching.value = true;
+  enrichError.value = "";
+  enrichNotice.value = "";
+  try {
+    const body = await apiRequest("/ai/generate", {
+      method: "POST",
+      body: { operation: "enrich_offer", offer_id: editingOfferId.value, mode: getStripeMode() },
+    });
+    enrichedModel.value = body.semantic_model || null;
+    if (!body.enriched) {
+      // The server already refunded the generation. Say so, because "nothing happened" and "you were
+      // charged for nothing" are different things and only one of them needs an apology.
+      enrichNotice.value = "Nothing could be added this time — your generation was not used.";
+    } else if (body.saved === false) {
+      enrichNotice.value = "Enhanced, but it could not be saved. Try again shortly.";
+    }
+  } catch (error) {
+    enrichError.value = error.message || "Could not enhance this offer.";
+  } finally {
+    enriching.value = false;
+  }
+}
+
 function openOfferModal(offer = null) {
   resetForm();
+  enriching.value = false;
+  enrichError.value = "";
+  enrichNotice.value = "";
+  // Only an AI model is shown. The deterministic one is recomputed on every read and says nothing here
+  // that the form above does not already show.
+  const stored = offer?.semantic_model;
+  enrichedModel.value = stored?.interpretation?.source === "ai" ? stored : null;
   if (offer) loadOfferIntoForm(offer);
   showOfferModal.value = true;
   if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();

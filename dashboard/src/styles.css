@@ -8284,3 +8284,28 @@ a.orders-place { text-decoration: underline; }
   margin-bottom: 0;
   opacity: 0.85;
 }
+
+/* The offer "Understanding" panel (plans/OFFER_SEMANTIC_P4.md P4.1). Quiet on purpose: it is a statement
+   about the offer rather than a control, and its one button must read as optional rather than as a step
+   in saving. Global because Offers.vue carries no <style> block of its own. */
+.offer-enrich-row { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
+.offer-enrich-row .field-note { margin: 0; }
+.offer-enrich-result {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.9rem;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid var(--accent, #6366f1);
+  background: var(--surface-muted, rgba(148, 163, 184, 0.08));
+  border-radius: 0 8px 8px 0;
+}
+.offer-enrich-block h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.offer-enrich-block ul { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.25rem; }
+.offer-enrich-block li { line-height: 1.5; }
