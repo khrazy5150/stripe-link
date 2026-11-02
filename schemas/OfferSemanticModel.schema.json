@@ -10,7 +10,7 @@
     "facts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["entities", "taxonomy", "intent", "commerce", "attributes"],
+      "required": ["entities", "taxonomy", "intent", "commerce", "attributes", "positioning"],
       "properties": {
         "entities": {
           "type": "object",
@@ -78,6 +78,18 @@
             "additionalProperties": false,
             "required": ["name", "value"],
             "properties": { "name": { "type": "string" }, "value": {} }
+          }
+        },
+        "positioning": {
+          "type": "object",
+          "description": "WHY the offer is worth buying, as meaning rather than copy. Empty in the deterministic core -- none of it is derivable from a catalogue -- and filled by the enrichment tier. It lives on the model rather than inside a campaign plan because more than one consumer wants it: a landing page answering objections and a campaign answering objections must not derive them twice and disagree. `hooks` is deliberately absent -- a pattern interrupt is a format decision, and channel logic never enters this model.",
+          "additionalProperties": false,
+          "required": ["problems", "misconceptions", "transformations", "objections"],
+          "properties": {
+            "problems": { "type": "array", "items": { "type": "string" }, "description": "The painful status quo the offer removes." },
+            "misconceptions": { "type": "array", "items": { "type": "string" }, "description": "False beliefs holding the buyer back." },
+            "transformations": { "type": "array", "items": { "type": "string" }, "description": "Before -> after, operational and emotional." },
+            "objections": { "type": "array", "items": { "type": "string" }, "description": "Friction blocking the purchase, to be answered in copy." }
           }
         }
       }

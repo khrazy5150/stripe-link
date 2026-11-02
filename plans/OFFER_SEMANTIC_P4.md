@@ -1,7 +1,30 @@
 # Offer Semantic Model — P4: AI Enrichment + New Consumers
 
-Status: **design, not built.** P1–P3 shipped to prod (deterministic core + slug/label/title/description/
-breadcrumb, all coherent). P4 is the final phase of `OFFER_SEMANTIC_ANALYZER.md` — the point where the model
+Status: **P4.0 SHIPPED. P4.1 BUILT 2026-11-01 (domain layer; no trigger yet).** P1–P3 shipped to prod
+(deterministic core + slug/label/title/description/breadcrumb, all coherent).
+
+> **Two gates in this document are stale and are recorded here rather than left to mislead.** The provider
+> adapter P4.1 is "gated on" **exists** — `ai_client.generate_structured(prompt, json_schema, model,
+> provider, api_key, validate, …)` with Bedrock + BYOK and bounded repair, in production via
+> `handlers/ai_generate.py`. And P4.0's three deliverables all landed: `schemas/OfferSemanticModel.schema.json`,
+> `validate_semantic_model`, and the `offer.semantic_model` cache with `resolve_semantic_model` as its read
+> seam.
+>
+> **P4.1 landed 2026-11-01 as `domain/semantic_enrich.py`** with two deviations, both documented in the
+> module: a NARROWER request schema than the full model (a schema with no `brand` field cannot return a
+> brand — serving this plan's own "enforced structurally" better than discarding afterwards), and a new
+> `facts.positioning` block (problems / misconceptions / transformations / objections) added for
+> `plans/ATTENTION_PRIMITIVE.md`, whose own rule says a consumer needing a fact the analyzer does not
+> expose must extend the ANALYZER. `hooks` stayed in Attention: a pattern interrupt is a format decision.
+>
+> **What is NOT built: the trigger.** `enrich()` takes `generate` injected and nothing calls it — no
+> handler, no quota check, no write to `offer.semantic_model`. The open decision below (button vs
+> auto-at-save) is still open.
+>
+> **Verified against real Bedrock on a real dev offer**, which found a bug no unit test could: Bedrock's
+> structured-output subset **rejects `maxItems`**, so every call failed validation and `enrich`'s graceful
+> degradation turned it into "the AI tier silently never works". Bounds live in `apply` instead, which is
+> where the module always said they belonged. P4 is the final phase of `OFFER_SEMANTIC_ANALYZER.md` — the point where the model
 stops being SEO plumbing and becomes the shared **meaning layer for AI, advertising, and marketplaces**. That
 is the payoff of the domain-agnostic design: one canonical *"what is this offer?"* now feeds channels far beyond
 Google's crawler.

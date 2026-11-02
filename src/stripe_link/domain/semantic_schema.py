@@ -28,7 +28,7 @@ OFFER_SEMANTIC_MODEL_SCHEMA: dict[str, Any] = {
         "facts": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["entities", "taxonomy", "intent", "commerce", "attributes"],
+            "required": ["entities", "taxonomy", "intent", "commerce", "attributes", "positioning"],
             "properties": {
                 "entities": {
                     "type": "object",
@@ -91,6 +91,32 @@ OFFER_SEMANTIC_MODEL_SCHEMA: dict[str, Any] = {
                         "additionalProperties": False,
                         "required": ["name", "value"],
                         "properties": {"name": {"type": "string"}, "value": {}},
+                    },
+                },
+                # WHY THE OFFER IS WORTH BUYING, as meaning rather than copy (P4.1, author 2026-11-01).
+                #
+                # Empty in the deterministic core: none of it is derivable from a catalogue. It exists here
+                # rather than inside `plans/ATTENTION_PRIMITIVE.md` because that plan's own rule says a
+                # consumer needing a fact the analyzer does not expose must EXTEND THE ANALYZER rather than
+                # keep a private copy -- and these are wanted by more than one consumer. A landing page
+                # answering objections and a campaign answering objections must not derive them twice and
+                # disagree.
+                #
+                # `hooks` is deliberately NOT here. A pattern interrupt is a format decision -- how to open
+                # a Reel versus a subject line -- and channel logic never enters this model.
+                "positioning": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["problems", "misconceptions", "transformations", "objections"],
+                    "properties": {
+                        # The painful status quo the offer removes.
+                        "problems": {"type": "array", "items": {"type": "string"}},
+                        # False beliefs holding the buyer back.
+                        "misconceptions": {"type": "array", "items": {"type": "string"}},
+                        # Before -> after, operational and emotional.
+                        "transformations": {"type": "array", "items": {"type": "string"}},
+                        # Friction blocking the purchase, to be answered in copy.
+                        "objections": {"type": "array", "items": {"type": "string"}},
                     },
                 },
             },

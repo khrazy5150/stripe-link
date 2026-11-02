@@ -22,7 +22,12 @@ from stripe_link.domain.opportunities import (
 
 # Bump when the model's SHAPE or deterministic derivation changes in a way a cached AI model should be
 # considered stale for (resolve_semantic_model falls back to a fresh compute on a version mismatch).
-MODEL_VERSION = 1
+#
+# 2 (2026-11-01): `facts.positioning` added for the enrichment tier. Nothing had written a cached model
+# yet, so this invalidates nothing in storage -- but the bump is correct rather than cosmetic: a model
+# enriched under version 1 would lack the block entirely, and a consumer reading it would see "no
+# objections" where the truth is "never asked".
+MODEL_VERSION = 2
 
 _STOP_WORDS = frozenset({
     "the", "a", "an", "and", "or", "for", "of", "with", "to", "in", "on", "at", "by", "from",
@@ -166,6 +171,10 @@ def analyze_offer(offer: dict, products_by_id: dict, services_by_id: dict | None
                            "upsells": len(upsells), "downsells": len(downsells)},
             },
             "attributes": _attributes(pricing_model, purchase_model),
+            # EMPTY, and honestly so: none of this is derivable from a catalogue. The shape is present
+            # because consumers degrade gracefully on empty rather than on absent, which is the same
+            # contract `intent.audience` has had since P1. `semantic_enrich.enrich` fills it.
+            "positioning": {"problems": [], "misconceptions": [], "transformations": [], "objections": []},
         },
         "interpretation": {
             "key_concepts": key_concepts,
