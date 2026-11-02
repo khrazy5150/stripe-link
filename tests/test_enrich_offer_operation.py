@@ -232,6 +232,44 @@ class TheGates(unittest.TestCase):
         self.assertEqual(usage.taken, 0)
 
 
+class TheButtonIsGatedToo(unittest.TestCase):
+    """The server refuses an unentitled or exhausted tenant (TheGates above). The BUTTON should not offer
+    the click in the first place -- but disabling alone is the weaker fix, because a greyed button with no
+    explanation tells a tenant nothing and the two reasons need different actions: "not on your plan" is
+    an upgrade, "used them all" is a wait."""
+
+    @property
+    def offers(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "Offers.vue").read_text()
+
+    def test_the_button_is_disabled_when_the_tenant_cannot_generate(self):
+        self.assertIn('"enriching || !canEnrich"', self.offers)
+
+    def test_it_shows_the_SERVER_s_sentence_rather_than_rewording_it(self):
+        """`ai_quota.may_generate` already writes the refusal, and its docstring says why it is the
+        tenant's text rather than a log line. A second wording here would drift from it."""
+        self.assertIn("enrichBlockedReason", self.offers)
+        self.assertIn("enrichUsage.value.reason", self.offers)
+
+    def test_it_is_PERMISSIVE_when_the_allowance_is_unknown(self):
+        """If the usage call has not answered, the button stays enabled and the server refuses -- which it
+        does anyway, with the better message. Disabling on an absent answer would block an entitled tenant
+        because an unrelated fetch was slow, which is reading an absence as a verdict."""
+        self.assertIn("can_generate !== false", self.offers)
+
+    def test_the_remaining_count_is_hidden_for_a_tenant_on_their_own_key(self):
+        """Their allowance is a safety ceiling, not a ration; counting it down reads as a limit they
+        bought."""
+        self.assertIn("billedToTenant", self.offers)
+
+    def test_the_usage_is_not_fetched_until_an_offer_is_opened(self):
+        """A tenant who never touches the panel should not pay for the call."""
+        block = self.offers.split("function openOfferModal(", 1)[1][:500]
+        self.assertIn("aiProviderStore.load()", block)
+
+
 class ItDoesNotDisturbTheOtherOperations(unittest.TestCase):
     def test_the_operation_is_opt_in(self):
         """A body without `operation` must still reach the page path — this route's original job."""

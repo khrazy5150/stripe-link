@@ -576,12 +576,23 @@
             </header>
 
             <div class="offer-enrich-row">
-              <button class="secondary-action" type="button" :disabled="enriching" @click="enrichOffer">
+              <button class="secondary-action" type="button" :disabled="enriching || !canEnrich"
+                      @click="enrichOffer">
                 {{ enriching ? "Thinking…" : (enrichedModel ? "Refresh understanding" : "✨ Enhance with AI") }}
               </button>
-              <!-- SAID BEFORE THE CLICK. Discovering the price afterwards is the entire class of
-                   complaint this prevents. -->
-              <small class="field-note">Uses one AI generation. Reads the offer as last saved.</small>
+              <!-- SAID BEFORE THE CLICK, and that includes what is left. Discovering the price
+                   afterwards is the entire class of complaint this prevents. -->
+              <small v-if="canEnrich" class="field-note">
+                Uses one AI generation{{ enrichRemaining }}. Reads the offer as last saved.
+              </small>
+            </div>
+
+            <!-- DISABLED IS NOT ENOUGH. A greyed button with no explanation tells a tenant nothing and
+                 gives them nowhere to go, and the two reasons need different actions -- "not on your
+                 plan" is an upgrade, "used them all" is a wait. The server already writes the sentence
+                 (`ai_quota.may_generate`), so it is shown rather than reworded here. -->
+            <div v-if="!canEnrich && enrichBlockedReason" class="keys-status-banner is-prose">
+              <span class="banner-line">{{ enrichBlockedReason }}</span>
             </div>
 
             <div v-if="enrichError" class="keys-status-banner error">{{ enrichError }}</div>
@@ -765,6 +776,7 @@ import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, usePro
 import { defaultCtaLabel } from "../composables/pageComposer";
 import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
+import { useAiProviderStore } from "../stores/aiProvider";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
 import { stagesFromSavedOffer, isIndexRow, landingChips, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
@@ -1342,6 +1354,27 @@ function resetForm() {
   couponSearch.value = "";
 }
 
+// The same usage object the AI settings screen reads: { used, allowance, remaining, can_generate,
+// reason, billed_to }. Loaded lazily when an offer modal opens rather than on every Offers visit, because
+// a tenant who never touches this panel should not pay for the call.
+const aiProviderStore = useAiProviderStore();
+const enrichUsage = computed(() => aiProviderStore.usage || {});
+
+// PERMISSIVE WHEN UNKNOWN, deliberately. If the usage call has not answered -- or failed -- the button
+// stays enabled and the SERVER refuses, which it does anyway and with the better message. Disabling on an
+// absent answer would block a perfectly entitled tenant because an unrelated fetch was slow, which is the
+// fault of reading an absence as a verdict.
+const canEnrich = computed(() => enrichUsage.value.can_generate !== false);
+const enrichBlockedReason = computed(() => String(enrichUsage.value.reason || ""));
+
+// "2 left" only where there is a finite number to count down. A tenant on their own key has an allowance
+// that is a safety ceiling rather than a ration, and counting it down would read as a limit they bought.
+const enrichRemaining = computed(() => {
+  const left = enrichUsage.value.remaining;
+  if (aiProviderStore.billedToTenant || typeof left !== "number" || left < 0) return "";
+  return ` — ${left} left`;
+});
+
 const enriching = ref(false);
 const enrichError = ref("");
 const enrichNotice = ref("");
@@ -1395,6 +1428,11 @@ async function enrichOffer() {
 
 function openOfferModal(offer = null) {
   resetForm();
+  // Best-effort and not awaited: the panel renders immediately and the allowance fills in when it
+  // arrives. A slow settings call must not hold up opening an offer.
+  if (!aiProviderStore.loading && !Object.keys(aiProviderStore.usage || {}).length) {
+    aiProviderStore.load().catch(() => {});
+  }
   enriching.value = false;
   enrichError.value = "";
   enrichNotice.value = "";
