@@ -296,9 +296,21 @@ established patterns, and costs essentially nothing.
 > - **Absent attribution writes NO field**, rather than `""`. An order nobody tracked and a post whose slug
 >   failed to arrive must not look the same in the column.
 >
-> **Still to build:** the reporting surface. Clicks are queryable per page (`source_totals_for_page`) and
-> orders carry the slug, but nothing joins them into "problem carousels convert 3.8x better" yet — that is
-> the pillar-weighting feedback loop, and it needs campaigns to exist before a pillar is a thing.
+> **The join landed too.** `GET /pages/{id}` now returns `attribution: [{source, arrivals, conversions,
+> revenue_cents}]` — arrivals from the counters, money from the same fold over paid orders the page cards
+> already use, keyed on the post instead of the page so the two can never disagree about what a conversion
+> is. The order's slug lives at `attribution.source`, beside `page_id`: the page is WHERE they converted,
+> the source is WHAT brought them to it, and putting it there means all three order builders (checkout,
+> subscription renewal, upsell) carry it from one change.
+>
+> The report is the **UNION** of arrivals and sales, not the intersection. A source with attention and no
+> sales is the most useful row on it — the post that got looked at and sold nothing is the whole reason to
+> measure — and a source with sales but no arrivals is real too (the visitor came before the tracker
+> shipped, or cleared their storage), so dropping it would quietly understate revenue.
+>
+> **Still to build:** the per-PILLAR view and the weighting loop — "problem carousels convert 3.8x better
+> than transformation videos". That needs campaigns to exist before a pillar is a thing, so it waits for
+> A3. Per-POST is answerable today. The dashboard does not render the rows yet either.
 
 
 

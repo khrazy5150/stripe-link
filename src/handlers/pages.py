@@ -6,7 +6,8 @@ from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_short_url_code
 import os
 
-from stripe_link.domain.page_analytics import attach_summaries
+from stripe_link.domain.page_analytics import (attach_summaries, attribution_rows,
+                                               summarize_by_source)
 from stripe_link.domain.page_views import clicks_by_url
 from stripe_link.repositories.page_views import page_views_repository
 from stripe_link.repositories.documents import RepositoryError, orders_repository, pages_repository, sites_repository
@@ -140,7 +141,7 @@ def strip_lifecycle_fields(document: dict, ignored: set[str]) -> dict:
     }
 
 
-def get_page(event, repository, page_id: str, views_repo=None, sites_repo=None):
+def get_page(event, repository, page_id: str, views_repo=None, sites_repo=None, orders_repo=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -162,6 +163,24 @@ def get_page(event, repository, page_id: str, views_repo=None, sites_repo=None):
             page = {**page, "link_clicks": clicks_by_url(page, totals, (site or {}).get("organization"))}
     except Exception as exc:  # noqa: BLE001
         print(f"link clicks unavailable for {page_id}: {type(exc).__name__}: {exc}")
+    # WHO SENT THEM AND WHAT IT EARNED (plans/ATTENTION_PRIMITIVE.md §8, A2). Arrivals come from the
+    # counters the beacon writes; conversions and revenue are the same fold over paid orders that the page
+    # cards already use, keyed on the post instead of the page. Attached on the SINGLE-page read for
+    # `link_clicks`' reason -- it is one counter query plus one orders read per page, and the listing
+    # would need them per row.
+    #
+    # Best-effort, and ABSENT rather than empty when it fails: a page whose attribution could not be read
+    # must not claim nobody ever came from anywhere.
+    try:
+        if os.environ.get("PAGE_VIEWS_TABLE"):
+            mode = resolve_stripe_mode(event, {})
+            arrivals = (views_repo or page_views_repository()).source_totals_for_page(page_id)
+            orders = (orders_repo or orders_repository(mode=mode)).list_for_tenant(tenant_id)
+            rows = attribution_rows(arrivals, summarize_by_source(orders, page_id))
+            if rows:
+                page = {**page, "attribution": rows}
+    except Exception as exc:  # noqa: BLE001
+        print(f"attribution unavailable for {page_id}: {type(exc).__name__}: {exc}")
     return json_response({"page": page})
 
 

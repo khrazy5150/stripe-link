@@ -202,5 +202,95 @@ class ThroughCheckout(unittest.TestCase):
         self.assertNotIn("metadata[src]", self.payload(attribution_source="///"))
 
 
+class OntoTheOrder(unittest.TestCase):
+    """Inside `attribution`, beside `page_id` — the page is WHERE they converted, the source is WHAT
+    brought them to it. One change there covers checkout, subscription renewal and upsell."""
+
+    def attribution(self, **metadata):
+        from handlers.stripe_webhook import attribution_from_metadata
+        return attribution_from_metadata({"page_id": "p1", **metadata})
+
+    def test_the_source_lands_beside_the_page(self):
+        row = self.attribution(src="ig-reel")
+        self.assertEqual(row["source"], "ig-reel")
+        self.assertEqual(row["page_id"], "p1")
+
+    def test_an_untracked_order_carries_an_empty_source(self):
+        """Empty rather than absent HERE, because the block is a fixed shape every order has — the
+        distinction that matters is made by the fold, which skips a blank."""
+        self.assertEqual(self.attribution()["source"], "")
+
+
+class TheMoneyFold(unittest.TestCase):
+    """The same fold `summarize_by_page` does, keyed on the post, so the two cannot disagree about what a
+    conversion is."""
+
+    ORDERS = [
+        {"status": "paid", "amount_total": 4999, "attribution": {"source": "ig-reel", "page_id": "p1"}},
+        {"status": "paid", "amount_total": 2500, "attribution": {"source": "ig-reel", "page_id": "p1"}},
+        {"status": "pending", "amount_total": 9999, "attribution": {"source": "ig-reel", "page_id": "p1"}},
+        {"status": "paid", "amount_total": 1000, "attribution": {"source": "tiktok", "page_id": "p2"}},
+        {"status": "paid", "amount_total": 700, "attribution": {"page_id": "p1"}},
+    ]
+
+    def test_only_paid_orders_count(self):
+        from stripe_link.domain.page_analytics import summarize_by_source
+        self.assertEqual(summarize_by_source(self.ORDERS)["ig-reel"],
+                         {"conversions": 2, "revenue_cents": 7499})
+
+    def test_a_page_id_narrows_it(self):
+        from stripe_link.domain.page_analytics import summarize_by_source
+        self.assertEqual(sorted(summarize_by_source(self.ORDERS, "p1")), ["ig-reel"])
+        self.assertEqual(sorted(summarize_by_source(self.ORDERS, "p2")), ["tiktok"])
+
+    def test_an_untracked_order_is_skipped_not_bucketed_as_blank(self):
+        from stripe_link.domain.page_analytics import summarize_by_source
+        self.assertNotIn("", summarize_by_source(self.ORDERS))
+
+    def test_a_malformed_amount_does_not_cost_the_report(self):
+        from stripe_link.domain.page_analytics import summarize_by_source
+        rows = summarize_by_source([{"status": "paid", "amount_total": "oops",
+                                     "attribution": {"source": "x"}}])
+        self.assertEqual(rows["x"], {"conversions": 1, "revenue_cents": 0})
+
+
+class TheReportRows(unittest.TestCase):
+    def rows(self, arrivals, money):
+        from stripe_link.domain.page_analytics import attribution_rows
+        return attribution_rows(arrivals, money)
+
+    def test_attention_without_sales_is_the_most_useful_row(self):
+        """The post that got attention and sold nothing is the whole point of measuring, so the report is
+        the UNION of both sides rather than the intersection."""
+        rows = self.rows({"tiktok": 15}, {})
+        self.assertEqual(rows[0]["source"], "tiktok")
+        self.assertEqual(rows[0]["arrivals"], 15)
+        self.assertEqual(rows[0]["conversions"], 0)
+
+    def test_sales_without_arrivals_are_not_dropped(self):
+        """Real: the visitor arrived before the tracker shipped, or cleared their storage. Dropping the
+        row would quietly understate revenue."""
+        rows = self.rows({}, {"old-post": {"conversions": 1, "revenue_cents": 5000}})
+        self.assertEqual(rows[0]["revenue_cents"], 5000)
+        self.assertNotIn("arrivals", rows[0])
+
+    def test_unmeasured_is_not_zero(self):
+        """"Nobody came" and "we were not measuring" must stay distinguishable, exactly as
+        `attach_summaries` keeps views absent rather than 0."""
+        rows = self.rows({"a": 0}, {"b": {"conversions": 1, "revenue_cents": 10}})
+        by_source = {r["source"]: r for r in rows}
+        self.assertEqual(by_source["a"]["arrivals"], 0)
+        self.assertNotIn("arrivals", by_source["b"])
+
+    def test_it_sorts_by_money_then_attention(self):
+        rows = self.rows({"a": 1, "b": 99, "c": 5},
+                         {"a": {"conversions": 1, "revenue_cents": 9000}})
+        self.assertEqual([r["source"] for r in rows], ["a", "b", "c"])
+
+    def test_nothing_measured_is_an_empty_report(self):
+        self.assertEqual(self.rows({}, {}), [])
+        self.assertEqual(self.rows(None, None), [])
+
+
 if __name__ == "__main__":
     unittest.main()
