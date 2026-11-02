@@ -326,6 +326,45 @@ class TheDashboardView(unittest.TestCase):
         self.assertIn("First touch wins", self.builder)
 
 
+class TheTrackedLinkBuilder(unittest.TestCase):
+    """A2 shipped the whole pipeline with no way to build a tagged link -- a tenant had to know `?src=`
+    existed and append it by hand, which is how a measurement feature goes unused."""
+
+    @property
+    def builder(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "LandingPages.vue").read_text()
+
+    def test_the_panel_opens_on_a_published_page_before_anything_is_measured(self):
+        """Gating it on having rows would be a chicken-and-egg: no link, no arrivals; no arrivals, no way
+        to make a link."""
+        self.assertIn('v-if="trackedLinkBase"', self.builder)
+        self.assertIn('v-if="pageAttribution.length"', self.builder)  # the TABLE still gates on rows
+
+    def test_a_draft_page_cannot_be_tagged(self):
+        """It has nowhere to send anyone, and a link that works nowhere gets posted before anyone
+        discovers it."""
+        block = self.builder.split("const trackedLinkBase = computed(", 1)[1][:400]
+        self.assertIn('page.status !== "published"', block)
+        self.assertIn("isOpenableUrl", block)
+
+    def test_the_label_is_sanitised_the_SAME_way_the_server_does(self):
+        """Sanitising only on the server would mean the tenant posts `IG Reel` and the report keys on
+        `igreel`, so the label they chose and the row they read would not match."""
+        block = self.builder.split("const trackedLabelClean = computed(", 1)[1][:300]
+        self.assertIn("toLowerCase()", block)
+        self.assertIn("[^a-z0-9_-]", block)
+        self.assertIn("slice(0, 64)", block)
+
+    def test_the_separator_respects_an_existing_query(self):
+        block = self.builder.split("const trackedLink = computed(", 1)[1][:300]
+        self.assertIn('base.includes("?") ? "&" : "?"', block)
+
+    def test_the_empty_state_says_what_to_do(self):
+        self.assertIn("Post a labelled link and the numbers appear here", self.builder)
+
+
 class ObjectionsSeedTheFAQ(unittest.TestCase):
     """The SECOND consumer of `positioning`, and the one that settles why it lives on the shared model
     rather than inside the Attention plan. An FAQ exists to answer friction blocking the purchase, which

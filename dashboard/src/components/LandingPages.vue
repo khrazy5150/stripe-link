@@ -420,16 +420,32 @@
                  page that has actually been arrived at by a named source: the rows come from the
                  PUBLISHED artifact's tracker, so an unpublished page has nothing here rather than a table
                  of zeros standing in for traffic nobody counted. -->
-            <SettingsAccordion v-if="pageAttribution.length" label="Traffic sources"
+            <SettingsAccordion v-if="trackedLinkBase" label="Traffic sources"
                                hint="Who sent them, and what it earned"
                                :icon="SETTINGS_ICONS['Traffic sources']"
                                :open="openSetting === 'Traffic sources'"
                                @toggle="toggleSetting('Traffic sources')">
               <small class="field-note">
-                Add <code>?src=your-label</code> to the link you post. First touch wins, so a visitor who
-                comes back later is still credited to the post that found them.
+                Label each post, then share its own link. First touch wins, so a visitor who comes back
+                later is still credited to the post that found them.
               </small>
-              <table class="attribution-table">
+
+              <!-- THE LINK BUILDER, and the panel exists for it even before anything is measured. The
+                   numbers below cannot appear until a tagged link has been posted, so gating this on
+                   having rows would be a chicken-and-egg: no link, no arrivals; no arrivals, no way to
+                   make a link. Sanitised here with the SAME rule the server applies, so what the tenant
+                   is told they posted is what the report will key on. -->
+              <div class="tracked-link-row">
+                <input v-model="trackedLabel" type="text" maxlength="64"
+                       placeholder="ig-reel-nov-03" aria-label="Label for this post" />
+                <button class="secondary-action" type="button" :disabled="!trackedLabelClean"
+                        @click="copyTrackedLink">
+                  {{ trackedCopied ? "Copied" : "Copy link" }}
+                </button>
+              </div>
+              <small v-if="trackedLabelClean" class="field-note tracked-link-preview">{{ trackedLink }}</small>
+
+              <table v-if="pageAttribution.length" class="attribution-table">
                 <thead>
                   <tr><th>Source</th><th>People</th><th>Sales</th><th>Revenue</th></tr>
                 </thead>
@@ -444,6 +460,9 @@
                   </tr>
                 </tbody>
               </table>
+              <small v-else class="field-note">
+                Nothing measured yet. Post a labelled link and the numbers appear here.
+              </small>
             </SettingsAccordion>
 
             <SettingsAccordion label="Favicon" hint="The browser-tab icon" :icon="SETTINGS_ICONS['Favicon']" :open="openSetting === 'Favicon'" @toggle="toggleSetting('Favicon')">
@@ -3302,6 +3321,43 @@ const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id 
 // LISTING holds index rows, and `offer_index_entry` deliberately leaves the semantic model out -- it is
 // kilobytes per row to serve a panel most tenants never open. So this is one document read, done when an
 // offer is chosen or a page is opened, and skipped entirely when the id has not changed.
+// THE TRACKED LINK a tenant posts. `?src=` is what makes a post measurable (plans/ATTENTION_PRIMITIVE.md
+// §8), and A2 shipped the whole pipeline with no way to build one -- a tenant had to know the parameter
+// existed and append it by hand, which is how a measurement feature goes unused.
+const trackedLabel = ref("");
+const trackedCopied = ref(false);
+
+// The SAME rule `page_views.source_slug` applies server-side. Sanitising only on the server would mean
+// the tenant posts `IG Reel` and the report keys on `igreel`, so the label they chose and the row they
+// read would not match.
+const trackedLabelClean = computed(() =>
+  String(trackedLabel.value || "").trim().toLowerCase().slice(0, 64)
+    .replace(/[^a-z0-9_-]/g, ""));
+
+// Only a page with a real, navigable address can be tagged. A draft has nowhere to send anyone, and a
+// link that works nowhere is worse than no button -- it gets posted before anyone discovers it.
+const trackedLinkBase = computed(() => {
+  const page = builderOriginalPage.value;
+  if (!page || page.status !== "published") return "";
+  const url = pageUrl(page);
+  return isOpenableUrl(url) ? url : "";
+});
+
+const trackedLink = computed(() => {
+  const base = trackedLinkBase.value;
+  if (!base || !trackedLabelClean.value) return "";
+  return `${base}${base.includes("?") ? "&" : "?"}src=${trackedLabelClean.value}`;
+});
+
+async function copyTrackedLink() {
+  if (!trackedLink.value) return;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(trackedLink.value).catch(() => {});
+  }
+  trackedCopied.value = true;
+  setTimeout(() => { trackedCopied.value = false; }, 2000);
+}
+
 const offerObjections = ref([]);
 let objectionsLoadedFor = "";
 async function loadOfferObjections(offerId) {
@@ -8141,6 +8197,8 @@ function editPage(page) {
   populateBuilderFromPage(page);
   loadPageNumbers(page.page_id);
   loadOfferObjections(page.offer_id);
+  trackedLabel.value = "";
+  trackedCopied.value = false;
   builderExistingPageId.value = page.page_id;
   builderOriginalPage.value = { ...page };
   builderOpen.value = true;

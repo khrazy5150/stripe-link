@@ -8330,3 +8330,8 @@ a.orders-place { text-decoration: underline; }
   font-variant-numeric: tabular-nums;
 }
 .attribution-source { font-weight: 600; word-break: break-all; }
+
+/* The tracked-link builder in the Traffic sources panel. */
+.tracked-link-row { display: flex; gap: 0.6rem; margin-top: 0.7rem; }
+.tracked-link-row input { flex: 1 1 auto; min-width: 0; }
+.tracked-link-preview { word-break: break-all; display: block; margin-top: 0.4rem; opacity: 0.85; }

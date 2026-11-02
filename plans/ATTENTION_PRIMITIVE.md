@@ -345,6 +345,17 @@ established patterns, and costs essentially nothing.
 > It rides the SAME single-page read the link clicks already used (`loadPageNumbers`, renamed from
 > `loadLinkClicks`) — a second request would double the cost of opening the builder to show two panels of
 > one document.
+>
+> **The panel also BUILDS the link**, which A2 shipped without: a tenant had to know `?src=` existed and
+> append it by hand, and a measurement feature nobody can easily feed is one nobody feeds. Type a label,
+> copy the tagged URL. The label is sanitised in the browser by the SAME rule `page_views.source_slug`
+> applies server-side — sanitising only on the server would mean the tenant posts `IG Reel` while the
+> report keys on `igreel`, so the label they chose and the row they read would disagree.
+>
+> The panel therefore opens on any PUBLISHED page rather than only once something is measured: gating it
+> on having rows is a chicken-and-egg — no link, no arrivals; no arrivals, no way to make a link. A draft
+> is excluded because it has nowhere to send anyone, and a link that works nowhere gets posted before
+> anyone discovers it.
 
 
 
