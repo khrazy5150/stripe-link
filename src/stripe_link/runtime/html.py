@@ -9665,7 +9665,27 @@ def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None
         "      try {\n"
         f"        var k = 'sl_vid_' + {json.dumps(tenant_id)}, v = '';\n"
         "        try { v = localStorage.getItem(k) || ''; if (!v) { v = (Math.random().toString(36).slice(2) + Date.now().toString(36)); localStorage.setItem(k, v); } } catch (e) { v = ''; }\n"
-        f"        var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)}) + (v ? '&v=' + encodeURIComponent(v) : '');\n"
+        # WHERE THEY CAME FROM, captured once and remembered. `?src=` names the post that sent them
+        # (plans/ATTENTION_PRIMITIVE.md §8), and it has to outlive the URL: a visitor arrives on the Reel's
+        # link, browses, and checks out from a page whose address no longer carries it. So the first page
+        # with a `src` writes it to localStorage and every later page and the checkout read it from there.
+        #
+        # FIRST TOUCH WINS, deliberately. A visitor who arrives from a Reel and later clicks their own
+        # bookmark should still be credited to the Reel; overwriting on each visit would quietly reassign
+        # the sale to whatever they touched last, which is the attribution mistake that makes a channel
+        # look worthless. Cleared only by the TTL below.
+        "        var s = '';\n"
+        f"        var sk = 'sl_src_' + {json.dumps(tenant_id)};\n"
+        "        try {\n"
+        "          var q = new URLSearchParams(location.search).get('src') || '';\n"
+        "          q = q.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 64);\n"
+        "          var held = JSON.parse(localStorage.getItem(sk) || 'null');\n"
+        "          if (held && held.at && (Date.now() - held.at) > 2592000000) { held = null; }\n"
+        "          if (q && !held) { held = { v: q, at: Date.now() }; localStorage.setItem(sk, JSON.stringify(held)); }\n"
+        "          s = (held && held.v) || q;\n"
+        "        } catch (e) { s = ''; }\n"
+        "        window.__jbSrc = s;\n"
+        f"        var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)}) + (v ? '&v=' + encodeURIComponent(v) : '') + (s ? '&s=' + encodeURIComponent(s) : '');\n"
         "        if (navigator.sendBeacon) { navigator.sendBeacon(u); }\n"
         "        else { var i = new Image(); i.src = u; }\n"
         "      } catch (e) {}\n"
@@ -10383,7 +10403,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # A coupon the visitor applied on the page rides along with the CART too, not just the single-offer
         # CTA. Until 2026-09-23 the cart body carried no coupon at all and the handler never looked for one,
         # so a cart paid full price however the buyer arrived.
-        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, mode: cartMode, page_id: cartPageId, coupon: window.__jbCoupon || '', ship_to_country: window.__jbShipTo || '', shipping_quote: window.__jbShipQuote || '', shipping_service: window.__jbShipService || '', success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
+        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, mode: cartMode, page_id: cartPageId, coupon: window.__jbCoupon || '', src: window.__jbSrc || '', ship_to_country: window.__jbShipTo || '', shipping_quote: window.__jbShipQuote || '', shipping_service: window.__jbShipService || '', success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
         # Clear the LOCAL cart ONLY once Stripe hands off (we have a redirect url) so returning to the page shows
         # an empty cart, not the just-purchased items. The .catch keeps it on failure (retry still works). The
         # SERVER cart persists — the webhook marks it converted on payment via metadata[cart_id], or it stays

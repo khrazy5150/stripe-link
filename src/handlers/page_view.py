@@ -28,6 +28,9 @@ from stripe_link.domain.page_views import (
     is_trackable_page_id,
     link_counter_key,
     link_dedupe_item,
+    source_counter_key,
+    source_dedupe_item,
+    source_slug,
     visitor_key,
 )
 from stripe_link.repositories.page_views import page_views_repository
@@ -75,13 +78,23 @@ def handler(event, context, repository=None, now=None):
     link = str(params.get("l") or "").strip()
     if link and not is_trackable_link_id(link):
         return _no_content()
+    # `s` is WHERE THEY CAME FROM, and unlike `l` it is not an alternative to a view -- it is the same
+    # arrival described on a second axis (plans/ATTENTION_PRIMITIVE.md §8). A visitor who followed a Reel
+    # is one view AND one arrival from that post, so both are counted, each deduped on its own key. An
+    # unusable slug is dropped and the VIEW still counts: losing a page view because a tenant mistyped a
+    # campaign label would be the analytics equivalent of refusing the page.
+    source = source_slug(params.get("s"))
     try:
         repo = repository or page_views_repository()
         if link:
             if repo.claim_view(link_dedupe_item(page_id, link, day, visitor, now_ts)):
                 repo.increment_link_total(link_counter_key(page_id, link), now_ts)
-        elif repo.claim_view(dedupe_item(page_id, day, visitor, now_ts)):
-            repo.increment_total(counter_key(page_id), now_ts)
+        else:
+            if repo.claim_view(dedupe_item(page_id, day, visitor, now_ts)):
+                repo.increment_total(counter_key(page_id), now_ts)
+            if source and repo.claim_view(
+                    source_dedupe_item(page_id, source, day, visitor, now_ts)):
+                repo.increment_source_total(source_counter_key(page_id, source), now_ts)
     except Exception as exc:  # noqa: BLE001 - a visitor must never see an analytics failure
         print(f"page {'link click' if link else 'view'} not recorded for {page_id}: {type(exc).__name__}: {exc}")
     return _no_content()

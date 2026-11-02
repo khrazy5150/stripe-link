@@ -20,6 +20,7 @@ logger.setLevel(logging.INFO)
 
 from stripe_link.common import error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.page_views import source_slug as attribution_source_slug
 from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
@@ -434,6 +435,7 @@ def handler(
             bnpl_payment_method_types=bnpl_types,
             collect_tax=collect_tax,
             coupon_code=str(params.get("coupon") or ""),
+            attribution_source=str(params.get("src") or ""),
             mode=mode,
             coupons_repo=coupons_repo,
             grants_repo=grants_repo,
@@ -1164,6 +1166,7 @@ def build_checkout_payload(
     bnpl_payment_method_types=None,
     collect_tax=False,
     coupon_code="",
+    attribution_source="",
     mode="test",
     coupons_repo=None,
     grants_repo=None,
@@ -1199,6 +1202,14 @@ def build_checkout_payload(
         "metadata[tenant_id]": tenant_id,
         "metadata[offer_id]": offer.get("offer_id") or "",
     }
+    # WHICH POST SENT THEM, carried to the order through Stripe exactly as `cart_id` already is
+    # (plans/ATTENTION_PRIMITIVE.md §8). Stripe metadata is the only channel that survives the hop to a
+    # hosted page and back through the webhook, so attribution rides it rather than needing a session store
+    # of its own. Sanitised here as well as in the browser: this value reaches a stored document, and the
+    # page that sent it is a static artifact anyone can POST in place of.
+    source = attribution_source_slug(attribution_source)
+    if source:
+        payload["metadata[src]"] = source
     # A coupon carried in from a campaign page: the visitor tapped a ticket that already named the code, so
     # applying it here means the discount is on the page they land on instead of behind a field they have to
     # find and retype (plans/COUPON_ELEMENT.md).

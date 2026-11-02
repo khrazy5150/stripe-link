@@ -71,6 +71,36 @@ class PageViewRepository:
                 totals[link] = int(item.get("clicks") or 0)
         return totals
 
+    def source_totals_for_page(self, page_id: str) -> dict[str, int]:
+        """Arrivals per `?src=` slug for one page, in a single query. Mirrors `link_totals_for_page` --
+        same partition trick, same "{} on any failure" posture, for the same reason: a page's numbers are
+        worth less than the page."""
+        from boto3.dynamodb.conditions import Key
+
+        from stripe_link.domain.page_views import source_counter_partition
+
+        try:
+            response = self.table.query(
+                KeyConditionExpression=Key("PK").eq(source_counter_partition(page_id)))
+        except Exception:  # noqa: BLE001
+            return {}
+        totals: dict[str, int] = {}
+        for item in response.get("Items") or []:
+            source = str(item.get("SK") or "").split("#", 1)[-1]
+            if source:
+                totals[source] = int(item.get("arrivals") or 0)
+        return totals
+
+    def increment_source_total(self, key: dict[str, str], now: int) -> None:
+        """Atomic ADD, for the same reason the other two are. `arrivals` rather than `views`: this counts
+        people who came IN by a named source, which is a different question from how many saw the page."""
+        self.table.update_item(
+            Key=key,
+            UpdateExpression="ADD #arrivals :one SET last_arrival_at = :now",
+            ExpressionAttributeNames={"#arrivals": "arrivals"},
+            ExpressionAttributeValues={":one": 1, ":now": now},
+        )
+
     def increment_link_total(self, key: dict[str, str], now: int) -> None:
         """Atomic ADD, for the same reason increment_total is one."""
         self.table.update_item(

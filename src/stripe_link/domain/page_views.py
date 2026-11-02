@@ -118,6 +118,60 @@ def link_counter_partition(page_id: str) -> str:
     return f"PAGELINKS#{page_id}"
 
 
+# WHERE A VISITOR CAME FROM, as a slug the tenant put in a link (plans/ATTENTION_PRIMITIVE.md §8).
+#
+# `?src=` on a published page identifies the POST that sent them -- one Reel, one carousel, one email. It
+# is the same question the link counter answers pointed the other way: that one counts people LEAVING by a
+# destination, this counts people ARRIVING by a source. So it reuses that shape exactly rather than
+# inventing a second one, and the dedupe is per (page, source, visitor, day) for the same reason: every
+# number on this page stays an answer about PEOPLE, so a click-through rate computed from any two of them
+# means something.
+#
+# Attribution does NOT stop here. A click is interest; the money is on the order, which carries the same
+# slug through Stripe metadata (`handlers/cart_checkout`), so GMV per post is a join on this one string.
+_SOURCE_KEY_LENGTH = 24
+MAX_SOURCE_LENGTH = 64
+
+
+def source_slug(value: Any) -> str:
+    """A tenant-supplied `?src=` reduced to something safe to put in a key. "" when it is unusable.
+
+    Lowercased, and limited to letters, digits, dash and underscore. NOT hashed, unlike `link_id`: a link
+    id exists to avoid putting a tenant's URL in a key, while this slug IS the tenant's own label and has
+    to be readable back on a report -- "ig-reel-nov-03" is the answer they are looking for, and a hash
+    would mean storing a second table just to turn it back into words.
+
+    That makes it the one place tenant text reaches a key, which is why the character set is an allow-list
+    rather than a deny-list, and why it is length-capped: a key is not a free-text field.
+    """
+    text = str(value or "").strip().lower()[:MAX_SOURCE_LENGTH]
+    cleaned = "".join(ch for ch in text if ch.isalnum() or ch in "-_")
+    return cleaned
+
+
+def source_dedupe_item(page_id: str, source: str, day: str, visitor: str, now: int) -> dict[str, Any]:
+    """The row whose CONDITIONAL creation decides whether this arrival counts. Mirrors `link_dedupe_item`."""
+    return {
+        "PK": f"PAGESOURCEHIT#{page_id}#{day}",
+        "SK": f"SOURCE#{source}#VISITOR#{visitor}",
+        "page_id": page_id,
+        "source": source,
+        "day": day,
+        "created_at": now,
+        "ttl": now + VIEW_TTL_DAYS * 24 * 60 * 60,
+    }
+
+
+def source_counter_key(page_id: str, source: str) -> dict[str, str]:
+    """The aggregate one source's arrivals accumulate on. Every source of a page shares a partition so the
+    dashboard reads them all in ONE query instead of a lookup per source."""
+    return {"PK": f"PAGESOURCES#{page_id}", "SK": f"SOURCE#{source}"}
+
+
+def source_counter_partition(page_id: str) -> str:
+    return f"PAGESOURCES#{page_id}"
+
+
 def page_link_urls(page: Any, organization: Any = None) -> list[str]:
     """Every outbound URL this page actually renders, in order, de-duplicated.
 

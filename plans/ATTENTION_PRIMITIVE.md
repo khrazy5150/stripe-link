@@ -270,7 +270,37 @@ invites). The publisher is a **fourth of the same shape**: query posts due ≤ n
 adapter, mark published/failed with retry/backoff. This avoids per-post EventBridge Scheduler limits, matches
 established patterns, and costs essentially nothing.
 
-## 8. Attribution — ship this EARLY
+## 8. Attribution — ship this EARLY — **A2 SHIPPED 2026-11-01**
+
+> **Built in `stripe-link`, not in `../sam/attention`.** The published page, the view beacon and both
+> checkout paths all live here, which is exactly why this was buildable before the Attention project
+> exists — and why the plan calls it the cheap early piece. The campaign-side *reporting* belongs in
+> `attention` when that lands; the SINK is here.
+>
+> **The chain, end to end:** `?src=` on a published page → captured and held in `localStorage` →
+> beaconed to `/t/view?s=` → counted as an arrival per (page, source, visitor, day) → carried into
+> checkout → `metadata[src]` at Stripe → `order.attribution_source`. GMV per post is a join on one string.
+>
+> **Four decisions worth keeping:**
+>
+> - **The slug is readable, not hashed.** Unlike `link_id`, this IS the tenant's own label and has to come
+>   back on a report — "ig-reel-nov-03" is the answer they want, and a hash would need a second table to
+>   turn it back into words. That makes it the one place tenant text reaches a key, so the character set is
+>   an allow-list and the length is capped.
+> - **FIRST TOUCH WINS.** A visitor who arrives from a Reel and later returns by bookmark is still credited
+>   to the Reel. Overwriting on each visit reassigns the sale to whatever they touched last, which is the
+>   attribution mistake that makes a channel look worthless. 30-day expiry.
+> - **A source counts the view AS WELL.** Unlike `l` (a click, which is exclusive), `s` is the same arrival
+>   on a second axis. And a mistyped slug never costs the page view — losing a view because a tenant fumbled
+>   a campaign label would be the analytics equivalent of refusing the page.
+> - **Absent attribution writes NO field**, rather than `""`. An order nobody tracked and a post whose slug
+>   failed to arrive must not look the same in the column.
+>
+> **Still to build:** the reporting surface. Clicks are queryable per page (`source_totals_for_page`) and
+> orders carry the slug, but nothing joins them into "problem carousels convert 3.8x better" yet — that is
+> the pillar-weighting feedback loop, and it needs campaigns to exist before a pillar is a thing.
+
+
 
 `/offer/{id}?src={tracking_slug}` → click recorded → session context → on checkout, GMV attributed to the
 **post and its pillar**. Feedback: *"problem carousels convert 3.8× better than transformation videos"* →

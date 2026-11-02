@@ -189,6 +189,7 @@ def handler(
             # correctly (author, 2026-10-01). The four parameters are the same four `/checkout` takes.
             shipping_config=_tenant_shipping_config(tenant_id) if collect_shipping_for(
                 offer, products_by_id) else None,
+            attribution_source=str(body.get("src") or ""),
             ship_to_country=str(body.get("ship_to_country") or "").strip().upper()[:2],
             shipping_quote_id=str(body.get("shipping_quote") or "").strip()[:64],
             shipping_service=str(body.get("shipping_service") or "").strip()[:64],

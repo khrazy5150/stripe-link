@@ -2860,6 +2860,16 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         # baseline any later shipping-cost variance is measured against. Absent when no quote priced the
         # sale, rather than a block of empty strings claiming one.
         **agreed_shipping(metadata, shipping_address),
+        # WHICH POST PRODUCED THIS SALE (plans/ATTENTION_PRIMITIVE.md §8). The slug the visitor arrived
+        # with, carried here through Stripe metadata because that is the only channel surviving the hop to
+        # a hosted checkout and back. Clicks live in the page-views table; the MONEY lives here, and GMV
+        # per post is a join on this one string.
+        #
+        # Omitted entirely when absent, rather than written as "": an order with no attribution is one
+        # nobody tracked, and an empty string in the column would be indistinguishable from a post whose
+        # slug failed to arrive.
+        **({"attribution_source": str(metadata.get("src") or "")}
+           if str(metadata.get("src") or "") else {}),
         # COST OF GOODS, frozen at the sale. `ledger.sale_entry` has accepted a `cogs` argument since the
         # ledger was written and nothing ever supplied one, so `profit` has been revenue-minus-fees
         # wearing the word "profit" -- and `Reports.vue` showed it (plans/MONEY_ACROSS_SILOS.md P2).
