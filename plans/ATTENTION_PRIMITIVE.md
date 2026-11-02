@@ -42,7 +42,9 @@ named consumers — not a second, parallel semantic extraction.**
 AttentionContext is the channel-aware consumer. If a campaign needs a fact about the offer that the analyzer
 doesn't expose, extend the **analyzer**, not a private copy here.
 
-## 2a. Where it lives — its own project, `../sam/attention` (author 2026-11-01)
+## 2a. Where it lives — its own project, `../sam/attention`
+
+**Name CONFIRMED by the author 2026-11-01.** Not scaffolded: an empty stack is how `../sam/ai-video-generator` became the three-file trap documented below, and nothing can be built here until A0's consumers exist. The folder appears when the work starts.
 
 **Not `stripe-link`.** That stack is at CloudFormation's 1MB transform limit with ~138KB of headroom, at
 ~441 of 500 resources, and at 225 of a 240-event route guard. This plan needs tables, a post queue, a
