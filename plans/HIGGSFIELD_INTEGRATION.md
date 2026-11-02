@@ -303,7 +303,45 @@ prudent.
 
 ---
 
-## 8. Open decisions
+## 8. Decided, and open
+
+### DECIDED 2026-11-01 — a premium tier with an allowance that EXPIRES
+
+Sold as a premium rung ($39+) including a number of generations that rises with the plan, **not priced per
+generation**. No rollover, no purchased tokens in Phase 1.
+
+That is not what makes it compliant — §0b is — but it removes the appearance of unit resale: the tenant
+buys Junior Bay premium, not Higgsfield inventory counted out by us. It also inverts §4's cash-flow risk,
+because subscription revenue arrives BEFORE the upstream cost is incurred, and it stabilises the funding
+cadence §5's concurrency tier depends on.
+
+**Why expiry rather than rollover: the two are not equally reversible.** Adding rollover later is a gift;
+removing it later means clawing back balances tenants believe they own. Same reasoning as requiring a
+return when no policy resolves — pick the direction that is one click to undo. And there is no usage data
+yet, which is what Phase 1 is for.
+
+**The accepted cost, stated rather than discovered:** a calendar month plus expiry produces a synchronised
+month-end rush against a hard concurrency ceiling. **Absorb it in the queue (§5); do NOT change the period
+model.** `ai_quota.period_key` chose calendar month deliberately — *"the number has to be one a tenant can
+check against their own calendar without us explaining it"* — and a second period model in that module to
+serve one feature is the split that drifts. Generation is async, so a deeper queue at month-end is slower
+turnaround, not failure. Size for it and alarm on queue depth.
+
+**Revisit when the ledger shows most tenants using well under half their allowance.** That is a churn
+signal rather than breakage, and rollover is the right fix for it. If they cluster near the cap instead,
+rollover adds liability and burst risk for people who do not need it.
+
+**If rollover is ever added, two constraints.** Cap it at one month (maximum balance 2x) — uncapped banking
+is the worst correlation available, a tenant redeeming a year at once hits cash and concurrency together,
+possibly in a month when the rolling 28-day window has already dropped the tier. And **forfeit it on
+downgrade or cancellation**: a balance that survives cancellation is a liability someone cashes out on the
+way out, while a forfeitable one is a switching cost. Same feature, opposite effect on retention.
+
+**The rung has to earn its price on more than video** (author, 2026-11-01). That is a commercial
+requirement, and it is also the §0b argument — the more the tier is Junior Bay capability rather than
+generation minutes, the further it sits from "Developer Access on a standalone basis".
+
+### Still open
 
 - **What is the first composition?** A short ad from the landing offer is the obvious candidate — it uses
   products, images, price, goal pack and brand colours, which is the §0b argument at its strongest. Settle
