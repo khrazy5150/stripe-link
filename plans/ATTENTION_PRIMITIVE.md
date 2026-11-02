@@ -543,10 +543,22 @@ Three things only a real deployment could establish:
   nobody has enriched, so **enrichment is a prerequisite step in the campaign flow**, not an optional
   polish — either the UI walks the tenant through it or the campaign route runs it on their behalf.
 
-The dev tenant `586173f0…` now carries `beta: ["attention"]` (granted 2026-11-02 with a targeted
-`update_item` using `list_append(if_not_exists(beta, []), …)`, not a load-mutate-put — a profile has many
-writers and a wholesale put loses the siblings). The gate moved from `403 not_entitled` to `409
-no_semantic_model`, which is the grant working.
+**Both stacks are live, and tenant `586173f0…` (keithdecosta@gmail.com) is entitled on dev and prod**
+(granted 2026-11-02). The Cognito pool is shared, so that one `sub` is the tenant id in both — there is no
+second identity to grant. Each grant is a targeted `update_item` using
+`list_append(if_not_exists(beta, []), …)` guarded by `attribute_exists(PK) AND NOT contains(beta, …)`, not
+a load-mutate-put: a tenant profile has many writers and a wholesale put loses the siblings, and the
+condition makes the grant idempotent.
+
+The grant is verifiable without reading a single offer. On dev the gate moved `403 not_entitled` →
+`409 no_semantic_model`; on prod, probed with a deliberately bogus offer id, `403` → `404 offer_not_found`.
+The 404 rather than a 503 also proves the prod function's cross-stack read of `jb-offers-prod` works.
+
+| | dev | prod |
+|---|---|---|
+| stack | `jb-attention-stack-dev` | `jb-attention-stack-prod` |
+| API | `bjhabjf4q1` | `n1fpqq3mae` |
+| tenant entitled | ✅ | ✅ |
 
 **Still open in A1:** the five-pillar generation call over the BYO-key adapter, and a dashboard surface —
 the API answers today only to `curl` with an id_token. **The one unproven link is the happy path**: no dev
