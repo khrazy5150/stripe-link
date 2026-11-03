@@ -26,8 +26,21 @@ class TheGateTests(unittest.TestCase):
         self.assertIn('v-if="editingOfferId && attentionAvailable"', OFFERS)
 
     def test_availability_comes_from_the_CONFIG_not_a_constant(self):
-        self.assertIn("const attentionAvailable = attentionConfigured();", OFFERS)
+        self.assertIn("attentionConfigured()", OFFERS)
         self.assertIn("getEnvironmentConfig(channel).attention_api_base", CLIENT)
+
+    def test_the_gate_is_RE_CHECKED_when_the_modal_opens(self):
+        """The bug that shipped this to dev invisible. App.vue loads app_config asynchronously on mount --
+        deliberately in the background -- so a value read once at component setup is `false` on any load
+        where localStorage did not already hold the base, and stays false for the whole page session."""
+        self.assertIn("const attentionAvailable = ref(attentionConfigured());", OFFERS)
+        opener = OFFERS.split("function openOfferModal(", 1)[1][:1200]
+        self.assertIn("attentionAvailable.value = attentionConfigured()", opener)
+
+    def test_the_gate_is_NOT_a_plain_computed(self):
+        """A computed over localStorage is cached and never invalidated -- Vue has no dependency to
+        invalidate on, so it would read `false` once and keep answering `false`."""
+        self.assertNotIn("const attentionAvailable = computed(", OFFERS)
 
     def test_there_is_NO_hardcoded_attention_host(self):
         """The repo's own rule for every other base: config-driven per channel, no fallback. A fallback
@@ -235,6 +248,106 @@ class WritingFinishedCopyTests(unittest.TestCase):
         css = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
         block = css.split(".offer-attention-body", 1)[1][:120]
         self.assertIn("pre-wrap", block)
+
+
+class ThePlanTests(unittest.TestCase):
+    """A4: the angles become a dated plan the tenant can amend and take away."""
+
+    def test_the_plan_is_labelled_FREE(self):
+        """Deterministic and server-side, like deriving the angles. Writing the copy is the metered step,
+        and claiming a cost here would be a false statement about the allowance."""
+        plan = OFFERS.split('<h4>Plan a month of it</h4>', 1)[1].split("</div>", 2)[0]
+        self.assertIn("No AI generation", plan)
+
+    def test_the_calendar_is_read_BACK_after_planning(self):
+        """The rows a tenant amends must be the STORED ones: due_at is part of the key, so a skip against
+        a row from the create response would address a key that may not match."""
+        planner = OFFERS.split("async function planCampaignForOffer()", 1)[1][:1200]
+        self.assertIn("await loadCalendar()", planner)
+
+    def test_both_amendments_send_the_posts_CURRENT_due_at(self):
+        """It is part of the storage key; without it the service has no key to address."""
+        self.assertIn("due_at: post.due_at", ADAPTER)
+        self.assertEqual(ADAPTER.count("due_at: post.due_at"), 2)
+
+    def test_a_move_RESORTS_the_rows(self):
+        """The service returns due order; leaving a moved row in place makes the dates read as shuffled."""
+        mover = OFFERS.split("async function movePost(", 1)[1][:900]
+        self.assertIn("sort((a, b) => Number(a.due_at) - Number(b.due_at))", mover)
+
+    def test_a_skipped_post_stays_VISIBLE(self):
+        """Hiding it leaves an unexplained gap in the dates, and a tenant cannot restore what they cannot
+        see."""
+        self.assertIn("'is-skipped': post.status === 'skipped'", OFFERS)
+        css = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("tr.is-skipped", css)
+
+    def test_dates_are_rendered_in_the_VIEWERS_timezone(self):
+        """`due_at` is a UTC epoch and stays one; a tenant reading "Tue 3 Nov" means their Tuesday."""
+        formatter = OFFERS.split("function formatPostDate(", 1)[1][:500]
+        self.assertIn("toLocaleString(undefined", formatter)
+
+    def test_the_plan_is_EXPORTABLE_as_a_file_and_as_text(self):
+        """A4's point while publishing is gated: a tenant takes the month into whatever they already use."""
+        self.assertIn("function copyCalendar()", OFFERS)
+        self.assertIn("function downloadCalendar()", OFFERS)
+
+    def test_the_csv_quotes_its_fields(self):
+        """An anchor is a sentence and will contain commas."""
+        exporter = OFFERS.split("function downloadCalendar()", 1)[1][:900]
+        self.assertIn('replace(/"/g, \'""\')', exporter)
+
+    def test_the_csv_carries_a_BOM(self):
+        """Excel mangles a UTF-8 CSV without one, and an anchor may well be accented."""
+        exporter = OFFERS.split("function downloadCalendar()", 1)[1][:900]
+        self.assertIn("ufeff", exporter)
+
+    def test_an_OUTDATED_plan_is_reported_never_auto_rebuilt(self):
+        """A scheduled post rewriting itself under the tenant is the surprise A3 refuses."""
+        banner = OFFERS.split('v-if="planOutdated"', 1)[1][:400]
+        self.assertIn("Re-plan", banner)
+
+    def test_outdated_COMPARES_the_two_model_keys(self):
+        """Not a flag someone has to remember to set: the plan records the model it was built from and the
+        context reports the model the offer has now."""
+        self.assertIn("planModelKey.value !== contextModelKey.value", OFFERS)
+        self.assertIn('planModelKey.value = body.campaign?.model_key', OFFERS)
+        self.assertIn('contextModelKey.value = context.context?.cache_key', OFFERS)
+
+    def test_outdated_is_FALSE_until_both_keys_are_known(self):
+        """An unknown key must not nag a tenant to rebuild a plan that was fine -- the same direction the
+        service takes in `predates_the_offer`."""
+        self.assertIn("Boolean(planModelKey.value && contextModelKey.value", OFFERS)
+
+    def test_an_EXISTING_plan_is_surfaced_when_the_modal_opens(self):
+        """Otherwise a plan built in an earlier session is invisible and the tenant presses Build again."""
+        self.assertIn("async function loadExistingPlan()", OFFERS)
+        self.assertIn("loadExistingPlan().catch(() => {})", OFFERS)
+
+    def test_surfacing_it_cannot_break_the_ANGLES(self):
+        """No plan is the common case, and it must not make the thing above it fail."""
+        loader = OFFERS.split("loadExistingPlan().catch", 1)[1][:60]
+        self.assertIn("{})", loader)
+
+    def test_the_existing_plan_restores_its_own_settings(self):
+        """The dropdowns should show what the plan was actually built with, not the defaults."""
+        loader = OFFERS.split("async function loadExistingPlan()", 1)[1][:700]
+        self.assertIn("planIntensity.value = mine.intensity", loader)
+        self.assertIn("planDays.value = Number(mine.days)", loader)
+
+    def test_the_plan_is_cleared_when_another_offer_is_opened(self):
+        reset = OFFERS.split("function resetAttention()", 1)[1][:400]
+        self.assertIn("resetPlan()", reset)
+
+    def test_the_component_does_not_decide_the_SCHEDULE(self):
+        """Which pillar lands on which day is the service's answer. A component computing it would be the
+        second derivation §2 forbids."""
+        logic = OFFERS.split("// A3/A4. The plan is the service's", 1)[1].split(
+            "function copyAttentionPost(", 1)[0]
+        code = "\n".join(line.split("//", 1)[0] for line in logic.splitlines())
+        for word in ("slot", "per_week", "7 -", "% 7"):
+            with self.subTest(word=word):
+                self.assertNotIn(word, code)
 
 
 if __name__ == "__main__":

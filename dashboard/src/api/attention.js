@@ -66,3 +66,61 @@ export function fetchContext(offerId) {
 export function fetchBriefs(offerId, channel, count) {
   return get("/me/briefs", { offer_id: offerId, channel, ...(count ? { count } : {}) });
 }
+
+// ---------------------------------------------------------------------------------------------------
+// A3/A4 -- campaigns and the calendar.
+// ---------------------------------------------------------------------------------------------------
+
+export const INTENSITIES = [
+  { key: "light", label: "One post a week" },
+  { key: "standard", label: "Two posts a week" },
+  { key: "committed", label: "Three posts a week" },
+];
+
+export const DURATIONS = [7, 14, 30, 60, 90];
+
+export const STATUS_PLANNED = "planned";
+export const STATUS_SKIPPED = "skipped";
+
+async function postJson(path, body, params) {
+  const base = getAttentionApiBase();
+  if (!base) {
+    const error = new Error("Attention is not configured for this environment.");
+    error.code = "not_configured";
+    throw error;
+  }
+  try {
+    return await apiRequest(path, { base, method: "POST", body, ...(params ? { params } : {}) });
+  } catch (err) {
+    err.code = err.payload?.error || err.code || "";
+    throw err;
+  }
+}
+
+export function planCampaign(offerId, { days, intensity, channels } = {}) {
+  // The offer rides in the QUERY STRING, not the body: the service reads it with the same `?offer_id=`
+  // the read routes use, so one route does not learn a second way to name an offer.
+  return postJson("/me/campaigns", { days, intensity, channels }, { offer_id: offerId });
+}
+
+export function fetchCampaigns() {
+  return get("/me/campaigns");
+}
+
+export function fetchCalendar({ campaignId, from, to } = {}) {
+  return get("/me/posts", {
+    ...(campaignId ? { campaign_id: campaignId } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  });
+}
+
+// Both amendments send the post's CURRENT due_at as well as its id, because due_at is part of the
+// storage key -- without it the service has no key to address and would have to scan to find one.
+export function setPostStatus(post, status) {
+  return postJson("/me/posts/status", { post_id: post.post_id, due_at: post.due_at, status });
+}
+
+export function reschedulePost(post, to) {
+  return postJson("/me/posts/schedule", { post_id: post.post_id, due_at: post.due_at, to });
+}

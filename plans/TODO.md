@@ -3631,6 +3631,14 @@ choice.
   counter. Spends the PAGE counter like enrichment does. Prod needs one non-code write:
   `environments.{dev,prod}.attention_api_base` in the prod `app_config` document (the panel is gated on
   it, so prod shows nothing until then).
+- **A3 + A4 SHIPPED dev 2026-11-02.** Campaign engine (`attention-campaigns`/`attention-posts`, mode in
+  both sort keys, `due_at` zero-padded in the posts key so the calendar and A5's sweep are each ONE range
+  query) + the dated calendar in the offer modal with skip/restore, ±1d/±1w, clipboard and CSV export.
+  Planning is free and deterministic; only writing a post's copy is metered. Drag-and-drop DEFERRED.
+- **A5 and A6 are BLOCKED on things that are not code.** A5 needs §11's paid one-week vendor spike (a real
+  IG account, publish a carousel + a video, revoke a token mid-queue) plus an Outstand/Ayrshare account —
+  the plan's own words: "vendor claims are unverified marketing until this passes". A6 needs Meta/TikTok/
+  YouTube app review, §6.2's "weeks-to-months", and only makes sense after A5 has connected tenants.
 - ⚠️ **PRE-EXISTING BYOK GAP found 2026-11-02, not fixed:** nothing in the generation path decrypts
   `ai_provider_config.api_key_ref`. The page, enrich and copy operations all pass no `api_key`, so a BYOK
   tenant admitted by `can_use_ai_builder` reaches `_byok_loop` with an EMPTY key. Everything runs on

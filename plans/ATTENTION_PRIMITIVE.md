@@ -441,10 +441,10 @@ mistaken for a generation endpoint. A5 automates the posting; it is not what mak
 | **A0 — Prereq** | ✅ **SHIPPED 2026-11-01** — `OfferSemanticAnalyzer` + the `facts.positioning` enrichment tier |
 | **A1 — Context** | 🟡 **domain layer built 2026-11-01, NOTHING DEPLOYED** — see §10a |
 | **A2 — Attribution** | `?src=` slugs, click ingestion, checkout attribution, per-post/per-pillar GMV *(early — see §8)* |
-| **A3 — Campaign engine** | intensity-aware 30-day generation; batch-write the post queue |
-| **A4 — Calendar UI** | edit/drag/reschedule/inject; **export & copy-to-clipboard** (delivers value with zero publishing APIs) |
-| **A5 — Publishing** | adapter interface + Outstand (Managed Keys); reconnection state; the 15-min publish sweep |
-| **A6 — BYOK migration** | own developer apps once reviews land; guided reconnect while tenant count is small |
+| **A3 — Campaign engine** | ✅ **SHIPPED dev 2026-11-02** — intensity-aware plan, batch-written queue |
+| **A4 — Calendar UI** | ✅ **dev 2026-11-02** — dated table, skip/restore, move, CSV + clipboard export. **Drag deferred** |
+| **A5 — Publishing** | ⛔ **BLOCKED on §11's unrun paid vendor spike** — adapter + reconnection + 15-min sweep |
+| **A6 — BYOK migration** | ⛔ **BLOCKED on Meta/TikTok/YouTube app review** (§6.2: weeks-to-months) and on A5 |
 | **Later** | performance-weighted pillar selection; more platforms; direct per-platform adapters |
 
 ## 10a. A1 as built — `../sam/attention` (2026-11-01)
@@ -602,8 +602,41 @@ failure, an empty answer, a carousel that came back without slides. Copy is gene
 request**, because writing five posts a tenant wants one of would spend five generations on four they
 discard, and the cost is stated before the click.
 
-⚠️ **Pre-existing gap, found while building this and not introduced by it:** nothing in the generation
-path decrypts `ai_provider_config.api_key_ref`. The page, enrichment and copy operations all pass no
+## 10b. A3 + A4 as built (2026-11-02)
+
+**A3 — the campaign engine.** `domain/campaign.py`, two tables, deterministic and free. Three dimensions
+advance at different rates so a month does not fall into a pattern: **pillar per post** (the §4 arc),
+**channel per post** (so no platform gets the same pillar twice running), **anchor per lap** (so thirty
+posts use thirty of the offer's own anchors, not one restated). A tenant who asks why there is a Mistakes
+post on the 14th gets an answer.
+
+Post ids are **derived** from the campaign, and the campaign id from offer+mode+day, so pressing the
+button twice **re-plans rather than doubling the calendar** — verified against the real tables. A random
+id would turn one dropped response into two campaigns' worth of posts in the queue.
+
+Posts carry their whole brief, **copied at plan time**. The context is keyed on the model's content, so a
+post that read through to it would rewrite itself when the offer was re-analyzed. `predates_the_offer`
+reports that instead, and treats an unknown key as **not** stale — the opposite of the context cache's
+rule, because there the cost of being wrong is invisible staleness and here it is nagging a tenant to
+rebuild a plan that was fine.
+
+**A4 — the calendar.** A dated table in the offer modal with skip/restore, ±1 day / ±1 week, clipboard and
+**CSV download**. §10's "delivers value with zero publishing APIs", which is the point while A5 is gated.
+`published` is deliberately **not settable** from a browser: that is A5's word, written by the sweep that
+actually published something, and letting a client claim it would make the calendar lie about what went
+out. **Drag-and-drop is deferred** — a lot of frontend for reordering something that can be re-planned.
+
+Two bugs found here, one by a test and one by the real tables:
+
+- **`channels: ["facebook"]` planned for all three platforms.** `known or CHANNELS` made the default
+  truthy, so the unknown-channel guard never fired. A tenant who picked one platform would have got a
+  month of posts on two they never chose.
+- **Every number read back from DynamoDB is a `Decimal`,** and `json.dumps(default=str)` stringified it —
+  so *create* answered `due_at` as a number while *the calendar* answered the same field as a string. One
+  field, two types, depending on the route. Now encoded as a number.
+
+⚠️ **Pre-existing gap, found while building A1's generation and not introduced by it:** nothing in the
+generation path decrypts `ai_provider_config.api_key_ref`. The page, enrichment and copy operations all pass no
 `api_key`, so a BYOK tenant admitted by `can_use_ai_builder` reaches `_byok_loop` with an empty key.
 Everything today runs on the platform's own Bedrock access. The fix is one resolver all three call; it was
 deliberately not papered over with a fourth private decrypt.

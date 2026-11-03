@@ -8326,6 +8326,38 @@ a.orders-place { text-decoration: underline; }
    them. `pre-wrap` keeps them without turning the text into a <pre> block. */
 .offer-attention-body { white-space: pre-wrap; }
 
+/* A4's calendar: a dated plan in the offer modal. */
+.offer-attention-plan { margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--border-muted, rgba(148, 163, 184, 0.25)); }
+.offer-attention-plan h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.attention-calendar { width: 100%; border-collapse: collapse; margin-top: 0.7rem; font-size: 0.86rem; }
+.attention-calendar th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  padding: 0.3rem 0.5rem 0.3rem 0;
+  border-bottom: 1px solid var(--border-muted, rgba(148, 163, 184, 0.25));
+}
+.attention-calendar td { padding: 0.45rem 0.5rem 0.45rem 0; vertical-align: top; line-height: 1.45; border-bottom: 1px solid var(--border-muted, rgba(148, 163, 184, 0.12)); }
+/* The date column is the one people scan down, so it gets tabular figures -- a column of dates whose
+   digits are different widths is the thing that makes a schedule hard to read. */
+.attention-calendar td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.attention-calendar-actions { white-space: nowrap; text-align: right; }
+.attention-calendar-actions .link-action { margin-left: 0.4rem; }
+/* A skipped post stays VISIBLE and reads as set aside. Hiding it would leave a gap in the dates with no
+   explanation, and the tenant could not restore what they could not see. */
+.attention-calendar tr.is-skipped td { opacity: 0.45; text-decoration: line-through; }
+.attention-calendar tr.is-skipped .attention-calendar-actions { opacity: 1; text-decoration: none; }
+
 /* Per-source attribution in the builder (plans/ATTENTION_PRIMITIVE.md §8). Numbers right-aligned and
    tabular so columns line up when they differ in width -- a revenue column that wanders is unreadable. */
 .attribution-table { width: 100%; border-collapse: collapse; margin-top: 0.7rem; font-size: 0.86rem; }

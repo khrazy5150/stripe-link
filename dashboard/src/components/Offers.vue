@@ -712,6 +712,78 @@
                 {{ attentionCopied === "__all__" ? "Copied" : "Copy all angles" }}
               </button>
             </div>
+
+            <!-- A3/A4: the angles above become a DATED PLAN. Free and deterministic, like deriving them
+                 -- the service decides which pillar lands on which day on which channel, and writing the
+                 copy for any one post stays the metered step. -->
+            <div class="offer-attention-plan">
+              <h4>Plan a month of it</h4>
+              <div class="offer-enrich-row">
+                <select v-model="planIntensity">
+                  <option v-for="level in planIntensities" :key="level.key" :value="level.key">
+                    {{ level.label }}
+                  </option>
+                </select>
+                <select v-model.number="planDays">
+                  <option v-for="count in planDurations" :key="count" :value="count">
+                    {{ count }} days
+                  </option>
+                </select>
+                <button class="secondary-action" type="button" :disabled="planning"
+                        @click="planCampaignForOffer">
+                  {{ planning ? "Planning…" : (calendar.length ? "Re-plan" : "Build the plan") }}
+                </button>
+                <small class="field-note">No AI generation — this is a schedule, not copy.</small>
+              </div>
+
+              <div v-if="planError" class="keys-status-banner error">{{ planError }}</div>
+
+              <!-- The plan predates the offer's current analysis. Reported, never auto-rebuilt: a
+                   scheduled post rewriting itself under the tenant is the surprise A3 refuses. -->
+              <div v-if="planOutdated" class="keys-status-banner is-prose">
+                <span class="banner-line">
+                  This plan was built from an earlier version of this offer's understanding. Re-plan to
+                  use the current one.
+                </span>
+              </div>
+
+              <table v-if="calendar.length" class="attention-calendar">
+                <thead>
+                  <tr><th>When</th><th>Angle</th><th>Where</th><th>About</th><th></th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="post in calendar" :key="post.post_id"
+                      :class="{ 'is-skipped': post.status === 'skipped' }">
+                    <td>{{ formatPostDate(post.due_at) }}</td>
+                    <td>{{ attentionPillarLabel(post.pillar) }}</td>
+                    <td>{{ post.brief?.format_label || post.channel }}</td>
+                    <td>{{ post.brief?.anchor }}</td>
+                    <td class="attention-calendar-actions">
+                      <button class="link-action" type="button" :disabled="amending === post.post_id"
+                              @click="movePost(post, 1)">+1d</button>
+                      <button class="link-action" type="button" :disabled="amending === post.post_id"
+                              @click="movePost(post, 7)">+1w</button>
+                      <button class="link-action" type="button" :disabled="amending === post.post_id"
+                              @click="togglePostSkipped(post)">
+                        {{ post.status === "skipped" ? "Restore" : "Skip" }}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div v-if="calendar.length" class="offer-enrich-row">
+                <button class="secondary-action" type="button" @click="copyCalendar">
+                  {{ attentionCopied === "__plan__" ? "Copied" : "Copy the plan" }}
+                </button>
+                <button class="secondary-action" type="button" @click="downloadCalendar">
+                  Download CSV
+                </button>
+                <small class="field-note">
+                  {{ plannedCount }} planned{{ skippedCount ? `, ${skippedCount} skipped` : "" }}.
+                </small>
+              </div>
+            </div>
           </section>
 
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
@@ -876,11 +948,20 @@ import { recurringSuffix } from "../utils/priceForm";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import {
   CHANNELS as ATTENTION_CHANNELS,
+  DURATIONS as ATTENTION_DURATIONS,
+  INTENSITIES as ATTENTION_INTENSITIES,
   NO_SEMANTIC_MODEL,
+  STATUS_PLANNED,
+  STATUS_SKIPPED,
   attentionConfigured,
   fetchBriefs,
+  fetchCalendar,
+  fetchCampaigns,
   fetchContext,
   pillarLabel,
+  planCampaign,
+  reschedulePost,
+  setPostStatus,
 } from "../api/attention";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, useProductsStore } from "../stores/products";
@@ -1543,7 +1624,17 @@ async function enrichOffer() {
 // derivation in a Vue component is exactly what ATTENTION_PRIMITIVE.md §2 forbids.
 // ---------------------------------------------------------------------------------------------------
 const attentionChannels = ATTENTION_CHANNELS;
-const attentionAvailable = attentionConfigured();
+// RE-CHECKED WHEN THE MODAL OPENS, not snapshotted at setup. `attentionConfigured()` reads the Attention
+// base out of the cached app_config, and App.vue loads that config ASYNCHRONOUSLY on mount -- deliberately
+// in the background, so a slow fetch cannot block the first paint. A value read once at component setup is
+// therefore `false` on any load where localStorage did not already hold the base, and stays false for the
+// whole page session: the panel never appears even after the config lands. That is how this shipped to dev
+// invisible.
+//
+// A `computed` would not fix it. Its source is localStorage, which Vue cannot track, so the cache would
+// never be invalidated either. A ref refreshed at the moment it matters is both correct and honest about
+// where the value comes from.
+const attentionAvailable = ref(attentionConfigured());
 const attentionChannel = ref(ATTENTION_CHANNELS[0].key);
 const attentionBriefs = ref([]);
 const attentionMissing = ref([]);
@@ -1569,6 +1660,7 @@ function resetAttention() {
   attentionBriefs.value = [];
   attentionCopy.value = {};
   attentionWriteError.value = {};
+  resetPlan();
   attentionMissing.value = [];
   attentionError.value = "";
   attentionNeedsUnderstanding.value = false;
@@ -1591,6 +1683,11 @@ async function loadAttention() {
     ]);
     attentionMissing.value = context.missing_pillars || [];
     attentionBriefs.value = briefs.briefs || [];
+    contextModelKey.value = context.context?.cache_key || "";
+    // A plan built in an earlier session is invisible otherwise -- the tenant would press "Build the
+    // plan" again and wonder why nothing looked new. Best-effort: a missing plan is the common case and
+    // must not make the angles fail.
+    loadExistingPlan().catch(() => {});
   } catch (error) {
     if (error.code === NO_SEMANTIC_MODEL) attentionNeedsUnderstanding.value = true;
     else attentionError.value = error.message || "Could not derive post angles.";
@@ -1664,6 +1761,167 @@ async function writeAttentionPost(brief) {
   }
 }
 
+// A3/A4. The plan is the service's: which pillar lands on which day, on which channel, anchored to
+// which of the offer's problems. This holds the rows and the two amendments, and nothing else -- a
+// component that started deciding the schedule would be the second derivation §2 forbids.
+const planIntensities = ATTENTION_INTENSITIES;
+const planDurations = ATTENTION_DURATIONS;
+const planIntensity = ref("standard");
+const planDays = ref(30);
+const planning = ref(false);
+const planError = ref("");
+const campaignId = ref("");
+// The model key the plan was built from, and the one the offer has NOW. Compared rather than acted on:
+// the service deliberately does not rebuild a plan when an offer changes, because a scheduled post
+// rewriting itself under the tenant is the surprise A3 refuses. So the panel reports it.
+const planModelKey = ref("");
+const contextModelKey = ref("");
+const planOutdated = computed(() => Boolean(planModelKey.value && contextModelKey.value
+                                            && planModelKey.value !== contextModelKey.value));
+const calendar = ref([]);
+const amending = ref("");
+
+const plannedCount = computed(() => calendar.value.filter((p) => p.status !== STATUS_SKIPPED).length);
+const skippedCount = computed(() => calendar.value.filter((p) => p.status === STATUS_SKIPPED).length);
+
+function resetPlan() {
+  calendar.value = [];
+  campaignId.value = "";
+  planModelKey.value = "";
+  contextModelKey.value = "";
+  planError.value = "";
+  amending.value = "";
+}
+
+function formatPostDate(due) {
+  // The VIEWER's timezone. `due_at` is a UTC epoch and stays one; a date is only ever rendered local,
+  // because a tenant reading "Tue 3 Nov" means their Tuesday.
+  const date = new Date(Number(due || 0) * 1000);
+  return date.toLocaleString(undefined, {
+    weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+  });
+}
+
+async function planCampaignForOffer() {
+  if (!editingOfferId.value || planning.value) return;
+  planning.value = true;
+  planError.value = "";
+  try {
+    // No `channels`: the service plans across all three and rotates them, which is the point of the
+    // rotation. Narrowing is a setting worth adding when a tenant asks for it, not a guess made here.
+    const body = await planCampaign(editingOfferId.value, {
+      days: planDays.value,
+      intensity: planIntensity.value,
+    });
+    campaignId.value = body.campaign?.campaign_id || "";
+    planModelKey.value = body.campaign?.model_key || "";
+    // Read the calendar back rather than trusting the create response: the rows a tenant then amends
+    // must be the STORED ones, or a skip would be addressing a key that does not exist.
+    await loadCalendar();
+  } catch (error) {
+    if (error.code === NO_SEMANTIC_MODEL || error.code === "nothing_to_plan") {
+      attentionNeedsUnderstanding.value = true;
+    } else {
+      planError.value = error.message || "Could not build the plan.";
+    }
+  } finally {
+    planning.value = false;
+  }
+}
+
+async function loadExistingPlan() {
+  const body = await fetchCampaigns();
+  // The service returns them newest first, so the first match is the current plan for this offer.
+  const mine = (body.campaigns || []).find((c) => c.offer_id === editingOfferId.value);
+  if (!mine) return;
+  campaignId.value = mine.campaign_id;
+  planModelKey.value = mine.model_key || "";
+  if (mine.intensity) planIntensity.value = mine.intensity;
+  if (mine.days) planDays.value = Number(mine.days);
+  await loadCalendar();
+}
+
+async function loadCalendar() {
+  if (!campaignId.value) return;
+  try {
+    const body = await fetchCalendar({ campaignId: campaignId.value });
+    calendar.value = body.posts || [];
+  } catch (error) {
+    planError.value = error.message || "Could not read the plan.";
+  }
+}
+
+async function togglePostSkipped(post) {
+  if (amending.value) return;
+  amending.value = post.post_id;
+  planError.value = "";
+  try {
+    const next = post.status === STATUS_SKIPPED ? STATUS_PLANNED : STATUS_SKIPPED;
+    const body = await setPostStatus(post, next);
+    replacePost(post, body.post);
+  } catch (error) {
+    planError.value = error.message || "Could not update that post.";
+  } finally {
+    amending.value = "";
+  }
+}
+
+async function movePost(post, days) {
+  if (amending.value) return;
+  amending.value = post.post_id;
+  planError.value = "";
+  try {
+    const body = await reschedulePost(post, Number(post.due_at) + days * 86400);
+    replacePost(post, body.post);
+    // Moving changes the order, and the service returns the calendar in due order -- so re-sort rather
+    // than leaving a row where it was and letting the dates read as shuffled.
+    calendar.value = [...calendar.value].sort((a, b) => Number(a.due_at) - Number(b.due_at));
+  } catch (error) {
+    planError.value = error.message || "Could not move that post.";
+  } finally {
+    amending.value = "";
+  }
+}
+
+function replacePost(original, updated) {
+  if (!updated) return;
+  calendar.value = calendar.value.map((p) => (p.post_id === original.post_id ? updated : p));
+}
+
+function calendarRows() {
+  return calendar.value.map((p) => ({
+    when: formatPostDate(p.due_at),
+    angle: attentionPillarLabel(p.pillar),
+    where: p.brief?.format_label || p.channel || "",
+    about: p.brief?.anchor || "",
+    status: p.status || STATUS_PLANNED,
+  }));
+}
+
+function copyCalendar() {
+  const text = calendarRows()
+    .map((r) => `${r.when} — ${r.angle} (${r.where})\n  ${r.about}${r.status === STATUS_SKIPPED ? "  [skipped]" : ""}`)
+    .join("\n\n");
+  return copyAttentionText(text, "__plan__");
+}
+
+function downloadCalendar() {
+  // A FILE, because a month of posts is something a tenant takes into whatever they already use -- which
+  // is A4's whole point while publishing is still gated on the vendor spike.
+  const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const header = ["When", "Angle", "Where", "About", "Status"];
+  const body = calendarRows().map((r) => [r.when, r.angle, r.where, r.about, r.status]);
+  const csv = [header, ...body].map((row) => row.map(escape).join(",")).join("\r\n");
+  // BOM, so Excel opens a UTF-8 CSV without mangling the accented characters an anchor may contain.
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `attention-plan-${editingOfferId.value || "offer"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function copyAttentionPost(pillar) {
   const copy = attentionCopy.value[pillar];
   if (!copy) return;
@@ -1698,6 +1956,7 @@ function openOfferModal(offer = null) {
   // Angles belong to ONE offer. Carrying the previous offer's over would show a tenant someone else's
   // post plan for the thing they just opened.
   resetAttention();
+  attentionAvailable.value = attentionConfigured();
   // Only an AI model is shown. The deterministic one is recomputed on every read and says nothing here
   // that the form above does not already show.
   const stored = offer?.semantic_model;
