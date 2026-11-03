@@ -269,6 +269,37 @@ At 60 posts/tenant/month that means the **first ~50 premium tenants publish insi
 total at 100 tenants — publishing is <1% of a $69 tier. Per-*profile* pricing (the common alternative) is the
 model that scales badly; avoiding it is the structural win.
 
+### 6.2a ⚠️ RESALE NEEDS THEIR WRITTEN PERMISSION — the gate nobody priced (author, 2026-11-03)
+
+Two findings from the author reading Outstand's actual terms, and both narrow §6.2's claim rather than
+confirming it:
+
+1. **Resale is permitted only with their WRITTEN PERMISSION** under the $19 plan. The author has requested
+   it; **it is not granted.** Reselling an aggregator's publishing to tenants is exactly what this plan
+   does, so without that letter there is no Outstand path at all — not a worse one, none.
+2. **The $19 plan grants DEVELOPER ACCESS only.** So the arithmetic above is probably priced off the wrong
+   tier: "first ~50 tenants inside the $19 base" assumed a production allowance. Until the permission reply
+   names the tier resale actually runs on, treat **every figure in §6.2 as a developer-tier quote**, and
+   the "<1% of a $69 tier" conclusion as unsupported.
+
+**This changes the ORDER of §11.** The spike was going to validate pricing, embedding rights and failure
+behaviour. Paying for a week of testing a vendor who may not permit resale spends money to learn something
+the permission reply answers for free. **Get the written permission first; spike second.**
+
+**What it costs if they refuse.** The §6.1 adapter contract is unaffected — that is what it is insurance
+for, and the reason it was built before any vendor was chosen. What is affected is the LAUNCH PATH, and
+there are only three options left, all worse:
+
+| If Outstand refuses | Consequence |
+|---|---|
+| Ayrshare | The same questions over again, including its own resale clause. Unverified in exactly the way Outstand was. |
+| Own Meta/TikTok/YouTube apps | §6.2's whole premise is that app review is weeks-to-months and the author "is not positioned to do now". Refusal does not change that. |
+| Ship A4 only | Export the calendar, tenant posts by hand. Already built and already working — this is the honest floor, not a failure state. |
+
+That last row is worth saying plainly: **A5 is the only phase with a third-party veto on it, and A4 already
+delivers a usable product without it.** A tenant with a dated plan and a CSV is not blocked on anyone's
+written permission.
+
 ### 6.3 ⚠️ Managed Keys → BYOK requires tenant re-authorization
 Confirmed from OAuth first principles, not vendor claims: access tokens are bound to the issuing app's
 `client_id`; platforms forbid using App A's token under App B. **Switching to your own developer app forces
@@ -645,7 +676,13 @@ deliberately not papered over with a fourth private decrypt.
 `app_config` document. Until then the prod dashboard shows no panel, which is the gate working.
 
 ## 11. Verify before A5 hardens
-Run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a video,
-then **deliberately revoke the token mid-queue** and read the error. That single test validates pricing,
-embedding rights, and — most importantly — the failure behavior the whole scheduling design depends on.
-Vendor claims in §6.2 are unverified marketing until this passes.
+
+**Step 0, added 2026-11-03: get the resale permission IN WRITING, and the tier it applies to.** Outstand
+permits resale only by written permission and the $19 plan is developer access only (§6.2a). A refusal ends
+the Outstand path, so this is the cheapest question and it must be asked first — the spike below cannot
+validate pricing for a tier the author is not allowed to resell on.
+
+Then run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a
+video, then **deliberately revoke the token mid-queue** and read the error. That single test validates
+pricing, embedding rights, and — most importantly — the failure behavior the whole scheduling design
+depends on. Vendor claims in §6.2 are unverified marketing until this passes.

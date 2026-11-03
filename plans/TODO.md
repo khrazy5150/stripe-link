@@ -3639,6 +3639,15 @@ choice.
   IG account, publish a carousel + a video, revoke a token mid-queue) plus an Outstand/Ayrshare account —
   the plan's own words: "vendor claims are unverified marketing until this passes". A6 needs Meta/TikTok/
   YouTube app review, §6.2's "weeks-to-months", and only makes sense after A5 has connected tenants.
+- ⚠️ **A5 has a THIRD-PARTY VETO on it (author, 2026-11-03, plans/ATTENTION_PRIMITIVE.md §6.2a).** Outstand
+  permits **resale only with their WRITTEN PERMISSION**, requested and **not yet granted**, and the $19 plan
+  is **developer access only** — so §6.2's "first ~50 tenants inside the $19 base" is probably priced off
+  the wrong tier and the "<1% of a $69 tier" conclusion is unsupported until the reply names the resale
+  tier. **This re-orders §11: get the permission first, spike second** — paying to test a vendor who may
+  not permit resale buys an answer the reply gives free. If they refuse, the options are Ayrshare (same
+  unknowns, its own resale clause), own app reviews (weeks-to-months, which §6.2 says the author is not
+  positioned to do), or **ship A4 only** — a dated plan plus CSV export, already built and already working.
+  The §6.1 adapter contract is unaffected; that is what it was insurance for.
 - ⚠️ **PRE-EXISTING BYOK GAP found 2026-11-02, not fixed:** nothing in the generation path decrypts
   `ai_provider_config.api_key_ref`. The page, enrich and copy operations all pass no `api_key`, so a BYOK
   tenant admitted by `can_use_ai_builder` reaches `_byok_loop` with an EMPTY key. Everything runs on
