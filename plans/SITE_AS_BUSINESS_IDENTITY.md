@@ -434,6 +434,12 @@ that rule is what preserves §2's guarantee while changing its scope.
   their own plan** (two shops can ship from different addresses and cut off at different times; that needs
   a per-Site shipping config, which does not exist).
 
+  **That plan is now written: `plans/SHIPPING_PER_SITE.md` (2026-11-04).** Its first finding corrects an
+  assumption made here — the ship-from ADDRESS was never on the user profile, it is already on
+  `ShippingConfig`. What the profile actually contributes to shipping is a ship-from EMAIL, the timezone,
+  and the cutoff hour. So the "operational fields" are a smaller move than this table implies, and the
+  real work is making `ShippingConfig` itself per-Site.
+
   So the order is: migrate → confirm nothing is left → delete the reads and the Profile fields. The
   migration is written and tested; the deletion is gated on it having RUN, in prod as well as dev, and
   **prod's contents are unknown here** (the audit needs a prod read this session was refused).
