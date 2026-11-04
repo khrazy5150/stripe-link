@@ -409,8 +409,9 @@ that rule is what preserves §2's guarantee while changing its scope.
   So *"remove the Business section"* cannot be done as written: four of its fields have nothing to do with
   identity and three consumers read them. What P4 actually means is **remove the identity half**.
 
-  **Done:** `deploy/migrate_profile_brands_to_site.py` (dry-run default, tested in
-  `tests/test_brand_migration.py` because it writes). It moves `business.brands` onto the tenant's Site
+  **Done:** `deploy/migrate_business_identity_to_site.py` (dry-run default, tested in
+  `tests/test_identity_migration.py` because it writes). It moves `business.name`, `business.brands` and a
+  VERIFIED `business.email` onto the tenant's Site
   **only where the answer is unambiguous — exactly ONE Site carrying an organization**, the same rule
   `sender_identity.site_organization` uses: with two businesses the platform cannot know which owns "Luxe
   Wellness", and guessing puts one business's brand in the other's picker, which is the bug this plan
@@ -428,11 +429,28 @@ that rule is what preserves §2's guarantee while changing its scope.
      so today every send still resolves its reply address through the profile. Removing it now regresses
      every tenant who has verified one.
 
-  So the remaining question is a ROLLOUT question, not a code one: *does the tenant-level fallback get
-  deleted once tenants have moved, or is it accepted as permanent?* Both are defensible — permanent is one
-  extra read and a safety net for an unattached page; deleted is the clean end state §3 argues for. **It
-  cannot be answered from the code, and prod's contents are unknown** (the audit that would tell us how
-  many prod tenants have a business name, brands or a verified address needs a prod read).
+  **DECIDED by the author, 2026-11-03: the fallback is DELETED once every tenant has moved** — the clean
+  end state, not a permanent safety net. And **the operational fields move to the Site too, later, under
+  their own plan** (two shops can ship from different addresses and cut off at different times; that needs
+  a per-Site shipping config, which does not exist).
+
+  So the order is: migrate → confirm nothing is left → delete the reads and the Profile fields. The
+  migration is written and tested; the deletion is gated on it having RUN, in prod as well as dev, and
+  **prod's contents are unknown here** (the audit needs a prod read this session was refused).
+
+  Two things that make the deletion safer than it first looked:
+
+  - **The builder cannot create a page without a Site** — `leaveSiteStep` refuses, and `canLeaveSiteStep`
+    disables Next. So every page authored from now on has one, and the unattached published page found in
+    live mode is legacy DATA to attach, not a code path to design around.
+  - **Carrying `email_verified` across is legitimate for a single-Site tenant, and only for one.** The
+    Site salt exists so one Site's proof cannot cover ANOTHER Site; a tenant with exactly one has no
+    second business for the proof to leak into. The migration refuses the ambiguous case for this reason
+    as much as for brands.
+
+  The pending verification record is deliberately NOT carried: its `code_hash` is salted with the tenant
+  scope, so under the Site scope it could never be confirmed — it would be a code that looks live and is
+  permanently dead.
 
 ## 6. Open decisions — author input needed
 
