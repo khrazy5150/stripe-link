@@ -148,17 +148,36 @@ class DocumentValidationTests(unittest.TestCase):
     def test_accepts_business_identity_block(self):
         doc = self._user_profile()
         doc["business"] = {
-            "name": "Luxe Spa", "brands": ["Luxe", "Luxe Wellness"], "phone": "+1 555 0100",
+            "name": "Luxe Spa", "phone": "+1 555 0100",
             "address": {"street": "75 S 100 E", "locality": "St. George", "region": "UT",
                         "postal_code": "84770", "country": "US"},
         }
         validate_user_profile(doc)
 
+    def test_REFUSES_the_retired_brands_field(self):
+        """Brands moved to the Site that owns them (plans/SITE_AS_BUSINESS_IDENTITY.md §P4). Refused rather
+        than ignored, the same call `same_as`'s retired `verified` boolean got: a payload still sending it
+        is asserting something about where brands live, and dropping it silently would let a stale client
+        believe it had saved one."""
+        doc = self._user_profile()
+        doc["business"] = {"name": "Luxe Spa", "brands": ["Luxe"]}
+        with self.assertRaises(DocumentValidationError) as caught:
+            validate_user_profile(doc)
+        self.assertIn("Site.organization.brands", str(caught.exception))
+
+    def test_an_EMPTY_brands_list_is_refused_too(self):
+        """`[]` is still the client asserting the field exists. Accepting it would leave one shape of the
+        retired field alive and a reader somewhere could start trusting it again."""
+        doc = self._user_profile()
+        doc["business"] = {"brands": []}
+        with self.assertRaises(DocumentValidationError):
+            validate_user_profile(doc)
+
     def test_accepts_profile_without_business(self):
         validate_user_profile(self._user_profile())
 
     def test_rejects_malformed_business_identity(self):
-        for bad in ({"brands": "Luxe"}, {"brands": [1, 2]}, {"address": "75 S 100 E"}, {"name": 5}):
+        for bad in ({"address": "75 S 100 E"}, {"name": 5}):
             doc = self._user_profile()
             doc["business"] = bad
             with self.assertRaises(DocumentValidationError):

@@ -466,8 +466,38 @@ that rule is what preserves §2's guarantee while changing its scope.
   **Prod verdict: unknown.** Three sessions have now been refused the prod DynamoDB read. One command
   answers it: `PYTHONPATH=src python3 deploy/audit_tenant_fallback.py prod`.
 
-  So the remaining order is: clear the blockers each environment reports → audit says safe in dev AND prod
-  → delete the reads and the Profile fields. Nothing else about P4 needs deciding.
+  **PROD AUDITED 2026-11-04 (author ran it): `EMAIL` safe, `BRANDS` safe, `NAME` blocked by TWO pages**
+  attached to no Site (`page_Eg2rPtBzmEh`, `page_yK7q5BlSd0u`). Prod holds 3 profiles, **1 Site and 2
+  pages — and both pages are the blockers**, so prod's only Site routes neither of them.
+
+  ### What that cleared, and what it did not
+
+  **`brands` DELETED 2026-11-04**, end to end: the builder's account-level fallback, the Profile screen's
+  editor, the profile store's field, and the validator — which now **REFUSES** the field rather than
+  ignoring it, the same call `same_as`'s retired `verified` boolean got. A payload still sending it is
+  asserting something about where brands live, and dropping it silently would let a stale client believe
+  it had saved one. Zero profiles carried a brand in either environment, so there was no data to migrate.
+
+  **`name` STAYS**, blocked in both environments by the same thing: pages attached to no Site (1 on dev,
+  2 on prod). `resolve_business_name` ends at the owner's own name, so deleting it re-brands a live page
+  after a person. Clearing it is a routing decision per page, not a code change — and dev's blocker
+  (`page_cYSn7b6QvLA`, slug `poliaxis-nutrition-…`) sits in an environment whose only LIVE Site is Quill,
+  so even the obvious repair is a judgement call.
+
+  **`email` STAYS, and the audit's "safe" was INCOMPLETE — worth recording as a limit of the tool.** The
+  audit asks whether any DATA still uses a field; it cannot see a CODE path that requires the field to be
+  *settable*. `handlers/downloads.py` gates lead-magnet email on a verified ACCOUNT business email, so
+  deleting the field would make that gate unpassable forever.
+
+  Which surfaced a live breakage: **no tenant in dev or prod has ever had a verified account business
+  email** (the audit measured it again), so that gate was already refusing EVERY lead-magnet send with
+  *"Its owner needs to verify a business email address"* — while §P3 had shipped a per-Site way to do
+  exactly that and the gate had not been told. Fixed 2026-11-04: it accepts the SITE's verified address
+  first, then the account's. A gate nobody can pass is not a gate, it is an outage.
+
+  So the remaining order is unchanged and now precise: attach 3 named pages to Sites → re-run the audit →
+  `name` can go. `email` additionally needs the download gate to stop requiring an account-level address,
+  which the §P3 flow now makes possible.
 
   Two things that make the deletion safer than it first looked:
 

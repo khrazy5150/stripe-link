@@ -1,12 +1,12 @@
 import { defineStore } from "pinia";
 import { apiRequest, getAuthSession } from "../api/client";
 
-// Tenant business identity (name, brands, NAP), read from the current user's profile. Cached once so the
+// Tenant business identity (name, NAP), read from the current user's profile. Cached once so the
 // Offers modal (brand picker) and the landing-page builder (brand default) can resolve brand without each
 // re-fetching. A lightweight precursor to the canonical Business Profile (plans/BUSINESS_PROFILE_AND_GBP.md).
 export const useProfileStore = defineStore("profile", {
   state: () => ({
-    business: { name: "", phone: "", brands: [], address: {}, timezone: "" },
+    business: { name: "", phone: "", address: {}, timezone: "" },
     // Derived by the server from the business address and never stored. The picker defaults to it, so a
     // tenant who never opens the field still gets a sensible working day, and one who does sees what we
     // guessed rather than a blank (plans/THANK_YOU_PAGE.md P1).
@@ -20,7 +20,6 @@ export const useProfileStore = defineStore("profile", {
   }),
   getters: {
     businessName: (state) => state.business.name || "",
-    brands: (state) => state.business.brands || [],
   },
   actions: {
     async ensureLoaded() {
@@ -56,7 +55,6 @@ export const useProfileStore = defineStore("profile", {
         this.business = {
           name: business.name || "",
           phone: business.phone || "",
-          brands: Array.isArray(business.brands) ? [...business.brands] : [],
           address: business.address || {},
           timezone: business.timezone || "",
         };

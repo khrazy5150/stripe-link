@@ -58,8 +58,9 @@
         <p class="field-note">
           <strong>Each site has its own business identity</strong> — name, address, brands and reply
           address live on the site, in <em>Sites → Edit → Business</em>, so you can run more than one
-          business from one account. What you set here is the fallback any site that has not filled its own
-          in, plus the account-level details shipping uses. All optional.
+          business from one account. <strong>Brands are managed there only.</strong> What is left here is
+          the fallback for a site that has not named itself, plus the account-level details shipping and
+          delivery estimates use. All optional.
         </p>
         <div class="offer-two-column">
           <label class="offer-field">
@@ -114,19 +115,7 @@
         <p v-if="hasStripeSourcedFields" class="field-note">
           Some details were filled automatically from your Stripe account. Edit any field to override it.
         </p>
-        <div class="offer-field">
-          <span>Brand Name(s)</span>
-          <!-- Offers no longer pick a brand at all (author, 2026-11-03): an offer is created before a
-               page and before a Site, so there is no business to pick from. Brands are chosen in the page
-               builder, from the brands of that page's site. This list stays as the fallback for a site
-               that has none of its own, and §P4's migration moves it. -->
-          <small>Optional, and better set per site. A page picks its heading from <em>its own site's</em> brands; these are offered only to a site that has none yet.</small>
-          <div v-for="(brand, index) in form.business.brands" :key="index" class="brand-row">
-            <input v-model.trim="form.business.brands[index]" type="text" placeholder="e.g. Luxe Wellness" />
-            <button type="button" class="secondary-action compact" @click="removeBrand(index)">Remove</button>
-          </div>
-          <button type="button" class="secondary-action compact" @click="addBrand">+ Add brand</button>
-        </div>
+
         <fieldset class="offer-field business-address">
           <span>Business Address</span>
           <small>For NAP consistency and local-SEO structured data. Manual entry; overridable by Google Business Profile once connected.</small>
@@ -312,23 +301,14 @@ function placeToDocument(place = {}) {
 
 function emptyBusiness() {
   // `null` cutoff and blank timezone both mean "use the suggestion" -- see cleanBusiness.
-  return { name: "", email: "", phone: "", brands: [], address: emptyPlace(), timezone: "",
+  return { name: "", email: "", phone: "", address: emptyPlace(), timezone: "",
            shipping_cutoff_hour: null };
-}
-
-function addBrand() {
-  form.business.brands.push("");
-}
-
-function removeBrand(index) {
-  form.business.brands.splice(index, 1);
 }
 
 // Build the stored business block, dropping blanks so an untouched section saves nothing. Preserves the
 // provenance map (business.sources) and stamps a field 'manual' when the tenant changes it, so a later
 // auto-seed (Stripe/GBP) knows the tenant owns it.
 function cleanBusiness(business, original = {}) {
-  const brands = (business.brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
   const address = Object.fromEntries(
     Object.entries(placeToDocument(business.address)).filter(([, value]) => String(value || "").trim()),
   );
@@ -336,7 +316,6 @@ function cleanBusiness(business, original = {}) {
   if (business.name) result.name = business.name;
   if (business.email) result.email = business.email;
   if (business.phone) result.phone = normalizeE164(business.phone);
-  if (brands.length) result.brands = brands;
   if (Object.keys(address).length) result.address = address;
   // Sent only when the tenant actually CHOSE one. Blank means "follow my address", which keeps working if
   // they move -- persisting the suggestion would freeze a guess into a decision they never made.
@@ -377,7 +356,6 @@ function applyProfile(profile) {
     name: business.name || "",
     email: business.email || "",
     phone: business.phone || "",
-    brands: Array.isArray(business.brands) ? [...business.brands] : [],
     address: placeFromDocument(address),
     timezone: business.timezone || "",
     shipping_cutoff_hour: Number.isInteger(business.shipping_cutoff_hour)

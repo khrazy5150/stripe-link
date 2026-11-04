@@ -5532,18 +5532,17 @@ function isStorefrontPage(page) {
 // headlined "Poliaxis Nutrition". The builder knows its Site — it is the Site step — so there is nothing to
 // guess.
 //
-// The tenant profile's list is the fallback only while that Site declares no brands of its own, so a tenant
-// mid-migration still sees the brands they have always had rather than an empty dropdown (P4 removes it).
-const storeBrands = computed(() => {
-  const own = siteBrands(selectedSite.value);
-  return own.length ? own : (profileStore.brands || []);
-});
+// NO account-level fallback any more (plans/SITE_AS_BUSINESS_IDENTITY.md §P4, 2026-11-04). It existed so a
+// tenant mid-migration did not meet an empty dropdown; the audit then measured ZERO profiles carrying a
+// brand in dev AND prod, so it was reading a field nobody had. A brand now comes from the site that owns
+// it or from the "+ New brand" control beside this one, which writes it there.
+const storeBrands = computed(() => siteBrands(selectedSite.value));
 
 // The brands a page may be headed by: EXACTLY the ones its Site's business owns (author, 2026-11-03).
 // Not a union, and not the tenant's list: a page belongs to one business, and offering another's brands
-// here is the whole bug this plan exists to close. The profile's list stands in only while the Site
-// declares none of its own, so a tenant mid-migration still sees the brands they have always had (§P4
-// removes it).
+// here is the whole bug this plan exists to close. The account-level fallback that used to stand in is
+// gone (§P4, 2026-11-04) — the audit measured zero profiles carrying a brand in dev and prod, so it was
+// reading a field nobody had.
 const selectedSiteBrands = computed(() => storeBrands.value);
 const newSiteBrand = ref("");
 const addingBrand = ref(false);

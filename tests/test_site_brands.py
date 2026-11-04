@@ -143,10 +143,23 @@ class TheBuilderScopesStrictlyTests(unittest.TestCase):
         block = BUILDER.split("const storeBrands = computed(", 1)[1][:400]
         self.assertIn("siteBrands(selectedSite.value)", block)
 
-    def test_it_no_longer_reads_the_tenant_wide_list_FIRST(self):
-        block = BUILDER.split("const storeBrands = computed(", 1)[1][:400]
-        self.assertLess(block.index("siteBrands(selectedSite.value)"), block.index("profileStore.brands"),
-                        "the Site must be consulted before the tenant-wide fallback")
+    def test_the_tenant_wide_list_is_GONE(self):
+        """§P4 deleted it, 2026-11-04. It existed so a tenant mid-migration did not meet an empty dropdown;
+        `audit_tenant_fallback.py` then measured ZERO profiles carrying a brand in dev AND prod, so it was
+        reading a field nobody had. A brand now comes from the Site, or from the "+ New brand" control
+        beside the picker, which writes it there."""
+        block = BUILDER.split("const storeBrands = computed(", 1)[1][:300]
+        self.assertNotIn("profileStore.brands", block)
+        self.assertIn("siteBrands(selectedSite.value)", block)
+
+    def test_the_PROFILE_SCREEN_no_longer_edits_brands(self):
+        """Leaving the editor while nothing reads it is the worse half of a half-migration: a tenant types
+        brands into a field that cannot affect any page."""
+        profile_screen = (ROOT / "dashboard/src/components/Profile.vue").read_text(encoding="utf-8")
+        self.assertNotIn("form.business.brands", profile_screen)
+        self.assertNotIn("addBrand", profile_screen)
+        store = (ROOT / "dashboard/src/stores/profile.js").read_text(encoding="utf-8")
+        self.assertNotIn("business.brands", store)
 
     def test_the_control_is_a_PICKER_not_a_text_box(self):
         """Typing a name freehand is how a Quill page comes to be headed "Poliaxis Nutrition": a brand has
@@ -174,11 +187,6 @@ class TheBuilderScopesStrictlyTests(unittest.TestCase):
         block = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1][:3000]
         self.assertIn("!selectedSiteBrands.includes(builder.brand_label_text)", block)
 
-    def test_the_tenant_list_survives_as_a_FALLBACK(self):
-        """Until §P4 deletes it. Without this a tenant mid-migration opens an empty dropdown and loses the
-        brands they have always had."""
-        block = BUILDER.split("const storeBrands = computed(", 1)[1][:400]
-        self.assertIn("profileStore.brands", block)
 
 
 class TheOffersScreenHasNoBrandPickerTests(unittest.TestCase):

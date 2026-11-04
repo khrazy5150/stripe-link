@@ -2620,10 +2620,16 @@ def validate_business_identity(business: Any) -> None:
     if sources is not None:
         if not isinstance(sources, dict) or any(not isinstance(v, str) for v in sources.values()):
             raise DocumentValidationError("business.sources must be a map of field name to source string.")
-    brands = business.get("brands")
-    if brands is not None:
-        if not isinstance(brands, list) or any(not isinstance(brand, str) for brand in brands):
-            raise DocumentValidationError("business.brands must be an array of strings.")
+    # RETIRED 2026-11-04 (plans/SITE_AS_BUSINESS_IDENTITY.md §P4). Brands belong to the business that
+    # owns them, which is a Site (`Site.organization.brands`). Measured before removing: ZERO profiles
+    # carried a brand in dev or prod, so there is no data to migrate and nothing to lose.
+    #
+    # REFUSED rather than ignored, which is the same call `same_as`'s retired `verified` boolean got: a
+    # payload still sending it is asserting something about where brands live, and dropping it silently
+    # would let a stale client believe it had saved one.
+    if "brands" in business:
+        raise DocumentValidationError(
+            "business.brands is retired; brands belong to a Site (Site.organization.brands).")
     address = business.get("address")
     if address is not None:
         if not isinstance(address, dict):

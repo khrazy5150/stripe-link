@@ -264,24 +264,31 @@ def lead_download_handler(
     except RepositoryError:
         profile = None
     business = (profile or {}).get("business") or {}
-    reply_to = verified_email(business)
+    # THIS PAGE'S BUSINESS, resolved once and used for both halves of the identity
+    # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Two reads could disagree and deliver one business's lead
+    # magnet under the other's name.
+    organization = site_organization(tenant_id, page_id=str(page.get("page_id") or ""),
+                                     mode=str(page.get("stripe_mode") or "live"))
+    # THE SITE'S VERIFIED ADDRESS COUNTS NOW (§P3 shipped it; this gate had not been told).
+    #
+    # The gate itself is unchanged in kind: SES will mail from any Reply-To it is handed, so the platform
+    # is what has to refuse an unproven one. What changed is WHOSE proof it accepts. It read only the
+    # account's verified business email — and no tenant in dev or prod has ever had one (measured again
+    # 2026-11-04 by deploy/audit_tenant_fallback.py), so this refused EVERY lead-magnet send with
+    # "Its owner needs to verify a business email address" while offering a per-Site way to do exactly
+    # that. A gate nobody can pass is not a gate, it is an outage.
+    reply_to = verified_email(organization) or verified_email(business)
     if not reply_to:
         return error_response(
-            "This page cannot send email yet. Its owner needs to verify a business email address.",
+            "This page cannot send email yet. Verify an email address for its site "
+            "(Sites → Edit → Business), or for your account in Profile.",
             status_code=409, code="sender_unverified",
         )
     # An empty business name must not fall back to the platform's bare address — that hands the recipient
     # Junior Bay's mail instead of the merchant's, which is the one thing this feature exists to avoid.
-    #
-    # The NAME comes from the Site that publishes this page, through the one resolver
-    # (plans/SITE_AS_BUSINESS_IDENTITY.md §4): a tenant running two businesses must not deliver one's lead
-    # magnet under the other's name. The REPLY ADDRESS stays the verified one gated above and is
-    # deliberately not re-resolved — the gate is the whole point of this block, and a Site address is not
-    # usable until verification is Site-scoped (§P3).
     business_name = email_identity(
         profile or {},
-        site_organization(tenant_id, page_id=str(page.get("page_id") or ""),
-                          mode=str(page.get("stripe_mode") or "live")),
+        organization,
     )["business_name"]
     # The subject is the RIBBON's headline: it is the promise the visitor just clicked, so it is what they
     # will recognise in a crowded inbox. The page's name is an internal label the tenant picked for a list.
