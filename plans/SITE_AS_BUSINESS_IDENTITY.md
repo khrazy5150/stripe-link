@@ -271,8 +271,11 @@ that rule is what preserves §2's guarantee while changing its scope.
 - **P2 — the shared resolver.** Introduce `sending_identity(tenant_id, site_id=...)` and the page→Site
   lookup (§3.1). Move receipts, cart recovery, reminders, invoices and purchase-manage onto it one at a
   time, each with a test proving which Site's name it used.
-- **P3 — per-Site Reply-To** *(only if §3.3 is decided that way)*. Per-Site email verification, reusing the
-  existing code/TTL/attempt flow. Until then the Reply-To stays the tenant's verified address.
+- **P3 — per-Site Reply-To** *(CONFIRMED in scope 2026-11-03)*. Make `domain/business_email.py`'s
+  verification Site-scoped: a code per Site address, same TTL and attempt limits. **Fallback is the
+  tenant's VERIFIED address, never the Site's unverified one.** The Sites editor must surface the
+  unverified state, or a tenant publishes a second Site and silently keeps receiving replies at the first
+  address.
 - **P3b — brands move to the Site.** Add `brands[]` + `sources{}` to `Site.organization`; scope the Offers
   brand picker to the offer's Site (depends on §3.1's page→Site resolution, same as P2). Decide separately
   where `shipping_cutoff_hour` and `timezone` live — they are operational, not identity, and must not
@@ -283,12 +286,18 @@ that rule is what preserves §2's guarantee while changing its scope.
 
 ## 6. Open decisions — author input needed
 
-1. **§3.3 — the Reply-To question.** Verify per Site, or Site name + tenant verified Reply-To? This decides
-   whether P3 exists at all. *Recommendation: the second, for P1–P2 — it fixes the reported bug this week
-   without re-opening a security gate, and per-Site verification can follow if tenants ask for it.*
-2. **§3.1 — `site_id` on the page, or a reverse index?** *Leaning: `site_id` on the page. The page already
-   carries its own routing facts, and a Site edited between publish and send would otherwise change a
-   message's identity retroactively.*
+1. ~~**§3.3 — the Reply-To question.**~~ **DECIDED 2026-11-03: verify an address PER SITE.** P3 is real
+   scope, not optional. The author chose the fuller end state over my recommendation of Site-name-only —
+   true per-business identity, at the cost of a verification per Site. Consequences: the existing
+   code/TTL/attempt flow in `domain/business_email.py` must become Site-scoped rather than tenant-scoped;
+   a Site with no verified address falls back to the tenant's verified one (never to an unverified Site
+   address — that is the hole the gate exists to close); and onboarding a second Site now includes an
+   email verification step, which the Sites editor must make obvious rather than letting a tenant publish
+   and wonder why replies go elsewhere.
+2. ~~**§3.1 — `site_id` on the page, or a reverse index?**~~ **DECIDED 2026-11-03: `site_id` on the page.**
+   A direct read, and the page records the Site it belonged to at publish time — so editing a Site later
+   cannot retroactively change which business an old order's email claims to be from. Costs an additive
+   schema field and a backfill from `Site.pages`.
 3. **Can the Business section actually be deleted (§3.4)?** Only if every send path resolves a Site.
    Invoices and platform notices look like permanent exceptions. *Leaning: keep the fields as a declared
    fallback, remove them from the UI, and stop tenants editing what no longer drives anything.*
