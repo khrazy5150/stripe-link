@@ -2054,7 +2054,13 @@ def plan_order_review_invite(order_record: dict[str, Any], tenant_id: str, produ
         product = (products_repo.get(tenant_id, product_id) if products_repo else None) \
             or {"product_id": product_id, "name": order_product.get("name")}
         invite = plan_invite(tenant_id=tenant_id, invite_id=invite_id, order_id=order_record.get("order_id", ""),
-                             product=product, customer=customer, now=now)
+                             product=product, customer=customer,
+                             # Free: the order already records WHERE the buyer converted, so the invite
+                             # can carry it and the sweep need not guess which of the tenant's businesses
+                             # to sign as. Read from `attribution`, which is where every order builder
+                             # puts it (see attribution_from_metadata) -- there is no top-level page_id.
+                             page_id=str((order_record.get("attribution") or {}).get("page_id") or ""),
+                             now=now)
         invites_repo.put(invite)
         return True
     except Exception:  # noqa: BLE001 — invites are an enhancement; never fail order persistence on them

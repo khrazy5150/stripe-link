@@ -5131,6 +5131,7 @@ Resources:
           # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
+          PAGES_TABLE: !Ref PagesTable
           REVIEWS_TABLE: !Ref ReviewsTable
           SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
@@ -5153,6 +5154,10 @@ Resources:
             TableName: !Ref ReviewsTable
         - DynamoDBReadPolicy:
             TableName: !Ref SitesTable
+        # WHICH of the tenant's businesses sells this product: the invite carries the page it was bought
+        # from, the page carries its Site (plans/SITE_AS_BUSINESS_IDENTITY.md §3.1). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         - Statement:
             Effect: Allow
             Action:

@@ -265,9 +265,18 @@ that rule is what preserves §2's guarantee while changing its scope.
 
 ## 5. Phasing
 
-- **P1 — fix the reported bug.** Invert the precedence in `review_invites.py` so the Site wins, and resolve
-  the Site from the invite's order `page_id` instead of "first Site". Smallest change that makes the
-  reported email correct. **Does not touch Reply-To.**
+- **P1 — fix the reported bug. SHIPPED 2026-11-03** (`handlers/review_invites.py`,
+  `handlers/stripe_webhook.py`, `domain/review_invites.py`, `tests/test_invite_business_identity.py`).
+  The invite now records the page the buyer converted on — read from `order.attribution.page_id`, which is
+  where every order builder already put it, so no new order field — and the sweep resolves
+  page → `page.site_id` → Site → `organization` per invite, cached by `(tenant, page)` rather than by
+  tenant: two invites from two Sites in one sweep are signed differently. The precedence is inverted, so
+  the Site's name beats `TenantProfile.business_name`, which is now only the fallback for an invite whose
+  Site has no organization or whose page cannot be resolved. `ReviewInvitesFunction` gained `PAGES_TABLE`
+  and a read grant on it. **Reply-To is untouched** — still the tenant's verified address, because that is
+  the only one SES has been shown (P3). Legacy invites carrying no `page_id` keep the old first-Site scan.
+  Not yet done here: `handlers/cart_recovery.py` has its own copy of the first-Site lookup, which P2
+  replaces rather than this phase duplicating the fix into.
 - **P2 — the shared resolver.** Introduce `sending_identity(tenant_id, site_id=...)` and the page→Site
   lookup (§3.1). Move receipts, cart recovery, reminders, invoices and purchase-manage onto it one at a
   time, each with a test proving which Site's name it used.

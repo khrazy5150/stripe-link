@@ -21,13 +21,21 @@ def new_invite_token() -> str:
     return secrets.token_urlsafe(24)
 
 
-def plan_invite(*, tenant_id: str, invite_id: str, order_id: str, product: dict[str, Any], customer: dict[str, Any],
-                now: int, token: str | None = None, steps_days: tuple[int, ...] = INVITE_STEPS_DAYS) -> dict[str, Any]:
+def plan_invite(*, tenant_id: str, invite_id: str, order_id: str, product: dict[str, Any],
+                customer: dict[str, Any], page_id: str = "", now: int, token: str | None = None,
+                steps_days: tuple[int, ...] = INVITE_STEPS_DAYS) -> dict[str, Any]:
     offset = ship_offset_days(product)
     steps = [{"day": d, "send_at": int(now) + (offset + d) * DAY_SECONDS, "sent_at": None} for d in steps_days]
     return {
         "schema_version": SCHEMA_VERSION, "document_type": "review_invite", "tenant_id": str(tenant_id),
         "invite_id": str(invite_id), "order_id": str(order_id or ""),
+        # THE PAGE THE PURCHASE CAME FROM, copied at plan time for the same reason the mode is: the invite
+        # is written beside the order and is the only record here that knows which Site's business the
+        # buyer actually bought from. The sweep resolves page -> Site -> organization so the email signs
+        # with THAT business, instead of "the tenant's first Site with an organization", which signed a
+        # Quill purchase as Poliaxis Nutrition (plans/SITE_AS_BUSINESS_IDENTITY.md §1). Empty on an order
+        # from before pages carried one; the sweep falls back.
+        "page_id": str(page_id or ""),
         "target": {"type": "product", "id": str((product or {}).get("product_id") or "")},
         "product_name": str((product or {}).get("name") or ""),
         "customer": {"email": str((customer or {}).get("email") or ""), "name": str((customer or {}).get("name") or "")},

@@ -2,7 +2,8 @@
 
 `Site.pages` stays the source of truth. `page.site_id` is the reverse edge, written only by the Site save
 path, so a consumer can answer "whose business is this page?" in one read instead of scanning every Site —
-which is what `review_invites._tenant_organization` does today, badly, by taking the first Site it finds.
+which is what `review_invites` used to do, badly, by taking the first Site it found
+(tests/test_invite_business_identity.py holds that fix).
 
 Three properties carry it, and each is one mistake away from an email naming the wrong business:
 
