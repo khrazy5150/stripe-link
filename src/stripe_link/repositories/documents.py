@@ -884,6 +884,53 @@ class SimpleKeyRepository:
         response = self.table.get_item(Key={self.key_field: key_value})
         return response.get("Item")
 
+    def set_nested(self, key_value: str, container: str, member: str, value: Any) -> bool:
+        """Write ONE member of a map attribute, leaving the rest of the document alone.
+
+        For the per-Site shipping override (plans/SHIPPING_PER_SITE.md §S4). The overrides live in a map
+        on a document the whole account shares, so a read-modify-write from a Site's own screen would
+        restore whatever it read a moment earlier over another Site's save -- two shipping screens open at
+        once and one business silently loses its warehouse
+        (`feedback_shared_document_read_modify_write`). Only `container.member` is touched.
+
+        `value is None` REMOVES the member rather than storing an empty map, because "this Site states
+        nothing" and "this Site states nothing in particular" must not be two different stored shapes that
+        every reader then has to collapse.
+
+        The container is created on demand with `if_not_exists`, so the first override on a config that
+        has never had one does not need the map to exist already. Returns False when the document itself
+        has gone, which is the caller's cue that there is nothing to override.
+        """
+        key_value = str(key_value or "").strip()
+        member = str(member or "").strip()
+        if not key_value or not container or not member:
+            return False
+        names = {"#c": container, "#m": member}
+        try:
+            if value is None:
+                self.table.update_item(
+                    Key={self.key_field: key_value},
+                    UpdateExpression="REMOVE #c.#m",
+                    ConditionExpression=f"attribute_exists({self.key_field})",
+                    ExpressionAttributeNames=names,
+                )
+            else:
+                # TWO expressions in one statement: create the map if absent, then set the member. A bare
+                # `SET #c.#m` on a document with no `sites` attribute fails the whole update with
+                # ValidationException, which is how a tenant's FIRST override would have 500'd.
+                self.table.update_item(
+                    Key={self.key_field: key_value},
+                    UpdateExpression="SET #c = if_not_exists(#c, :empty), #c.#m = :v",
+                    ConditionExpression=f"attribute_exists({self.key_field})",
+                    ExpressionAttributeNames=names,
+                    ExpressionAttributeValues={":empty": {}, ":v": dynamodb_safe_document(value)},
+                )
+        except Exception as exc:  # noqa: BLE001 - a conditional failure means "no such document"
+            if "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc):
+                return False
+            raise
+        return True
+
 
 class AiUsageRepository:
     """The per-tenant AI generation counter (PK=`tenant_id`, SK=`period`).

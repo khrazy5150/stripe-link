@@ -17,6 +17,7 @@ from stripe_link.domain.business_email import (
     start_verification,
 )
 from stripe_link.domain.sitemap import generate_indexnow_key
+from stripe_link.domain.sites import SITE_ID_RE
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
 from stripe_link.domain.slugs import sanitize_slug
@@ -66,7 +67,7 @@ from stripe_link.repositories.documents import (
 
 SITE_SCHEMA_VERSION = "2026-07-20"
 _ID_ALPHABET = string.ascii_letters + string.digits
-_SITE_ID_RE = re.compile(r"^site_[A-Za-z0-9]+$")
+_SITE_ID_RE = SITE_ID_RE          # the shared contract (domain/sites.py), not a local copy
 _HOSTNAME_RE = re.compile(r"^(?!https?://)([a-z0-9-]+\.)+[a-z]{2,}$")
 # A DNS label: lowercase alphanumerics + interior hyphens, no leading/trailing hyphen.
 _SUBDOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")

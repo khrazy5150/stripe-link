@@ -2,6 +2,8 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from stripe_link.domain.sites import SITE_ID_PATTERN, is_site_id
+
 from stripe_link.domain.business_types import BUSINESS_TYPES
 from stripe_link.domain.cart import CART_STATUSES, MAX_CART_LINES, MAX_LINE_QTY
 from stripe_link.domain.composition import ELEMENTS, supported_goals
@@ -1718,7 +1720,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
     # requiring it would make every page creation fail until a Site existed. `Site.pages` remains the source
     # of truth; this is written only by the Site save path (plans/SITE_AS_BUSINESS_IDENTITY.md §3.1).
     optional_string(document, "site_id", "Page site_id")
-    if str(document.get("site_id") or "") and not re.match(r"^site_[A-Za-z0-9]+$", str(document["site_id"])):
+    if str(document.get("site_id") or "") and not is_site_id(document["site_id"]):
         raise DocumentValidationError("Page site_id must look like 'site_xxx'.")
     # An offer-less page (storefront homepage / category / seller profile) has no single primary offer, so
     # offer_id is optional there (plans/SITE_OBJECT.md §2.5b/2.7). Every other page still requires one — a
@@ -2924,8 +2926,8 @@ def validate_site(document: dict[str, Any]) -> None:
     identity, navigation, SEO, indexing eligibility, and a slug->page route map. Enforces the load-bearing
     constraints; the full shape lives in schemas/Site.schema.json v2."""
     require_document_fields(document, "site", "site_id")
-    if not re.match(r"^site_[A-Za-z0-9]+$", str(document.get("site_id") or "")):
-        raise DocumentValidationError("Site site_id must match ^site_[A-Za-z0-9]+$.")
+    if not is_site_id(document.get("site_id")):
+        raise DocumentValidationError(f"Site site_id must match {SITE_ID_PATTERN}.")
     require_enum(document, "stripe_mode", SITE_STRIPE_MODES, "Site stripe_mode")
     require_string(document, "name", "Site name")
     require_enum(document, "status", SITE_STATUSES, "Site status")
@@ -3385,7 +3387,7 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
         if not isinstance(sites, dict):
             raise DocumentValidationError("Shipping config sites must be an object keyed by site_id.")
         for site_id, override in sites.items():
-            if not re.match(r"^site_[A-Za-z0-9]+$", str(site_id)):
+            if not is_site_id(site_id):
                 raise DocumentValidationError(
                     f"Shipping config sites key '{site_id}' must look like 'site_xxx'.")
             if not isinstance(override, dict):

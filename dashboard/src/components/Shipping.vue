@@ -308,6 +308,31 @@
         </div>
       </header>
       <div class="dashboard-card-body">
+        <!-- WHICH BUSINESS ships from here (plans/SHIPPING_PER_SITE.md §S4). Only shown once there is
+             more than one site: with one, every address on this screen is unambiguously its, and a
+             selector offering a single choice is a question with no answer. -->
+        <label v-if="sitesStore.sites.length > 1" class="offer-field ship-from-scope">
+          <span>Shipping for</span>
+          <select v-model="shipFromScope">
+            <option value="">All sites (account default)</option>
+            <option v-for="s in sitesStore.sites" :key="s.site_id" :value="s.site_id">
+              {{ s.organization?.name || s.name || s.site_id }}{{ overriddenSiteIds.includes(s.site_id) ? " — own address" : " — inherits" }}
+            </option>
+          </select>
+          <!-- Said outright, because the consequence is otherwise invisible: a tenant editing the account
+               default while believing they are editing one shop would change every shop. -->
+          <small v-if="!shipFromScope" class="field-note">
+            Editing the <strong>account default</strong>. Every site without its own address ships from here.
+          </small>
+          <small v-else-if="overriddenSiteIds.includes(shipFromScope)" class="field-note">
+            This site has its <strong>own</strong> ship-from address.
+            <button type="button" class="link-btn" @click="clearSiteOverride">Go back to inheriting</button>
+          </small>
+          <small v-else class="field-note">
+            This site <strong>inherits</strong> the account default. Fill the address in and save to give it its own.
+          </small>
+          <small v-if="siteOverrideError" class="field-error">{{ siteOverrideError }}</small>
+        </label>
         <AddressFields :address="form.ship_from_address" />
       </div>
     </section>
@@ -704,6 +729,7 @@ import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { statusLabel } from "../utils/format";
 import AddressFields from "./AddressFields.vue";
 import { useProfileStore } from "../stores/profile";
+import { useSitesStore } from "../stores/sites";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -715,6 +741,22 @@ const connectionResult = ref(null);
 const profileStore = useProfileStore();
 const copyingBusiness = ref(false);
 const form = reactive(defaultForm());
+// WHICH business's ship-from is on screen. "" is the account default (plans/SHIPPING_PER_SITE.md §S4).
+const shipFromScope = ref("");
+const siteOverrides = ref({});
+const siteOverrideError = ref("");
+const sitesStore = useSitesStore();
+sitesStore.ensureLoaded();
+const overriddenSiteIds = computed(() => Object.keys(siteOverrides.value));
+
+// Switching scope swaps the address in the form: the account's, or this site's own if it has one, or the
+// account's as a STARTING POINT for a site that inherits — so "fill it in and save" has something to
+// start from rather than an empty form the tenant has to retype.
+watch(shipFromScope, (siteId) => {
+  siteOverrideError.value = "";
+  const own = siteId ? siteOverrides.value[siteId]?.ship_from_address : null;
+  fillAddress(form.ship_from_address, own || rawDoc.value?.ship_from_address);
+});
 
 // A saved key comes back redacted (api_key_ref === "********"), so a truthy value means configured.
 // PER MODE. The saved key comes back redacted, so a truthy value means configured -- but it is now
@@ -1253,6 +1295,11 @@ function applyConfig(config) {
   form.provider.api_key = ""; // never populate the actual key; it's redacted on read
   fillAddress(form.ship_from_address, config.ship_from_address);
   fillAddress(form.return_address, config.return_address);
+  // The per-Site overrides as STORED, so the selector can say which sites have their own address rather
+  // than inferring it (plans/SHIPPING_PER_SITE.md §S4). Switching back to the account default re-reads
+  // `rawDoc`, so loading always lands on the account's address whatever was selected before.
+  siteOverrides.value = (config.sites && typeof config.sites === "object") ? { ...config.sites } : {};
+  shipFromScope.value = "";
   form.boxes = Array.isArray(config.boxes)
     ? config.boxes.map((box) => ({ ...boxFormFromDocument(box), max_weight: box.max_weight ?? "" }))
     : [];
@@ -1598,7 +1645,65 @@ function adoptSavedConfig(config) {
   if (typeof config.enabled === "boolean") form.enabled = config.enabled;
 }
 
+/**
+ * The per-Site write (plans/SHIPPING_PER_SITE.md §S4).
+ *
+ * A SEPARATE call from the account save, because the server writes it differently: a targeted update of
+ * `sites.<site_id>` so two shipping screens open at once cannot overwrite each other's Sites. Sending it
+ * through the account save would mean a read-modify-write of the whole document, which is the hazard the
+ * targeted write exists to avoid.
+ *
+ * Only the ship-from address for now — the other overridable fields get their controls when they get
+ * their screens (§S5).
+ */
+async function saveSiteOverride() {
+  siteOverrideError.value = "";
+  saving.value = true;
+  try {
+    const body = await apiRequest("/shipping", {
+      method: "PUT",
+      body: {
+        tenant_id: getTenantId(),
+        site_id: shipFromScope.value,
+        site_override: { ship_from_address: cleanAddress(form.ship_from_address) },
+      },
+    });
+    // The SERVER's resolved view, so the screen and the carrier agree about what this site ships with.
+    siteOverrides.value = { ...siteOverrides.value, [body.site_id]: body.site_override };
+    message.value = "This site's ship-from address saved.";
+  } catch (err) {
+    siteOverrideError.value = err.message || "Could not save this site's address.";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function clearSiteOverride() {
+  siteOverrideError.value = "";
+  saving.value = true;
+  try {
+    // An EMPTY override is how the server is told "go back to inheriting" — it removes the member rather
+    // than storing an empty map, so "states nothing" has one stored shape and not two.
+    const body = await apiRequest("/shipping", {
+      method: "PUT",
+      body: { tenant_id: getTenantId(), site_id: shipFromScope.value, site_override: {} },
+    });
+    const next = { ...siteOverrides.value };
+    delete next[body.site_id];
+    siteOverrides.value = next;
+    fillAddress(form.ship_from_address, rawDoc.value?.ship_from_address);
+    message.value = "This site now uses the account default.";
+  } catch (err) {
+    siteOverrideError.value = err.message || "Could not clear this site's address.";
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function save() {
+  // A site is selected, so the address on screen is THAT site's, not the account's. Saving it through the
+  // account route would move every other site that inherits.
+  if (shipFromScope.value) return saveSiteOverride();
   error.value = "";
   message.value = "";
   const errors = validationErrors();

@@ -174,8 +174,30 @@ hides inheritance produces a tenant who thinks they changed one warehouse and ch
   The other eight readers are NOT threaded, deliberately: they are per-handler loaders with divergent
   failure semantics (one returns `True`, one a `dict(blank, reason=...)`) and they read `zones`/`enabled`
   — which is §S5's territory. Consolidating them is worth doing and is not this phase.
-- **S4 — the write path and the screen.** Targeted `update_item` per Site (§3.1), plus the Site selector
-  and an explicit inherited/overridden state.
+- **S4 — the write path and the screen. SHIPPED 2026-11-04.**
+  `SimpleKeyRepository.set_nested(key, container, member, value)` writes ONE member of a map attribute, so
+  a Site's own screen cannot restore every other Site's override as it looked a moment earlier. Two
+  details that would each have been a bug: the update is `SET #c = if_not_exists(#c, :empty), #c.#m = :v`,
+  because a bare `SET #c.#m` on a document with no `sites` attribute fails the WHOLE update with
+  `ValidationException` — a tenant's FIRST override would have 500'd; and `value is None` REMOVES the
+  member rather than storing an empty map, so "states nothing" has one stored shape and not two.
+
+  **Read to VALIDATE, write TARGETED.** `save_site_override` shape-checks the override as part of the
+  whole stored document — zones need the account's boxes to validate against, and the override must never
+  be the softer path — then writes only `sites.<site_id>`. Validating against a read a moment old can
+  only mean validating against slightly older boxes; SAVING from one would mean restoring every other
+  Site's override.
+
+  It **rides `POST /shipping`**, split on the body, because this handler's own note says so: adding a
+  route took the transformed stack over CloudFormation's 1,000,000-byte limit once already.
+
+  The response carries the RESOLVED view and an `inherited` list, so the screen shows what the Site will
+  actually ship with instead of re-deriving inheritance in JavaScript and disagreeing with the server. The
+  Shipping screen's selector appears only with more than one Site (with one, every address on it is
+  unambiguously that Site's) and says outright which Sites have their own address, which inherit, and —
+  when no Site is selected — that editing the account default changes every Site that inherits.
+
+  Only `ship_from_address` has a control so far; the other two overridable fields get theirs with §S5.
 - **S5 — per-Site enablement.** `enabled` / `enabled_opt_out` per Site, so one business can be
   digital-only. Deliberately last: it changes whether a buyer is offered shipping at all, and wants S3's
   resolution proven first.

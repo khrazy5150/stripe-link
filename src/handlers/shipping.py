@@ -13,7 +13,9 @@ from stripe_link.domain.fulfilment import order_fulfilment_state, product_index
 from stripe_link.domain.handover import handover_groups
 from stripe_link.domain.rate_policy import select_rate
 from stripe_link.domain.returns import RETURN_STATES, return_deadline, return_label_expired
+from stripe_link.domain.sites import is_site_id
 from stripe_link.domain.shipping import (
+    SITE_OVERRIDABLE,
     config_for_site,
     ShipmentError,
     build_shipment,
@@ -171,7 +173,69 @@ def catalogue_readiness(tenant_id: str, products_repo=None, mode: str = "test") 
         return []
 
 
+def save_site_override(event, repository, products_repo=None):
+    """Save (or clear) ONE Site's shipping overrides (plans/SHIPPING_PER_SITE.md §S4).
+
+    Rides `POST /shipping`, split by the body, because this handler's own note says so: adding a route
+    took the transformed stack over CloudFormation's 1,000,000-byte limit once already, so "new endpoints
+    have to ride existing routes".
+
+    **Read to VALIDATE, write TARGETED.** The override is shape-checked against the stored document --
+    zones need the account's boxes to validate against -- but the write touches only `sites.<site_id>`.
+    Validating against a read that is a moment old can only mean validating against slightly older boxes;
+    SAVING from one would mean restoring every other Site's override as it looked a moment ago.
+
+    An empty override REMOVES the Site's entry, which is how a tenant goes back to inheriting.
+    """
+    body = parse_json_body(event)
+    tenant_id = tenant_id_from_event(event) or str(body.get("tenant_id") or "").strip()
+    site_id = str(body.get("site_id") or "").strip()
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    if not is_site_id(site_id):
+        return error_response("A site_id is required.", code="missing_site")
+
+    config = repository.get(tenant_id)
+    if not config:
+        return error_response(
+            "Set up shipping for your account before overriding it for one site.",
+            status_code=404, code="not_found")
+
+    raw = body.get("site_override") if isinstance(body.get("site_override"), dict) else {}
+    # Only the fields a Site may state, and only the ones it actually stated. A key present but empty is
+    # "inherit", exactly as `config_for_site` reads it, so the stored shape and the resolver agree.
+    override = {field: raw[field] for field in SITE_OVERRIDABLE if raw.get(field)}
+    try:
+        # Validated as part of the WHOLE document, so an override cannot store a shape the account could
+        # not -- the override must never be the softer path.
+        validate_shipping_config({**config, "sites": {**(config.get("sites") or {}),
+                                                      site_id: override}})
+    except (DocumentValidationError, ValueError) as exc:
+        return error_response(str(exc), code="invalid_shipping_config")
+
+    try:
+        if not repository.set_nested(tenant_id, "sites", site_id, override or None):
+            return error_response("Shipping config not found.", status_code=404, code="not_found")
+    except RepositoryError as exc:
+        return error_response(str(exc), code="invalid_shipping_config")
+
+    resolved = config_for_site({**config, "sites": {**(config.get("sites") or {}), site_id: override}},
+                               site_id)
+    return json_response({
+        "site_id": site_id,
+        "site_override": override,
+        # The RESOLVED view, so the screen shows what this Site will actually ship with rather than
+        # re-deriving inheritance in JavaScript and disagreeing with the server about it.
+        "resolved": redact_shipping_config(resolved),
+        "inherited": sorted(set(SITE_OVERRIDABLE) - set(override)),
+    }, status_code=201)
+
+
 def save_shipping_config(event, repository, secret_cipher, products_repo=None):
+    # A per-Site override is a different write with a different safety rule -- targeted, so two shipping
+    # screens cannot overwrite each other's Sites. Split on the body, not a route (see above).
+    if str(parse_json_body(event).get("site_id") or "").strip():
+        return save_site_override(event, repository, products_repo)
     try:
         document = parse_json_body(event)
         tenant_id = str(document.get("tenant_id") or "").strip()

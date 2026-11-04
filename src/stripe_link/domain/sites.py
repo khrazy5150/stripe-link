@@ -6,7 +6,19 @@ and a dict -- it renders nothing. Keeping it in the publishing runtime meant tha
 app_config grant test follows the import graph, an IAM grant for a table the handler never reads.
 `runtime.publishing` re-exports it, so every existing import site is unchanged.
 """
+import re
 from typing import Any
+
+# THE site_id contract, in one place. It was written out five times across `domain/documents.py` and
+# `handlers/sites.py`, and a sixth was about to be added for the per-Site shipping override. A pattern
+# copied per caller is a rule that can be relaxed in one of them without anyone noticing.
+SITE_ID_PATTERN = r"^site_[A-Za-z0-9]+$"
+SITE_ID_RE = re.compile(SITE_ID_PATTERN)
+
+
+def is_site_id(value: Any) -> bool:
+    """True for a well-formed site_id. The one question every caller was asking with its own regex."""
+    return bool(SITE_ID_RE.match(str(value or "")))
 
 
 def site_for_page(sites_repository: Any, tenant_id: str, page_id: str, *,
