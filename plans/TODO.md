@@ -3617,6 +3617,26 @@ choice.
   be ordinary tenant entities (reuse existing repos/validators/screens).
 - **Money flow:** platform is the seller → rides the **existing platform-billing rail** (as Premium), not Connect.
 
+### ⭐⭐ HIGH — Site is the business identity (emails sign with the wrong business) — plan 2026-11-03, not built
+- **The bug, reported from a real email:** a review invite signed **"Poliaxis Nutrition"** for an offer whose
+  Site is **Quill**. `handlers/review_invites.py` does `identity.get("business_name") or org.get("name")` —
+  the USER PROFILE wins over `Site.organization` — and `_tenant_organization` takes the **first Site with an
+  organization** (its own docstring says "multi-Site precision is a future refinement").
+- **This reverses the 2026-09-23 sender consolidation, deliberately.** `domain/business_email.py` centralised
+  identity so a shop could not appear as two businesses across two emails. That goal STAYS; what changes is
+  the scope of "one" — per **Site**, not per tenant. Author direction 2026-11-03: each Site is its own
+  business with its own NAP and email; every landing page under it inherits that.
+- **Blocker (plans/SITE_AS_BUSINESS_IDENTITY.md §3.3): `Site.organization.email` is NOT verified.** The
+  tenant business email is gated behind a code/TTL/attempt flow because "SES will not check whether the
+  reply-to belongs to the tenant". Using the Site's free-text address as Reply-To re-opens that hole.
+  Three options; recommendation is **Site name + tenant's verified Reply-To** until per-Site verification
+  is worth building.
+- **Other gaps:** `Page` has no `site_id` (link runs Site→pages only); orders DO carry `page_id` but **no
+  emitter reads it** (receipts, cart_recovery, reminders, invoices, purchase_manage, notifications_content);
+  and some sends have **no Site at all** (manual invoices, platform notices), so the tenant fields cannot
+  simply be deleted — they become a declared fallback.
+- Full plan + phasing + 4 open decisions: **`plans/SITE_AS_BUSINESS_IDENTITY.md`**.
+
 ### ⭐⭐ HIGH — Attention Primitive (offer → campaign → attribution) — plan 2026-08-28; **A0+A2 SHIPPED, A1 domain built**
 - **STATUS 2026-11-01.** **A0 shipped** (`facts.positioning` on the semantic model + the enrich operation +
   the "Understanding" button). **A2 shipped dev+prod** (`?src=` first-touch capture, per-source arrivals and
