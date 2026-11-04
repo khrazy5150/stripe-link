@@ -68,6 +68,31 @@ class TheGuessIsMadeONCETests(unittest.TestCase):
         self.assertEqual(working_day({"address": {"country": "US", "region": "WA"}}, ACCOUNT)[0],
                          "US/Eastern")
 
+    def test_a_BARE_COUNTRY_site_address_is_a_FORM_ARTIFACT_not_an_answer(self):
+        """Found on live dev data, not by a test. The Sites editor defaults `country` to "US" and saves
+        whatever is non-empty, so a Site nobody has given an address stores `{"country": "US"}`. Treated as
+        stated it beat the account's real US/WA with the country default (America/New_York) — a Seattle
+        business told it keeps New York hours."""
+        self.assertEqual(working_day({"address": {"country": "US"}}, ACCOUNT)[0], "US/Eastern")
+        self.assertEqual(working_day({"address": {"country": "US"}},
+                                     {"address": {"country": "US", "region": "WA"}})[0],
+                         "America/Los_Angeles")
+
+    def test_PLACEABLE_means_what_the_GUESSER_reads_and_nothing_more(self):
+        """A postal code is not consulted by `suggest_timezone`, so counting it would mark an address
+        placeable while leaving the guess at the country default — the same bug wearing a postcode."""
+        account = {"address": {"country": "US", "region": "WA"}}
+        self.assertEqual(working_day({"address": {"country": "US", "postal_code": "73301"}}, account)[0],
+                         "America/Los_Angeles")
+        self.assertEqual(working_day({"address": {"country": "US", "region": "TX"}}, account)[0],
+                         "America/Chicago")
+
+    def test_either_region_or_state_counts(self):
+        """`suggest_timezone` reads both keys; so must the predicate in front of it."""
+        account = {"address": {"country": "US", "region": "WA"}}
+        self.assertEqual(working_day({"address": {"country": "US", "state": "TX"}}, account)[0],
+                         "America/Chicago")
+
     def test_the_accounts_address_is_used_when_the_site_has_none(self):
         self.assertEqual(working_day({}, {"address": {"country": "US", "region": "CO"}})[0],
                          "America/Denver")

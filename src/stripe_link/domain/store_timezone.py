@@ -194,6 +194,27 @@ def store_timezone(business: Any) -> str:
     return chosen or suggest_timezone((business or {}).get("address") if isinstance(business, dict) else None)
 
 
+def _placeable(address: Any) -> dict[str, Any] | None:
+    """An address only counts for GUESSING a timezone if it narrows the answer beyond a country.
+
+    The Sites editor defaults `country` to "US" and saves whatever is non-empty, so a Site nobody has
+    given an address stores `{"country": "US"}` -- a FORM ARTIFACT, not a statement by the tenant. Treated
+    as stated, it beat the account's real `US/WA` with the country-level default (America/New_York), which
+    is how a Seattle business came to be told it keeps New York hours. Found on live dev data 2026-11-04,
+    not by a test.
+
+    "Narrows" means **exactly what `suggest_timezone` reads** -- country plus region/state. A postal code
+    or a locality is not consulted by the guesser, so counting them would mark an address placeable while
+    leaving the guess at the country default, which is the bug again wearing a postcode.
+
+    If NEITHER level has a region, `suggest_timezone` still answers from the country and nothing is lost.
+    """
+    if not isinstance(address, dict):
+        return None
+    narrows = _text(address.get("region")) or _text(address.get("state"))
+    return address if narrows else None
+
+
 def working_day(organization: Any = None, business: Any = None) -> tuple[str, int]:
     """`(timezone, cutoff_hour)` for ONE business's working day (plans/SHIPPING_PER_SITE.md §S1).
 
@@ -214,7 +235,7 @@ def working_day(organization: Any = None, business: Any = None) -> tuple[str, in
 
     timezone = _text(org.get("timezone")) or _text(biz.get("timezone"))
     if not timezone:
-        timezone = suggest_timezone(org.get("address") or biz.get("address"))
+        timezone = suggest_timezone(_placeable(org.get("address")) or biz.get("address"))
 
     cutoff = org.get("shipping_cutoff_hour")
     if cutoff is None or isinstance(cutoff, bool):
