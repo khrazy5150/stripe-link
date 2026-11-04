@@ -186,7 +186,47 @@
                 <PhoneInput v-model="form.org.telephone" />
                 <small v-if="orgPhoneError" class="field-error">{{ orgPhoneError }}</small>
               </label>
-              <label class="offer-field"><span>Email</span><input v-model.trim="form.org.email" type="email" /></label>
+              <div class="offer-field">
+                <span>Email</span>
+                <div class="business-email-row">
+                  <input v-model.trim="form.org.email" type="email" :disabled="emailVerify.step === 'code'" />
+                  <span v-if="siteEmailVerified" class="business-email-badge verified">Verified</span>
+                  <button
+                    v-else-if="emailVerify.step !== 'code'"
+                    class="secondary-action compact"
+                    type="button"
+                    :disabled="!form.org.email || emailVerify.busy"
+                    @click="startSiteEmailVerification"
+                  >{{ emailVerify.busy ? "Checking..." : "Verify" }}</button>
+                </div>
+
+                <!-- The code step replaces the field rather than sitting beside it: there is one thing to
+                     do here, and splitting attention between an address box and a code box is how people
+                     paste the wrong one. Mirrors the tenant-level flow on the Profile screen. -->
+                <div v-if="emailVerify.step === 'code'" class="business-email-code">
+                  <label class="offer-field">
+                    <span>Enter the 6-digit code we emailed to {{ emailVerify.pending }}</span>
+                    <input v-model.trim="emailVerify.code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" />
+                  </label>
+                  <div class="business-email-actions">
+                    <button class="secondary-action compact" type="button" @click="cancelSiteEmailVerification">Cancel</button>
+                    <button class="primary-action compact" type="button" :disabled="emailVerify.code.length !== 6 || emailVerify.busy" @click="confirmSiteEmailVerification">
+                      {{ emailVerify.busy ? "Checking..." : "Confirm" }}
+                    </button>
+                  </div>
+                  <small class="field-note">The code expires in 5 minutes.</small>
+                </div>
+
+                <small v-if="emailVerify.error" class="field-error">{{ emailVerify.error }}</small>
+                <small v-else-if="emailVerify.catchAll" class="field-note">
+                  That domain accepts mail to any address, so we could not confirm this specific mailbox — the code will.
+                </small>
+                <small v-else-if="siteEmailVerified">Customer replies to this site's emails go here.</small>
+                <!-- Said plainly, because the consequence is invisible otherwise: a tenant who publishes a
+                     second business and never verifies its address keeps receiving its replies at the
+                     first one, and nothing on the page would have told them. -->
+                <small v-else>Unverified. Until you verify it, replies to this site's emails go to your account email instead. It is still the public contact in your structured data.</small>
+              </div>
             </div>
             <label class="offer-field"><span>Street</span><input v-model.trim="form.org.address.street" type="text" placeholder="1493 Osage St" /></label>
             <div class="offer-two-column">
@@ -954,6 +994,61 @@ const BUSINESS_TYPE_GROUPS = [
 const socialHostError = ref("");
 const socialBusy = ref(false);
 const socialCheckNote = ref("");
+// Per-Site Reply-To verification (plans/SITE_AS_BUSINESS_IDENTITY.md P3). Deliberately NOT part of
+// `form`: it is a transient workflow, not a Site field, and mixing it in would post it to the save
+// endpoint — where the server discards it anyway, since the verified state is server-owned.
+const emailVerify = reactive({ step: "idle", code: "", pending: "", busy: false, error: "", catchAll: false });
+
+// Verified means verified for the address CURRENTLY typed. Editing the field must drop the badge
+// immediately, or a tenant sees "Verified" beside an address that is nothing of the sort — and the server
+// agrees: changing the address drops the proof at the write boundary.
+const siteEmailVerified = computed(() => {
+  const stored = editing.value?.organization || {};
+  return Boolean(stored.email_verified)
+    && (form.org.email || "").trim().toLowerCase() === (stored.email || "").toLowerCase();
+});
+
+async function startSiteEmailVerification() {
+  emailVerify.busy = true;
+  emailVerify.error = "";
+  emailVerify.catchAll = false;
+  try {
+    const body = await store.startBusinessEmail(editing.value.site_id, form.org.email);
+    emailVerify.pending = form.org.email;
+    emailVerify.catchAll = Boolean(body.catch_all);
+    emailVerify.step = "code";
+    emailVerify.code = "";
+  } catch (err) {
+    emailVerify.error = err.message || "We could not send the code. Please try again.";
+  } finally {
+    emailVerify.busy = false;
+  }
+}
+
+async function confirmSiteEmailVerification() {
+  emailVerify.busy = true;
+  emailVerify.error = "";
+  try {
+    const { email, site } = await store.confirmBusinessEmail(editing.value.site_id, emailVerify.code);
+    // The server is the source of truth for what is verified, so take the Site it returns rather than
+    // patching a guess into the one being edited.
+    if (site) editing.value = site;
+    form.org.email = email;
+    emailVerify.step = "idle";
+    emailVerify.code = "";
+  } catch (err) {
+    emailVerify.error = err.message || "That code is not right.";
+  } finally {
+    emailVerify.busy = false;
+  }
+}
+
+function cancelSiteEmailVerification() {
+  emailVerify.step = "idle";
+  emailVerify.code = "";
+  emailVerify.error = "";
+}
+
 const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
@@ -1704,6 +1799,7 @@ async function removePage(pageId) {
 
 function openEdit(site) {
   editing.value = site;
+  cancelSiteEmailVerification();   // a fresh Site must not inherit the last one's in-flight code step
   domainError.value = "";
   domainDiagnostics.value = {};
   domainForm.domain = "";

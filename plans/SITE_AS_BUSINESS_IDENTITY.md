@@ -312,11 +312,35 @@ that rule is what preserves §2's guarantee while changing its scope.
 
   Still tenant-level by design: `send_email`'s own last-resort fallback for a caller that states no
   sender, and platform-authored mail, which has no Site. **Reply-To is untouched throughout** — see P3.
-- **P3 — per-Site Reply-To** *(CONFIRMED in scope 2026-11-03)*. Make `domain/business_email.py`'s
-  verification Site-scoped: a code per Site address, same TTL and attempt limits. **Fallback is the
-  tenant's VERIFIED address, never the Site's unverified one.** The Sites editor must surface the
-  unverified state, or a tenant publishes a second Site and silently keeps receiving replies at the first
-  address.
+- **P3 — per-Site Reply-To. SHIPPED 2026-11-03** (`domain/business_email.py`, `handlers/sites.py`,
+  `schemas/Site.schema.json`, `dashboard/src/components/Sites.vue`,
+  `tests/test_site_email_verification.py`). Verification is Site-scoped, same 5-minute TTL and 5-attempt
+  cap, and `email_identity` now prefers the Site's VERIFIED address with the tenant's verified one as the
+  fallback — never the Site's unverified one.
+
+  The load-bearing details, each one mistake away from a tenant receiving another business's replies:
+
+  - **`verification_scope(tenant_id, site_id)` is the salt**, so a code mailed to prove one Site's mailbox
+    confirms nothing about another. Without it, a tenant controlling one address verifies every Site they
+    own and the gate reduces to "this tenant has an inbox somewhere". A bare tenant scope is deliberately
+    the SAME string as before, so the tenant-level flow and its stored hashes are untouched — re-salting
+    it would have silently unverified every tenant, including the fallback this phase depends on.
+  - **`email_verified` is server-owned**, merged at the write boundary by
+    `preserve_email_verification` exactly as `social_links.preserve_verification` handles sameAs. The
+    Sites editor posts the whole `organization` back, so anything a client can send is something a client
+    can assert, and this one decides what SES puts in a Reply-To.
+  - **Re-pointing the address drops the proof** (and the pending code with it). The code proved "someone
+    reads mail at THIS address" and that finding does not travel. So `organization.email` stays freely
+    editable — it is the published contact address and belongs in the markup either way — and simply stops
+    being usable as a Reply-To until the new one is proven.
+  - **The confirm route is the only producer** of a verified state, the same arrangement
+    `check_social_links` has.
+  - The Sites editor shows the badge, and when unverified says what actually happens: *"replies to this
+    site's emails go to your account email instead"*. A tenant who publishes a second business and never
+    verifies its address would otherwise have nothing on the page tell them.
+
+  `SitesFunction` gains the three grants the tenant-level flow already had (Debounce by secret path, SES,
+  read on UserProfilesTable) plus two routes.
 - **P3b — brands move to the Site.** Add `brands[]` + `sources{}` to `Site.organization`; scope the Offers
   brand picker to the offer's Site (depends on §3.1's page→Site resolution, same as P2). Decide separately
   where `shipping_cutoff_hour` and `timezone` live — they are operational, not identity, and must not

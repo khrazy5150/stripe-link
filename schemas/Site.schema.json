@@ -199,7 +199,27 @@
             "string",
             "null"
           ],
-          "format": "email"
+          "format": "email",
+          "description": "Public contact address, emitted in the Organization markup. Freely editable. It becomes the Reply-To on this Site's mail only once email_verified is true \u2014 SES will send from any Reply-To it is handed, so the platform is what has to refuse an unproven one."
+        },
+        "email_verified": {
+          "type": "boolean",
+          "description": "SERVER-OWNED. True once a code mailed to `email` was confirmed for THIS Site. Changing `email` drops it (domain/business_email.preserve_email_verification), because the code proved a specific mailbox and that finding does not travel. A client-supplied value is discarded at the write boundary, like same_as verification."
+        },
+        "email_verified_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "SERVER-OWNED. Unix seconds at which `email` was confirmed."
+        },
+        "email_verification": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "SERVER-OWNED pending code: {pending_email, code_hash, expires_at, attempts}. The code is stored hashed and salted with tenant_id|site_id, so a code for one Site cannot confirm another.",
+          "additionalProperties": true
         },
         "address": {
           "type": [

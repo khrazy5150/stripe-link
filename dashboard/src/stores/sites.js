@@ -190,6 +190,19 @@ export const useSitesStore = defineStore("sites", {
         `/sites/${encodeURIComponent(siteId)}/managed-dns?domain=${encodeURIComponent(domain)}`,
         { method: "DELETE" });
     },
+    // Per-Site Reply-To (plans/SITE_AS_BUSINESS_IDENTITY.md P3). The start call does NOT touch the
+    // stored address — pending is not verified — so there is nothing to replace in the list yet.
+    async startBusinessEmail(siteId, email) {
+      return apiRequest(`/sites/${encodeURIComponent(siteId)}/business-email/start`, {
+        method: "POST", body: { email },
+      });
+    },
+    async confirmBusinessEmail(siteId, code) {
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/business-email/confirm`, {
+        method: "POST", body: { code },
+      });
+      return { email: res.email, site: this._replace(res.site) };
+    },
     async checkSocialLinks(siteId) {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/social/check`, { method: "POST" });
       return { site: this._replace(res.site), checked: res.checked || 0, backlinkHost: res.backlink_host || "" };

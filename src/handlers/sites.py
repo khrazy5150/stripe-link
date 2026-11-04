@@ -8,6 +8,14 @@ import time
 from stripe_link.cloudflare_secrets import get_cloudflare_api_token
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified, site_seo_enabled
+from stripe_link.domain.business_email import (
+    CODE_DIGITS,
+    check_code,
+    is_disposable,
+    looks_like_email,
+    preserve_email_verification,
+    start_verification,
+)
 from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
@@ -220,6 +228,10 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
         return set_homepage(event, repository, site_id, mode=mode)
     if method == "POST" and site_id and resource.endswith("/social/check"):
         return check_social_links(event, repository, site_id)
+    if method == "POST" and site_id and resource.endswith("/business-email/start"):
+        return start_site_email_verification(event, repository, site_id)
+    if method == "POST" and site_id and resource.endswith("/business-email/confirm"):
+        return confirm_site_email(event, repository, site_id)
     if method == "POST" and site_id and resource.endswith("/pages"):
         return attach_page(event, repository, site_id, mode=mode)
     if method == "DELETE" and site_id and resource.endswith("/pages"):
@@ -602,6 +614,12 @@ def create_site(event, repository, registry=None, mode="test"):
         organization = document.get("organization")
         if isinstance(organization, dict) and organization.get("same_as") is not None:
             organization["same_as"] = preserve_verification(organization, (existing or {}).get("organization"))
+        if isinstance(organization, dict):
+            # The same merge for the business email, and for the same reason: `email_verified` decides
+            # whether SES puts that address in a Reply-To, so a client that could set it could receive
+            # another business's customer replies. Changing the address drops the proof
+            # (plans/SITE_AS_BUSINESS_IDENTITY.md §P3).
+            organization.update(preserve_email_verification(organization, (existing or {}).get("organization")))
         record_hosting_history(existing, document)
         validate_site(document)
         _assert_pages_unassigned(repository, document)
@@ -976,6 +994,108 @@ def _recompute_eligibility(site, tenant_id, now):
     )
     site["indexing"] = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
     return eligibility
+
+
+def start_site_email_verification(event, repository, site_id, *, mailer_send=None,
+                                  now_fn=lambda: int(time.time()), code_fn=None, validator=None):
+    """Mail a code to the address this Site wants its customer replies to reach.
+
+    The Site-scoped twin of `profile.start_business_email_verification`, and deliberately a twin rather
+    than a generalisation of it: the two store their pending record in different documents, and the only
+    thing they genuinely share -- the rules about codes -- already lives in `domain/business_email.py`.
+
+    The code goes to the NEW address, which is the whole point: it proves the tenant controls the mailbox
+    they are asking us to put in every Reply-To for this business. It is salted with the SITE, so proving
+    one Site's mailbox confirms nothing about another (§P3).
+    """
+    from stripe_link.email_validation import check_email
+    from stripe_link.mailer import send_email
+
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+
+    email = str((parse_json_body(event) or {}).get("email") or "").strip().lower()
+    if not looks_like_email(email):
+        return error_response("That does not look like an email address.", code="invalid_email")
+    if is_disposable(email):
+        return error_response("That looks like a disposable address. Please use your business email.",
+                              code="disposable_email")
+    # Debounce fails OPEN: an outage must not stop a tenant setting up a business.
+    verdict = (validator or check_email)(email)
+    if not verdict["allowed"]:
+        return error_response(verdict["reason"], code="rejected_email")
+
+    code = str(code_fn() if code_fn else secrets.randbelow(10 ** CODE_DIGITS)).zfill(CODE_DIGITS)
+    now = int(now_fn())
+    organization = dict(site.get("organization") or {})
+    organization["email_verification"] = start_verification(
+        email, tenant_id=tenant_id, code=code, now=now, site_id=site_id)
+    site["organization"] = organization
+    try:
+        repository.put(site)
+    except (RepositoryError, ValueError) as exc:
+        return error_response(str(exc), code="save_failed")
+
+    try:
+        (mailer_send or send_email)(
+            to=email,
+            subject="Your Junior Bay verification code",
+            text=f"Your verification code is {code}. It expires in 5 minutes.",
+            html=f"<p>Your verification code is <strong>{code}</strong>.</p><p>It expires in 5 minutes.</p>",
+            signature=False,  # platform -> tenant: they already have the store the sign-off advertises
+        )
+    except Exception:  # noqa: BLE001 - tell the tenant; a code they never receive is a dead end
+        return error_response("We could not send the code. Please check the address and try again.",
+                              status_code=502, code="send_failed")
+    # `catch_all` is reported, never blocking -- the code is what proves the mailbox exists.
+    return json_response({"status": "sent", "catch_all": bool(verdict.get("catch_all"))})
+
+
+def confirm_site_email(event, repository, site_id, *, now_fn=lambda: int(time.time())):
+    """Confirm the code, and only then does the address become this Site's Reply-To.
+
+    Written HERE and nowhere else. The write boundary in `create_site` discards whatever a client sends
+    for `email_verified`, so this is the single producer of a verified state -- the same arrangement
+    `check_social_links` has for sameAs.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+
+    organization = dict(site.get("organization") or {})
+    pending = organization.get("email_verification")
+    now = int(now_fn())
+    ok, reason = check_code(pending, str((parse_json_body(event) or {}).get("code") or ""),
+                            tenant_id=tenant_id, now=now, site_id=site_id)
+    if not ok:
+        # Count the attempt BEFORE returning, or the cap is advisory.
+        if isinstance(pending, dict):
+            pending["attempts"] = int(pending.get("attempts") or 0) + 1
+            organization["email_verification"] = pending
+            site["organization"] = organization
+            try:
+                repository.put(site)
+            except (RepositoryError, ValueError):
+                pass
+        return error_response(reason, code="invalid_code")
+
+    organization["email"] = pending["pending_email"]
+    organization["email_verified"] = True
+    organization["email_verified_at"] = now
+    organization.pop("email_verification", None)
+    site["organization"] = organization
+    try:
+        repository.put(site)
+    except (RepositoryError, ValueError) as exc:
+        return error_response(str(exc), code="save_failed")
+    return json_response({"status": "verified", "email": organization["email"], "site": site})
 
 
 def check_social_links(event, repository, site_id):

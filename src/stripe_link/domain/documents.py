@@ -3064,6 +3064,17 @@ def validate_site_organization(organization: Any) -> None:
     optional_string(organization, "description", "organization.description", max_length=500)
     require_e164(organization, "telephone", "Organization phone")
     optional_string(organization, "email", "organization.email")
+    # The address is freely editable; whether it has been PROVEN is server-owned, so these are shape-
+    # checked and ACCEPTED rather than rejected. Rejecting them would reject our own writes: the Site is
+    # re-validated on the way out (publish re-runs validate_site over the stored document), the same
+    # reason same_as verification is merged at the write boundary instead of validated away.
+    if organization.get("email_verified") is not None and not isinstance(organization["email_verified"], bool):
+        raise DocumentValidationError("organization.email_verified must be a boolean.")
+    if organization.get("email_verified_at") is not None and whole_number(organization["email_verified_at"]) is None:
+        raise DocumentValidationError("organization.email_verified_at must be a whole number of seconds.")
+    pending = organization.get("email_verification")
+    if pending is not None and not isinstance(pending, dict):
+        raise DocumentValidationError("organization.email_verification must be an object.")
     optional_string(organization, "founding_date", "organization.founding_date")
     address = organization.get("address")
     if address is not None:

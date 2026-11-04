@@ -1645,11 +1645,30 @@ Resources:
           SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-sites-api-${Environment}"
       CodeUri: src/
       Handler: handlers.sites.handler
       Description: JSON-first Sites API (the public aggregate root — plans/SITE_OBJECT.md).
       Policies:
+        # Per-Site Reply-To verification (plans/SITE_AS_BUSINESS_IDENTITY.md §P3) — the same three grants
+        # the tenant-level flow on /profile/business-email already has: Debounce validates the address as
+        # it is typed, SES sends the confirmation code to it, and the mailer can resolve a sender identity
+        # from the owner's profile. The secret is scoped by path; SES is unscoped because the platform
+        # identity is the only sender there is.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/debounce/*"
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
         # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
@@ -1739,6 +1758,21 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /sites/{site_id}/social/check
+            Method: POST
+        # Per-Site Reply-To (plans/SITE_AS_BUSINESS_IDENTITY.md §P3). Mirrors the tenant-level pair on
+        # /me/business-email: one route mails a code to the address, the other confirms it. The confirm
+        # route is the ONLY producer of organization.email_verified.
+        SitesStartBusinessEmail:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/business-email/start
+            Method: POST
+        SitesConfirmBusinessEmail:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/business-email/confirm
             Method: POST
         SitesDisconnectDomain:
           Type: Api

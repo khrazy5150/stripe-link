@@ -75,23 +75,42 @@ def is_disposable(value: str) -> bool:
     return bool(disposable_domain_of(value))
 
 
-def hash_code(code: str, *, tenant_id: str) -> str:
-    """Codes are stored hashed and salted per tenant. A stored plaintext code is a credential sitting in a
+def verification_scope(tenant_id: str, site_id: str = "") -> str:
+    """What a code is valid FOR. The salt, and therefore the blast radius of one code.
+
+    A tenant may run several businesses, each on its own Site with its own address
+    (plans/SITE_AS_BUSINESS_IDENTITY.md §P3), so a code mailed to prove one Site's mailbox must not
+    confirm another's -- otherwise a tenant who controls one address verifies every Site they own, and the
+    whole gate reduces to "this tenant has an inbox somewhere".
+
+    A bare tenant scope is NOT the same string as a Site scope, so the tenant-level flow is untouched: its
+    stored hashes keep verifying. A code in flight across the deploy that introduced this would fail, and
+    the message already says to request a new one -- against a 5-minute TTL, that is the whole exposure.
+    """
+    site_id = str(site_id or "").strip()
+    return f"{tenant_id}|{site_id}" if site_id else str(tenant_id)
+
+
+def hash_code(code: str, *, tenant_id: str, site_id: str = "") -> str:
+    """Codes are stored hashed and salted per scope. A stored plaintext code is a credential sitting in a
     database, and reading it would be enough to take over a tenant's sending identity."""
-    return hashlib.sha256(f"{tenant_id}|{code}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{verification_scope(tenant_id, site_id)}|{code}".encode("utf-8")).hexdigest()
 
 
-def start_verification(email: str, *, tenant_id: str, code: str, now: int) -> dict[str, Any]:
-    """The pending record to store alongside the profile's business block."""
+def start_verification(email: str, *, tenant_id: str, code: str, now: int,
+                       site_id: str = "") -> dict[str, Any]:
+    """The pending record to store beside the address being proven: the profile's `business` block, or a
+    Site's `organization`. Same shape either way, because it is the same question about a mailbox."""
     return {
         "pending_email": str(email or "").strip().lower(),
-        "code_hash": hash_code(code, tenant_id=tenant_id),
+        "code_hash": hash_code(code, tenant_id=tenant_id, site_id=site_id),
         "expires_at": int(now) + CODE_TTL_SECONDS,
         "attempts": 0,
     }
 
 
-def check_code(pending: Any, submitted: str, *, tenant_id: str, now: int) -> tuple[bool, str]:
+def check_code(pending: Any, submitted: str, *, tenant_id: str, now: int,
+               site_id: str = "") -> tuple[bool, str]:
     """(ok, reason). Reasons are for the tenant, so they say what to do next rather than what went wrong."""
     if not isinstance(pending, dict) or not pending.get("code_hash"):
         return False, "Request a new code to continue."
@@ -100,9 +119,40 @@ def check_code(pending: Any, submitted: str, *, tenant_id: str, now: int) -> tup
     if int(pending.get("attempts") or 0) >= MAX_ATTEMPTS:
         return False, "Too many attempts. Request a new code."
     # Constant-time: a timing difference on a 6-digit code is a real oracle.
-    if not hmac.compare_digest(str(pending["code_hash"]), hash_code(str(submitted or "").strip(), tenant_id=tenant_id)):
+    if not hmac.compare_digest(
+            str(pending["code_hash"]),
+            hash_code(str(submitted or "").strip(), tenant_id=tenant_id, site_id=site_id)):
         return False, "That code is not right."
     return True, ""
+
+
+def preserve_email_verification(incoming_org: Any, existing_org: Any) -> dict[str, Any]:
+    """Strip client-supplied email-verification state and restore what the SERVER stored.
+
+    The same merge, for the same reason, as `social_links.preserve_verification`: the Sites editor sends
+    the whole `organization` back, so anything a client can put in the payload is something a client can
+    assert. `email_verified` decides whether SES will put that address in a Reply-To, and SES does not
+    check it for us -- a tenant who could set the flag could receive another business's customer replies.
+
+    **Re-pointing the address drops the proof**, exactly as re-pointing a sameAs URL does: the code proved
+    "someone can read mail AT THIS ADDRESS", and that finding does not travel to a different address. So a
+    tenant may freely edit `organization.email` -- it is their published contact address and belongs in the
+    markup either way -- and it simply stops being usable as a Reply-To until they prove the new one.
+
+    Returns the fields to overlay, so the caller stays one assignment.
+    """
+    incoming = incoming_org if isinstance(incoming_org, dict) else {}
+    existing = existing_org if isinstance(existing_org, dict) else {}
+    verified_address = str(existing.get("email") or "").strip().lower()
+    asked_for = str(incoming.get("email") or "").strip().lower()
+    same_address = bool(verified_address) and asked_for == verified_address
+    return {
+        "email_verified": bool(existing.get("email_verified")) and same_address,
+        "email_verified_at": existing.get("email_verified_at") if same_address else None,
+        # The pending record follows the address it was issued for, so asking for a different one does not
+        # let yesterday's unconfirmed code confirm it.
+        "email_verification": existing.get("email_verification") if same_address else None,
+    }
 
 
 def verified_email(business: Any) -> str:
@@ -182,13 +232,14 @@ def email_identity(profile: Any, organization: Any = None) -> dict[str, str]:
     "Poliaxis Nutrition". The profile is the fallback, for a Site with no organization and for the mail
     that has no Site at all -- a verification code, or anything sent before a Site exists.
 
-    Reply-To is still the TENANT's, deliberately, even when the name is the Site's: it is the only address
-    the platform has made the tenant prove they can receive at. A Site address becomes usable once
-    verification is Site-scoped (§P3), and until then an unverified Site address would be exactly the hole
-    the verification gate exists to close.
+    Reply-To follows the SITE too, but only once the Site's address has been PROVEN (§P3): the Site's
+    `email` with `email_verified`, else the tenant's verified address. Never the Site's unverified one --
+    SES will mail from any Reply-To it is handed, so an unverified Site address is precisely the hole the
+    verification gate exists to close, and falling back is what keeps a half-set-up second Site from
+    silently sending replies nowhere.
     """
     org = organization if isinstance(organization, dict) else {}
     return {
         "business_name": str(org.get("name") or "").strip() or sender_display_name(profile),
-        "reply_to": reply_to_address(profile),
+        "reply_to": verified_email(org) or reply_to_address(profile),
     }
