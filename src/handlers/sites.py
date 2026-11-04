@@ -217,7 +217,7 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
     if method == "PATCH" and site_id and resource.endswith("/status"):
         return update_site_status(event, repository, site_id, mode=mode)
     if method == "POST" and site_id and resource.endswith("/homepage"):
-        return set_homepage(event, repository, site_id)
+        return set_homepage(event, repository, site_id, mode=mode)
     if method == "POST" and site_id and resource.endswith("/social/check"):
         return check_social_links(event, repository, site_id)
     if method == "POST" and site_id and resource.endswith("/pages"):
@@ -332,9 +332,19 @@ def _put_site_index_records(saved: dict) -> None:
         pass
 
 
-def _save_site_pages(repository, site):
+def _save_site_pages(repository, site, pages_repo=None, mode="test"):
     """Validate + persist a Site whose route map changed, and refresh the domain-index route table when a
-    custom domain serves it. Returns (saved_site, error_response|None)."""
+    custom domain serves it. Returns (saved_site, error_response|None).
+
+    THE single write path for `Site.pages` -- all three callers come through here -- which is why the
+    page->Site reverse edge is reconciled here rather than at each attach point. Stamping in three places
+    is three chances to miss one, and a page carrying the wrong `site_id` would make an email claim the
+    wrong business (plans/SITE_AS_BUSINESS_IDENTITY.md §3.1).
+    """
+    before = {str(entry.get("page_id") or "")
+              for entry in ((repository.get(str(site.get("tenant_id") or ""),
+                                            str(site.get("site_id") or "")) or {}).get("pages") or {}).values()
+              if entry.get("page_id")}
     site["updated_at"] = int(time.time())
     try:
         _assert_pages_unassigned(repository, site)  # a page belongs to at most one Site — attach can't steal it
@@ -352,10 +362,47 @@ def _save_site_pages(repository, site):
                        sorted((site.get("pages") or {}).keys()))
         return None, error_response(str(exc), code="invalid_site")
     _put_site_index_records(saved)  # custom-domain (if any) + the free platform-hostname record
+    _reconcile_page_site_ids(saved, before, pages_repo, mode=mode)
     return saved, None
 
 
-def set_homepage(event, repository, site_id):
+def _reconcile_page_site_ids(site, before_page_ids, pages_repo=None, mode="test"):
+    """Write the page->Site reverse edge for pages that JOINED or LEFT this Site.
+
+    Only the difference is written. A Site with thirty pages saved for an unrelated reason must not
+    rewrite thirty page documents -- that is thirty chances to collide with a tenant editing one of them,
+    for no change at all.
+
+    Best-effort by design: the route map in `Site.pages` is the source of truth and has already been
+    persisted. A failure here leaves a stale reverse edge, which the backfill repairs; raising would undo
+    a Site save the tenant already saw succeed.
+    """
+    tenant_id = str((site or {}).get("tenant_id") or "")
+    site_id = str((site or {}).get("site_id") or "")
+    if not tenant_id or not site_id:
+        return
+    now = {str(entry.get("page_id") or "")
+           for entry in ((site or {}).get("pages") or {}).values() if entry.get("page_id")}
+    joined, left = now - set(before_page_ids or ()), set(before_page_ids or ()) - now
+    if not joined and not left:
+        return
+    try:
+        if pages_repo is None:
+            from stripe_link.repositories.documents import pages_repository
+
+            pages_repo = pages_repository(mode=mode)
+        for page_id in sorted(joined):
+            pages_repo.set_site_id(tenant_id, page_id, site_id)
+        for page_id in sorted(left):
+            # Cleared, not reassigned: a detached page belongs to no Site until it is attached again, and
+            # leaving the old id would have it answer "whose business is this?" with a Site that no longer
+            # routes it.
+            pages_repo.set_site_id(tenant_id, page_id, "")
+    except Exception as exc:  # noqa: BLE001 - see the docstring; the route map is already saved
+        logger.warning("page site_id reconcile failed for site %s: %s", site_id, exc)
+
+
+def set_homepage(event, repository, site_id, mode="test", pages_repo=None):
     """Make a page the Site's homepage: attach it at "/" with page_type=homepage (plans/SITE_OBJECT.md §2.5b).
     Any different page currently at "/" moves to its own slug so it stays served — and linkable from the new
     homepage's catalog grid."""
@@ -376,7 +423,7 @@ def set_homepage(event, repository, site_id):
     _attach_page_to_site(pages, page_id=page_id, slug="/",
                          page_type=str(body.get("page_type") or "homepage").strip() or "homepage")
     site["pages"] = pages
-    saved, error = _save_site_pages(repository, site)
+    saved, error = _save_site_pages(repository, site, pages_repo, mode=mode)
     return error or json_response({"site": saved})
 
 
@@ -427,7 +474,7 @@ def attach_page(event, repository, site_id, mode="test", pages_repo=None):
     )
     _record_offer_link_on_attach(pages, page_id, tenant_id, mode=mode)
     site["pages"] = pages
-    saved, error = _save_site_pages(repository, site)
+    saved, error = _save_site_pages(repository, site, pages_repo, mode=mode)
     if error is None:
         # The page now HAS an identity; its artifact was rendered without one. See _republish_page.
         _republish_page(tenant_id, page_id, pages_repo, mode=mode)
@@ -469,7 +516,7 @@ def detach_page(event, repository, site_id, mode="test", pages_repo=None):
     pages = {slug: entry for slug, entry in (site.get("pages") or {}).items()
              if not (isinstance(entry, dict) and entry.get("page_id") == page_id)}
     site["pages"] = pages
-    saved, error = _save_site_pages(repository, site)
+    saved, error = _save_site_pages(repository, site, pages_repo, mode=mode)
     if error is None:
         # The mirror of attach: the page must stop claiming an identity it no longer has.
         _republish_page(tenant_id, page_id, pages_repo, mode=mode)

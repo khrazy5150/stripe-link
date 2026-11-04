@@ -381,6 +381,45 @@ class DynamoDocumentRepository:
             if "ConditionalCheckFailed" not in str(type(exc).__name__) + str(exc):
                 raise
 
+    def set_site_id(self, tenant_id: str, document_id: str, site_id: str) -> bool:
+        """Stamp (or clear) the Site a page belongs to, WITHOUT rewriting the page.
+
+        A targeted update for the same reason as `update_tracking` below: a page document has several
+        writers -- the builder saving sections, the publisher writing artifact facts, and now the Site
+        route map -- and a read-modify-write from here would restore whatever this function had read a
+        moment earlier over a tenant's edit, silently
+        (`feedback_shared_document_read_modify_write`). Only `site_id` is touched.
+
+        An empty `site_id` REMOVES the attribute rather than storing "": a detached page has no Site, and
+        an empty string would be a value that reads as one until every consumer remembers to check for it.
+
+        Returns False when the page has gone, which is not an error -- a Site can legitimately still list
+        a page id that was deleted, and the route map is reconciled separately.
+        """
+        tenant_id, document_id = str(tenant_id or "").strip(), str(document_id or "").strip()
+        if not tenant_id or not document_id:
+            return False
+        site_id = str(site_id or "").strip()
+        try:
+            if site_id:
+                self.table.update_item(
+                    Key=self._key(tenant_id, document_id),
+                    UpdateExpression="SET #s = :s",
+                    ConditionExpression="attribute_exists(PK)",
+                    ExpressionAttributeNames={"#s": "site_id"},
+                    ExpressionAttributeValues={":s": site_id},
+                )
+            else:
+                self.table.update_item(
+                    Key=self._key(tenant_id, document_id),
+                    UpdateExpression="REMOVE #s",
+                    ConditionExpression="attribute_exists(PK)",
+                    ExpressionAttributeNames={"#s": "site_id"},
+                )
+        except Exception:  # noqa: BLE001 - a missing page must not fail the Site save that triggered this
+            return False
+        return True
+
     def update_tracking(self, tenant_id: str, document_id: str, fields: dict[str, Any]) -> bool:
         """Write a carrier's tracking reading onto a Shipment, WITHOUT rewriting the document.
 

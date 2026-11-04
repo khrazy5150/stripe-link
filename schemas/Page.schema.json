@@ -1,47 +1,54 @@
-  {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://schemas.juniorbay.com/stripe-link/Page.schema.json",
-    "title": "Page",
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-      "schema_version",
-      "document_type",
-      "tenant_id",
-      "page_id",
-      "name",
-      "route",
-      "offer_id",
-      "sections"
-    ],
-    "properties": {
-      "schema_version": {
-        "type": "string",
-        "const": "2026-05-29"
-      },
-      "document_type": {
-        "type": "string",
-        "const": "page"
-      },
-      "tenant_id": {
-        "type": "string",
-        "minLength": 1
-      },
-      "page_id": {
-        "type": "string",
-        "minLength": 1
-      },
-      "name": {
-        "type": "string",
-        "minLength": 1
-      },
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Page.schema.json",
+  "title": "Page",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "page_id",
+    "name",
+    "route",
+    "offer_id",
+    "sections"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "page"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "page_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
     "status": {
       "type": "string",
-      "enum": ["draft", "published", "archived"],
+      "enum": [
+        "draft",
+        "published",
+        "archived"
+      ],
       "default": "draft"
     },
     "published_at": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 0,
       "description": "Timestamp when status moved to published. Kept separate from updated_at for audit history and rollback UI."
     },
@@ -49,50 +56,58 @@
       "type": "string",
       "description": "Stable snowflake assigned on first publish; the shareable test link is test.juniorbay.com/published/{short_code}. The publish stream registers a code->page route from it (plans/SALES_FUNNELS.md Phase B)."
     },
-      "route": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["slug"],
-        "properties": {
-          "slug": {
-            "type": "string",
-            "minLength": 1
-          },
-          "domain": {
-            "type": "string"
-          },
-          "short_code": {
-            "type": "string"
-          }
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain": {
+          "type": "string"
+        },
+        "short_code": {
+          "type": "string"
         }
-      },
-      "seo": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "image": {
-            "type": "string"
-          },
-          "favicon_url": {
-            "type": "string",
-            "description": "Optional favicon URL. When omitted, the renderer uses Junior Bay's default favicon."
-          }
+      }
+    },
+    "seo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "favicon_url": {
+          "type": "string",
+          "description": "Optional favicon URL. When omitted, the renderer uses Junior Bay's default favicon."
         }
-      },
-      "offer_id": {
-        "type": "string",
-        "minLength": 1
-      },
+      }
+    },
+    "offer_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "goal": {
       "type": "string",
-      "enum": ["paid_ads", "search_seo", "social", "email_list", "minimal"],
-      "description": "Why this page exists / where its traffic comes from. Second composition axis alongside the offer's offer_type: the goal enables capability packs on top of the offer_type base (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Optional — a page without a goal composes from the base alone, exactly as pages did before the goal axis existed."
+      "enum": [
+        "paid_ads",
+        "search_seo",
+        "social",
+        "email_list",
+        "minimal"
+      ],
+      "description": "Why this page exists / where its traffic comes from. Second composition axis alongside the offer's offer_type: the goal enables capability packs on top of the offer_type base (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Optional \u2014 a page without a goal composes from the base alone, exactly as pages did before the goal axis existed."
     },
     "theme": {
       "type": "object",
@@ -101,7 +116,9 @@
       "properties": {
         "template": {
           "type": "string",
-          "enum": ["universal_bundle"]
+          "enum": [
+            "universal_bundle"
+          ]
         },
         "preset": {
           "type": "string",
@@ -123,15 +140,23 @@
           "additionalProperties": false,
           "description": "Legacy color overrides, bridged onto Universal Bundle tokens (background/text/accent) by the renderer.",
           "properties": {
-            "background": { "$ref": "#/$defs/hexColor" },
-            "text": { "$ref": "#/$defs/hexColor" },
-            "accent": { "$ref": "#/$defs/hexColor" }
+            "background": {
+              "$ref": "#/$defs/hexColor"
+            },
+            "text": {
+              "$ref": "#/$defs/hexColor"
+            },
+            "accent": {
+              "$ref": "#/$defs/hexColor"
+            }
           }
         },
         "tokens": {
           "type": "object",
           "description": "Universal Bundle CSS variable overrides. Keys map to renderer tokens such as background, card, brand, cta_from, savings_bg, and featured_badge_text.",
-          "additionalProperties": { "$ref": "#/$defs/hexColor" }
+          "additionalProperties": {
+            "$ref": "#/$defs/hexColor"
+          }
         },
         "fonts": {
           "type": "object",
@@ -140,12 +165,21 @@
           "properties": {
             "service": {
               "type": "string",
-              "enum": ["system", "junior-bay"],
+              "enum": [
+                "system",
+                "junior-bay"
+              ],
               "default": "system"
             },
-            "body": { "$ref": "#/$defs/fontRole" },
-            "heading": { "$ref": "#/$defs/fontRole" },
-            "accent": { "$ref": "#/$defs/fontRole" }
+            "body": {
+              "$ref": "#/$defs/fontRole"
+            },
+            "heading": {
+              "$ref": "#/$defs/fontRole"
+            },
+            "accent": {
+              "$ref": "#/$defs/fontRole"
+            }
           }
         }
       }
@@ -155,8 +189,14 @@
       "description": "Per-page Sale toggle (plans/SALES_FUNNELS.md). When enabled, the /sale context view renders this page's offer at its sale-context price with a Sale badge. Absent ends_at = perpetual.",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" },
-        "ends_at": { "type": "integer", "minimum": 0, "description": "Epoch seconds; absent = perpetual." }
+        "enabled": {
+          "type": "boolean"
+        },
+        "ends_at": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Epoch seconds; absent = perpetual."
+        }
       }
     },
     "flash_sale": {
@@ -164,9 +204,19 @@
       "description": "Per-page Flash Sale toggle (plans/SALES_FUNNELS.md). The /flash-sale context view renders the flash-context price + countdown. Dates live here so a tenant sets a window for a live event. ends_at is required to enable.",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" },
-        "starts_on": { "type": "integer", "minimum": 0, "description": "Epoch seconds; before this the banner reads 'coming up' and price stays Standard." },
-        "ends_at": { "type": "integer", "minimum": 0, "description": "Epoch seconds; required when enabled. After this the banner reads 'ended' and price reverts to Standard." }
+        "enabled": {
+          "type": "boolean"
+        },
+        "starts_on": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Epoch seconds; before this the banner reads 'coming up' and price stays Standard."
+        },
+        "ends_at": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Epoch seconds; required when enabled. After this the banner reads 'ended' and price reverts to Standard."
+        }
       }
     },
     "post_checkout": {
@@ -176,16 +226,24 @@
       "oneOf": [
         {
           "description": "Phase 1: Inline configuration owned by the page.",
-          "required": ["thank_you_page"],
+          "required": [
+            "thank_you_page"
+          ],
           "additionalProperties": false,
           "properties": {
-            "thank_you_page": { "$ref": "#/$defs/thankYouPage" },
-            "funnel_steps": { "$ref": "#/$defs/funnelStepsArray" }
+            "thank_you_page": {
+              "$ref": "#/$defs/thankYouPage"
+            },
+            "funnel_steps": {
+              "$ref": "#/$defs/funnelStepsArray"
+            }
           }
         },
         {
           "description": "Phase 2: External funnel resolution.",
-          "required": ["funnel_id"],
+          "required": [
+            "funnel_id"
+          ],
           "additionalProperties": false,
           "properties": {
             "funnel_id": {
@@ -228,36 +286,109 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Customer-facing refund policy snapshot resolved from offer settings, which may derive from product settings originally seeded by user preferences.",
-      "required": ["source", "short_label", "full_policy"],
+      "required": [
+        "source",
+        "short_label",
+        "full_policy"
+      ],
       "properties": {
         "source": {
           "type": "string",
-          "enum": ["offer", "product", "user_preference_default", "manual_page_override"]
+          "enum": [
+            "offer",
+            "product",
+            "user_preference_default",
+            "manual_page_override"
+          ]
         },
-        "offer_id": { "type": "string" },
-        "product_id": { "type": "string" },
+        "offer_id": {
+          "type": "string"
+        },
+        "product_id": {
+          "type": "string"
+        },
         "refund_window": {
           "type": "string",
-          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "90_days", "custom"]
+          "enum": [
+            "non_refundable",
+            "72_hours",
+            "7_days",
+            "14_days",
+            "30_days",
+            "60_days",
+            "90_days",
+            "custom"
+          ]
         },
         "condition": {
           "type": "string",
-          "enum": ["any", "unused", "unopened", "working_condition", "complete_in_packaging", "tags_intact", "any_value_adjusted", "defective_only", "not_downloaded", "custom"]
+          "enum": [
+            "any",
+            "unused",
+            "unopened",
+            "working_condition",
+            "complete_in_packaging",
+            "tags_intact",
+            "any_value_adjusted",
+            "defective_only",
+            "not_downloaded",
+            "custom"
+          ]
         },
         "return_method": {
           "type": "string",
-          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+          "enum": [
+            "no_return_customer_keeps",
+            "return_required",
+            "digital_revoke_access",
+            "custom"
+          ]
         },
         "return_shipping": {
           "type": "string",
-          "enum": ["seller_pays", "seller_pays_label", "buyer_pays", "not_applicable"]
+          "enum": [
+            "seller_pays",
+            "seller_pays_label",
+            "buyer_pays",
+            "not_applicable"
+          ]
         },
-        "restocking_fee_percent": { "type": "integer", "minimum": 1, "maximum": 50, "description": "A restocking fee as a whole percent of what the buyer paid, deducted from the refund. Absent means none. Only stated when the policy requires a return -- nothing is restocked when nothing comes back (plans/REFUND_POLICY_AND_GUARANTEES.md P8)." },
-        "original_shipping": { "type": "string", "enum": ["unstated", "refunded", "not_refunded"], "description": "What happens to the OUTBOUND postage the buyer already paid. Distinct from return_shipping, which is the cost of sending the goods back. Absent means the page says nothing either way." },
-        "refund_processing_days": { "type": "integer", "minimum": 1, "maximum": 30, "description": "How long the tenant takes to ISSUE the refund once the return arrives or the request is approved. Not the date the money lands: the card network's clock is not ours. Absent means the page says nothing." },
-        "resolution": { "type": "string", "enum": ["refund_only", "replacement_or_refund", "replacement_first"], "description": "What the buyer gets back: their money, or another one. Independent of return_method, which is about what happens to the ITEM. Absent (or `refund_only`) prints nothing -- a refund policy silent on replacements refunds you (plans/REFUND_POLICY_AND_GUARANTEES.md P9)." },
-        "short_label": { "type": "string" },
-        "full_policy": { "type": "string" }
+        "restocking_fee_percent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "A restocking fee as a whole percent of what the buyer paid, deducted from the refund. Absent means none. Only stated when the policy requires a return -- nothing is restocked when nothing comes back (plans/REFUND_POLICY_AND_GUARANTEES.md P8)."
+        },
+        "original_shipping": {
+          "type": "string",
+          "enum": [
+            "unstated",
+            "refunded",
+            "not_refunded"
+          ],
+          "description": "What happens to the OUTBOUND postage the buyer already paid. Distinct from return_shipping, which is the cost of sending the goods back. Absent means the page says nothing either way."
+        },
+        "refund_processing_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "description": "How long the tenant takes to ISSUE the refund once the return arrives or the request is approved. Not the date the money lands: the card network's clock is not ours. Absent means the page says nothing."
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "refund_only",
+            "replacement_or_refund",
+            "replacement_first"
+          ],
+          "description": "What the buyer gets back: their money, or another one. Independent of return_method, which is about what happens to the ITEM. Absent (or `refund_only`) prints nothing -- a refund policy silent on replacements refunds you (plans/REFUND_POLICY_AND_GUARANTEES.md P9)."
+        },
+        "short_label": {
+          "type": "string"
+        },
+        "full_policy": {
+          "type": "string"
+        }
       }
     },
     "composition": {
@@ -272,7 +403,9 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "enabled": { "type": "boolean" }
+              "enabled": {
+                "type": "boolean"
+              }
             }
           }
         }
@@ -281,34 +414,37 @@
     "sections": {
       "type": "array",
       "minItems": 1,
-        "items": {
-          "type": "object",
-          "additionalProperties": true,
-          "required": ["id", "type"],
-          "properties": {
-            "id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "type": {
-              "type": "string",
-              "minLength": 1
-            }
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
           }
         }
-      },
-      "revision": {
-        "type": "integer",
-        "minimum": 1,
-        "default": 1
-      },
-      "created_at": {
-        "type": "integer",
-        "minimum": 0
-      },
-      "updated_at": {
-        "type": "integer",
-        "minimum": 0
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "$defs": {
@@ -326,7 +462,12 @@
         },
         "fallback": {
           "type": "string",
-          "enum": ["system", "sans-serif", "serif", "monospace"],
+          "enum": [
+            "system",
+            "sans-serif",
+            "serif",
+            "monospace"
+          ],
           "default": "system"
         }
       }
@@ -336,7 +477,9 @@
       "description": "Terminal post-checkout destination. Use page_id for an internal page or url for an external destination.",
       "oneOf": [
         {
-          "required": ["page_id"],
+          "required": [
+            "page_id"
+          ],
           "additionalProperties": false,
           "properties": {
             "page_id": {
@@ -346,7 +489,9 @@
           }
         },
         {
-          "required": ["url"],
+          "required": [
+            "url"
+          ],
           "additionalProperties": false,
           "properties": {
             "url": {
@@ -362,12 +507,17 @@
       "type": "array",
       "description": "Inline post-checkout funnel steps. The engine starts at index 0; on_accept and on_decline point to another step_id or the reserved thank_you terminal.",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/funnelStep" }
+      "items": {
+        "$ref": "#/$defs/funnelStep"
+      }
     },
     "funnelStep": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["step_id", "page_id"],
+      "required": [
+        "step_id",
+        "page_id"
+      ],
       "properties": {
         "step_id": {
           "type": "string",

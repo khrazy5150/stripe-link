@@ -1713,6 +1713,13 @@ HERO_TAGLINE_MAX_LENGTH = 40
 def validate_page_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "page", "page_id")
     require_string(document, "name")
+    # The reverse edge to the Site that routes this page. OPTIONAL, and that is not laxity: a page with no
+    # `site_id` is unattached -- a draft nobody has given an address yet -- which is a normal state, and
+    # requiring it would make every page creation fail until a Site existed. `Site.pages` remains the source
+    # of truth; this is written only by the Site save path (plans/SITE_AS_BUSINESS_IDENTITY.md §3.1).
+    optional_string(document, "site_id", "Page site_id")
+    if str(document.get("site_id") or "") and not re.match(r"^site_[A-Za-z0-9]+$", str(document["site_id"])):
+        raise DocumentValidationError("Page site_id must look like 'site_xxx'.")
     # An offer-less page (storefront homepage / category / seller profile) has no single primary offer, so
     # offer_id is optional there (plans/SITE_OBJECT.md §2.5b/2.7). Every other page still requires one — a
     # landing page renders exactly one offer.
