@@ -55,14 +55,26 @@ def blockers_for(profile: dict, sites: list[dict], pages: list[dict]) -> dict[st
     brands = [str(b) for b in (business.get("brands") or []) if str(b).strip()]
     verified_email = str(business.get("email") or "").strip() if business.get("email_verified") else ""
     found: dict[str, list[str]] = {"name": [], "email": [], "brands": []}
+    # `notes` is populated opportunistically for things worth SEEING but not worth BLOCKING.
 
     if name:
         for site in sites:
             if not str((site.get("organization") or {}).get("name") or "").strip():
                 found["name"].append(f"Site {site.get('site_id') or site.get('SK')} has no business name")
         for page in pages:
-            if not str(page.get("site_id") or "").strip():
-                found["name"].append(f"page {page.get('page_id') or page.get('SK')} is attached to no Site")
+            if str(page.get("site_id") or "").strip():
+                continue
+            # PUBLISHED pages only. A draft or archived page with no Site renders in the tenant's OWN
+            # builder preview and nowhere else, so the worst it can show is the owner their own name on
+            # their own screen — not a reason to hold up the deletion. A published one is served to
+            # visitors, and `resolve_business_name` ends at the owner's personal name.
+            status = str(page.get("status") or "").strip().lower()
+            where = f"page {page.get('page_id') or page.get('SK')}"
+            if status == "published":
+                found["name"].append(f"{where} is PUBLISHED and attached to no Site")
+            else:
+                found.setdefault("notes", []).append(f"{where} ({status or 'no status'}) has no Site — "
+                                                     f"not a blocker, only the tenant's own preview")
 
     if verified_email:
         for site in sites:
@@ -102,6 +114,7 @@ def audit(environment: str) -> int:
           f"{sum(len(v) for v in pages_by_tenant.values())} page row(s)\n")
 
     total: dict[str, list[str]] = {"name": [], "email": [], "brands": []}
+    notes: list[str] = []
     for profile in profiles:
         tenant_id = str(profile.get("tenant_id") or "")
         business = profile.get("business") or {}
@@ -112,6 +125,7 @@ def audit(environment: str) -> int:
             print(f"  tenant {tenant_id}\n    profile says: {' '.join(states)}")
             found = blockers_for(profile, by_tenant.get(tenant_id, []),
                                  pages_by_tenant.get(tenant_id, []))
+            notes.extend(f"{tenant_id}: {n}" for n in found.pop("notes", []))
             for field, reasons in found.items():
                 if reasons:
                     total[field].extend(f"{tenant_id}: {r}" for r in reasons)
@@ -129,6 +143,10 @@ def audit(environment: str) -> int:
                 print(f"           … and {len(reasons) - 8} more")
         else:
             print(f"  {field.upper():6} safe to delete in {environment}")
+    if notes:
+        print("  NOTES (not blockers):")
+        for n in notes[:8]:
+            print(f"           {n}")
     print("=" * 78)
     print("\nThis is ONE environment. The fallback is shared code, so it may only be deleted once every\n"
           "environment says safe — dev AND prod.")

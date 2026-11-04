@@ -33,8 +33,8 @@ def site(site_id="site_qui", **org):
     return {"site_id": site_id, "organization": org}
 
 
-def page(page_id="p1", site_id="site_qui"):
-    doc = {"page_id": page_id}
+def page(page_id="p1", site_id="site_qui", status="published"):
+    doc = {"page_id": page_id, "status": status}
     if site_id:
         doc["site_id"] = site_id
     return doc
@@ -75,6 +75,26 @@ class TheNAMEIsReachedTwoWaysTests(unittest.TestCase):
     def test_a_tenant_with_NO_name_is_not_blocked_by_an_unnamed_site(self):
         """There is nothing to delete, so there is nothing to protect."""
         self.assertEqual(blockers_for(profile(), [site(name="")], [page(site_id="")])["name"], [])
+
+    def test_a_DRAFT_page_with_no_Site_is_NOT_a_blocker(self):
+        """It renders in the tenant's own builder preview and nowhere else, so the worst it can show is
+        the owner their own name on their own screen. Blocking a deletion on that would hold the clean end
+        state hostage to every abandoned draft a tenant ever made."""
+        found = blockers_for(profile(name="Poliaxis"), [site(name="Quill")],
+                             [page("p1", "", status="draft")])
+        self.assertEqual(found["name"], [])
+        self.assertTrue(found.get("notes"), "it should still be REPORTED, just not as a blocker")
+
+    def test_an_ARCHIVED_page_is_not_a_blocker_either(self):
+        found = blockers_for(profile(name="Poliaxis"), [site(name="Quill")],
+                             [page("p1", "", status="archived")])
+        self.assertEqual(found["name"], [])
+
+    def test_a_PUBLISHED_page_with_no_Site_still_blocks(self):
+        """A visitor sees it, and `resolve_business_name` ends at the owner's personal name."""
+        found = blockers_for(profile(name="Poliaxis"), [site(name="Quill")],
+                             [page("p1", "", status="published")])
+        self.assertIn("PUBLISHED", found["name"][0])
 
     def test_EVERY_offender_is_listed_not_just_the_first(self):
         """The report is a to-do list. Naming one of four means three more rounds of the same discovery."""
