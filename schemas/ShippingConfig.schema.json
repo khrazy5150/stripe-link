@@ -360,6 +360,34 @@
     "updated_at": {
       "type": "integer",
       "minimum": 0
+    },
+    "sites": {
+      "type": "object",
+      "description": "PER-SITE OVERRIDES, keyed by site_id (plans/SHIPPING_PER_SITE.md S3). A Site states only what differs from the account's config; everything absent is inherited. An override model rather than a per-Site document, following domain/shipping_keys.py's answer to the same question for Stripe mode - 'the provider stays shared and only the credential splits' - because forcing a tenant to re-enter a warehouse address before a second Site can quote a rate is how a safety feature becomes the thing people route around. The provider and its credentials are deliberately NOT overridable.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "ship_from_address": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "return_address": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "zones": {
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "$defs": {

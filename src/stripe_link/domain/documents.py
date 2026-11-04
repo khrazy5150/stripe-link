@@ -3364,6 +3364,8 @@ def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
 
 
 def validate_shipping_config(document: dict[str, Any]) -> None:
+    from stripe_link.domain.shipping import SITE_OVERRIDABLE
+
     # Only the provider is required. A tenant must be able to save a key and TEST it before filling in
     # addresses -- testing is the first thing anyone wants to do, and gating it behind the most tedious
     # part of the form is backwards. Whether the config is COMPLETE enough to buy a label is a different
@@ -3375,6 +3377,33 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
     optional_bool(document, "enabled_opt_out", "Shipping config enabled_opt_out")
     validate_enabled_services(document.get("enabled_services"))
     validate_shipping_zones(document.get("zones"), document.get("boxes"))
+    # Per-Site overrides (plans/SHIPPING_PER_SITE.md §S3). Shape-checked, and the ZONES inside an override
+    # go through the same validator as the account's -- a Site must not be able to store a zone shape the
+    # account could not, or the override would be the way around the rule.
+    sites = document.get("sites")
+    if sites is not None:
+        if not isinstance(sites, dict):
+            raise DocumentValidationError("Shipping config sites must be an object keyed by site_id.")
+        for site_id, override in sites.items():
+            if not re.match(r"^site_[A-Za-z0-9]+$", str(site_id)):
+                raise DocumentValidationError(
+                    f"Shipping config sites key '{site_id}' must look like 'site_xxx'.")
+            if not isinstance(override, dict):
+                raise DocumentValidationError(f"Shipping config sites['{site_id}'] must be an object.")
+            unknown = set(override) - set(SITE_OVERRIDABLE)
+            if unknown:
+                raise DocumentValidationError(
+                    f"Shipping config sites['{site_id}'] may only override "
+                    f"{sorted(SITE_OVERRIDABLE)}; got {sorted(unknown)}.")
+            for field in ("ship_from_address", "return_address"):
+                address = override.get(field)
+                if address:
+                    if not isinstance(address, dict):
+                        raise DocumentValidationError(
+                            f"Shipping config sites['{site_id}'].{field} must be an object.")
+                    require_fields(address, ["name", "street1", "city", "state", "postal_code", "country"])
+            if override.get("zones"):
+                validate_shipping_zones(override.get("zones"), document.get("boxes"))
     validate_combined_shipping(document.get("combined_shipping"))
     if document.get("document_type") != "shipping_config":
         raise DocumentValidationError("Shipping config document_type must be 'shipping_config'.")

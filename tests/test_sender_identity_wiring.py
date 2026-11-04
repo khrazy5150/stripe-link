@@ -226,6 +226,11 @@ class EverySenderGoesThroughTheResolverTests(unittest.TestCase):
         "src/stripe_link/sender_identity.py", "src/handlers/sites.py",
         # The renderer: a PAGE's own organization markup, which is not a message.
         "src/stripe_link/runtime/html.py",
+        # A CARRIER LABEL is not a message. `shipping.selling_site` reads the organization for the
+        # ship-from email Shippo requires (plans/SHIPPING_PER_SITE.md §S2), through the same page -> Site
+        # walk; routing it through `sending_identity` would hand it a Reply-To it has no use for and hide
+        # the one field it needs.
+        "src/handlers/shipping.py",
     }
 
     def test_no_message_sender_reads_Site_organization_directly(self):

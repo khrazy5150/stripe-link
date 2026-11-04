@@ -261,21 +261,67 @@ def tenant_boxes(config: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [dict(box) for box in boxes if isinstance(box, dict) and box.get("name")]
 
 
-def sender_address(ship_from: dict, business: dict | None = None, owner_email: str = "") -> dict:
+# What a Site is allowed to state for itself (plans/SHIPPING_PER_SITE.md §2). Everything else is "the
+# same facts for the whole account" -- the provider and its credentials above all, because nobody runs
+# Shippo for one business and EasyPost for another, and per-Site credentials would multiply the key slots
+# while the KMS encryption context stays deliberately unscoped.
+SITE_OVERRIDABLE = ("ship_from_address", "return_address", "zones")
+
+
+def config_for_site(config: dict | None, site_id: str = "") -> dict:
+    """The shipping config AS THIS SITE SEES IT: its own overrides laid over the account's.
+
+    Resolved where the config is LOADED rather than at each reader, which is the answer
+    `handlers/shipping.config_for_mode` already reached for the carrier key: *"twelve places decrypt
+    `provider.api_key_ref`... adding the mode to each would have been twelve chances to miss one"*. The
+    returned document is the shape every downstream reader already reads, so none of them change.
+
+    Field-level, and only the fields in `SITE_OVERRIDABLE`. A Site that states a ship-from address but no
+    zones keeps the account's zones; a value present but EMPTY (`{}`, `[]`) is treated as not stated,
+    because an empty override is what a half-filled form produces and silently shipping from nowhere is
+    worse than inheriting.
+
+    `sites` itself is stripped from the result: a reader handed the whole map could resolve a second time
+    and reach a different answer, and nothing downstream has any business knowing the other businesses
+    exist.
+    """
+    resolved = {k: v for k, v in dict(config or {}).items() if k != "sites"}
+    override = ((config or {}).get("sites") or {}).get(str(site_id or "").strip())
+    if not isinstance(override, dict):
+        return resolved
+    for field in SITE_OVERRIDABLE:
+        value = override.get(field)
+        if value:                      # absent, None, {} and [] all mean "inherit"
+            resolved[field] = value
+    return resolved
+
+
+def sender_address(ship_from: dict, business: dict | None = None, owner_email: str = "", *,
+                   organization: dict | None = None) -> dict:
     """The ship-from address with an email on it, because a carrier will not buy a label without one.
 
     Shippo rejects a purchase with `Attribute "address_from.email" must not be empty` -- and does NOT
     reject a rate request, so a tenant can price a parcel all week and only discover the gap at the moment
     they try to post it (reported 2026-10-05, on a ship-from address saved before the field mattered).
 
-    The address's own email wins. Failing that the business email, then the account the tenant signs in
-    with: all three are the seller, and a label's sender address is for the carrier to reach THEM. An
-    address that already carries one is returned untouched.
+    The address's own email wins -- it is the one the tenant typed on the warehouse itself. Then **the
+    SELLING BUSINESS's verified address** (plans/SHIPPING_PER_SITE.md §S2): a label's sender address is
+    for the carrier to reach THEM, and a tenant running two shops had both labels carry the account's
+    single address. Then the account's business email, then the account the tenant signs in with. All four
+    are the seller.
+
+    The Site's address must be VERIFIED to be used, for the same reason it must be to carry a Reply-To:
+    nobody has proven an unverified one is reachable, and a carrier's "we could not deliver" notice going
+    nowhere is worse than one going to the account owner.
+
+    An address that already carries an email is returned untouched.
     """
     address = dict(ship_from or {})
     if _clean(address.get("email")):
         return address
-    fallback = _clean((business or {}).get("email")) or _clean(owner_email)
+    org = organization if isinstance(organization, dict) else {}
+    site_email = _clean(org.get("email")) if org.get("email_verified") else ""
+    fallback = site_email or _clean((business or {}).get("email")) or _clean(owner_email)
     if fallback:
         address["email"] = fallback
     return address

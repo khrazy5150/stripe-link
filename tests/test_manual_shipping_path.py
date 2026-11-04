@@ -82,7 +82,10 @@ class ALabelNeedsASenderEmailTests(unittest.TestCase):
     def test_the_failure_is_named_where_it_can_be_FIXED(self):
         """Relaying "Attribute address_from.email must not be empty" tells a tenant what a carrier's API
         thinks, not what to do about it."""
-        block = SHIPPING_PY.split("def buy_label", 1)[1][:4200]
+        # To the end of the FUNCTION, not a fixed 4200 characters: the slice stopped covering the error
+        # branch the first time `buy_label` grew, which is the same way a 1800-char window in
+        # test_registration_confirmation quietly stopped watching its `except` clause.
+        block = SHIPPING_PY.split("def buy_label", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("ship_from_email_required", block)
         self.assertIn("Shipping screen", block)
 
@@ -109,8 +112,12 @@ class TheEmailMustBeOnTheRATETests(unittest.TestCase):
     """
 
     def test_the_tenant_facing_rater_carries_it(self):
+        """From `site_config`, not `config`, since plans/SHIPPING_PER_SITE.md §S3: the ship-from is the
+        SELLING business's, resolved at the one point the config is loaded. With no per-Site override
+        `config_for_site` returns the account's address, so this is the same value it always was."""
         block = SHIPPING_PY.split("def quote_rates", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("sender_address(config.get(\"ship_from_address\")", block)
+        self.assertIn('sender_address(site_config.get("ship_from_address")', block)
+        self.assertIn("organization=site.get(\"organization\")", block)
 
     def test_the_buyer_facing_rater_carries_it_too(self):
         block = SHIPPING_PY.split("def live_rates_for", 1)[1].split("\ndef ", 1)[0]

@@ -1,6 +1,6 @@
 # Shipping per Site
 
-**Status:** PLAN ONLY — nothing built. Written 2026-11-04, after `SITE_AS_BUSINESS_IDENTITY.md` P1–P4
+**Status:** S1–S3 SHIPPED 2026-11-04 (dev+prod pending deploy). S4–S5 not built. Written 2026-11-04, after `SITE_AS_BUSINESS_IDENTITY.md` P1–P4
 made business identity per-Site. The author's ask: *"plan a migration to move the shipping to Sites."*
 
 **Premise:** a Site is a business (`SITE_AS_BUSINESS_IDENTITY.md` §3b). Two businesses under one account
@@ -141,15 +141,39 @@ hides inheritance produces a tenant who thinks they changed one warehouse and ch
 
 ## 4. Phasing
 
-- **S1 — the working day moves to the Site.** Add `timezone` + `shipping_cutoff_hour` to
-  `Site.organization`; resolve Site-then-tenant; pass the Site's organization to `store_timezone` /
-  `store_cutoff_hour`. Four reads, one helper. Closes the item `SITE_AS_BUSINESS_IDENTITY.md` §P4 deferred.
-- **S2 — the ship-from email stops coming from the profile.** `sender_address` already prefers the
-  address's own email; have it fall back to the SITE's verified `organization.email` (shipped in §P3)
-  before the tenant's. One function, one test.
-- **S3 — `ShippingConfig.sites{}` overrides, read path only.** Add the map and the resolver; nothing
-  writes it yet, so behaviour is identical. Lands the resolution at all 10 readers under one change that
-  cannot regress anything.
+- **S1 — the working day moves to the Site. SHIPPED 2026-11-04.** `Site.organization` gains `timezone` +
+  `shipping_cutoff_hour` (both nullable: absent means inherit). `store_timezone.working_day()` resolves
+  them **per field, Site before account** — a shop may keep the account's timezone and close earlier, and
+  document-level resolution would make setting either field silently adopt the other's default.
+  `attach_delivery_promise` resolves the selling business through `sender_identity.site_organization`.
+  Closes the item `SITE_AS_BUSINESS_IDENTITY.md` §P4 deferred.
+
+  The subtlety worth keeping: `suggest_timezone` never returns `""` — it answers UTC for an address it
+  cannot place — so chaining the guess per source would let an EMPTY Site address swallow the account's
+  real timezone. An explicit answer at either level wins first, then ONE guess is made. And midnight is a
+  real cutoff: hour 0 is falsy, so a `||` anywhere in the chain reads it as unset and returns 3pm. Both
+  have tests.
+- **S2 — the label's sender is the selling business. SHIPPED 2026-11-04.** `sender_address` takes an
+  `organization` and prefers its **verified** email, after the address's own and before the account's.
+  Unverified is ignored for the same reason it is for a Reply-To: a carrier's "we could not deliver"
+  notice going nowhere is worse than one going to the account owner.
+- **S3 — `ShippingConfig.sites{}` overrides. SHIPPED 2026-11-04** (read path; nothing writes the map yet,
+  so behaviour is identical today). `domain/shipping.config_for_site(config, site_id)` lays a Site's
+  overrides over the account's, field by field, restricted to `SITE_OVERRIDABLE`
+  (`ship_from_address`, `return_address`, `zones`). An empty value (`{}`, `[]`) means inherit, because
+  that is what a half-filled form produces and shipping from nowhere is worse. The `sites` map is
+  STRIPPED from the result so no reader can resolve twice and reach a different answer.
+
+  **Where it resolves, and the correction to §3.2 above.** This section originally planned to thread a
+  Site through all ten readers. It resolves at `config_for_mode`'s seam instead — the codebase's own
+  answer to the identical problem for the carrier key: *"twelve places decrypt `provider.api_key_ref`...
+  adding the mode to each would have been twelve chances to miss one."* `quote_rates` and `buy_label` each
+  resolve the selling Site ONCE (`selling_site`) and use it for both the override and the sender email,
+  because two reads could disagree and put one business's warehouse on another's label.
+
+  The other eight readers are NOT threaded, deliberately: they are per-handler loaders with divergent
+  failure semantics (one returns `True`, one a `dict(blank, reason=...)`) and they read `zones`/`enabled`
+  — which is §S5's territory. Consolidating them is worth doing and is not this phase.
 - **S4 — the write path and the screen.** Targeted `update_item` per Site (§3.1), plus the Site selector
   and an explicit inherited/overridden state.
 - **S5 — per-Site enablement.** `enabled` / `enabled_opt_out` per Site, so one business can be

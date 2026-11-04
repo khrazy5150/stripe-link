@@ -14,6 +14,7 @@ from stripe_link.domain.handover import handover_groups
 from stripe_link.domain.rate_policy import select_rate
 from stripe_link.domain.returns import RETURN_STATES, return_deadline, return_label_expired
 from stripe_link.domain.shipping import (
+    config_for_site,
     ShipmentError,
     build_shipment,
     dimensions_consequence,
@@ -1515,6 +1516,12 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
     if not order:
         return error_response("Order not found.", status_code=404, code="order_not_found")
 
+    # WHICH of the tenant's businesses sold this (plans/SHIPPING_PER_SITE.md §S2/§S3). Resolved once, at
+    # the point the config is used, which is the same answer `config_for_mode` reached for the carrier key:
+    # resolve where it is LOADED and every downstream reader stays correct without being touched.
+    site = selling_site(order, mode)
+    site_config = config_for_site(config, str(site.get("site_id") or ""))
+
     products = (products_repo or products_repository(mode=mode)).list_for_tenant(tenant_id) or []
     state = order_fulfilment_state(
         order,
@@ -1559,8 +1566,9 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
             # created without an email produces a rate id that cannot be bought, and the failure surfaces
             # one click later with the carrier's wording. Fixing only the purchase looked right and
             # changed nothing (2026-10-05).
-            from_address=sender_address(config.get("ship_from_address") or {},
-                                        *_seller_contact(tenant_id, None)),
+            from_address=sender_address(site_config.get("ship_from_address") or {},
+                                        *_seller_contact(tenant_id, None),
+                                        organization=site.get("organization")),
             to_address=order.get("shipping_address") or {},
             parcel=parcels[0],
         )
@@ -1615,6 +1623,35 @@ def quoted_service_status(order, rates):
     }}
 
 
+def selling_site(order, mode):
+    """The Site that sold this order, or `{}`. ONE read, two uses.
+
+    Its `site_id` selects the per-Site shipping overrides (§S3) and its `organization` supplies the
+    label's sender email (§S2) — the same question asked once rather than twice, because two reads could
+    disagree and put one business's warehouse on another's label.
+
+    Reached through the `site_id` edge on the page the order names, the same walk the sender identity and
+    the delivery estimate use. Never raises: an unreadable Site costs the override, not the label. An
+    order from before pages carried a Site resolves to `{}` and the account answers, which is exactly the
+    behaviour those orders have today.
+    """
+    from stripe_link.domain.sites import find_site_for_page
+    from stripe_link.repositories.documents import pages_repository, sites_repository
+
+    tenant_id = str((order or {}).get("tenant_id") or "")
+    page_id = str(((order or {}).get("attribution") or {}).get("page_id") or "")
+    if not tenant_id or not page_id or not os.environ.get("SITES_TABLE"):
+        return {}
+    try:
+        page = {}
+        if os.environ.get("PAGES_TABLE"):
+            page = pages_repository(mode=mode).get(tenant_id, page_id) or {}
+        return find_site_for_page(sites_repository(mode=mode), tenant_id, page_id, page=page) or {}
+    except Exception as exc:  # noqa: BLE001 - branding and overrides are worth less than the label
+        print(f"[shipping] selling site unresolved for {page_id}: {type(exc).__name__}: {exc}")
+        return {}
+
+
 def _seller_contact(tenant_id, user_profiles_repo):
     """`(business, owner_email)` for the tenant, or `({}, "")`. Never raises: a missing profile means the
     ship-from address has to carry its own email, which is the next thing checked anyway."""
@@ -1664,6 +1701,12 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     if not order:
         return error_response("Order not found.", status_code=404, code="order_not_found")
 
+    # WHICH of the tenant's businesses sold this (plans/SHIPPING_PER_SITE.md §S2/§S3). Resolved once, at
+    # the point the config is used, which is the same answer `config_for_mode` reached for the carrier key:
+    # resolve where it is LOADED and every downstream reader stays correct without being touched.
+    site = selling_site(order, mode)
+    site_config = config_for_site(config, str(site.get("site_id") or ""))
+
     shipments = shipments_repo or shipments_repository(mode=mode)
     # ONE SHIPMENT PER PARCEL. `sequence` already existed for a deliberate split and is exactly this: a
     # group needing two boxes buys `shp_<order>_outbound_1` and `_outbound_2`, so a double-clicked Buy
@@ -1684,8 +1727,9 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # `address_from.email must not be empty` and does NOT reject a RATE request, so a tenant can price
     # parcels all week and only meet the gap at the moment they try to post one. Falls back to the
     # business email, then the account they sign in with -- all three are the seller.
-    from_address = sender_address(config.get("ship_from_address") or {},
-                                  *_seller_contact(tenant_id, user_profiles_repo))
+    from_address = sender_address(site_config.get("ship_from_address") or {},
+                                  *_seller_contact(tenant_id, user_profiles_repo),
+                                  organization=site.get("organization"))
     if not str(from_address.get("email") or "").strip():
         # Named where it can be fixed, rather than relayed in the carrier's words.
         return error_response(
