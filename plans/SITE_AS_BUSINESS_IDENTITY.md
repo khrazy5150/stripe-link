@@ -452,6 +452,32 @@ that rule is what preserves §2's guarantee while changing its scope.
   scope, so under the Site scope it could never be confirmed — it would be a code that looks live and is
   permanently dead.
 
+- **P5 — the Site cap. NOT BUILT. Every decision is already made; none of the code exists.**
+
+  This is §3b's whole point — *"Site becomes the unit of a business, and the number of Sites becomes the
+  tier axis"* — and it is the half of this plan that makes the multi-business tier sellable. P1–P4 made
+  identity per-Site, which is what the commercial logic needs to be true; P5 is charging for it.
+
+  **There is no site-count gate anywhere in the codebase today** (verified 2026-11-03: no `site_cap`, no
+  `max_sites`, no `allowances.sites` — a free tenant can create unlimited Sites). What exists is the
+  mechanism to build it with: plans carry numeric allowances (`ai_generations`, `ai_images`) read by named
+  accessors in `domain/platform_billing.py`, editable from the Admin Site's Pricing screen with no deploy.
+  A `sites` allowance is the same shape.
+
+  Locked decisions, so this needs no further input:
+
+  - **Free 1 / Basic 3 / Pro 10, PER MODE** — "your plan includes N sites" means N in each mode.
+  - **Two gates coexist and must not be conflated**: `entitlements.sites` (boolean, "may they use Sites at
+    all" — stays yes on the free floor) and `allowances.sites` (numeric, "how many"). Conflating them
+    turns a downgrade into "Sites removed" rather than "Sites capped".
+  - **Soft-lock on downgrade, tenant picks which stay active.** Published pages keep serving; edits and
+    new publishes are refused on Sites over the cap. The free tier is free-FOREVER and the pricing pivot's
+    rule is that a lapsed subscription sells on at the free-tier fee, so deleting Sites is out.
+  - **The counter counts distinct `site_id`s within the target mode, and the copy path must check the cap
+    BEFORE writing** — a cross-mode copy is a same-id upsert (`COPY_TO_ENVIRONMENT.md` D1), so at a cap of
+    1 it is a no-op against the counter except when test already holds a DIFFERENT Site. Checking after
+    the write would let the upsert silently put the tenant over.
+
 ## 6. Open decisions — author input needed
 
 1. ~~**§3.3 — the Reply-To question.**~~ **DECIDED 2026-11-03: verify an address PER SITE.** P3 is real
@@ -466,14 +492,20 @@ that rule is what preserves §2's guarantee while changing its scope.
    A direct read, and the page records the Site it belonged to at publish time — so editing a Site later
    cannot retroactively change which business an old order's email claims to be from. Costs an additive
    schema field and a backfill from `Site.pages`.
-3. **Can the Business section actually be deleted (§3.4)?** Only if every send path resolves a Site.
-   Invoices and platform notices look like permanent exceptions. *Leaning: keep the fields as a declared
-   fallback, remove them from the UI, and stop tenants editing what no longer drives anything.*
+3. ~~**Can the Business section actually be deleted (§3.4)?**~~ **ANSWERED 2026-11-03, and the premise was
+   wrong.** The question assumed the section is identity. It is not: `phone`/`address` are the shipping
+   ship-from, `address` also feeds the timezone inference, and `timezone`/`shipping_cutoff_hour` are the
+   delivery estimate. Only the IDENTITY half can go, and the author chose to **delete** it (not keep it as
+   a declared fallback) once the migration has run everywhere. The earlier leaning — keep the fields,
+   remove the UI — was explicitly rejected: it would leave data still driving sends that no tenant can
+   see or correct. See §P4.
 4. **What about pre-multi-Site orders** with no `page_id` in metadata? They fall to the fallback; worth
-   confirming that is acceptable rather than backfilling.
-5. **§3b — the Site cap numbers and the downgrade rule.** Free 1 / Basic 3 / Pro 10 as stated? And what
-   happens to Sites over the cap on downgrade — soft-lock, read-only, or grandfather? *Recommendation:
-   soft-lock with tenant choice; it is the only option compatible with free-forever.*
+   confirming that is acceptable rather than backfilling. *Still open, and now cheap: with §P4's deletion
+   the fallback is the owner's own name, so an old order's receipt would be signed by a person rather than
+   a business. Needs a count before the deletion lands.*
+5. ~~**§3b — the Site cap numbers and the downgrade rule.**~~ **DECIDED 2026-11-03: Free 1 / Basic 3 /
+   Pro 10, PER MODE, and soft-lock on downgrade with the tenant choosing which Sites stay active.** None
+   of it is built — see §P5.
 6. ~~**§3b — does the cap apply to TEST-mode Sites?**~~ **RESOLVED 2026-11-03 — the cap is PER MODE**
    (Free 1 live + 1 test, Basic 3 + 3, Pro 10 + 10), and a cross-mode copy is a same-id upsert so it only
    trips the cap when the target mode holds a DIFFERENT Site. See §3c.
