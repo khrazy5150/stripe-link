@@ -814,13 +814,35 @@
                   </template>
                 </small>
 
+                <!-- A PICKER over this Site's brands, not a free-text box (author, 2026-11-03). Brands
+                     belong to the business that owns them, so only the brands of the Site this page lives
+                     under can appear here — typing a name freehand is how a Quill page comes to be headed
+                     "Poliaxis Nutrition". A brand can still be created on the spot, which writes it to the
+                     Site and selects it in one step. -->
                 <label class="offer-field">
                   <span>Brand name</span>
-                  <input v-model.trim="builder.brand_label_text" type="text" :placeholder="brandLabelFallback" />
+                  <select v-if="!brandCreateOpen" v-model="builder.brand_label_text">
+                    <option value="">{{ brandLabelFallback }} (no brand)</option>
+                    <option v-for="b in selectedSiteBrands" :key="b" :value="b">{{ b }}</option>
+                    <!-- A brand this page already names but the Site no longer lists: kept selectable so
+                         opening an older page does not silently re-brand it. -->
+                    <option v-if="builder.brand_label_text && !selectedSiteBrands.includes(builder.brand_label_text)"
+                            :value="builder.brand_label_text">{{ builder.brand_label_text }}</option>
+                  </select>
+                  <div v-else class="brand-row">
+                    <input v-model.trim="newSiteBrand" type="text" placeholder="e.g. Luxe Wellness"
+                           @keydown.enter.prevent="addSiteBrandAndSelect" />
+                    <button type="button" class="secondary-action compact" :disabled="!newSiteBrand || addingBrand"
+                            @click="addSiteBrandAndSelect">{{ addingBrand ? "Adding…" : "Add" }}</button>
+                    <button type="button" class="secondary-action compact" @click="brandCreateOpen = false">Cancel</button>
+                  </div>
+                  <button v-if="!brandCreateOpen && selectedSite" type="button" class="link-btn"
+                          @click="brandCreateOpen = true">+ New brand for {{ selectedSite.name || "this site" }}</button>
+                  <p v-if="brandError" class="field-error">{{ brandError }}</p>
                   <small class="field-note">
-                    Leave blank to use your business name. Without one it falls back to the product's name,
-                    which is why a page can end up branded after the thing it sells — set a business name in
-                    Profile → Business, or override it here for this page.
+                    No brand means the page is headed by this site's business name. Brands belong to the
+                    site, so only {{ selectedSite?.name || "this site" }}'s brands are offered — manage them
+                    in Sites → Edit → Business.
                   </small>
                 </label>
             </template>
@@ -2147,6 +2169,28 @@
               <button type="button" class="secondary-action" :disabled="!canCreateInlineSite" @click="createInlineSite">
                 {{ creatingSite ? "Creating…" : "Create Site" }}
               </button>
+            </div>
+            <!-- A brand belongs to the business, so the moment a Site is chosen or created there is a
+                 place to put one (author, 2026-11-03). Optional: with no brand the page is headed by the
+                 Site's own name, which is the right answer for a single-brand shop. -->
+            <div v-if="selectedSite" class="offer-field wizard-site-brands">
+              <span>Brands for {{ selectedSite.name || "this site" }}</span>
+              <small class="field-note">
+                Optional. A brand added here is selectable as this page's heading. With none, pages are
+                headed <strong>{{ selectedSite.organization?.name || selectedSite.name }}</strong>.
+              </small>
+              <ul v-if="selectedSiteBrands.length" class="wizard-site-brand-list">
+                <li v-for="b in selectedSiteBrands" :key="b">{{ b }}</li>
+              </ul>
+              <div class="brand-row">
+                <input v-model.trim="newSiteBrand" type="text" placeholder="e.g. Luxe Wellness"
+                       @keydown.enter.prevent="addSiteBrand" />
+                <button type="button" class="secondary-action compact"
+                        :disabled="!newSiteBrand || addingBrand" @click="addSiteBrand">
+                  {{ addingBrand ? "Adding…" : "+ Add brand" }}
+                </button>
+              </div>
+              <p v-if="brandError" class="field-error">{{ brandError }}</p>
             </div>
             <p v-if="siteStepError" class="field-error">{{ siteStepError }}</p>
           </section>
@@ -5494,6 +5538,43 @@ const storeBrands = computed(() => {
   const own = siteBrands(selectedSite.value);
   return own.length ? own : (profileStore.brands || []);
 });
+
+// The brands a page may be headed by: EXACTLY the ones its Site's business owns (author, 2026-11-03).
+// Not a union, and not the tenant's list: a page belongs to one business, and offering another's brands
+// here is the whole bug this plan exists to close. The profile's list stands in only while the Site
+// declares none of its own, so a tenant mid-migration still sees the brands they have always had (§P4
+// removes it).
+const selectedSiteBrands = computed(() => storeBrands.value);
+const newSiteBrand = ref("");
+const addingBrand = ref(false);
+const brandError = ref("");
+const brandCreateOpen = ref(false);
+
+async function addSiteBrand() {
+  const name = newSiteBrand.value;
+  if (!name || !selectedSite.value) return null;
+  addingBrand.value = true;
+  brandError.value = "";
+  try {
+    // Written to the SITE, not to the page: a brand is a fact about the business, and the page only picks
+    // one. The same store action the Sites screen uses, so there is one writer.
+    await sitesStore.addBrand(selectedSite.value.site_id, name);
+    newSiteBrand.value = "";
+    return name;
+  } catch (err) {
+    brandError.value = err.message || "We could not add that brand.";
+    return null;
+  } finally {
+    addingBrand.value = false;
+  }
+}
+
+async function addSiteBrandAndSelect() {
+  const added = await addSiteBrand();
+  if (!added) return;
+  builder.brand_label_text = added;
+  brandCreateOpen.value = false;
+}
 // Effective mode: honor an explicit choice, else default to "brand" when brands exist, "custom" otherwise.
 const storefrontNameMode = computed(() => form.storefront.nameMode || (storeBrands.value.length ? "brand" : "custom"));
 // The selected brand, defaulting to the first one so the dropdown is never blank.

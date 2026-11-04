@@ -18,6 +18,7 @@ import pathlib
 import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_site_organization
+from stripe_link.runtime import html
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SITES_STORE = (ROOT / "dashboard/src/stores/sites.js").read_text(encoding="utf-8")
@@ -64,6 +65,76 @@ class TheSiteCarriesTheBrandsTests(unittest.TestCase):
             validate_site_organization({"sources": {"name": 1}})
 
 
+class ThePagesOwnBrandDrivesTheTitleTests(unittest.TestCase):
+    """One brand per page, used everywhere (author's choice, 2026-11-03).
+
+    Before this the visible header read the PAGE's `brand_label` and the `<title>` suffix read the OFFER's
+    `presentation.brand`, so one document could name two different businesses — a page headed "Luxe
+    Wellness" titled "… | Quill". The chain is now: the page's own brand, then the offer's stored brand (a
+    legacy carrier, so no published page changes until a brand is picked), then the Site's organization
+    name, then the platform.
+    """
+
+    def setUp(self):
+        self._org = dict(html._RENDER_ORG)
+        html._RENDER_ORG.clear()
+        html._RENDER_ORG.update({"name": "Quill"})
+
+    def tearDown(self):
+        html._RENDER_ORG.clear()
+        html._RENDER_ORG.update(self._org)
+
+    def _page(self, label=None, enabled=True):
+        section = {"type": "brand_label", "id": "bl"}
+        if label is not None:
+            section["label"] = label
+        if not enabled:
+            section["enabled"] = False
+        return {"sections": [{"type": "hero", "id": "h"}, section]}
+
+    def test_the_pages_brand_WINS(self):
+        self.assertEqual(
+            html.resolved_brand_label({"brand": "Legacy Offer Brand"}, self._page("Luxe Wellness")),
+            "Luxe Wellness")
+
+    def test_the_offers_stored_brand_is_the_next_answer(self):
+        """So a page that has never picked a brand keeps the title it has today."""
+        self.assertEqual(html.resolved_brand_label({"brand": "Legacy Offer Brand"}, self._page("")),
+                         "Legacy Offer Brand")
+
+    def test_then_the_SITE(self):
+        self.assertEqual(html.resolved_brand_label({}, self._page("")), "Quill")
+
+    def test_a_page_with_no_brand_label_section_at_all_still_resolves(self):
+        self.assertEqual(html.resolved_brand_label({}, {"sections": []}), "Quill")
+
+    def test_a_caller_passing_NO_page_is_unchanged(self):
+        """`resolved_brand_label` is called from two places and both pass the page; the default keeps any
+        other caller, and every existing test, working."""
+        self.assertEqual(html.resolved_brand_label({"brand": "Legacy Offer Brand"}), "Legacy Offer Brand")
+
+    def test_a_HIDDEN_brand_header_is_not_a_brand_claim(self):
+        """A tenant who switched the header off has not chosen a brand for the page — reading its leftover
+        label would put a name in the title that appears nowhere on the page."""
+        self.assertEqual(
+            html.resolved_brand_label({}, self._page("Luxe Wellness", enabled=False)), "Quill")
+
+    def test_the_platform_is_the_last_resort(self):
+        html._RENDER_ORG.clear()
+        self.assertEqual(html.resolved_brand_label({}, {"sections": []}), html.PLATFORM_BRAND)
+
+    def test_both_call_sites_pass_the_page(self):
+        """The title suffix and og:site_name. If either kept the old one-argument call they would disagree
+        with the header again, which is the bug."""
+        source = (ROOT / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+        calls = [line.strip() for line in source.splitlines()
+                 if "resolved_brand_label(" in line and "def " not in line]
+        self.assertEqual(len(calls), 2, calls)
+        for call in calls:
+            with self.subTest(call=call):
+                self.assertIn("page", call)
+
+
 class TheBuilderScopesStrictlyTests(unittest.TestCase):
     """The surface where it matters: the brand chosen here becomes the headline on a page that belongs to
     exactly one business."""
@@ -77,6 +148,32 @@ class TheBuilderScopesStrictlyTests(unittest.TestCase):
         self.assertLess(block.index("siteBrands(selectedSite.value)"), block.index("profileStore.brands"),
                         "the Site must be consulted before the tenant-wide fallback")
 
+    def test_the_control_is_a_PICKER_not_a_text_box(self):
+        """Typing a name freehand is how a Quill page comes to be headed "Poliaxis Nutrition": a brand has
+        to be one the Site's business actually owns."""
+        block = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1][:3000]
+        self.assertIn('<select v-if="!brandCreateOpen" v-model="builder.brand_label_text">', block)
+        self.assertIn('v-for="b in selectedSiteBrands"', block)
+
+    def test_a_brand_can_be_CREATED_from_the_picker(self):
+        """The author's "or optionally, allow the tenant to create a brand right from there" — it writes to
+        the Site and selects it in one step, so the brand is still a fact about the business."""
+        self.assertIn("addSiteBrandAndSelect", BUILDER)
+        block = BUILDER.split("async function addSiteBrand(", 1)[1][:900]
+        self.assertIn("sitesStore.addBrand(selectedSite.value.site_id", block)
+
+    def test_the_site_step_offers_to_add_a_brand(self):
+        """*"When a Site is selected (or created) the tenant should have the option to add a brand to go
+        along with it."* """
+        self.assertIn('v-if="selectedSite" class="offer-field wizard-site-brands"', BUILDER)
+        self.assertIn("addSiteBrand", BUILDER)
+
+    def test_a_brand_the_page_ALREADY_names_stays_selectable(self):
+        """Opening an older page whose brand the Site no longer lists must not silently re-brand it on the
+        next save."""
+        block = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1][:3000]
+        self.assertIn("!selectedSiteBrands.includes(builder.brand_label_text)", block)
+
     def test_the_tenant_list_survives_as_a_FALLBACK(self):
         """Until §P4 deletes it. Without this a tenant mid-migration opens an empty dropdown and loses the
         brands they have always had."""
@@ -84,26 +181,48 @@ class TheBuilderScopesStrictlyTests(unittest.TestCase):
         self.assertIn("profileStore.brands", block)
 
 
-class TheOffersScreenNamesTheOwnerTests(unittest.TestCase):
-    def test_it_no_longer_reads_the_profile_brands_directly(self):
-        self.assertNotIn("profileStore.brands)", OFFERS.replace("sitesStore.brandOptions(profileStore.brands)", ""))
-        self.assertNotIn("profileBrands", OFFERS)
+class TheOffersScreenHasNoBrandPickerTests(unittest.TestCase):
+    """An offer cannot name a business, so it must not offer the choice (author, 2026-11-03).
 
-    def test_it_offers_the_union_through_the_store(self):
-        self.assertIn("sitesStore.brandOptions(profileStore.brands)", OFFERS)
+    *"Offers are created before a page and before a site is assigned. In fact, the software is designed to
+    allow tenants to create a brand new Site at page creation. This means that the only place in which
+    brands can reasonably be picked is at the Landing Page Builder."*
 
-    def test_the_owner_is_shown_only_when_there_is_MORE_THAN_ONE_site(self):
-        """With a single Site every brand belongs to it, and the suffix would be noise on every row."""
-        self.assertIn("sitesStore.sites.length > 1", OFFERS)
+    An earlier pass at P3b kept the control here and offered the union of every Site's brands, labelled by
+    owner. That was the wrong answer to the right question: at this point in the flow there is no business
+    to pick from, so any list shown is a list of other businesses' brands.
+    """
 
-    def test_a_brand_the_tenant_already_chose_stays_selectable(self):
-        """An offer saved before this change may name a brand no Site declares. Dropping it from the
-        options would silently reset the offer's brand the next time it was saved."""
-        self.assertIn('v-if="form.brand && !brandOptions.some((o) => o.brand === form.brand)"', OFFERS)
+    def test_the_control_is_GONE(self):
+        self.assertNotIn("<span>Brand</span>", OFFERS)
+        self.assertNotIn('v-model="form.brand"', OFFERS)
 
-    def test_the_help_text_points_at_the_new_home(self):
-        self.assertIn("Sites → Edit → Business", OFFERS)
-        self.assertNotIn("Manage your brands in Profile", OFFERS)
+    def test_it_reads_no_brand_list_at_all(self):
+        for dead in ("profileBrands", "brandOptions", "siteBrands"):
+            with self.subTest(dead=dead):
+                self.assertNotIn(dead, OFFERS)
+
+    def test_a_loaded_offers_brand_is_still_CARRIED(self):
+        """The author's call: leave the stored values readable. An offer saved before this keeps the brand
+        it was saved with, so no published page changes until a brand is picked at the builder."""
+        self.assertIn('form.brand = offer.presentation?.brand || ""', OFFERS)
+        self.assertIn("brand: form.brand || undefined", OFFERS)
+
+    def test_it_NO_LONGER_bakes_the_tenants_business_name_into_a_new_offer(self):
+        """The sharp edge of removing the picker. `brand: form.brand || profileStore.businessName` stamped
+        the tenant's ONE business name onto every new offer, and in the renderer's chain the offer's brand
+        sits ABOVE the Site's organization name — so every page of every other business would have been
+        titled after the first one. The review-invite bug arriving by a different road."""
+        # Asserted on the CODE, not the surrounding block: the comment above it names the removed
+        # expression on purpose, and a substring search over the block matches the explanation.
+        self.assertNotIn("brand: form.brand || profileStore.businessName", OFFERS)
+        self.assertIn("brand: form.brand || undefined,", OFFERS)
+
+    def test_the_slug_preview_is_left_alone(self):
+        """`smartOfferSlug` is a deliberate mirror of the server's `smart_offer_slug`. The brand's part in a
+        SLUG is a different question from the brand's part in a TITLE, and changing one here would put the
+        two implementations out of parity."""
+        self.assertIn("slugTokens(form.brand || profileStore.businessName", OFFERS)
 
 
 class TheStoreIsTheOneSourceTests(unittest.TestCase):
@@ -111,11 +230,18 @@ class TheStoreIsTheOneSourceTests(unittest.TestCase):
         block = SITES_STORE.split("export function siteBrands(", 1)[1][:300]
         self.assertIn("organization?.brands", block)
 
-    def test_brandOptions_tags_each_brand_with_its_owner(self):
-        block = SITES_STORE.split("brandOptions(", 1)[1][:900]
-        self.assertIn("siteBrands(site)", block)
-        self.assertIn("organization?.name", block)
-        self.assertIn("{ brand, owner }", block)
+    def test_the_UNION_helper_is_gone(self):
+        """It existed only for the Offers picker. With that control removed, a function that mixes two
+        businesses' brands into one list has no caller and no reason to exist — and leaving it would invite
+        the next screen to reach for it."""
+        self.assertNotIn("brandOptions", SITES_STORE)
+
+    def test_ONE_writer_adds_a_brand(self):
+        """The wizard's Site step and the builder's brand picker both add brands. Two code paths would be
+        two chances for one of them to write somewhere else."""
+        block = SITES_STORE.split("async addBrand(", 1)[1][:800]
+        self.assertIn("organization: { ...(site.organization || {}), brands:", block)
+        self.assertIn("toLowerCase()", block)   # adding a brand the Site already owns is a no-op
 
     def test_a_derived_default_site_INHERITS_the_brands_it_came_from(self):
         """A tenant's first Site is built from their profile. Without this they would open the brand picker

@@ -165,30 +165,6 @@ export const useSitesStore = defineStore("sites", {
       if (siteId) query.set("site_id", siteId);
       return apiRequest(`/sites/subdomain?${query.toString()}`);
     },
-    /**
-     * Every brand this tenant owns, each tagged with the Site that owns it.
-     *
-     * For a surface that genuinely cannot know the Site yet: an OFFER is authored before any page exists
-     * for it, and resolving offer -> page -> Site would need the whole pages list for a dropdown. An empty
-     * picker would block authoring, so the union is offered and each option carries its Site's name —
-     * which is what actually prevents the mistake scoping was for, by making ownership visible at the
-     * point of choice instead of hiding it.
-     *
-     * `profileBrands` is folded in while UserProfile.business.brands still exists (P4 removes it), so no
-     * tenant loses their list mid-migration.
-     */
-    brandOptions(profileBrands = []) {
-      const seen = new Map();
-      for (const site of this.sites) {
-        for (const brand of siteBrands(site)) {
-          if (!seen.has(brand)) seen.set(brand, site.organization?.name || site.name || "");
-        }
-      }
-      for (const brand of profileBrands || []) {
-        if (brand && !seen.has(brand)) seen.set(brand, "");
-      }
-      return [...seen].map(([brand, owner]) => ({ brand, owner }));
-    },
     _replace(site) {
       const index = this.sites.findIndex((s) => s.site_id === site.site_id);
       if (index >= 0) this.sites.splice(index, 1, site);
@@ -243,6 +219,26 @@ export const useSitesStore = defineStore("sites", {
         method: "POST", body: { code },
       });
       return { email: res.email, site: this._replace(res.site) };
+    },
+    /**
+     * Add a brand to a Site's business, from wherever the tenant happens to be standing.
+     *
+     * One action, two entry points (the wizard's Site step and the builder's brand picker), because a
+     * brand added in either place is the same fact about the same business — two code paths would be two
+     * chances for one of them to write somewhere else.
+     *
+     * Idempotent, and a no-op for a name the Site already owns.
+     */
+    async addBrand(siteId, brand) {
+      const name = String(brand || "").trim();
+      const site = this.sites.find((s) => s.site_id === siteId);
+      if (!name || !site) return null;
+      const existing = siteBrands(site);
+      if (existing.some((b) => b.toLowerCase() === name.toLowerCase())) return site;
+      return this.save({
+        ...site,
+        organization: { ...(site.organization || {}), brands: [...existing, name] },
+      });
     },
     async checkSocialLinks(siteId) {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/social/check`, { method: "POST" });

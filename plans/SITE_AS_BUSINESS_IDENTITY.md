@@ -347,18 +347,36 @@ that rule is what preserves §2's guarantee while changing its scope.
   manages brands per business; `organizationFromBusiness` carries them into a derived default Site so a
   tenant's first Site keeps the list they already built.
 
-  **Deviation from this plan's wording, deliberate.** It said *"scope the Offers brand picker to the
-  offer's Site"*. The two surfaces that offer brands know different amounts, so they behave differently:
+  **The plan said "scope the Offers brand picker to the offer's Site". The author corrected the premise
+  (2026-11-03):** *"Offers are created before a page and before a site is assigned. In fact, the software
+  is designed to allow tenants to create a brand new Site at page creation. This means that the only place
+  in which brands can reasonably be picked is at the Landing Page Builder."*
 
-  - the **page builder** scopes STRICTLY to `selectedSite`. This is where it matters — the brand chosen
-    there becomes the headline on a page belonging to exactly one business — and the builder already has a
-    Site step, so there is nothing to guess.
-  - the **Offers screen** cannot be scoped. An offer is authored before any page exists for it, so there
-    is no page to resolve a Site through; resolving it would mean loading the whole pages list for a
-    dropdown, and a brand-new offer would face an empty one either way. It offers the union and names the
-    owner beside each brand *when the tenant has more than one Site*. Making ownership visible at the
-    point of choice is what actually prevents the mistake scoping was for; hiding the ambiguity behind a
-    filtered list that is sometimes wrong is not.
+  So the Offers brand picker is **removed**, not scoped. A first pass had kept it and offered the union of
+  every Site's brands labelled by owner; that was the wrong answer to the right question, because at
+  offer-creation time there is no business to pick from and any list shown is a list of *other*
+  businesses' brands.
+
+  The builder is the only picker, and it is a **select over exactly its Site's brands** — not a free-text
+  box, because typing a name freehand is how a Quill page comes to be headed "Poliaxis Nutrition". A brand
+  can be added in two places, both writing through one store action: the wizard's **Site step** (*"when a
+  Site is selected (or created) the tenant should have the option to add a brand to go along with it"*) and
+  a **+ New brand** control inside the picker itself, which writes it to the Site and selects it in one
+  step. No brand selected means the page is headed by the Site's business name.
+
+  **ONE brand per page, used everywhere** (author's choice over leaving titles alone). `resolved_brand_label`
+  now reads the page's own `brand_label` first, then the offer's stored brand, then the Site's organization
+  name, then the platform. Before, the visible header read the page and the `<title>` suffix read the
+  offer, so one document could name two businesses — headed "Luxe Wellness" and titled "… | Quill". A
+  brand header the tenant switched OFF is not a brand claim and is skipped, or the title would carry a name
+  appearing nowhere on the page.
+
+  **The sharp edge of removing the picker:** `presentation.brand` was saved as
+  `form.brand || profileStore.businessName`, which baked the tenant's ONE business name into every new
+  offer — and the offer's brand sits ABOVE the Site's organization name in that chain, so every page of
+  every other business would have been titled after the first one. The review-invite bug arriving by a
+  different road. That fallback is gone; a new offer simply has no brand. Existing values stay stored and
+  stay read (author's choice), so no published page changes until a brand is picked at the builder.
 
   Migration safety, in both: the tenant profile's list is a FALLBACK, used only where the Site declares no
   brands of its own, so nobody opens an empty dropdown before §P4 removes it. An offer already naming a

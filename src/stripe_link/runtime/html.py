@@ -2044,7 +2044,7 @@ def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: 
     # bundle subject ("Dietary Supplement Bundle"), not just the first product. A single product is unchanged
     # — same product.name, with the presentation.headline fallback preserved.
     name = subject_from_model(model) if bundle else str(product.get("name") or presentation.get("headline") or "").strip()
-    brand = resolved_brand_label(presentation)
+    brand = resolved_brand_label(presentation, page)
     intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
     is_transactional = intent == "transaction"
     include_new = bool((page.get("seo") or {}).get("include_new_in_title"))
@@ -2282,7 +2282,7 @@ def render_head_seo_tags(
 
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
-    brand_label = resolved_brand_label(presentation)
+    brand_label = resolved_brand_label(presentation, page)
     intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
     og_type = "product" if intent == "transaction" else "website"
     og_title = title.split(" | ", 1)[0] if " | " in title else title
@@ -2550,13 +2550,40 @@ def local_business_caption() -> str:
     return f"{name} — {place}"
 
 
-def resolved_brand_label(presentation: dict[str, Any]) -> str:
-    """The storefront brand for the title suffix / og:site_name. The offer's explicit brand wins; otherwise
-    the Site's Organization name (the single-source business identity); otherwise the platform brand."""
-    brand = str((presentation or {}).get("brand") or "").strip()
-    if brand:
-        return brand
-    return str(_RENDER_ORG.get("name") or "").strip() or PLATFORM_BRAND
+def page_brand_label(page: dict[str, Any] | None) -> str:
+    """The brand the TENANT chose for this page, from its `brand_label` section.
+
+    One read, so the page's brand is the page's brand wherever it is asked for. `render_brand_label` puts
+    this at the head of its own chain for the visible header; this is how the title suffix and og:site_name
+    get the same answer (plans/SITE_AS_BUSINESS_IDENTITY.md §P3b, author 2026-11-03).
+    """
+    for section in ((page or {}).get("sections") or []):
+        if isinstance(section, dict) and section.get("type") == "brand_label":
+            if section.get("enabled") is False:
+                return ""   # a hidden brand header is not a brand claim
+            return str(section.get("label") or "").strip()
+    return ""
+
+
+def resolved_brand_label(presentation: dict[str, Any], page: dict[str, Any] | None = None) -> str:
+    """The storefront brand for the title suffix / og:site_name.
+
+    THE PAGE'S OWN BRAND WINS (author, 2026-11-03). Brands are chosen per page in the builder, scoped to
+    the Site that owns them, so a page branded "Luxe Wellness" has to be titled "… | Luxe Wellness" rather
+    than carrying the Site name while its own header says something else. Before this, the header read the
+    page and the title read the OFFER, and the two could name different businesses on one document.
+
+    `presentation.brand` stays below it as a legacy fallback: offers written before brands moved to the
+    Site still carry one, and dropping it would change the title of every page already relying on it. The
+    Offers screen no longer writes it — an offer has no Site, so it was never the right place to pick a
+    brand from (author, 2026-11-03).
+
+    Then the Site's Organization name (the single-source business identity), then the platform brand.
+    """
+    return (page_brand_label(page)
+            or str((presentation or {}).get("brand") or "").strip()
+            or str(_RENDER_ORG.get("name") or "").strip()
+            or PLATFORM_BRAND)
 
 
 def render_page(

@@ -254,19 +254,16 @@
               </label>
             </div>
 
-            <label class="offer-field">
-              <span>Brand</span>
-              <select v-model="form.brand">
-                <option value="">No brand — use business, then product name</option>
-                <!-- The owner is shown only when there is more than one business to confuse: with a single
-                     Site every brand belongs to it and the suffix would be noise on every row. -->
-                <option v-for="option in brandOptions" :key="option.brand" :value="option.brand">
-                  {{ option.brand }}{{ brandOptions.length && option.owner && sitesStore.sites.length > 1 ? ` — ${option.owner}` : "" }}
-                </option>
-                <option v-if="form.brand && !brandOptions.some((o) => o.brand === form.brand)" :value="form.brand">{{ form.brand }}</option>
-              </select>
-              <small>Optional. The brand shown on the landing page. Manage each business's brands in Sites → Edit → Business.</small>
-            </label>
+            <!-- NO BRAND PICKER HERE, deliberately (author, 2026-11-03). An offer is created before any
+                 page exists for it, and a page is where a Site is chosen — the software even lets a tenant
+                 create the Site at page-creation time. So at this point in the flow there is no business
+                 to pick a brand from, and offering the tenant's whole list is exactly how one business's
+                 brand ends up on another's page. The brand is chosen in the page builder, scoped to that
+                 page's Site (plans/SITE_AS_BUSINESS_IDENTITY.md §P3b).
+
+                 `presentation.brand` is still STORED and still read by the renderer, one step below the
+                 page's own brand: offers written before this carry one, and dropping it would change the
+                 title of every page relying on it. -->
 
             <div v-if="landingProducts.length" class="detected-offer-type">
               <span>{{ detectedOfferTypeLabel }}</span>
@@ -972,7 +969,6 @@ import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, usePro
 import { defaultCtaLabel } from "../composables/pageComposer";
 import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
-import { useSitesStore } from "../stores/sites";
 import { useAiProviderStore } from "../stores/aiProvider";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
@@ -987,13 +983,6 @@ const couponStore = useCouponsStore();
 const servicesStore = useServicesStore();
 const profileStore = useProfileStore();
 profileStore.ensureLoaded();
-const sitesStore = useSitesStore();
-sitesStore.ensureLoaded();
-// Brands live on the Site that owns them (plans/SITE_AS_BUSINESS_IDENTITY.md P3b). An offer is authored
-// before any page exists for it, so this screen cannot know which Site it belongs to — it offers every
-// brand the tenant owns and names the owner beside each, which is what keeps the choice honest. The page
-// BUILDER, which does know its Site, scopes strictly.
-const brandOptions = computed(() => sitesStore.brandOptions(profileStore.brands));
 function serviceObjFor(serviceId) {
   return servicesStore.services.find((s) => s.service_id === serviceId) || null;
 }
@@ -2446,9 +2435,15 @@ function buildOfferDocument() {
     presentation: cleanObject({
       headline: primary.name || form.name,
       subheadline: primary.description || undefined,
-      // The brand shown on the page + in the <title>: the tenant's pick, else their business name. The
-      // renderer falls back to the platform name when this is absent. Baked so the renderer needs no profile.
-      brand: form.brand || profileStore.businessName || undefined,
+      // CARRIED, never freshly chosen (author, 2026-11-03). An offer loaded from before brands moved to
+      // the Site keeps the brand it was saved with; a new offer gets none, because a brand belongs to a
+      // business and at offer-creation time there is no Site to name one.
+      //
+      // The `|| profileStore.businessName` that used to sit here is gone, and that mattered: it baked the
+      // tenant's ONE business name into every new offer, and in the renderer's chain the offer's brand
+      // sits ABOVE the Site's organization name — so every page of every other business would have been
+      // titled after the first one. The same bug as the review invite, arriving by a different road.
+      brand: form.brand || undefined,
       hero_image_url: primary.image || undefined,
       cta_label: cta.label || "Buy Now",
       cta: cleanObject({ type: cta.type, label: cta.label, target: cta.target || undefined }),
