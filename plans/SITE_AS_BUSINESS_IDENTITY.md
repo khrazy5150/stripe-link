@@ -84,6 +84,51 @@ outright would leave those with no name at all** — which is the "bare support@
 So the tenant-level fields cannot simply be deleted on day one. They can become the explicit **fallback
 for site-less sends**, and be removed only if every send path is later proven to resolve a Site.
 
+## 3a. ⭐ The transition is ~60% done — here is exactly where it stopped
+
+The author's recollection is right, and the halves are cleanly separable. **The renderer already migrated.**
+`html.resolved_brand_label` reads:
+
+> *"The offer's explicit brand wins; otherwise the Site's Organization name (the single-source business
+> identity); otherwise the platform brand."*
+
+There is no user-profile `business_name` in that chain at all. So a **published page** is already
+Site-based. Likewise the builder preview: on 2026-10-13 `renderedBrandLabel` was changed to read the mark
+out of the preview frame, with a comment naming this very bug —
+
+> *"Using it here promised 'Poliaxis Nutrition' on a page whose mark reads 'Quill' (author, 2026-10-13) — a
+> placeholder that lies about what publishing will do."*
+
+**Same two business names, same cause, caught in the preview and missed in email.** That is the strongest
+argument for finishing the migration rather than patching emitters: the bug recurs wherever a surface was
+not converted.
+
+| Surface | State |
+|---|---|
+| Published page (`html.resolved_brand_label`) | ✅ Site.organization |
+| Builder brand preview (`renderedBrandLabel`) | ✅ reads the rendered frame (2026-10-13) |
+| Brand PICKER options (`stores/profile.js`, `Offers.vue`) | ❌ user profile `business.brands` — *"Manage your brands in Profile → Business"* |
+| All transactional email | ❌ user profile (§1) |
+| Profile → Business edit UI | ❌ still the edit surface for name/brands/NAP |
+
+### The field delta
+
+`Site.organization` already carries `name`, `legal_name`, `description`, `email`, `telephone`, `address`,
+`founding_date`, `place_id`, `gbp_url`, `geo`, `opening_hours`. What lives on `user_profile.business` and
+has **no home on the Site yet**:
+
+| Field | Disposition |
+|---|---|
+| `brands[]` | **Add to `Site.organization`.** This is the author's ask: brands belong to the business that owns them, and an offer picks from its own Site's brands rather than a tenant-wide pool. |
+| `sources{}` | Move with it — the per-field provenance (`stripe\|manual\|gbp\|derived`) is what stops a GBP/Stripe auto-seed clobbering a tenant's own value, and it is per-business. |
+| `shipping_cutoff_hour` | **Not identity.** Operational, and arguably per-Site anyway (two shops can cut off at different times). Needs its own decision — it should not ride along silently. |
+| `timezone` | Same. Operational, and already duplicated by `TenantAvailability`/booking. |
+
+**The brand picker is the sharp edge.** Today an offer picks from a tenant-wide brand list. Once brands are
+per-Site, the picker must be scoped to the Site the offer's page belongs to — which needs the SAME
+page→Site resolution as §3.1. The two halves of this plan share one dependency, so they should ship in that
+order rather than separately.
+
 ## 4. Proposed shape
 
 **One resolver, Site-scoped, with a declared fallback.** Replace `tenant_email_identity(tenant_id)` with
@@ -108,9 +153,13 @@ that rule is what preserves §2's guarantee while changing its scope.
   time, each with a test proving which Site's name it used.
 - **P3 — per-Site Reply-To** *(only if §3.3 is decided that way)*. Per-Site email verification, reusing the
   existing code/TTL/attempt flow. Until then the Reply-To stays the tenant's verified address.
+- **P3b — brands move to the Site.** Add `brands[]` + `sources{}` to `Site.organization`; scope the Offers
+  brand picker to the offer's Site (depends on §3.1's page→Site resolution, same as P2). Decide separately
+  where `shipping_cutoff_hour` and `timezone` live — they are operational, not identity, and must not
+  migrate by accident.
 - **P4 — remove the UserProfile Business section** *(only once P2 covers every send path, or the fallback
   is accepted as permanent)*. Removing it is a data migration, not a UI change: `business_name` /
-  `business_email` are read by 16 modules.
+  `business_email` are read by 16 modules, and `business.brands` backs a live picker.
 
 ## 6. Open decisions — author input needed
 
