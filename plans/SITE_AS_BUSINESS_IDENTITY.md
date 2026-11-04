@@ -218,6 +218,18 @@ businesses in test mode has sold nothing; the cap bites the moment they want one
 open a test Site to try the next idea — which is the behaviour that makes the tier feel fair rather than
 punitive, and it costs nothing to allow.
 
+**A Site is mode-scoped by design, not by accident** — worth recording so this is not re-litigated. The
+schema says so itself:
+
+> `stripe_mode` — *"The Stripe mode this Site belongs to. NOT the deployment: `environment` (dev/prod)
+> names the stack, and one stack serves both modes. Called `environment` until 2026-10-23, which is how the
+> two came to be read for each other. Sites are authored in test and copied to live by a later workflow."*
+
+Mode runs to the edge too: the routing `kvs_key` pattern is `^site:(test|live):[a-z0-9.-]+$`, so the
+CloudFront KeyValueStore holds the two separately. A "modeless Site" would mean reworking `stripe_mode`,
+the `pages` map (whose page_ids are themselves mode-scoped), the hostname split and the edge keys — and
+the cap does not need any of it. Counting the live partition gives the same answer far more cheaply.
+
 ## 4. Proposed shape
 
 **One resolver, Site-scoped, with a declared fallback.** Replace `tenant_email_identity(tenant_id)` with
