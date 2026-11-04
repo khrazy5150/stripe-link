@@ -129,6 +129,62 @@ per-Site, the picker must be scoped to the Site the offer's page belongs to — 
 page→Site resolution as §3.1. The two halves of this plan share one dependency, so they should ship in that
 order rather than separately.
 
+## 3b. ⭐⭐ Why this is a PRICING change, not a refactor (author, 2026-11-03)
+
+The author's framing: **Site becomes the unit of "a business", and the number of Sites becomes the tier
+axis** — Free 1, Basic 3, Pro 10. That reframes the whole plan. It is not cleanup; it is the thing that
+makes a multi-business tier sellable.
+
+**The commercial logic only closes if identity is per-Site.** "How many businesses can I run" has to equal
+"how many Sites I pay for". While any part of business identity still lives on the tenant — the brand
+list, the email sender — the axis is muddled: a tenant has one tenant-wide business identity regardless of
+what they pay. Finish the migration and the answer becomes structural rather than enforced.
+
+### The mechanism already exists
+
+Plans carry numeric allowances today — `ai_generations` and `ai_images`, read from the plan record with
+buyer-facing names in `_ALLOWANCE_LABELS` ("AI-written pages a month"). **A `sites` allowance is the same
+shape**, needs no new machinery, and is editable from the Admin Site's Pricing screen without a deploy.
+
+### But two gates must coexist, and they are different questions
+
+`sites` is ALREADY a boolean capability, and it is in `FREE_TIER_CAPABILITIES` — "may this tenant use Sites
+at all". The cap is a second, numeric question: "how many". Both are needed:
+
+| Gate | Question | Where |
+|---|---|---|
+| `entitlements.sites` (exists) | may they use Sites at all? | free-tier floor — stays yes |
+| `allowances.sites` (new) | how many may they have? | plan record, like `ai_generations` |
+
+Conflating them would mean a downgrade removing Sites entirely rather than capping them.
+
+### ⚠️ The hard question is DOWNGRADE, not upgrade
+
+Creating the 4th Site on a 3-Site plan is easy to refuse. The real decision is what happens to Sites 4–10
+when Pro → Basic, or when a subscription lapses to free. The free tier is **free-forever** and the pricing
+pivot's stated rule is that an expired trial or cancelled subscription "sells on at the free-tier fee" —
+pages keep serving, checkout keeps charging. Deleting a tenant's Sites would violate that outright.
+
+Options, none free of cost:
+
+| | |
+|---|---|
+| **Soft-lock extra Sites** | Keep serving published pages; refuse edits and new publishes on Sites over the cap, tenant picks which stay active. Preserves free-forever; most work. |
+| **Read-only over the cap** | Everything keeps serving, nothing over the cap can be edited. Simpler, blunter. |
+| **Grandfather existing** | Cap applies to NEW Sites only. Zero disruption, but the tier never converts anyone who already has three. |
+
+*Recommendation: soft-lock, with the tenant choosing which Sites stay active.* It is the only option that
+keeps the free-forever promise while making the tier mean something.
+
+### Two live facts that constrain the rollout
+
+1. **The free tier currently advertises "Unlimited landing pages"** (`DEFAULT_FREE_FEATURES`) and `sites`
+   sits in `FREE_TIER_CAPABILITIES` with no cap anywhere in the codebase — verified: there is no
+   `max_sites`, no site-count gate, nothing. Capping to 1 changes a promise already on the pricing card.
+2. **The author's own dev tenant has 3 Sites** (`poliaxis-nutrition`, `poliaxis-nutrition-test`, `quill`,
+   `quill-test` subdomains). So the "Poliaxis vs Quill" email is two of three real businesses on one
+   tenant — this plan's motivating bug and its motivating revenue case are the same account.
+
 ## 4. Proposed shape
 
 **One resolver, Site-scoped, with a declared fallback.** Replace `tenant_email_identity(tenant_id)` with
@@ -174,3 +230,9 @@ that rule is what preserves §2's guarantee while changing its scope.
    fallback, remove them from the UI, and stop tenants editing what no longer drives anything.*
 4. **What about pre-multi-Site orders** with no `page_id` in metadata? They fall to the fallback; worth
    confirming that is acceptable rather than backfilling.
+5. **§3b — the Site cap numbers and the downgrade rule.** Free 1 / Basic 3 / Pro 10 as stated? And what
+   happens to Sites over the cap on downgrade — soft-lock, read-only, or grandfather? *Recommendation:
+   soft-lock with tenant choice; it is the only option compatible with free-forever.*
+6. **§3b — does the cap apply to TEST-mode Sites?** The author's tenant has `quill` and `quill-test`. If a
+   sandbox Site counts against the cap, a 1-Site free tenant cannot test anything. *Leaning: cap LIVE-mode
+   Sites only.* This is the kind of detail that makes a tier feel punitive if it is got wrong.
