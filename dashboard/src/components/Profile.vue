@@ -194,6 +194,7 @@ import PhoneInput from "./PhoneInput.vue";
 import { normalizeCountry } from "../utils/countries";
 import AddressFields from "./AddressFields.vue";
 import { useProfileStore } from "../stores/profile";
+import { hourLabel, timeZoneOptions, zoneLabel } from "../utils/timezones";
 
 
 const session = getAuthSession() || {};
@@ -214,38 +215,9 @@ const form = reactive({
 // has not looked at must never be saved as a value they appear to have chosen -- an empty stored timezone
 // means "use the suggestion", which keeps following the address if they move.
 const timezoneSuggested = ref("");
-
-// EVERY zone the browser knows, not a list we maintain. `Intl.supportedValuesOf` is the complete IANA set
-// and costs nothing to keep current; the short fallback is for the handful of browsers without it, and a
-// tenant needing one that is missing can still be given it server-side -- nothing validates against this.
-const timezoneChoices = computed(() => {
-  try {
-    const all = Intl.supportedValuesOf("timeZone");
-    if (all?.length) return all;
-  } catch { /* older browser */ }
-  return ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix",
-          "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "Europe/London",
-          "Europe/Berlin", "Asia/Tokyo", "Australia/Sydney", "UTC"];
-});
-
-// "America/Denver (GMT-6)" — the offset is what a tenant recognises; the name alone is ambiguous to most.
-function zoneLabel(zone) {
-  try {
-    const parts = new Intl.DateTimeFormat("en", { timeZone: zone, timeZoneName: "shortOffset" })
-      .formatToParts(new Date());
-    const offset = parts.find((p) => p.type === "timeZoneName")?.value;
-    return offset ? `${zone.replace(/_/g, " ")} (${offset})` : zone.replace(/_/g, " ");
-  } catch {
-    return zone;
-  }
-}
-
-// "15" -> "3:00 PM". A tenant picks an hour, not a 24-hour number.
-function hourLabel(hour) {
-  const suffix = hour < 12 ? "AM" : "PM";
-  const twelve = hour % 12 === 0 ? 12 : hour % 12;
-  return `${twelve}:00 ${suffix}`;
-}
+// The shared helpers rather than private copies: the Sites screen needs the same three for a Site's own
+// working day, and a second copy is a second answer to "which zones exist".
+const timezoneChoices = computed(() => timeZoneOptions(form.business.timezone));
 
 // Verification state. Deliberately NOT part of `form`: it is a transient workflow, not a profile field,
 // and mixing it in would send it to the save endpoint.

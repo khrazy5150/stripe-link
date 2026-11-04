@@ -192,3 +192,31 @@ def store_timezone(business: Any) -> str:
     """The tenant's own answer when they gave one, else the suggestion. What every caller should use."""
     chosen = _text((business or {}).get("timezone")) if isinstance(business, dict) else ""
     return chosen or suggest_timezone((business or {}).get("address") if isinstance(business, dict) else None)
+
+
+def working_day(organization: Any = None, business: Any = None) -> tuple[str, int]:
+    """`(timezone, cutoff_hour)` for ONE business's working day (plans/SHIPPING_PER_SITE.md §S1).
+
+    Resolved **per field, Site before account**, because the two are independent answers: a shop may keep
+    the account's timezone and close earlier, or sit in another zone and keep the same cutoff. Resolving
+    the whole document instead would make setting either field silently adopt the default of the other.
+
+    The GUESS is the subtle part. `suggest_timezone` never returns "" -- it answers UTC for an address it
+    cannot place -- so chaining it per source would let an empty Site address swallow the account's real
+    one. So an explicit answer from either level wins first, and only then is a single guess made, from
+    whichever address exists, the Site's first.
+
+    Both arguments optional and either may be `None`: an order with no Site, or a Site on an account whose
+    profile was never filled in, both have to produce an estimate rather than an exception.
+    """
+    org = organization if isinstance(organization, dict) else {}
+    biz = business if isinstance(business, dict) else {}
+
+    timezone = _text(org.get("timezone")) or _text(biz.get("timezone"))
+    if not timezone:
+        timezone = suggest_timezone(org.get("address") or biz.get("address"))
+
+    cutoff = org.get("shipping_cutoff_hour")
+    if cutoff is None or isinstance(cutoff, bool):
+        cutoff = biz.get("shipping_cutoff_hour")
+    return timezone, store_cutoff_hour({"shipping_cutoff_hour": cutoff})

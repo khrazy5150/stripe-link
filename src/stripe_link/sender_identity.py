@@ -20,7 +20,11 @@ from stripe_link.mailer import tenant_email_identity
 
 def site_organization(tenant_id: str, *, site_id: str = "", page_id: str = "", mode: str = "live",
                       sites_repo: Any | None = None, pages_repo: Any | None = None) -> dict[str, Any]:
-    """The `organization` of the Site behind one message, or `{}` when no Site can be named.
+    """The `organization` of the Site behind one message or order, or `{}` when no Site can be named.
+
+    Two callers now: the sending identity below, and the delivery estimate's working day
+    (`handlers/stripe_webhook.attach_delivery_promise`). Both are asking the same question -- *which of
+    this tenant's businesses is this?* -- so they ask it in one place rather than each walking the edge.
 
     Two ways in, in order of directness:
 

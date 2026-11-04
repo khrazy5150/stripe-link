@@ -273,21 +273,38 @@ class TheSitesScreenManagesThemTests(unittest.TestCase):
         self.assertIn("brands.length ? brands : undefined", block)
 
 
-class TheOperationalFieldsDidNotRideAlongTests(unittest.TestCase):
-    """The plan calls these out by name: *"Not identity. Operational... it should not ride along silently."*
-    `timezone` is already duplicated by TenantAvailability/booking, and `shipping_cutoff_hour` answers a
-    shipping question. Both stay on the tenant profile until they get their own decision."""
+class TheOperationalFieldsMovedSEPARATELYTests(unittest.TestCase):
+    """P3b left `timezone` and `shipping_cutoff_hour` on the account ON PURPOSE — *"Not identity.
+    Operational... it should not ride along silently."* They have since moved, under their own plan
+    (`plans/SHIPPING_PER_SITE.md` §S1) and with their own resolution rule, which is exactly what "not
+    silently" asked for.
 
-    def test_neither_appeared_on_the_site_organization(self):
+    This test flipped rather than being deleted: the point it was making was never "these fields must
+    never move", it was "they must not move as a side effect of the identity work". Both halves of the
+    account/Site split are now asserted, so neither can quietly disappear.
+    """
+
+    def test_they_ARE_on_the_site_organization_now(self):
         schema = json.loads((ROOT / "schemas/Site.schema.json").read_text(encoding="utf-8"))
         org = schema["properties"]["organization"]["properties"]
-        self.assertNotIn("timezone", org)
-        self.assertNotIn("shipping_cutoff_hour", org)
+        self.assertEqual(org["timezone"]["type"], ["string", "null"])
+        self.assertEqual(org["shipping_cutoff_hour"]["maximum"], 23)
 
-    def test_they_are_STILL_on_the_tenant_profile(self):
+    def test_they_are_STILL_on_the_tenant_profile_as_the_fallback(self):
+        """A Site that states neither inherits the account's, so the account-level fields are not dead —
+        and `business.address` is still what the timezone is guessed from."""
         validator = (ROOT / "src/stripe_link/domain/documents.py").read_text(encoding="utf-8")
         self.assertIn('optional_string(business, "timezone"', validator)
         self.assertIn('"shipping_cutoff_hour"', validator)
+
+    def test_the_SHIP_FROM_ADDRESS_did_not_move_with_them(self):
+        """It was never on the profile to begin with — it lives on ShippingConfig, which is §S3/§S4's
+        work, not §S1's. Recorded because the plan's own first finding was that this assumption was
+        wrong."""
+        schema = json.loads((ROOT / "schemas/Site.schema.json").read_text(encoding="utf-8"))
+        org = schema["properties"]["organization"]["properties"]
+        self.assertNotIn("ship_from_address", org)
+        self.assertNotIn("return_address", org)
 
 
 if __name__ == "__main__":

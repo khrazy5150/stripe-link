@@ -262,6 +262,22 @@
             }
           }
         },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "IANA zone name for THIS business's working day \u2014 whose 3pm the shipping cutoff means. Absent inherits the account's, then is guessed from this organization's address, then UTC. Two shops under one account can keep different hours (plans/SHIPPING_PER_SITE.md S1)."
+        },
+        "shipping_cutoff_hour": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 23,
+          "description": "Hour of the day (0-23) after which an order ships the NEXT working day. Absent inherits the account's, then the platform default of 15:00. A suggestion shown to the buyer as a delivery estimate, not a promise the platform enforces."
+        },
         "area_served": {
           "type": "array",
           "items": {

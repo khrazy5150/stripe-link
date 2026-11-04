@@ -3097,6 +3097,14 @@ def validate_site_organization(organization: Any) -> None:
         for field in ("street", "locality", "region", "postal_code", "country"):
             optional_string(address, field, f"organization.address.{field}")
         _normalize_address_country(address)
+    # THIS business's working day (plans/SHIPPING_PER_SITE.md §S1). Both absent inherit the account's,
+    # which is why neither is required and why `None` is a meaningful value rather than a missing one.
+    optional_string(organization, "timezone", "organization.timezone", max_length=64)
+    if organization.get("shipping_cutoff_hour") is not None:
+        hour = whole_number(organization.get("shipping_cutoff_hour"))
+        if hour is None or not 0 <= hour <= 23:
+            raise DocumentValidationError(
+                "organization.shipping_cutoff_hour must be an hour of the day (0-23).")
     logo = organization.get("logo")
     if logo is not None and not isinstance(logo, dict):
         raise DocumentValidationError("organization.logo must be an object.")

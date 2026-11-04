@@ -132,8 +132,17 @@ class TheScreenCanActuallySaveItTests(unittest.TestCase):
         self.assertIn("timezone_suggested", self.STORE_JS)
 
     def test_the_picker_offers_every_zone_the_browser_knows(self):
-        # Not a list we maintain: Intl.supportedValuesOf is the complete IANA set and stays current.
-        self.assertIn('Intl.supportedValuesOf("timeZone")', self.PROFILE_VUE)
+        """Not a list we maintain: `Intl.supportedValuesOf` is the complete IANA set and stays current.
+
+        It moved to `utils/timezones.js` when the Sites screen needed the same picker for a Site's own
+        working day (plans/SHIPPING_PER_SITE.md §S1) — Profile.vue had a private copy of a helper that
+        already existed in that file, and a third copy was the alternative.
+        """
+        util = (self._pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "utils" / "timezones.js").read_text()
+        self.assertIn('Intl.supportedValuesOf("timeZone")', util)
+        self.assertIn("timeZoneOptions", self.PROFILE_VUE)
+        self.assertNotIn("Intl.supportedValuesOf", self.PROFILE_VUE, "the private copy is back")
 
     def test_the_endpoint_sends_the_suggestion(self):
         source = (self._pathlib.Path(__file__).resolve().parents[1]

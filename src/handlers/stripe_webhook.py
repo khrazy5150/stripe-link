@@ -52,7 +52,7 @@ from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
-from stripe_link.sender_identity import sending_identity
+from stripe_link.sender_identity import sending_identity, site_organization
 from stripe_link.domain.coupon_grants import is_grant_code
 from stripe_link.domain.coupon_redemptions import amounts_from_session, redemption_document
 from stripe_link.repositories.documents import (
@@ -2760,17 +2760,21 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
 
 
 def attach_delivery_promise(order_record, *, tenant_id, mode, user_profiles_repo=None,
-                            quotes_repo=None) -> None:
+                            quotes_repo=None, sites_repo=None, pages_repo=None) -> None:
     """Put `delivery_estimate` on the order, in place. Silent when it cannot be known.
 
-    Three reads, none of which may cost a sale: the stored quote for the transit days of the service the
-    buyer chose, and the tenant's business identity for whose afternoon the cutoff falls in. An order that
+    Reads, none of which may cost a sale: the stored quote for the transit days of the service the buyer
+    chose, and the SELLING BUSINESS's working day for whose afternoon the cutoff falls in. An order that
     shipped nothing, or one whose quote has expired, simply carries no estimate -- and the renderer then
     shows no element, which is the honest outcome rather than a gap to fill.
+
+    The working day is the SITE's where the order names one (plans/SHIPPING_PER_SITE.md §S1), falling back
+    to the account's. Two shops under one account can keep different hours, and before this both were told
+    the first one's -- so a buyer from the second was promised a day that business does not ship on.
     """
     try:
         from stripe_link.domain.shipping_promise import promise_for
-        from stripe_link.domain.store_timezone import store_cutoff_hour, store_timezone
+        from stripe_link.domain.store_timezone import working_day
 
         quote_ref = order_record.get("shipping_quote")
         if not isinstance(quote_ref, dict) or not order_record.get("shipping_address"):
@@ -2782,15 +2786,19 @@ def attach_delivery_promise(order_record, *, tenant_id, mode, user_profiles_repo
                                    if os.environ.get("CARTS_TABLE") else None)
             if repo is not None:
                 quote = repo.get(tenant_id, quote_id) or {}
-        # The OWNER's profile carries the business identity, and `_owner_user_profile` already knows how
-        # to find it (and when not to guess). An absent profile means the defaults -- UTC and 15:00 -- so
-        # the estimate is still made, just in a day that may not be the tenant's.
+        # The OWNER's profile is the ACCOUNT-LEVEL answer, and `_owner_user_profile` already knows how to
+        # find it (and when not to guess). Nothing anywhere means the defaults -- UTC and 15:00 -- so the
+        # estimate is still made, just in a day that may not be the tenant's.
         repo = user_profiles_repo or (user_profiles_repository()
                                       if os.environ.get("USER_PROFILES_TABLE") else None)
         owner = (_owner_user_profile(repo, tenant_id) or {}) if repo is not None else {}
-        business = owner.get("business") or {}
-        promise = promise_for(order_record, quote, tz_name=store_timezone(business),
-                              cutoff_hour=store_cutoff_hour(business))
+        # WHICH business sold it. `site_organization` is the same page -> Site walk the sender identity
+        # uses, and it never raises: a Site that cannot be read costs the override, not the estimate.
+        organization = site_organization(
+            tenant_id, page_id=str((order_record.get("attribution") or {}).get("page_id") or ""),
+            mode=mode, sites_repo=sites_repo, pages_repo=pages_repo)
+        tz_name, cutoff_hour = working_day(organization, owner.get("business"))
+        promise = promise_for(order_record, quote, tz_name=tz_name, cutoff_hour=cutoff_hour)
         if promise:
             order_record["delivery_estimate"] = promise
     except Exception as exc:  # noqa: BLE001 - a missing estimate must never cost a sale

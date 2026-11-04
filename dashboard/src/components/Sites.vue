@@ -191,6 +191,28 @@
               </div>
               <button type="button" class="secondary-action compact" @click="addOrgBrand">+ Add brand</button>
             </div>
+            <!-- THIS business's working day (plans/SHIPPING_PER_SITE.md §S1). Both inherit the account's
+                 when left on "Use account setting", and the option says so rather than showing a blank —
+                 an override UI that hides inheritance produces a tenant who thinks they changed one
+                 warehouse's hours and changed none. -->
+            <div class="offer-two-column">
+              <label class="offer-field">
+                <span>Timezone</span>
+                <select v-model="form.org.timezone">
+                  <option value="">Use account setting{{ accountTimezoneLabel }}</option>
+                  <option v-for="zone in timezoneChoices" :key="zone" :value="zone">{{ zoneLabel(zone) }}</option>
+                </select>
+                <small class="field-note">This business's working day — it decides when its shipping cutoff falls.</small>
+              </label>
+              <label class="offer-field">
+                <span>Orders after this ship the next business day</span>
+                <select v-model="form.org.shipping_cutoff_hour">
+                  <option value="">Use account setting</option>
+                  <option v-for="hour in 24" :key="hour - 1" :value="String(hour - 1)">{{ hourLabel(hour - 1) }}</option>
+                </select>
+                <small class="field-note">A buffer, not a rule. It only changes the arrival date shown to this site's buyers.</small>
+              </label>
+            </div>
             <label class="offer-field"><span>Description</span><textarea v-model.trim="form.org.description" rows="2" /></label>
             <div class="offer-two-column">
               <label class="offer-field">
@@ -853,6 +875,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
+import { hourLabel, timeZoneOptions, zoneLabel } from "../utils/timezones";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { DNS_PROVIDERS, apexAdvice, apexRedirectStep, detectProvider, dnsRecordSteps, emphasise, lookupNameservers } from "../composables/dnsInstructions";
 import { sanitizeSlug } from "../composables/slugs";
@@ -1014,6 +1037,13 @@ const emailVerify = reactive({ step: "idle", code: "", pending: "", busy: false,
 // Verified means verified for the address CURRENTLY typed. Editing the field must drop the badge
 // immediately, or a tenant sees "Verified" beside an address that is nothing of the sort — and the server
 // agrees: changing the address drops the proof at the write boundary.
+// What "Use account setting" actually resolves to, so the tenant can see what they are inheriting.
+const accountTimezoneLabel = computed(() => {
+  const zone = profileStore.business?.timezone;
+  return zone ? ` — ${zoneLabel(zone)}` : "";
+});
+const timezoneChoices = computed(() => timeZoneOptions(form.org.timezone));
+
 const siteEmailVerified = computed(() => {
   const stored = editing.value?.organization || {};
   return Boolean(stored.email_verified)
@@ -1069,7 +1099,7 @@ function cancelSiteEmailVerification() {
   emailVerify.error = "";
 }
 
-const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", brands: [], legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
+const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", brands: [], timezone: "", shipping_cutoff_hour: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -1836,6 +1866,11 @@ function openEdit(site) {
   form.org = {
     name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
     brands: Array.isArray(org.brands) ? [...org.brands] : [],
+    // Strings in the form, because a <select> option value is a string and `null` and 0 would both be
+    // falsy — "" is "inherit" and "0" is midnight, which are different answers.
+    timezone: org.timezone || "",
+    shipping_cutoff_hour: org.shipping_cutoff_hour === null || org.shipping_cutoff_hour === undefined
+      ? "" : String(org.shipping_cutoff_hour),
     business_type: org.business_type || "",
     description: org.description || "", telephone: org.telephone || "", email: org.email || "",
     address: { locality: address.locality || "", region: address.region || "", street: address.street || "", postal_code: address.postal_code || "", country: address.country || "US" },
@@ -1863,6 +1898,10 @@ async function saveEdit({ keepOpen = false } = {}) {
     // `business.brands` accepted, so that a migration cannot fail on its own data. Omitted entirely when
     // empty, so a Site nobody has given brands keeps the shape it had.
     brands: brands.length ? brands : undefined,
+    timezone: form.org.timezone || undefined,
+    // `|| undefined` would eat midnight: hour 0 is a real choice and "" is the only "inherit".
+    shipping_cutoff_hour: form.org.shipping_cutoff_hour === "" ? undefined
+      : Number(form.org.shipping_cutoff_hour),
     legal_name: form.org.legal_name || undefined,
     entity_type: form.org.entity_type || undefined,
     business_type: form.org.business_type || undefined,

@@ -29,3 +29,23 @@ export function timeZoneOptions(current = "") {
   if (value && !list.includes(value)) list.push(value);
   return list;
 }
+
+// "America/Denver (GMT-6)" — the offset is what a tenant recognises; the name alone is ambiguous to most.
+export function zoneLabel(zone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en", { timeZone: zone, timeZoneName: "shortOffset" })
+      .formatToParts(new Date());
+    const offset = parts.find((p) => p.type === "timeZoneName")?.value;
+    return offset ? `${zone.replace(/_/g, " ")} (${offset})` : zone.replace(/_/g, " ");
+  } catch {
+    return zone;
+  }
+}
+
+// An hour of the day as a tenant reads a clock. Lives beside the zone helpers because the two are always
+// shown together — a cutoff hour means nothing without the zone it falls in.
+export function hourLabel(hour) {
+  const suffix = hour < 12 ? "AM" : "PM";
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelve}:00 ${suffix}`;
+}
