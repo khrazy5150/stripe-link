@@ -208,15 +208,34 @@ SITE#test#site_3SxIqyfqnqrbmo     a test-only Site
 So "how many Sites does this tenant have" has three possible answers (1 live, 2 test, 2 distinct ids) and
 the cap must say which.
 
-**Decision: count Sites in LIVE mode.** Test mode is the staging area the cross-mode copy feature exists to
-serve; charging for staging would penalise the safe workflow. And an uncapped test mode costs nothing
-commercially — test Sites serve on `*.jbay.be` / `*.jbay.uk`, are **always noindex**, and take test-mode
-Stripe payments only, so no real customer and no real money can reach one. A tenant who builds five
-businesses in test mode has sold nothing; the cap bites the moment they want one live.
+**Decision (author, 2026-11-03): the cap applies PER MODE.** Free = 1 Site in live **and** 1 in test;
+Basic = 3 and 3; Pro = 10 and 10. Not "live only, test unlimited" — an earlier draft of this section said
+that and it was wrong, because it let a free tenant build fifty businesses in test mode and flip them in
+one at a time. Per-mode is also the simpler promise: *"your plan includes N sites"* means N in each mode.
 
-**Consequence for the counter:** the gate reads the LIVE partition only. A tenant at their cap can still
-open a test Site to try the next idea — which is the behaviour that makes the tier feel fair rather than
-punitive, and it costs nothing to allow.
+The point of allowing test at all is the **round trip**: a free tenant enables test mode, copies their
+live Site over, experiments, and copies back. The two modes holding *different* Sites is permitted — it is
+just not the recommended way to work, because then nothing can be copied either direction without
+displacing something.
+
+### Why the copy does not fight the cap
+
+`COPY_TO_ENVIRONMENT.md` D1 settles this: a copy is **same id (sync)**, not a fresh id. Confirmed in live
+data — `SITE#live#site_rWLjyL57Pn5Gk5` and `SITE#test#site_rWLjyL57Pn5Gk5` are one Site in two partitions.
+
+So copying a Site into the other mode is an **upsert of the same `site_id`**, and at a cap of 1 it is a
+no-op against the counter:
+
+| Situation | Copy live→test | |
+|---|---|---|
+| test is empty | creates `SITE#test#<same id>` | 0 → 1, allowed |
+| test holds the SAME `site_id` | overwrites it | 1 → 1, allowed |
+| test holds a DIFFERENT Site | would be 1 → 2 | **refused at cap** |
+
+Only the third case trips, and the refusal is explainable in one sentence: *"Your plan includes one test
+Site and it is currently <name>. Replace it, or upgrade."* **The counter must therefore count distinct
+`site_id`s within the target mode, and the copy path must check the cap BEFORE writing** — otherwise the
+upsert silently succeeds and the tenant is over.
 
 **A Site is mode-scoped by design, not by accident** — worth recording so this is not re-litigated. The
 schema says so itself:
@@ -278,5 +297,6 @@ that rule is what preserves §2's guarantee while changing its scope.
 5. **§3b — the Site cap numbers and the downgrade rule.** Free 1 / Basic 3 / Pro 10 as stated? And what
    happens to Sites over the cap on downgrade — soft-lock, read-only, or grandfather? *Recommendation:
    soft-lock with tenant choice; it is the only option compatible with free-forever.*
-6. ~~**§3b — does the cap apply to TEST-mode Sites?**~~ **RESOLVED 2026-11-03 — cap LIVE-mode Sites only.**
-   See §3c.
+6. ~~**§3b — does the cap apply to TEST-mode Sites?**~~ **RESOLVED 2026-11-03 — the cap is PER MODE**
+   (Free 1 live + 1 test, Basic 3 + 3, Pro 10 + 10), and a cross-mode copy is a same-id upsert so it only
+   trips the cap when the target mode holds a DIFFERENT Site. See §3c.
