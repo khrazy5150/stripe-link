@@ -16,6 +16,7 @@ from stripe_link.domain.returns import RETURN_STATES, return_deadline, return_la
 from stripe_link.domain.sites import is_site_id
 from stripe_link.domain.shipping import (
     SITE_OVERRIDABLE,
+    SITE_OVERRIDABLE_FLAGS,
     config_for_site,
     ShipmentError,
     build_shipment,
@@ -205,6 +206,10 @@ def save_site_override(event, repository, products_repo=None):
     # Only the fields a Site may state, and only the ones it actually stated. A key present but empty is
     # "inherit", exactly as `config_for_site` reads it, so the stored shape and the resolver agree.
     override = {field: raw[field] for field in SITE_OVERRIDABLE if raw.get(field)}
+    # A FLAG is kept when it is an actual boolean, `False` included: "this shop ships even though the
+    # account turned shipping off" is a decision, and the truthiness filter above would drop it (§S5).
+    override.update({flag: raw[flag] for flag in SITE_OVERRIDABLE_FLAGS
+                     if isinstance(raw.get(flag), bool)})
     try:
         # Validated as part of the WHOLE document, so an override cannot store a shape the account could
         # not -- the override must never be the softer path.

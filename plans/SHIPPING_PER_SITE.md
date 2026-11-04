@@ -1,6 +1,6 @@
 # Shipping per Site
 
-**Status:** S1–S3 SHIPPED 2026-11-04 (dev+prod pending deploy). S4–S5 not built. Written 2026-11-04, after `SITE_AS_BUSINESS_IDENTITY.md` P1–P4
+**Status:** S1–S5 ALL SHIPPED 2026-11-04 (deployed dev; prod pending). Written 2026-11-04, after `SITE_AS_BUSINESS_IDENTITY.md` P1–P4
 made business identity per-Site. The author's ask: *"plan a migration to move the shipping to Sites."*
 
 **Premise:** a Site is a business (`SITE_AS_BUSINESS_IDENTITY.md` §3b). Two businesses under one account
@@ -198,9 +198,44 @@ hides inheritance produces a tenant who thinks they changed one warehouse and ch
   when no Site is selected — that editing the account default changes every Site that inherits.
 
   Only `ship_from_address` has a control so far; the other two overridable fields get theirs with §S5.
-- **S5 — per-Site enablement.** `enabled` / `enabled_opt_out` per Site, so one business can be
-  digital-only. Deliberately last: it changes whether a buyer is offered shipping at all, and wants S3's
-  resolution proven first.
+- **S5 — per-Site enablement. SHIPPED 2026-11-04.** One business can be digital-only while its sibling
+  ships.
+
+  **The flag is `enabled_opt_out` ONLY, not `enabled` — a correction to this plan.** The buyer-facing gate
+  has always read the opt-out (`shipping_opted_out`), because the Enable-shipping checkbox was declared,
+  rendered, saved and gating nothing until 2026-10-11, so **every config in existence carries
+  `enabled: false` by accident**. Making that field per-Site would copy a legacy accident into a fresh
+  layer and hand a tenant two overlapping ways to say one thing.
+
+  **Flags merge by a different rule from containers**, and this is the trap: for an address or a zone list
+  an empty value means inherit, but for a flag `False` is a DECISION — *"this shop ships even though the
+  account has shipping off"* — so absent and false are different answers. Reading `False` as "inherit" is
+  the midnight-cutoff bug wearing a boolean. Hence `SITE_OVERRIDABLE_FLAGS`, an `isinstance(..., bool)`
+  filter on the write path, and a tri-state control rather than a checkbox.
+
+  **Threaded where it bites, which is the buyer's side:** publish (`runtime/publishing`), the builder
+  preview (`page_render`), and both checkout reads — the session and the public rate island.
+
+  The rate island is public and documented as *"a cached config read plus arithmetic, with NO carrier
+  call"*, so the Site read is **LAZY**: the config is already in hand and says whether the account has any
+  override at all, and with none nothing is read. `domain/sites.site_id_of_page` is the cheap half of
+  `site_for_page` — one keyed read, no Site scan — and never raises, because on the buyer's path an
+  unreadable page must mean "no override", not a failed checkout. `_tenant_shipping_config` was NOT
+  widened: it is a seam the suite patches in 47 places, the same reason `resolve_for_mode` is applied at
+  the call sites.
+
+  **What deliberately stays account-level**, said out loud because an unscoped reader looks identical to a
+  forgotten one: the **Orders screen** (one list across every business — a readiness summary scoped to one
+  Site answers a question nobody asked there) and the **upsell** (its order records
+  `attribution.page_id = ""` deliberately, being charged off-session after checkout and belonging to no
+  page, so there is no Site to resolve from). Both are asserted by tests.
+
+  The **label path's readiness gate** also stays on the account config, on purpose: the opt-out is a
+  buyer-facing gate — *don't offer shipping* — not a prohibition on the tenant posting something that
+  already sold. Refusing a label on a Site opt-out would invent a refusal with no benefit.
+
+  Controls for the remaining two overridable fields (`return_address`, `zones`) are still to come; only
+  `ship_from_address` and the enablement flag have UI.
 
 No migration of existing data is required by S1–S3: an absent Site override means inherit, and every
 tenant today has exactly the behaviour they have now. **S4 is the first step that writes**, and even then

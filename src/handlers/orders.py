@@ -210,6 +210,10 @@ def fulfilment_context(tenant_id, mode, products_repo=None, shipments_repo=None,
     except Exception:  # noqa: BLE001
         shipments = {}
     try:
+        # ACCOUNT-LEVEL on purpose (plans/SHIPPING_PER_SITE.md §S5). This is the tenant's Orders screen —
+        # one list across every business — so a readiness summary scoped to one Site would be answering a
+        # question nobody asked here. The per-Site override applies where a parcel is actually priced or
+        # bought, which is `quote_rates` / `buy_label`.
         repo = shipping_config_repo or shipping_config_repository()
         config = repo.get(tenant_id) or {}
     except Exception:  # noqa: BLE001

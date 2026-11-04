@@ -333,6 +333,22 @@
           </small>
           <small v-if="siteOverrideError" class="field-error">{{ siteOverrideError }}</small>
         </label>
+
+        <!-- PER-SITE ENABLEMENT (plans/SHIPPING_PER_SITE.md §S5). One business can be digital-only while
+             its sibling ships. Three states, not two, because "inherit" is a real answer and collapsing
+             it into "on" would make the account's own switch unreachable from here. -->
+        <label v-if="shipFromScope" class="offer-field">
+          <span>Shipping on this site</span>
+          <select v-model="siteShipping">
+            <option value="">Follow the account setting{{ accountShippingLabel }}</option>
+            <option value="on">On — offer shipping on this site's pages</option>
+            <option value="off">Off — this site is digital only</option>
+          </select>
+          <small class="field-note">
+            Off hides the postcode field and charges no postage on this site's pages. It does not change
+            any other site.
+          </small>
+        </label>
         <AddressFields :address="form.ship_from_address" />
       </div>
     </section>
@@ -749,11 +765,29 @@ const sitesStore = useSitesStore();
 sitesStore.ensureLoaded();
 const overriddenSiteIds = computed(() => Object.keys(siteOverrides.value));
 
+// What "follow the account setting" resolves to, so inheritance is legible rather than implied. The gate
+// reads the OPT-OUT, never `enabled` — every config predating 2026-10-11 carries `enabled: false` by
+// accident — so this reports the same field the server will.
+const accountShippingLabel = computed(() => (rawDoc.value?.enabled_opt_out ? " — off" : " — on"));
+
+// "", "on" or "off". `enabled_opt_out` is a BOOLEAN whose `false` is a decision ("ship here even though
+// the account has shipping off"), so absent and false are different answers and a tri-state is the only
+// honest control.
+const siteShipping = computed({
+  get: () => {
+    const stated = siteOverrides.value[shipFromScope.value]?.enabled_opt_out;
+    return typeof stated === "boolean" ? (stated ? "off" : "on") : "";
+  },
+  set: (choice) => { pendingSiteShipping.value = choice; },
+});
+const pendingSiteShipping = ref(null);
+
 // Switching scope swaps the address in the form: the account's, or this site's own if it has one, or the
 // account's as a STARTING POINT for a site that inherits — so "fill it in and save" has something to
 // start from rather than an empty form the tenant has to retype.
 watch(shipFromScope, (siteId) => {
   siteOverrideError.value = "";
+  pendingSiteShipping.value = null;   // an unsaved choice must not follow the tenant to another site
   const own = siteId ? siteOverrides.value[siteId]?.ship_from_address : null;
   fillAddress(form.ship_from_address, own || rawDoc.value?.ship_from_address);
 });
@@ -1665,17 +1699,32 @@ async function saveSiteOverride() {
       body: {
         tenant_id: getTenantId(),
         site_id: shipFromScope.value,
-        site_override: { ship_from_address: cleanAddress(form.ship_from_address) },
+        site_override: { ship_from_address: cleanAddress(form.ship_from_address), ...siteShippingFlag() },
       },
     });
     // The SERVER's resolved view, so the screen and the carrier agree about what this site ships with.
     siteOverrides.value = { ...siteOverrides.value, [body.site_id]: body.site_override };
-    message.value = "This site's ship-from address saved.";
+    pendingSiteShipping.value = null;   // the control now reads from what the server stored
+    message.value = "This site's shipping saved.";
   } catch (err) {
     siteOverrideError.value = err.message || "Could not save this site's address.";
   } finally {
     saving.value = false;
   }
+}
+
+/**
+ * The enablement flag for the save body, or nothing at all.
+ *
+ * Three states have to survive the trip: unchanged keeps whatever is stored, "on" sends `false` and "off"
+ * sends `true`, and "follow the account" sends the key ABSENT — which is how the server is told to drop
+ * it. Sending `false` for "follow" would store a decision the tenant did not make.
+ */
+function siteShippingFlag() {
+  const choice = pendingSiteShipping.value ?? siteShipping.value;
+  if (choice === "on") return { enabled_opt_out: false };
+  if (choice === "off") return { enabled_opt_out: true };
+  return {};
 }
 
 async function clearSiteOverride() {

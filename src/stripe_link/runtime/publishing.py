@@ -62,7 +62,7 @@ from stripe_link.domain.custom_domains import (
     creator_hosting_domain, creator_page_url, creator_serving_enabled, site_index_records)
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
-from stripe_link.domain.shipping import shipping_is_quotable
+from stripe_link.domain.shipping import config_for_site, shipping_is_quotable
 from stripe_link.domain import buyer_guarantees as buyer_guarantees_module
 from stripe_link.domain import refund_policy as refund_policy_module
 from stripe_link.runtime.upsell_pages import (
@@ -1610,7 +1610,11 @@ def publish_page_document(
     shipping_quotable = True
     if shipping_config_repository is not None:
         try:
-            shipping_config = shipping_config_repository.get(tenant_id) or {}
+            # THIS PAGE'S business (plans/SHIPPING_PER_SITE.md §S5), through the `site_id` edge the page
+            # already carries -- so a digital-only shop publishes without a postcode field while its
+            # sibling that ships keeps one. No extra read: the override rides on the same document.
+            shipping_config = config_for_site(shipping_config_repository.get(tenant_id) or {},
+                                              str((page or {}).get("site_id") or ""))
             shipping_quotable = shipping_is_quotable(list(products_by_id.values()), shipping_config)
         except Exception:  # noqa: BLE001 - a page must publish even when the shipping config is unreadable
             logger.exception("shipping config unreadable for %s; leaving the element in place", tenant_id)

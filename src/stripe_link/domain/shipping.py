@@ -267,6 +267,18 @@ def tenant_boxes(config: dict[str, Any] | None) -> list[dict[str, Any]]:
 # while the KMS encryption context stays deliberately unscoped.
 SITE_OVERRIDABLE = ("ship_from_address", "return_address", "zones")
 
+# The FLAGS a Site may state, which merge by a different rule: `False` is a DECISION, not an absence.
+# Lumping them in with the containers above would read `enabled_opt_out: False` -- "this shop ships even
+# though the account turned shipping off" -- as "inherit", which is the same shape as a midnight cutoff
+# hour being read as unset (plans/SHIPPING_PER_SITE.md §S5).
+#
+# **`enabled` is deliberately NOT here, and that is a correction to the plan.** The buyer-facing gate reads
+# `enabled_opt_out`, never `enabled`, because the Enable-shipping checkbox was declared, rendered, saved
+# and gating nothing until 2026-10-11 -- so every config in existence carries `enabled: false` by
+# accident (`shipping_opted_out`). Making that field per-Site would copy a legacy accident into a new
+# layer and give a tenant two overlapping ways to say one thing.
+SITE_OVERRIDABLE_FLAGS = ("enabled_opt_out",)
+
 
 def config_for_site(config: dict | None, site_id: str = "") -> dict:
     """The shipping config AS THIS SITE SEES IT: its own overrides laid over the account's.
@@ -276,10 +288,14 @@ def config_for_site(config: dict | None, site_id: str = "") -> dict:
     `provider.api_key_ref`... adding the mode to each would have been twelve chances to miss one"*. The
     returned document is the shape every downstream reader already reads, so none of them change.
 
-    Field-level, and only the fields in `SITE_OVERRIDABLE`. A Site that states a ship-from address but no
-    zones keeps the account's zones; a value present but EMPTY (`{}`, `[]`) is treated as not stated,
-    because an empty override is what a half-filled form produces and silently shipping from nowhere is
-    worse than inheriting.
+    Field-level, and only the fields in `SITE_OVERRIDABLE` / `SITE_OVERRIDABLE_FLAGS`. A Site that states
+    a ship-from address but no zones keeps the account's zones.
+
+    **Two merge rules, because the fields are two kinds.** For a container, a value present but EMPTY
+    (`{}`, `[]`) is treated as not stated -- an empty override is what a half-filled form produces, and
+    silently shipping from nowhere is worse than inheriting. For a FLAG, absent means inherit and both
+    `True` and `False` are statements, so a Site can turn shipping off for itself OR keep it on while the
+    account has it off.
 
     `sites` itself is stripped from the result: a reader handed the whole map could resolve a second time
     and reach a different answer, and nothing downstream has any business knowing the other businesses
@@ -293,6 +309,9 @@ def config_for_site(config: dict | None, site_id: str = "") -> dict:
         value = override.get(field)
         if value:                      # absent, None, {} and [] all mean "inherit"
             resolved[field] = value
+    for flag in SITE_OVERRIDABLE_FLAGS:
+        if isinstance(override.get(flag), bool):   # only an actual boolean is a statement
+            resolved[flag] = override[flag]
     return resolved
 
 

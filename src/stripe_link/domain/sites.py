@@ -21,6 +21,25 @@ def is_site_id(value: Any) -> bool:
     return bool(SITE_ID_RE.match(str(value or "")))
 
 
+def site_id_of_page(pages_repository: Any, tenant_id: str, page_id: str) -> str:
+    """The `site_id` a page carries, or `""`. ONE keyed read and no Site scan.
+
+    The cheap half of `site_for_page`, for a caller that needs the id rather than the document -- a
+    per-Site shipping override is selected by id (plans/SHIPPING_PER_SITE.md §S5), and scanning every Site
+    to find one would put a list on the buyer's checkout path.
+
+    Never raises. On the buyer's path an unreadable page must mean "no override", not a failed checkout:
+    the account's own shipping config is the honest fallback and is what every tenant had before.
+    """
+    tenant_id, page_id = str(tenant_id or "").strip(), str(page_id or "").strip()
+    if pages_repository is None or not tenant_id or not page_id:
+        return ""
+    try:
+        return str((pages_repository.get(tenant_id, page_id) or {}).get("site_id") or "")
+    except Exception:  # noqa: BLE001 - no override beats no sale
+        return ""
+
+
 def site_for_page(sites_repository: Any, tenant_id: str, page_id: str, *,
                   consistent: bool = False, page: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Resolve the Site that owns `page_id` (plans/SITE_OBJECT.md §2.2). A page belongs to at most one Site,

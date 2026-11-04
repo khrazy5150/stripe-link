@@ -877,6 +877,10 @@ def quote_upsell_shipping(tenant_id, items, products_by_id, *, destination, mode
     try:
         from stripe_link.repositories.documents import shipping_config_repository
 
+        # ACCOUNT-LEVEL, and not an omission (plans/SHIPPING_PER_SITE.md §S5). An upsell's own order
+        # records `attribution.page_id = ""` deliberately — it is charged off-session after checkout and
+        # belongs to no page — so there is no Site to resolve from. Inventing one would mean guessing
+        # which business the add-on belongs to.
         config = shipping_config_repository().get(tenant_id) or {}
     except Exception as exc:  # noqa: BLE001 - a settings read must never cost a sale
         print(f"[upsell] shipping config unreadable: {type(exc).__name__}: {exc}")

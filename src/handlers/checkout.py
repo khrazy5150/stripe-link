@@ -289,6 +289,9 @@ def handler(
             region=str(params.get("region") or "").strip()[:3],
             # The server cart, when the page keeps one. It describes what is actually being posted.
             cart_id=str(params.get("cart_id") or "").strip()[:64],
+            # WHICH page asked, so a per-Site shipping override applies to the right business. Already
+            # parsed above; the Site behind it is resolved only if the account has an override at all.
+            page_id=page_id,
             mode=resolve_stripe_mode(event),
             offers_repo=offers_repo, products_repo=products_repo,
         )
@@ -441,7 +444,8 @@ def handler(
             grants_repo=grants_repo,
             discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
             shipping_config=resolve_for_mode(
-                _tenant_shipping_config(tenant_id), tenant_id, mode,
+                _site_scoped(_tenant_shipping_config(tenant_id), tenant_id, page_id, mode),
+                tenant_id, mode,
                 KmsSecretCipher()) if collect_shipping_for(
                 offer, products_by_id) else None,
             # Where the BUYER said they want it sent, if a shipping element on the page asked. Declaring a
@@ -683,7 +687,7 @@ def _flatten_params(value, prefix: str = "") -> dict[str, str]:
     return flat
 
 
-def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, country, mode,
+def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, country, mode, page_id="",
                    postal_code="", region="", cart_id="", offers_repo=None, products_repo=None,
                    quotes_repo=None, carts_repo=None, secret_cipher=None):
     """What shipping would cost this cart, and where it may be sent.
@@ -733,8 +737,9 @@ def shipping_quote(*, tenant_id, offer_id, product_id, price_id, quantity, count
     # Resolved HERE rather than inside `_tenant_shipping_config`, because that function is a seam the
     # suite patches in 47 places and widening its signature broke all of them. The mode and the cipher
     # are already in hand at the call site; they were not in there.
-    config = resolve_for_mode(_tenant_shipping_config(tenant_id), tenant_id, mode,
-                              secret_cipher or KmsSecretCipher())
+    config = resolve_for_mode(
+        _site_scoped(_tenant_shipping_config(tenant_id), tenant_id, page_id, mode),
+        tenant_id, mode, secret_cipher or KmsSecretCipher())
     countries = zone_countries(config)
 
     # THE REAL CART when there is one. A listicle page keeps a server-side cart, and quoting the selected
@@ -1127,6 +1132,32 @@ def collect_shipping_for(offer, products_by_id):
         if fulfillment.get("requires_shipping") or (product or {}).get("product_type") == "physical":
             return True
     return False
+
+
+def _site_scoped(config, tenant_id, page_id, mode):
+    """The shipping config as THIS PAGE's business sees it (plans/SHIPPING_PER_SITE.md §S5).
+
+    **The Site is resolved LAZILY, and that is the point.** This runs on the buyer's path -- the
+    shipping-quote route is public and is documented as "a cached config read plus arithmetic, with NO
+    carrier call" -- so a page read per quote would be a new cost on every tenant. The config is already
+    in hand, and it says whether this account has any per-Site override at all: with none, there is
+    nothing to resolve and nothing is read.
+
+    Deliberately NOT folded into `_tenant_shipping_config`, which the suite patches in 47 places; the same
+    reason `resolve_for_mode` is applied at the call sites rather than inside it.
+    """
+    if not isinstance((config or {}).get("sites"), dict) or not config["sites"]:
+        return config
+    from stripe_link.domain.shipping import config_for_site
+    from stripe_link.domain.sites import site_id_of_page
+    from stripe_link.repositories.documents import pages_repository
+
+    try:
+        site_id = site_id_of_page(pages_repository(mode=mode), tenant_id, page_id)
+    except Exception as exc:  # noqa: BLE001 - no override beats no sale
+        logger.warning("checkout: site not resolved for shipping (%s): %s", page_id, type(exc).__name__)
+        return config
+    return config_for_site(config, site_id)
 
 
 def _tenant_shipping_config(tenant_id):

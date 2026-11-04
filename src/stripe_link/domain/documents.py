@@ -3366,7 +3366,7 @@ def validate_shipping_zones(zones: Any, boxes: Any = None) -> None:
 
 
 def validate_shipping_config(document: dict[str, Any]) -> None:
-    from stripe_link.domain.shipping import SITE_OVERRIDABLE
+    from stripe_link.domain.shipping import SITE_OVERRIDABLE, SITE_OVERRIDABLE_FLAGS
 
     # Only the provider is required. A tenant must be able to save a key and TEST it before filling in
     # addresses -- testing is the first thing anyone wants to do, and gating it behind the most tedious
@@ -3392,11 +3392,16 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
                     f"Shipping config sites key '{site_id}' must look like 'site_xxx'.")
             if not isinstance(override, dict):
                 raise DocumentValidationError(f"Shipping config sites['{site_id}'] must be an object.")
-            unknown = set(override) - set(SITE_OVERRIDABLE)
+            allowed = set(SITE_OVERRIDABLE) | set(SITE_OVERRIDABLE_FLAGS)
+            unknown = set(override) - allowed
             if unknown:
                 raise DocumentValidationError(
                     f"Shipping config sites['{site_id}'] may only override "
-                    f"{sorted(SITE_OVERRIDABLE)}; got {sorted(unknown)}.")
+                    f"{sorted(allowed)}; got {sorted(unknown)}.")
+            for flag in SITE_OVERRIDABLE_FLAGS:
+                if override.get(flag) is not None and not isinstance(override[flag], bool):
+                    raise DocumentValidationError(
+                        f"Shipping config sites['{site_id}'].{flag} must be true or false.")
             for field in ("ship_from_address", "return_address"):
                 address = override.get(field)
                 if address:

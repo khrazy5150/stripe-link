@@ -333,8 +333,17 @@ class EveryPathThatOPENSAKeyResolvesTheMode(unittest.TestCase):
         return (self.ROOT / "src" / name).read_text(encoding="utf-8")
 
     def test_the_buyer_quote_resolves_the_key(self):
+        """The config is now wrapped in `_site_scoped` first (plans/SHIPPING_PER_SITE.md §S5), so the
+        assertion is on the two facts rather than one literal expression: the account's config is still
+        what is loaded, and `resolve_for_mode` is still what opens the key for this request's mode. The
+        Site layer sits BETWEEN them, which is correct — a per-Site override never carries a credential."""
         source = self._module("handlers/checkout.py")
-        self.assertIn("resolve_for_mode(_tenant_shipping_config(tenant_id), tenant_id, mode", source)
+        quote = source.split("def shipping_quote(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("resolve_for_mode(", quote)
+        self.assertIn("_site_scoped(_tenant_shipping_config(tenant_id), tenant_id, page_id, mode)", quote)
+        # And the ordering: the Site resolution is INSIDE the mode resolution's argument, so the key is
+        # opened on the config that is actually going to be used.
+        self.assertLess(quote.index("resolve_for_mode("), quote.index("_site_scoped("))
 
     def test_the_orders_address_check_resolves_the_key(self):
         """It calls `provider_for`, so it opens a credential and needs the mode's one."""
