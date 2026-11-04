@@ -9,6 +9,7 @@ from stripe_link.domain.booking import appointment_service_id
 from stripe_link.domain.calendar_routing import delegation_status, resolve_write_connection
 from stripe_link.domain.notifications_content import delegate_booking_email
 from stripe_link.mailer import send_email
+from stripe_link.sender_identity import sending_identity
 
 
 def route_and_sync(appointment, *, service, fulfiller, connections, action, connections_repo=None, secret_cipher=None, google_secret=None, opener=None):
@@ -85,10 +86,17 @@ def apply_delegation(appointment: dict[str, Any], *, action, change, services_re
                 pass
 
         if fulfiller:
-            profile = (tenant_repo.get(tenant_id, tenant_id) if tenant_repo else {}) or {}
+            # WHO the staff notice is from, through the one resolver
+            # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). This read `TenantProfile.business_name` /
+            # `support_email` -- empty on every tenant and in every environment -- so the person being
+            # assigned work was told about it by nobody in particular. A booking taken through checkout
+            # records its page, which names the business; one taken any other way falls back.
+            identity = sending_identity(
+                tenant_id, page_id=str(appointment.get("page_id") or ""),
+                mode=str(appointment.get("stripe_mode") or "live"))
             notify_delegate(
                 appointment, service, fulfiller, change=change,
-                business_name=str(profile.get("business_name") or ""), support_email=str(profile.get("support_email") or ""),
+                business_name=identity["business_name"], support_email=identity["reply_to"],
                 tenant_id=tenant_id, mailer_send=mailer_send,
             )
     except Exception:  # noqa: BLE001 - delegation must never break a booking

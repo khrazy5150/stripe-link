@@ -19,6 +19,7 @@ from stripe_link.domain.invoicing import (
 )
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.mailer import send_email
+from stripe_link.sender_identity import sending_identity
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
@@ -89,8 +90,15 @@ def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_ci
         return error_response(f"{mode} Stripe keys are not configured.", status_code=400, code="stripe_not_configured")
 
     profile = tenant_repo.get(tenant_id, tenant_id) or {}
-    business_name = str(profile.get("business_name") or "")
-    support_email = str(profile.get("support_email") or "")
+    # WHO the invoice is from, through the one resolver (plans/SITE_AS_BUSINESS_IDENTITY.md §4). This read
+    # `TenantProfile.business_name` / `support_email`, which are empty on every tenant and in every
+    # environment -- the same dead fields the receipt was fixed off on 2026-09-23 -- so every invoice went
+    # out with no business name and no reply address at all. An invoice is raised in the dashboard rather
+    # than from a page, so there is no page_id to narrow it: a single-Site tenant gets their Site, and a
+    # tenant with several gets the tenant-level answer rather than a guess.
+    identity = sending_identity(tenant_id, mode=mode)
+    business_name = identity["business_name"]
+    support_email = identity["reply_to"]
     currency = invoice_currency(invoice)
     tenant_plan = normalize_tier_id(profile.get("tier_id"))
     fee = calculate_price(

@@ -145,7 +145,7 @@ class FlowTests(unittest.TestCase):
         self.refunds = FakeRefunds()
         self.sent = []
         self._business = pm._business_name
-        pm._business_name = lambda tenant_id: "Poliaxis"
+        pm._business_name = lambda tenant_id, **_kw: "Poliaxis"
 
     def tearDown(self):
         pm._business_name = self._business
@@ -223,7 +223,7 @@ class CancelTests(unittest.TestCase):
         pm.stripe_request = lambda method, path, **kwargs: (
             self.calls.append((method, path, kwargs.get("data"))) or {"id": "sub_1"})
         pm.checkout_credentials = lambda *args, **kwargs: ("sk_test", "acct_1")
-        pm._business_name = lambda tenant_id: "Poliaxis"
+        pm._business_name = lambda tenant_id, **_kw: "Poliaxis"
         self.tokens = FakeTokens()
         self.tokens.put(purchase_token_doc("t1", "good", order_id="o1", email="sam@example.com", now=0))
 
@@ -367,7 +367,7 @@ class ThrottleTests(unittest.TestCase):
         self.sent = []
         self.reads = []
         self._business = pm._business_name
-        pm._business_name = lambda tenant_id: "Poliaxis"
+        pm._business_name = lambda tenant_id, **_kw: "Poliaxis"
         orders = self.orders
         outer = self
 
@@ -691,7 +691,7 @@ class CancellationEmailTests(unittest.TestCase):
             or {"id": "sub_1", "cancel_at_period_end": True,
                 "items": {"data": [{"current_period_end": self.PERIOD_END}]}})
         pm.checkout_credentials = lambda *a, **k: ("sk_test", "acct_1")
-        pm._business_name = lambda tenant_id: "Poliaxis"
+        pm._business_name = lambda tenant_id, **_kw: "Poliaxis"
         pm.sending_identity = lambda tenant_id, **_kw: {"business_name": "Poliaxis",
                                                       "reply_to": "hi@poliaxis.com"}
         self.tokens = FakeTokens()
@@ -855,7 +855,7 @@ class CancelRecordsItLocallyTests(unittest.TestCase):
         pm.stripe_request = lambda method, path, **kwargs: {
             "id": "sub_1", "items": {"data": [{"current_period_end": 1790714125}]}}
         pm.checkout_credentials = lambda *a, **k: ("sk_test", "acct_1")
-        pm._business_name = lambda t: "Poliaxis"
+        pm._business_name = lambda t, **_kw: "Poliaxis"
         pm.sending_identity = lambda t, **_kw: {"business_name": "Poliaxis", "reply_to": ""}
         self.tokens = FakeTokens()
         self.tokens.put(purchase_token_doc("t1", "good", order_id="o1", email="s@x.com", now=0))

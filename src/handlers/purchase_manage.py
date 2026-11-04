@@ -139,6 +139,8 @@ def handler(
         if token:
             return _transaction_page(token, tokens_repo=tokens_repo, orders_repo=orders_repo)
         if tenant_id:
+            # A visitor arriving with only a tenant in the URL: no order, so nothing narrows it to one
+            # of the tenant's businesses, and the lookup form is for real buyers -- hence live.
             return _html(render_lookup_form(_manage_url(), tenant_id,
                                             business=_business_name(tenant_id),
                                             honeypot_field=HONEYPOT_FIELD))
@@ -160,15 +162,17 @@ def handler(
     return _html(_EXPIRED_HTML, 404)
 
 
-def _business_name(tenant_id: str) -> str:
-    """Best-effort branding. A missing name costs a sentence, never the page."""
-    try:
-        from stripe_link.repositories.documents import tenant_profiles_repository
+def _business_name(tenant_id: str, *, order=None, mode="live") -> str:
+    """Best-effort branding for the public pages. A missing name costs a sentence, never the page.
 
-        profile = tenant_profiles_repository().get(tenant_id, tenant_id) or {}
-        return str((profile.get("business") or {}).get("name") or profile.get("business_name") or "").strip()
-    except Exception:  # noqa: BLE001
-        return ""
+    It used to read the TENANT profile for `business.name` -- a USER-profile field -- or
+    `business_name`, which is empty on every tenant and in every environment. So it returned "" every
+    time it was called, and the buyer's own purchase page said "the seller" instead of naming who they
+    bought from. Now it asks the one resolver (plans/SITE_AS_BUSINESS_IDENTITY.md §4); with the order in
+    hand it names the business whose page sold it, and the bare lookup form gets the tenant-level answer.
+    """
+    return sending_identity(tenant_id, page_id=_one_page([order] if order else []),
+                            mode=mode)["business_name"]
 
 
 def _orders_for(tenant_id, orders_repo, mode):
@@ -288,7 +292,10 @@ def _send_link(minted, tenant_id, mailer_send, *, mode="live"):
                                 mode=mode)
     # The identity is the same source the email HEADER uses. Reading a different one here is how the
     # header said "Poliaxis Nutrition" while the body said "the seller" in the same message.
-    business = (identity.get("business_name") or _business_name(tenant_id_str) or "").strip()
+    # ONE source. This was `identity or _business_name(...)`, two different reads of the same question
+    # back when they answered differently; both now go through the resolver, so the fallback was the same
+    # value arrived at twice.
+    business = str(identity.get("business_name") or "").strip()
     several = len(minted) > 1
 
     def line(order, token):
@@ -381,11 +388,11 @@ def _resolve(token, tokens_repo, orders_repo):
 
 
 def _transaction_page(token, *, tokens_repo, orders_repo):
-    record, order, _ = _resolve(token, tokens_repo, orders_repo)
+    record, order, mode = _resolve(token, tokens_repo, orders_repo)
     if not record or not order:
         return _html(_EXPIRED_HTML, 404)
     tenant_id = str(record.get("tenant_id") or "")
-    business = _business_name(tenant_id)
+    business = _business_name(tenant_id, order=order, mode=mode or "live")
     policy = str(((order.get("refund_policy") or {}).get("short_label")) or "")
     return _html(render_transaction(
         purchase_summary(order), _manage_url(), token,
@@ -400,7 +407,7 @@ def _act(action, body, *, tokens_repo, orders_repo, refunds_repo, notifications_
     if not record or not order:
         return _html(_EXPIRED_HTML, 404)
     tenant_id = str(record.get("tenant_id") or "")
-    business = _business_name(tenant_id)
+    business = _business_name(tenant_id, order=order, mode=mode or "live")
 
     if action == "cancel":
         return _cancel(order, tenant_id, mode, business, token=str(body.get("t") or "").strip(),
@@ -471,7 +478,7 @@ def _cancel(order, tenant_id, mode, business, *, token="", stripe_repo, secret_c
     if email:
         identity = sending_identity(tenant_id, page_id=_one_page([order]), mode=mode)
         content = cancellation_content(
-            business_name=identity.get("business_name") or (business if business != "the seller" else ""),
+            business_name=str(identity.get("business_name") or ""),
             product=order_label(order),
             ends_at=ends_at,
             # The same link back, because cancelling and wanting money back are usually the same

@@ -12,11 +12,12 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, stripe_mode_from_session_id, tenant_id_from_event
 from stripe_link.domain.downloads import DOWNLOADABLE_STATUSES, asset_bucket_key, sanitize_filename
-from stripe_link.domain.business_email import is_disposable, sender_display_name, verified_email
+from stripe_link.domain.business_email import email_identity, is_disposable, verified_email
 from stripe_link.domain.lead_magnets import COLLECTABLE_FIELDS, download_offer, find_ribbon, missing_fields
 from stripe_link.domain.leads import build_lead_submission, is_spam, lead_id_for
 from stripe_link.ids import generate_id
 from stripe_link.mailer import send_email
+from stripe_link.sender_identity import site_organization
 from html import escape
 from stripe_link.repositories.documents import RepositoryError, leads_repository, orders_repository, pages_repository, products_repository, user_profiles_repository
 
@@ -271,7 +272,17 @@ def lead_download_handler(
         )
     # An empty business name must not fall back to the platform's bare address — that hands the recipient
     # Junior Bay's mail instead of the merchant's, which is the one thing this feature exists to avoid.
-    business_name = sender_display_name(profile or {})
+    #
+    # The NAME comes from the Site that publishes this page, through the one resolver
+    # (plans/SITE_AS_BUSINESS_IDENTITY.md §4): a tenant running two businesses must not deliver one's lead
+    # magnet under the other's name. The REPLY ADDRESS stays the verified one gated above and is
+    # deliberately not re-resolved — the gate is the whole point of this block, and a Site address is not
+    # usable until verification is Site-scoped (§P3).
+    business_name = email_identity(
+        profile or {},
+        site_organization(tenant_id, page_id=str(page.get("page_id") or ""),
+                          mode=str(page.get("stripe_mode") or "live")),
+    )["business_name"]
     # The subject is the RIBBON's headline: it is the promise the visitor just clicked, so it is what they
     # will recognise in a crowded inbox. The page's name is an internal label the tenant picked for a list.
     subject = str((section or {}).get("headline") or "").strip() or str(page.get("name") or "").strip() or filename

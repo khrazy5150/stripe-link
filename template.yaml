@@ -1268,6 +1268,7 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTable
           PAGES_TABLE: !Ref PagesTable
           PRODUCTS_TABLE: !Ref ProductsTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-downloads-upload-${Environment}"
@@ -1275,6 +1276,10 @@ Resources:
       Handler: handlers.downloads.upload_url_handler
       Description: Tenant -- mint a presigned S3 PUT URL for a digital-product file in the media bucket.
       Policies:
+        # WHO this message is from: the page names the Site and the Site carries the business
+        # identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
         # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
         - DynamoDBReadPolicy:
@@ -1302,6 +1307,7 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTable
           PAGES_TABLE: !Ref PagesTable
           PRODUCTS_TABLE: !Ref ProductsTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-lead-download-${Environment}"
@@ -1309,6 +1315,10 @@ Resources:
       Handler: handlers.downloads.lead_download_handler
       Description: Public -- capture a lead when the ribbon asks for one, then hand the file over as a download or email the link.
       Policies:
+        # WHO this message is from: the page names the Site and the Site carries the business
+        # identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
         - DynamoDBCrudPolicy:
@@ -1352,6 +1362,7 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTable
           PAGES_TABLE: !Ref PagesTable
           PRODUCTS_TABLE: !Ref ProductsTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-download-serve-${Environment}"
@@ -1359,6 +1370,10 @@ Resources:
       Handler: handlers.downloads.serve_handler
       Description: Public -- verify the paid order owns the product, then 302 to a short-lived presigned download URL.
       Policies:
+        # WHO this message is from: the page names the Site and the Site carries the business
+        # identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
         # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
         - DynamoDBReadPolicy:
@@ -4643,7 +4658,9 @@ Resources:
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
           INVOICES_TABLE: !Ref InvoicesTable
+          PAGES_TABLE: !Ref PagesTable
           SERVICES_TABLE: !Ref ServicesTable
+          SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
@@ -4652,6 +4669,12 @@ Resources:
       Handler: handlers.invoices.handler
       Description: Service and custom invoice API (create, list, and finalize+send via Stripe Invoicing).
       Policies:
+        # WHO this message is from: the page names the Site and the Site carries the business
+        # identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
         # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
         - DynamoDBReadPolicy:
