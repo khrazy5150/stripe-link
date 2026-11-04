@@ -172,25 +172,39 @@ class TheSiteSignsTheInviteTests(unittest.TestCase):
 class TheFallbacksKeepSendingTests(unittest.TestCase):
     """Branding is worth less than delivery: every failure here degrades the name, never the message."""
 
-    def test_a_LEGACY_invite_with_no_page_falls_back_to_the_first_site(self):
-        """Invites planned before `page_id` was stored have nothing to resolve from. A single-Site tenant
-        gets the same answer either way; a multi-Site tenant gets what it got before, which is the best
-        available for an invite that never recorded where the sale happened."""
+    def test_a_LEGACY_invite_with_no_page_does_NOT_guess_between_two_sites(self):
+        """Invites planned before `page_id` was stored have nothing to resolve from. With two businesses to
+        choose between there is no answer, so the resolver declines to pick one and the tenant profile
+        answers instead — ONE wrong-but-consistent name beats a coin flip between two."""
         sites = FakeSites()
         _result, sent = sweep(FakeInvites([invite(page_id="")]), sites=sites)
-        self.assertEqual(sent[0]["from_name"], "Poliaxis Nutrition")
-        self.assertEqual(sites.scans, 1)
+        self.assertEqual(sent[0]["from_name"], "Poliaxis Nutrition")  # from the profile, not from a Site
+
+    def test_a_SINGLE_site_tenant_still_gets_their_site(self):
+        """With one business there is nothing to guess, and the Site is the better source: the profile's
+        business name is empty on every tenant that has ever existed."""
+        sites = FakeSites([{"site_id": "site_qui", "tenant_id": "t1", "organization": dict(QUILL),
+                            "pages": {}}])
+        _result, sent = sweep(FakeInvites([invite(page_id="")]), sites=sites,
+                              profiles=FakeProfiles({"email": "owner@quill.test"}))
+        self.assertEqual(sent[0]["from_name"], "Quill")
 
     def test_a_site_with_NO_organization_falls_back_to_the_profile(self):
         sites = FakeSites([{"site_id": "site_qui", "tenant_id": "t1", "organization": {}, "pages": {}}])
         _result, sent = sweep(FakeInvites([invite(page_id="page_qui")]), sites=sites)
         self.assertEqual(sent[0]["from_name"], "Poliaxis Nutrition")
 
-    def test_an_unreadable_pages_table_still_sends(self):
-        result, sent = sweep(FakeInvites([invite(page_id="page_qui")]), pages=FakePages(fail=True))
+    def test_an_unreadable_pages_table_STILL_FINDS_THE_RIGHT_SITE(self):
+        """The page read only supplies the `site_id` edge, which makes the lookup keyed instead of a scan.
+        Without it the resolver looks for the page_id in each Site's route map and gets the same answer —
+        so a throttled Pages table costs latency, not the business name."""
+        sites = FakeSites()
+        result, sent = sweep(FakeInvites([invite(page_id="page_qui")]), pages=FakePages(fail=True),
+                             sites=sites)
         self.assertEqual(result["failed"], 0)
         self.assertEqual(len(sent), 2)
-        self.assertEqual(sent[0]["from_name"], "Poliaxis Nutrition")  # degraded to the scan, not silent
+        self.assertEqual(sent[0]["from_name"], "Quill")
+        self.assertEqual(sites.scans, 1)
 
     def test_no_sites_repo_at_all_still_sends(self):
         """Unit tests and any environment without SITES_TABLE. The name falls back to the profile."""

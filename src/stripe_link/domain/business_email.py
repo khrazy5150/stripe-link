@@ -166,16 +166,29 @@ def reply_to_address(profile: Any) -> str:
     return signup if looks_like_email(signup) else ""
 
 
-def email_identity(profile: Any) -> dict[str, str]:
-    """The tenant's sending identity: the name a customer sees, and the address their reply reaches.
+def email_identity(profile: Any, organization: Any = None) -> dict[str, str]:
+    """The sending identity of the business behind one message: the name a customer sees, and the address
+    their reply reaches.
 
     ONE answer, so every message a tenant sends is from the same business with the same reply address.
     Before this existed each emitter resolved its own: the review invite read `Site.organization.name`, the
-    receipt read `TenantProfile.business_name` (empty on every tenant that has ever existed), and most
+    receipt read `TenantProfile.business_name` (empty on every tenant and in every environment) and most
     emitters asked for neither -- so the same shop appeared as "Poliaxis Nutrition" on one message and as a
     bare "support@juniorbay.net" on the next (reported 2026-09-23, both screenshots).
+
+    `organization` is the Site's, and it WINS the display name when it has one
+    (plans/SITE_AS_BUSINESS_IDENTITY.md §4). The tenant profile holds one business name for a tenant who
+    may run several businesses, so preferring it is how a Quill customer's review invite came to be signed
+    "Poliaxis Nutrition". The profile is the fallback, for a Site with no organization and for the mail
+    that has no Site at all -- a verification code, or anything sent before a Site exists.
+
+    Reply-To is still the TENANT's, deliberately, even when the name is the Site's: it is the only address
+    the platform has made the tenant prove they can receive at. A Site address becomes usable once
+    verification is Site-scoped (§P3), and until then an unverified Site address would be exactly the hole
+    the verification gate exists to close.
     """
+    org = organization if isinstance(organization, dict) else {}
     return {
-        "business_name": sender_display_name(profile),
+        "business_name": str(org.get("name") or "").strip() or sender_display_name(profile),
         "reply_to": reply_to_address(profile),
     }

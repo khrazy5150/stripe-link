@@ -51,26 +51,31 @@ def from_email_address(display_name: str = "") -> str:
     return formataddr((name, address)) if name else address
 
 
-def tenant_email_identity(tenant_id: str, profiles_repo: Any | None = None) -> dict[str, str]:
-    """The tenant's `{business_name, reply_to}`, read from the OWNER's profile.
+def tenant_email_identity(tenant_id: str, profiles_repo: Any | None = None,
+                          organization: Any = None) -> dict[str, str]:
+    """The `{business_name, reply_to}` behind one message, from the OWNER's profile and an optional Site.
 
     The owner's `user_id` equals their `tenant_id` (verified against every profile in dev and prod,
-    2026-09-23), so this is one keyed read rather than a scan.
+    2026-09-23), so this is one keyed read.
+
+    Prefer `sending_identity`, which resolves the Site for you. This stays as the NO-SITE answer: the
+    mailer's own last-resort fallback for a caller that passed no display name, and platform-authored mail,
+    which has no Site by definition.
 
     Never raises: an identity lookup must not be the reason a receipt fails to send. A failure costs the
     branding, which is recoverable; a failure that loses the message is not.
     """
     tenant_id = str(tenant_id or "").strip()
     if not tenant_id:
-        return {"business_name": "", "reply_to": ""}
+        return email_identity({}, organization)
     try:
         if profiles_repo is None:
             from stripe_link.repositories.documents import user_profiles_repository
 
             profiles_repo = user_profiles_repository()
-        return email_identity(profiles_repo.get(tenant_id, tenant_id) or {})
+        return email_identity(profiles_repo.get(tenant_id, tenant_id) or {}, organization)
     except Exception:  # noqa: BLE001 - branding is worth less than delivery
-        return {"business_name": "", "reply_to": ""}
+        return email_identity({}, organization)
 
 
 def _tenant_shows_signature(tenant_id: str, profiles_repo: Any | None = None) -> bool:

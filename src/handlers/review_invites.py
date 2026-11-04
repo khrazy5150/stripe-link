@@ -10,8 +10,8 @@ import os
 import time
 
 from stripe_link.domain.review_invites import due_steps, invite_email, invite_sendable, mark_step_sent
-from stripe_link.domain.sites import find_site_for_page
-from stripe_link.mailer import EmailError, send_email, tenant_email_identity
+from stripe_link.mailer import EmailError, send_email
+from stripe_link.sender_identity import sending_identity
 from stripe_link.repositories.documents import (pages_repository, review_invites_repository,
                                                 sites_repository)
 
@@ -33,8 +33,11 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
 
     invites = invites_repo.scan_type()
     sent = failed = 0
-    org_by_page: dict[tuple[str, str], dict] = {}
-    identity_by_tenant: dict[str, dict] = {}
+    # Keyed by (tenant, PAGE), not by tenant: one tenant can run several businesses, and the business an
+    # invite is from is the one whose page sold the product. A per-tenant cache would sign every invite in
+    # the sweep with whichever Site resolved first -- the reported bug, one layer down
+    # (plans/SITE_AS_BUSINESS_IDENTITY.md §1).
+    identity_by_page: dict[tuple[str, str], dict] = {}
     for invite in invites:
         if not invite_sendable(invite):
             continue
@@ -43,21 +46,16 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
             continue
         tenant_id = str(invite.get("tenant_id") or "")
         page_id = str(invite.get("page_id") or "")
-        if (tenant_id, page_id) not in org_by_page:
-            org_by_page[(tenant_id, page_id)] = _invite_organization(sites_repo, pages_repo, tenant_id,
-                                                                     page_id)
-        if tenant_id not in identity_by_tenant:
-            identity_by_tenant[tenant_id] = tenant_email_identity(tenant_id, profiles_repo)
-        org = org_by_page.get((tenant_id, page_id), {})
+        if (tenant_id, page_id) not in identity_by_page:
+            identity_by_page[(tenant_id, page_id)] = sending_identity(
+                tenant_id, page_id=page_id, mode="live", profiles_repo=profiles_repo,
+                sites_repo=sites_repo, pages_repo=pages_repo)
         # Resolved ONCE and used for both the body and the envelope. The two used to be read from
         # different places, which is how a message could name one business in its From line and another
         # (or none) in its content.
-        identity = identity_by_tenant.get(tenant_id, {})
-        # The SITE WINS (plans/SITE_AS_BUSINESS_IDENTITY.md §1). The tenant profile's business name is one
-        # name for a tenant who may sell several businesses, so letting it win signed a Quill customer's
-        # invite "Poliaxis Nutrition". The profile is now only the fallback for an invite whose Site has no
-        # organization yet, and it disappears entirely when §P4 removes that field.
-        business_name = str(org.get("name") or "").strip() or identity.get("business_name", "")
+        identity = identity_by_page.get((tenant_id, page_id), {})
+        org = identity.get("organization") or {}
+        business_name = identity.get("business_name", "")
         current = invite
         for step in due:
             try:
@@ -81,37 +79,3 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to persist invite %s: %s", invite.get("invite_id"), exc)
     return {"scanned": len(invites), "sent": sent, "failed": failed}
-
-
-def _invite_organization(sites_repo, pages_repo, tenant_id, page_id):
-    """The business identity to sign this invite with — name (From line) plus entity_type/place_id/
-    review_destination (where the review is routed).
-
-    Resolved PER INVITE from the page the order came from, because one tenant can run several businesses
-    and each lives on its own Site. The invite carries its `page_id`; the page carries its `site_id`
-    reverse edge, so this is two keyed reads (plans/SITE_AS_BUSINESS_IDENTITY.md §3.1 and §4).
-
-    Falls back to the first Site that has an organization, which is what this did for every invite before
-    the edge existed: invites written before `page_id` was stored have no page to resolve from, and a
-    single-Site tenant gets the same answer either way. Never raises — branding is worth less than
-    delivery.
-    """
-    if not sites_repo or not tenant_id:
-        return {}
-    if page_id and pages_repo is not None:
-        try:
-            page = pages_repo.get(tenant_id, page_id) or {}
-            site = find_site_for_page(sites_repo, tenant_id, page_id, page=page)
-            org = (site or {}).get("organization")
-            if isinstance(org, dict) and str(org.get("name") or "").strip():
-                return org
-        except Exception:  # noqa: BLE001
-            pass
-    try:
-        for site in sites_repo.list_for_tenant(tenant_id):
-            org = (site or {}).get("organization")
-            if isinstance(org, dict) and str(org.get("name") or "").strip():
-                return org
-    except Exception:  # noqa: BLE001
-        pass
-    return {}
