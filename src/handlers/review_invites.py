@@ -11,9 +11,9 @@ import time
 
 from stripe_link.domain.review_invites import due_steps, invite_email, invite_sendable, mark_step_sent
 from stripe_link.mailer import EmailError, send_email
-from stripe_link.sender_identity import sending_identity
 from stripe_link.repositories.documents import (pages_repository, review_invites_repository,
                                                 sites_repository)
+from stripe_link.sender_identity import sending_identity
 
 logger = logging.getLogger(__name__)
 

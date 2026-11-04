@@ -10354,7 +10354,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          };",
         "          const addToCart = (t) => {",
         "            if (!serverEnabled) { addFallback(t); return; }",
-        "            const body = { tenant_id: tenantId, offer_id: offerId, mode: cartMode, product_id: t.product_id || '', price_id: t.price_id || '', service_id: t.service_id || '', qty: 1, page_url: window.location.origin + window.location.pathname };",
+        "            const body = { tenant_id: tenantId, offer_id: offerId, mode: cartMode, product_id: t.product_id || '', price_id: t.price_id || '', service_id: t.service_id || '', qty: 1, page_url: window.location.origin + window.location.pathname, page_id: listicle.dataset.pageId || '' };",
         "            const id = getCartId(); if (id) body.cart_id = id;",
         "            if (ctToken) body.ct = ctToken;",
 

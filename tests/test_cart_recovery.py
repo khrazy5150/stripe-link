@@ -109,6 +109,110 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(self._run()["sent"], 0)
 
 
+class WhichBusinessSendsTheNudgeTests(unittest.TestCase):
+    """A recovery email is signed by the business whose page holds the cart.
+
+    The sweep used to take "the first Site that has an organization" and then let the tenant profile's
+    single business name override it — the same two faults as the review-invite sweep, which is how a Quill
+    customer's invite came to be signed "Poliaxis Nutrition". Both now ask one resolver
+    (plans/SITE_AS_BUSINESS_IDENTITY.md §4), and the cart records its page so there is something to ask
+    with.
+    """
+
+    QUILL = {"name": "Quill", "entity_type": "LocalBusiness"}
+    POLIAXIS = {"name": "Poliaxis Nutrition", "entity_type": "Organization"}
+
+    class Sites:
+        def __init__(self, sites):
+            self.sites = sites
+
+        def get(self, _tenant, site_id):
+            return next((dict(s) for s in self.sites if s["site_id"] == site_id), None)
+
+        def list_for_tenant(self, _tenant, **_kw):
+            return [dict(s) for s in self.sites]
+
+    class Pages:
+        def get(self, tenant_id, page_id):
+            return {"tenant_id": tenant_id, "page_id": page_id, "site_id": "site_" + page_id[-3:]}
+
+    class Profiles:
+        def get(self, *_a):
+            return {"business": {"name": "Poliaxis Nutrition", "email": "hi@pol.test",
+                                 "email_verified": True}}
+
+    def setUp(self):
+        self.carts = FakeDocumentRepository("cart_id")
+        self.tokens = FakeDocumentRepository("token")
+        self.sent = []
+        self.sites = self.Sites([
+            {"site_id": "site_pol", "tenant_id": "t1", "organization": dict(self.POLIAXIS),
+             "pages": {"/p": {"page_id": "page_pol"}}},
+            {"site_id": "site_qui", "tenant_id": "t1", "organization": dict(self.QUILL),
+             "pages": {"/q": {"page_id": "page_qui"}}},
+        ])
+
+    def _run(self):
+        return sweep_handler(
+            {}, None, carts_repo=self.carts, cart_tokens_repo=self.tokens, sites_repo=self.sites,
+            pages_repo=self.Pages(), profiles_repo=self.Profiles(),
+            mailer_send=lambda **kw: self.sent.append(kw) or {"ok": True},
+            now_fn=lambda: 10000, token_factory=lambda: "tok_fixed")
+
+    def _cart(self, cart_id, page_id):
+        cart = _open_cart(cart_id, updated_at=0)
+        cart["page_id"] = page_id
+        return cart
+
+    def test_the_nudge_is_signed_by_the_carts_own_business(self):
+        self.carts.put(self._cart("c1", "page_qui"))
+        self._run()
+        self.assertEqual(self.sent[0]["from_name"], "Quill")
+
+    def test_two_carts_on_two_sites_are_signed_DIFFERENTLY(self):
+        """The per-tenant cache this replaced would sign both with whichever resolved first."""
+        self.carts.put(self._cart("c1", "page_qui"))
+        self.carts.put(self._cart("c2", "page_pol"))
+        self._run()
+        self.assertEqual({m["from_name"] for m in self.sent}, {"Quill", "Poliaxis Nutrition"})
+
+    def test_a_cart_with_no_page_is_not_guessed_at(self):
+        """Carts created before the page was recorded. With two businesses there is no answer, so the
+        tenant profile gives one consistent name instead of a coin flip."""
+        self.carts.put(_open_cart("c1", updated_at=0))
+        self._run()
+        self.assertEqual(self.sent[0]["from_name"], "Poliaxis Nutrition")
+
+    def test_the_cart_api_records_the_page_it_was_added_from(self):
+        """Nothing above works if the cart never stores it. The published page already carries its page_id
+        on the listicle section; the POST body now passes it through."""
+        from tests.test_cart import _offer, _product
+
+        carts = FakeDocumentRepository("cart_id")
+        offers = FakeDocumentRepository("offer_id")
+        products = FakeDocumentRepository("product_id")
+        offers.put(_offer())
+        products.put(_product("prod_a", "price_a", 1999))
+        resp = cart_handler(
+            {"httpMethod": "POST",
+             "body": json.dumps({"tenant_id": "t1", "offer_id": "off_1", "product_id": "prod_a",
+                                 "qty": 1, "page_url": PAGE, "page_id": "page_qui"})},
+            None, carts_repo=carts, offers_repo=offers, products_repo=products,
+            services_repo=FakeDocumentRepository("service_id"),
+            cart_tokens_repo=FakeDocumentRepository("token"), now_fn=lambda: 0)
+        self.assertEqual(resp["statusCode"], 201, resp.get("body"))
+        cart_id = json.loads(resp["body"])["cart_id"]
+        self.assertEqual(carts.get("t1", cart_id)["page_id"], "page_qui")
+
+    def test_the_published_page_sends_its_page_id_with_every_add(self):
+        import pathlib as _pathlib
+
+        src = (_pathlib.Path(__file__).resolve().parents[1] / "src" / "stripe_link" / "runtime"
+               / "html.py").read_text()
+        body = next(line for line in src.splitlines() if "const body = { tenant_id: tenantId" in line)
+        self.assertIn("page_id: listicle.dataset.pageId", body)
+
+
 class UnsubscribeAndRehydrateTests(unittest.TestCase):
     def setUp(self):
         self.carts = FakeDocumentRepository("cart_id")

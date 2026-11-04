@@ -13,20 +13,24 @@ from urllib.parse import quote
 
 from stripe_link.domain.cart import cart_token_doc, mark_recovery_sent, normalize_page_url, recoverable
 from stripe_link.domain.cart_recovery import recovery_email
-from stripe_link.mailer import EmailError, send_email, tenant_email_identity
-from stripe_link.repositories.documents import cart_tokens_repository, carts_repository, sites_repository
+from stripe_link.mailer import EmailError, send_email
+from stripe_link.repositories.documents import (cart_tokens_repository, carts_repository,
+                                                pages_repository, sites_repository)
+from stripe_link.sender_identity import sending_identity
 
 logger = logging.getLogger(__name__)
 
 
 def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_repo=None,
-            mailer_send=None, now_fn=None, token_factory=None, profiles_repo=None):
+            mailer_send=None, now_fn=None, token_factory=None, profiles_repo=None, pages_repo=None):
     # Abandoned-cart recovery is a live-only sweep: never email real recovery nudges for test-mode carts
     # (plans/STRIPE_MODE_DECOUPLING.md). The mode-scoped scan returns only live carts.
     carts_repo = carts_repo or carts_repository(mode="live")
     cart_tokens_repo = cart_tokens_repo or cart_tokens_repository(mode="live")
     if sites_repo is None and os.environ.get("SITES_TABLE"):
         sites_repo = sites_repository(mode="live")
+    if pages_repo is None and os.environ.get("PAGES_TABLE"):
+        pages_repo = pages_repository(mode="live")  # the cart's page, to find WHICH business is selling
     mailer_send = mailer_send or send_email
     now = int((now_fn or time.time)())
     base_url = os.environ.get("PUBLIC_API_BASE_URL", "").rstrip("/")
@@ -36,19 +40,23 @@ def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_rep
 
     carts = carts_repo.scan_type()
     sent = failed = 0
-    org_by_tenant: dict[str, dict] = {}
-    identity_by_tenant: dict[str, dict] = {}
+    # Keyed by (tenant, PAGE): the business behind a recovery email is the one whose page holds the
+    # abandoned cart, and a tenant can run several. A per-tenant cache would sign every nudge in the sweep
+    # with whichever Site resolved first (plans/SITE_AS_BUSINESS_IDENTITY.md §1).
+    identity_by_page: dict[tuple[str, str], dict] = {}
     for cart in carts:
         if not recoverable(cart, now, min_age_seconds=min_age, max_attempts=max_attempts):
             continue
         tenant_id = str(cart.get("tenant_id") or "")
-        if tenant_id not in org_by_tenant:
-            org_by_tenant[tenant_id] = _tenant_organization(sites_repo, tenant_id)
-            identity_by_tenant[tenant_id] = tenant_email_identity(tenant_id, profiles_repo)
-        org = org_by_tenant.get(tenant_id, {})
+        page_id = str(cart.get("page_id") or "")
+        if (tenant_id, page_id) not in identity_by_page:
+            identity_by_page[(tenant_id, page_id)] = sending_identity(
+                tenant_id, page_id=page_id, mode="live", profiles_repo=profiles_repo,
+                sites_repo=sites_repo, pages_repo=pages_repo)
         # One identity for the body and the envelope alike (plans/EMAIL_TEMPLATE.md).
-        identity = identity_by_tenant.get(tenant_id, {})
-        business_name = identity.get("business_name") or str(org.get("name") or "")
+        identity = identity_by_page.get((tenant_id, page_id), {})
+        org = identity.get("organization") or {}
+        business_name = identity.get("business_name", "")
         try:
             token = token_factory()
             cart_tokens_repo.put(cart_token_doc(
@@ -79,18 +87,3 @@ def _with_param(url: str, key: str, value: str) -> str:
         return ""
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}{quote(key)}={quote(value)}"
-
-
-def _tenant_organization(sites_repo, tenant_id):
-    """The tenant's business identity for the from-name — first Site with an organization (multi-Site
-    precision is a future refinement, same as the review-invite sweep)."""
-    if not sites_repo or not tenant_id:
-        return {}
-    try:
-        for site in sites_repo.list_for_tenant(tenant_id):
-            org = (site or {}).get("organization")
-            if isinstance(org, dict) and str(org.get("name") or "").strip():
-                return org
-    except Exception:  # noqa: BLE001
-        pass
-    return {}

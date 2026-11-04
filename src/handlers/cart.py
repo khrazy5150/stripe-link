@@ -170,6 +170,13 @@ def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, ca
     page_url = normalize_page_url(body.get("page_url"))
     if page_url:
         cart["page_url"] = page_url  # where a recovery link returns the shopper
+    # WHICH page, as an id rather than a URL. The recovery email has to be signed by the business that is
+    # selling, and a tenant can run several; the page names the Site and the Site carries the business
+    # identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). The URL cannot answer it -- two Sites can share a
+    # hostname shape, and a custom domain changes without the cart knowing.
+    page_id = str(body.get("page_id") or "").strip()
+    if page_id:
+        cart["page_id"] = page_id
 
     cart["updated_at"] = int(now)
     cart["retention_expires_at"] = int(now) + CART_RETENTION_SECONDS
