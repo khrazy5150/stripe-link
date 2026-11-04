@@ -44,6 +44,15 @@ class FakeTable:
     def update_item(self, **kwargs):
         if self.missing:
             raise RuntimeError("ConditionalCheckFailedException")
+        # THE RULE THE REAL TABLE ENFORCES, which this fake did not: DynamoDB refuses an
+        # UpdateExpression that touches both a container and a member of it -- "Two document paths overlap
+        # with each other... path one: [sites], path two: [sites, site_xxx]". The first version of
+        # `set_nested` did exactly that and every test passed, because a fake that only records the
+        # expression text has no opinion about whether the expression is legal. Found by running it
+        # against dev.
+        expression = kwargs.get("UpdateExpression", "")
+        if "#c = " in expression and "#c.#m" in expression:
+            raise RuntimeError("ValidationException: Two document paths overlap with each other")
         self.updates.append(kwargs)
 
 
@@ -74,18 +83,39 @@ class TheWriteIsTARGETEDTests(unittest.TestCase):
             event({"site_id": "site_qui", "site_override": {"ship_from_address": AUSTIN}}), repository)
         self.assertEqual(response["statusCode"], 201, response.get("body"))
         self.assertEqual(table.puts, [], "a put would restore every other site's override")
-        self.assertEqual(len(table.updates), 1)
-        update = table.updates[0]
-        self.assertIn("#c.#m = :v", update["UpdateExpression"])
+        # The LAST statement is the member write; the first creates the map (see below). What matters here
+        # is that nothing writes the whole document.
+        update = table.updates[-1]
+        self.assertEqual(update["UpdateExpression"], "SET #c.#m = :v")
         self.assertEqual(update["ExpressionAttributeNames"], {"#c": "sites", "#m": "site_qui"})
 
-    def test_the_FIRST_override_creates_the_map(self):
-        """A bare `SET #c.#m` on a document with no `sites` attribute fails the whole update with
-        ValidationException — which is how a tenant's first override would have 500'd."""
+    def test_the_FIRST_override_creates_the_map_in_its_OWN_statement(self):
+        """A bare `SET #c.#m` on a document with no `sites` attribute fails with ValidationException — a
+        tenant's first override would have 500'd — and folding the two into ONE expression is what
+        DynamoDB refuses as overlapping paths. So it is two statements, in order."""
         repository, table = repo()
         save_site_override(event({"site_id": "site_qui", "site_override": {"ship_from_address": AUSTIN}}),
                            repository)
-        self.assertIn("if_not_exists(#c, :empty)", table.updates[0]["UpdateExpression"])
+        self.assertEqual([u["UpdateExpression"] for u in table.updates],
+                         ["SET #c = if_not_exists(#c, :empty)", "SET #c.#m = :v"])
+
+    def test_the_map_is_NOT_re_created_when_the_caller_knows_it_exists(self):
+        """The caller has just read the document, so the extra round trip is only paid on the first
+        override a config ever gets."""
+        repository, table = repo(config(sites={"site_pol": {"ship_from_address": HQ}}))
+        save_site_override(event({"site_id": "site_qui", "site_override": {"ship_from_address": AUSTIN}}),
+                           repository)
+        self.assertEqual([u["UpdateExpression"] for u in table.updates], ["SET #c.#m = :v"])
+
+    def test_creating_the_map_CANNOT_lose_a_sibling(self):
+        """`if_not_exists` writes only when the attribute is absent, and writes an empty map — so even the
+        first statement is incapable of clearing another Site's override."""
+        repository, table = repo()
+        save_site_override(event({"site_id": "site_qui", "site_override": {"ship_from_address": AUSTIN}}),
+                           repository)
+        ensure = table.updates[0]
+        self.assertEqual(ensure["ExpressionAttributeValues"], {":empty": {}})
+        self.assertNotIn("#m", ensure["ExpressionAttributeNames"])
 
     def test_it_is_CONDITIONAL_on_the_document_existing(self):
         repository, table = repo()
@@ -120,7 +150,7 @@ class ItRidesTheExistingRouteTests(unittest.TestCase):
                    "site_override": {"ship_from_address": AUSTIN}}), repository, secret_cipher=None)
         self.assertEqual(response["statusCode"], 201, response.get("body"))
         self.assertEqual(table.puts, [], "the account document must not be rewritten")
-        self.assertEqual(len(table.updates), 1)
+        self.assertEqual([u["UpdateExpression"] for u in table.updates][-1], "SET #c.#m = :v")
 
     def test_a_body_with_NO_site_id_still_saves_the_account(self):
         """The split is on the body, so the ordinary save has to be completely unaffected."""

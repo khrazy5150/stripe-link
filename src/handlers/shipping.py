@@ -214,7 +214,8 @@ def save_site_override(event, repository, products_repo=None):
         return error_response(str(exc), code="invalid_shipping_config")
 
     try:
-        if not repository.set_nested(tenant_id, "sites", site_id, override or None):
+        if not repository.set_nested(tenant_id, "sites", site_id, override or None,
+                                     container_exists=isinstance(config.get("sites"), dict)):
             return error_response("Shipping config not found.", status_code=404, code="not_found")
     except RepositoryError as exc:
         return error_response(str(exc), code="invalid_shipping_config")

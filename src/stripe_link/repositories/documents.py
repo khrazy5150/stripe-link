@@ -884,7 +884,8 @@ class SimpleKeyRepository:
         response = self.table.get_item(Key={self.key_field: key_value})
         return response.get("Item")
 
-    def set_nested(self, key_value: str, container: str, member: str, value: Any) -> bool:
+    def set_nested(self, key_value: str, container: str, member: str, value: Any, *,
+                   container_exists: bool = False) -> bool:
         """Write ONE member of a map attribute, leaving the rest of the document alone.
 
         For the per-Site shipping override (plans/SHIPPING_PER_SITE.md §S4). The overrides live in a map
@@ -897,9 +898,18 @@ class SimpleKeyRepository:
         nothing" and "this Site states nothing in particular" must not be two different stored shapes that
         every reader then has to collapse.
 
-        The container is created on demand with `if_not_exists`, so the first override on a config that
-        has never had one does not need the map to exist already. Returns False when the document itself
-        has gone, which is the caller's cue that there is nothing to override.
+        **The container is created by a SEPARATE update, not in the same expression.** DynamoDB refuses
+        `SET #c = if_not_exists(#c, :empty), #c.#m = :v` outright -- *"Two document paths overlap with each
+        other... path one: [sites], path two: [sites, <member>]"* -- so the obvious one-statement form is
+        illegal. Found by running it against the real table; a fake that records the expression text
+        accepts it happily.
+
+        The extra call is skipped when the caller already knows the map exists (`container_exists`), which
+        it does whenever it has just read the document. And it cannot lose a sibling even when it does run:
+        `if_not_exists` writes only when the attribute is absent, and writes an empty map.
+
+        Returns False when the document itself has gone, which is the caller's cue that there is nothing
+        to override.
         """
         key_value = str(key_value or "").strip()
         member = str(member or "").strip()
@@ -915,15 +925,24 @@ class SimpleKeyRepository:
                     ExpressionAttributeNames=names,
                 )
             else:
-                # TWO expressions in one statement: create the map if absent, then set the member. A bare
-                # `SET #c.#m` on a document with no `sites` attribute fails the whole update with
-                # ValidationException, which is how a tenant's FIRST override would have 500'd.
+                if not container_exists:
+                    # The map FIRST, in its own statement. A bare `SET #c.#m` on a document with no
+                    # `sites` attribute fails with ValidationException -- a tenant's FIRST override would
+                    # have 500'd -- and folding the two into one expression is what DynamoDB refuses as
+                    # overlapping paths.
+                    self.table.update_item(
+                        Key={self.key_field: key_value},
+                        UpdateExpression="SET #c = if_not_exists(#c, :empty)",
+                        ConditionExpression=f"attribute_exists({self.key_field})",
+                        ExpressionAttributeNames={"#c": container},
+                        ExpressionAttributeValues={":empty": {}},
+                    )
                 self.table.update_item(
                     Key={self.key_field: key_value},
-                    UpdateExpression="SET #c = if_not_exists(#c, :empty), #c.#m = :v",
+                    UpdateExpression="SET #c.#m = :v",
                     ConditionExpression=f"attribute_exists({self.key_field})",
                     ExpressionAttributeNames=names,
-                    ExpressionAttributeValues={":empty": {}, ":v": dynamodb_safe_document(value)},
+                    ExpressionAttributeValues={":v": dynamodb_safe_document(value)},
                 )
         except Exception as exc:  # noqa: BLE001 - a conditional failure means "no such document"
             if "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc):
