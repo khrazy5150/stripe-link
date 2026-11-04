@@ -196,24 +196,62 @@ class OriginationResolverTests(unittest.TestCase):
         self.assertEqual(captured["OriginationIdentity"], "+18885550000")
 
 
+class FakeSites:
+    """One tenant, two businesses — the shape that makes "which business?" a real question."""
+
+    def __init__(self, sites=None):
+        self.sites = sites if sites is not None else [
+            {"site_id": "site_pol", "tenant_id": "t1", "organization": {"name": "Poliaxis Nutrition"},
+             "pages": {"/p": {"page_id": "page_pol"}}},
+            {"site_id": "site_acme", "tenant_id": "t1", "organization": {"name": "Acme"},
+             "pages": {"/a": {"page_id": "page_acme"}}},
+        ]
+
+    def get(self, _tenant, site_id):
+        return next((dict(s) for s in self.sites if s["site_id"] == site_id), None)
+
+    def list_for_tenant(self, _tenant, **_kw):
+        return [dict(s) for s in self.sites]
+
+
+class FakePages:
+    def get(self, tenant_id, page_id):
+        return {"tenant_id": tenant_id, "page_id": page_id,
+                "site_id": "site_" + page_id.split("_", 1)[1]}
+
+
+class FakeProfiles:
+    def get(self, *_a):
+        return {"business": {"name": "Poliaxis Nutrition"}}
+
+
 class SweepHandlerTests(unittest.TestCase):
     def _repos(self, appt):
         appointments = FakeDocumentRepository("appointment_id")
         appointments.put(appt)
-        tenants = FakeDocumentRepository("tenant_id")
-        tenants.put({"tenant_id": "t1", "business_name": "Acme"})
-        return appointments, tenants
+        return appointments, {"sites_repo": FakeSites(), "pages_repo": FakePages(),
+                              "profiles_repo": FakeProfiles()}
+
+    def _sweep(self, appt):
+        appointments, identity = self._repos(appt)
+        sent = []
+        result = reminders_handler(
+            {}, None, appointments_repo=appointments, **identity,
+            sms_send=lambda *, to, body: sent.append((to, body)) or {"MessageId": "m9"},
+            now_fn=lambda: START - 30 * 60, origination_configured=True)
+        return result, sent, appointments
 
     def test_sweep_sends_due_and_stamps(self):
-        appt = appointment(reminders=[{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR, "attempts": 0}])
-        appointments, tenants = self._repos(appt)
+        appt = appointment(page_id="page_acme",
+                           reminders=[{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR, "attempts": 0}])
+        appointments, identity = self._repos(appt)
         sent = []
 
         def fake_send(*, to, body):
             sent.append((to, body))
             return {"MessageId": "m9"}
 
-        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=True)
+        result = reminders_handler({}, None, appointments_repo=appointments, **identity, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=True)
         self.assertEqual(result, {"scanned": 1, "sent": 1, "failed": 0})
         self.assertEqual(sent[0][0], "+14155550123")
         self.assertIn("Acme", sent[0][1])
@@ -221,28 +259,61 @@ class SweepHandlerTests(unittest.TestCase):
         self.assertEqual(stored["reminders"][0]["status"], "sent")
         self.assertEqual(stored["reminders"][0]["message_id"], "m9")
 
+    def test_the_text_names_THE_BUSINESS_THE_APPOINTMENT_IS_WITH(self):
+        """This read `TenantProfile.business_name`, empty on every tenant in every environment, so every
+        reminder text ever sent named no business at all — an unsigned SMS about an appointment. It now
+        resolves from the page the booking was taken on, which names the Site
+        (plans/SITE_AS_BUSINESS_IDENTITY.md §4). The fixture tenant runs two businesses, so a resolver
+        that guessed would name the other one."""
+        due = [{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR,
+                "attempts": 0}]
+        _result, sent, _ = self._sweep(appointment(page_id="page_acme", reminders=due))
+        self.assertTrue(sent[0][1].startswith("Acme:"))
+
+    def test_two_bookings_on_two_sites_are_named_DIFFERENTLY(self):
+        """The per-tenant cache this replaced would name both with whichever resolved first."""
+        due = [{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR,
+                "attempts": 0}]
+        appointments = FakeDocumentRepository("appointment_id")
+        appointments.put(appointment(page_id="page_acme", reminders=due))
+        appointments.put(appointment(appointment_id="appt_2", page_id="page_pol", reminders=due))
+        sent = []
+        reminders_handler({}, None, appointments_repo=appointments, sites_repo=FakeSites(),
+                          pages_repo=FakePages(), profiles_repo=FakeProfiles(),
+                          sms_send=lambda *, to, body: sent.append(body) or {"MessageId": "m"},
+                          now_fn=lambda: START - 30 * 60, origination_configured=True)
+        self.assertEqual({body.split(":")[0] for body in sent}, {"Acme", "Poliaxis Nutrition"})
+
+    def test_a_booking_with_no_page_is_not_guessed_at(self):
+        """Bookings taken before the page was recorded. With two businesses there is no answer, so the
+        tenant profile gives one consistent name rather than a coin flip."""
+        due = [{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR,
+                "attempts": 0}]
+        _result, sent, _ = self._sweep(appointment(reminders=due))
+        self.assertTrue(sent[0][1].startswith("Poliaxis Nutrition:"))
+
     def test_sweep_idempotent_second_pass_sends_nothing(self):
         appt = appointment(reminders=[{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR, "attempts": 0}])
-        appointments, tenants = self._repos(appt)
+        appointments, identity = self._repos(appt)
         calls = {"n": 0}
 
         def fake_send(*, to, body):
             calls["n"] += 1
             return {"MessageId": "m9"}
 
-        reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=True)
-        second = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 20 * 60, origination_configured=True)
+        reminders_handler({}, None, appointments_repo=appointments, **identity, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=True)
+        second = reminders_handler({}, None, appointments_repo=appointments, **identity, sms_send=fake_send, now_fn=lambda: START - 20 * 60, origination_configured=True)
         self.assertEqual(calls["n"], 1)
         self.assertEqual(second["sent"], 0)
 
     def test_sweep_failure_keeps_scheduled_for_retry(self):
         appt = appointment(reminders=[{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR, "attempts": 0}])
-        appointments, tenants = self._repos(appt)
+        appointments, identity = self._repos(appt)
 
         def boom(*, to, body):
             raise SmsError("carrier down")
 
-        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=boom, now_fn=lambda: START - 30 * 60, origination_configured=True)
+        result = reminders_handler({}, None, appointments_repo=appointments, **identity, sms_send=boom, now_fn=lambda: START - 30 * 60, origination_configured=True)
         self.assertEqual(result["failed"], 1)
         stored = appointments.get("t1", "appt_1")
         self.assertEqual(stored["reminders"][0]["status"], SCHEDULED)
@@ -250,14 +321,14 @@ class SweepHandlerTests(unittest.TestCase):
 
     def test_sweep_skips_when_sms_unconfigured(self):
         appt = appointment(reminders=[{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR, "attempts": 0}])
-        appointments, tenants = self._repos(appt)
+        appointments, identity = self._repos(appt)
         calls = {"n": 0}
 
         def fake_send(*, to, body):
             calls["n"] += 1
             return {"MessageId": "m9"}
 
-        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=False)
+        result = reminders_handler({}, None, appointments_repo=appointments, **identity, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=False)
         self.assertEqual(calls["n"], 0)
         self.assertEqual(result["skipped"], "sms_not_configured")
         # the scheduled reminder is untouched — not marked failed

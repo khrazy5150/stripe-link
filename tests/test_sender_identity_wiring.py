@@ -183,7 +183,9 @@ class NoEmitterReadsTheDeadFieldsAnyMoreTests(unittest.TestCase):
             if rel in self.ALLOWED:
                 continue
             source = path.read_text()
-            if "send_email" not in source and "mailer_send" not in source:
+            # Any tenant-authored MESSAGE, not just email: the appointment reminder is an SMS, and it
+            # read the dead field for as long as it existed.
+            if not any(w in source for w in ("send_email", "mailer_send", "send_sms", "sms_send")):
                 continue
             for receiver, field in pattern.findall(source):
                 if receiver not in self.RESOLVED:

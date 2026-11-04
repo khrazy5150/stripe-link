@@ -5102,8 +5102,11 @@ Resources:
           # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
+          PAGES_TABLE: !Ref PagesTable
           SERVICES_TABLE: !Ref ServicesTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-reminders-sweep-${Environment}"
       CodeUri: src/
       Handler: handlers.reminders.handler
@@ -5114,6 +5117,15 @@ Resources:
             TableName: !Ref ServicesTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        # WHO the reminder is from. The text used to name no business at all because it read the empty
+        # TenantProfile.business_name; it now resolves page -> Site -> organization, falling back to the
+        # OWNER's user profile (plans/SITE_AS_BUSINESS_IDENTITY.md §4). All read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         - Statement:
             Effect: Allow
             Action:
