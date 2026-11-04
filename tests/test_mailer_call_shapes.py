@@ -101,3 +101,94 @@ class EveryOtherMailerCallerFitsTooTests(unittest.TestCase):
                 if dead in source:
                     offenders.append(f"{path.relative_to(root.parent)}: {dead}")
         self.assertEqual(offenders, [], "\n".join(offenders))
+
+
+def _parse(request):
+    """The Raw MIME document SES was handed, as a parsed message."""
+    import email
+
+    return email.message_from_bytes(request["Content"]["Raw"]["Data"])
+
+
+def _body(part):
+    return part.get_payload(decode=True).decode("utf-8")
+
+
+class FakeSes:
+    def __init__(self):
+        self.request = None
+
+    def send_email(self, **kwargs):
+        self.request = kwargs
+        return {"MessageId": "m1"}
+
+
+class TheMailerItselfIsEXECUTEDTests(unittest.TestCase):
+    """Binding a signature proves the call fits; it does not prove the function RUNS.
+
+    `send_email` read its local `reply` inside the calendar branch and assigned it on the line after, so
+    every send carrying an .ics raised `UnboundLocalError` from 2026-10-14. Nothing surfaced it: every
+    other test hands the caller a `mailer_send` double that never enters the mailer, and `leads.py`
+    swallows a failed confirmation so the registration still succeeds. A webinar registrant simply never
+    got an email, and the warning went to a log nobody reads.
+
+    So these drive the real function against a fake SES client -- the one thing a double cannot fake.
+    """
+
+    def _send(self, **over):
+        client = FakeSes()
+        kwargs = {"to": "buyer@example.com", "subject": "You're registered", "html": "<p>See you</p>",
+                  "text": "See you", "from_name": "Quill", "reply_to": "hi@quill.test",
+                  "client": client}
+        kwargs.update(over)
+        send_email(**kwargs)
+        return client.request
+
+    def test_a_send_WITH_a_calendar_invite_does_not_raise(self):
+        request = self._send(calendar_invite="BEGIN:VCALENDAR\nEND:VCALENDAR",
+                             calendar_filename="session.ics")
+        self.assertIn("Raw", request["Content"])
+
+    def test_the_ics_and_the_reply_address_both_reach_the_raw_message(self):
+        """The Raw path builds the whole MIME document itself, so anything the Simple path sets as a
+        separate field has to be written into the message instead -- Reply-To is the one that was lost.
+
+        Parsed rather than string-matched, because the bodies are base64 inside the document: a substring
+        check on the raw bytes would pass on the headers and silently say nothing about the parts."""
+        request = self._send(calendar_invite="BEGIN:VCALENDAR\nEND:VCALENDAR",
+                             calendar_filename="session.ics")
+        message = _parse(request)
+        self.assertEqual(message["Reply-To"], "hi@quill.test")
+        parts = {part.get_content_type(): part for part in message.walk()}
+        self.assertIn("text/calendar", parts)
+        self.assertEqual(parts["text/calendar"].get_filename(), "session.ics")
+        self.assertIn("END:VCALENDAR", _body(parts["text/calendar"]))
+        self.assertIn("See you", _body(parts["text/plain"]))
+        self.assertIn("See you", _body(parts["text/html"]))
+
+    def test_ReplyToAddresses_is_still_set_on_the_calendar_send(self):
+        request = self._send(calendar_invite="BEGIN:VCALENDAR\nEND:VCALENDAR")
+        self.assertEqual(request["ReplyToAddresses"], ["hi@quill.test"])
+
+    def test_a_plain_send_still_uses_the_SIMPLE_content(self):
+        request = self._send()
+        self.assertIn("Simple", request["Content"])
+        self.assertEqual(request["ReplyToAddresses"], ["hi@quill.test"])
+
+    def test_no_reply_address_sets_no_header(self):
+        request = self._send(reply_to="")
+        self.assertNotIn("ReplyToAddresses", request)
+
+    def test_the_webinar_confirmation_path_runs_end_to_end(self):
+        """The actual reported shape: leads.py's confirmation, with the real .ics builder."""
+        from stripe_link.domain.ics import invite_for_occurrence
+
+        event = {"title": "Office hours", "timezone": "UTC", "location": "Online",
+                 "occurrences": [{"occurrence_id": "occ_1", "starts_at": 1_762_000_000,
+                                  "duration_minutes": 60}]}
+        request = self._send(
+            calendar_invite=invite_for_occurrence(event, event["occurrences"][0]),
+            calendar_filename="session.ics")
+        calendar = next(part for part in _parse(request).walk()
+                        if part.get_content_type() == "text/calendar")
+        self.assertIn("SUMMARY:Office hours", _body(calendar))

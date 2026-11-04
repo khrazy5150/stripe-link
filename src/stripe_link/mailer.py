@@ -179,6 +179,11 @@ def send_email(
         "Destination": {"ToAddresses": [recipient]},
         "Content": {"Simple": {"Subject": {"Data": subject, "Charset": "UTF-8"}, "Body": body}},
     }
+    # Resolved BEFORE the calendar branch, which reads it. It used to be assigned after, so every send
+    # carrying an .ics raised UnboundLocalError -- and `leads.py` swallows a failed confirmation so the
+    # registration still succeeds, which meant no webinar registrant had received a confirmation since
+    # 2026-10-14 and nothing said so (fixed 2026-11-03).
+    reply = str(reply_to or "").strip()
     if calendar_invite:
         # RAW, because SESv2's Simple content cannot carry an attachment. Everything above still applies --
         # the signature has already been appended to `html`/`text` -- so this swaps only how the same
@@ -187,7 +192,6 @@ def send_email(
             sender=request["FromEmailAddress"], recipient=recipient, subject=subject,
             html=html, text=text, reply_to=reply, calendar=calendar_invite, filename=calendar_filename,
         )}}
-    reply = str(reply_to or "").strip()
     if reply:
         request["ReplyToAddresses"] = [reply]
 
