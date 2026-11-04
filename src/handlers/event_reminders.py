@@ -117,7 +117,12 @@ def _registrants_for(leads_repo, tenant_id: str, event_id) -> dict[str, list[dic
         if not email:
             continue
         grouped.setdefault(str(lead.get("occurrence_id") or ""), []).append(
-            {"email": email, "name": str((lead.get("fields") or {}).get("name") or "")}
+            # `page_id` and `stripe_mode` ride along because the reminder has to be signed by the business
+            # running the session, and the registration is the only record that knows which page it came
+            # from (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
+            {"email": email, "name": str((lead.get("fields") or {}).get("name") or ""),
+             "page_id": str(lead.get("page_id") or ""),
+             "stripe_mode": str(lead.get("stripe_mode") or "live")}
         )
     return grouped
 
@@ -125,10 +130,14 @@ def _registrants_for(leads_repo, tenant_id: str, event_id) -> dict[str, list[dic
 def _send_reminder(record, occurrence, registrant, lead_minutes, tenant_id):
     from stripe_link.domain.registration_email import registration_reminder
     from stripe_link.mailer import send_email
+    from stripe_link.sender_identity import sending_identity
 
     message = registration_reminder(record, occurrence, lead_minutes,
                                     name=registrant.get("name") or "")
     if not message["subject"]:
         return
+    identity = sending_identity(tenant_id, page_id=str(registrant.get("page_id") or ""),
+                                mode=str(registrant.get("stripe_mode") or "live"))
     send_email(to=registrant["email"], subject=message["subject"], html=message["html"],
-               text=message["text"], tenant_id=tenant_id)
+               text=message["text"], tenant_id=tenant_id,
+               from_name=identity["business_name"], reply_to=identity["reply_to"])

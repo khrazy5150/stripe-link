@@ -158,7 +158,9 @@ class TheMailerCarriesIt(unittest.TestCase):
         they already hold."""
         import pathlib
         source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers" / "leads.py").read_text()
-        block = source[source.index("def _send_registration_confirmation"):][:1800]
+        # To the end of the FUNCTION, not a fixed number of characters: a 1800-char window silently
+        # stopped covering the handler the first time the function grew.
+        block = source.split("def _send_registration_confirmation", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("except Exception", block)
         self.assertIn("logger.warning", block)
 

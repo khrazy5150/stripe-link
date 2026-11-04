@@ -155,6 +155,101 @@ class TheLeadMagnetDownloadAsksTheResolverTests(unittest.TestCase):
         self.assertEqual(mailer.sent[0]["from_name"], "Poliaxis Nutrition")
 
 
+class TheRegistrationEmailsNameTheirPagesBusinessTests(unittest.TestCase):
+    """A webinar confirmation, its reminder, and the notice that the session is off.
+
+    These were not broken — they passed only `tenant_id` and the mailer's own fallback filled in the
+    tenant's name. But a registration happens ON A PAGE, and the page names the Site whose business is
+    running the session, so leaving it to the fallback meant a tenant with two businesses invited people
+    to one under the other's name. The registration record is the only thing that remembers which page it
+    came from, which is why `page_id` and `stripe_mode` ride along with each registrant.
+    """
+
+    def test_the_confirmation_resolves_from_the_registrations_page(self):
+        import handlers.leads as leads
+
+        seen, sent = {}, {}
+
+        def resolver(tenant_id, **kwargs):
+            seen.update({"tenant_id": tenant_id, **kwargs})
+            return dict(QUILL)
+
+        event = {"tenant_id": "t1", "event_id": "ev_1", "title": "Office hours", "timezone": "UTC",
+                 "occurrences": [{"occurrence_id": "occ_1", "starts_at": 1_800_000_000,
+                                  "duration_minutes": 60}]}
+        with mock.patch("stripe_link.sender_identity.sending_identity", resolver), \
+             mock.patch("stripe_link.mailer.send_email", lambda **kw: sent.update(kw)):
+            leads._send_registration_confirmation(event, "occ_1", {"email": "a@b.co", "name": "Casey"},
+                                                  "t1", page_id="page_qui", mode="test")
+
+        self.assertEqual(sent.get("from_name"), "Quill")
+        self.assertEqual(seen, {"tenant_id": "t1", "page_id": "page_qui", "mode": "test"})
+
+    def test_the_reminder_and_the_cancellation_carry_the_page_through_the_registrant(self):
+        """Both sweeps find their audience by listing leads, so the page has to survive that grouping or
+        the resolver has nothing to go on."""
+        import handlers.event_reminders as reminders
+        import handlers.events as events
+
+        class Leads:
+            def list_for_tenant(self, _tenant, **_kw):
+                return [{"event_id": "ev_1", "occurrence_id": "occ_1", "page_id": "page_qui",
+                         "stripe_mode": "test", "fields": {"email": "a@b.co", "name": "Casey"}}]
+
+        for grouper in (reminders._registrants_for, events._registrants_by_occurrence):
+            with self.subTest(grouper=grouper.__module__):
+                registrant = grouper(Leads(), "t1", "ev_1")["occ_1"][0]
+                self.assertEqual(registrant["page_id"], "page_qui")
+                self.assertEqual(registrant["stripe_mode"], "test")
+
+    def test_a_registrant_with_no_page_recorded_resolves_LIVE(self):
+        """Leads captured before the page was recorded. Live, because a registration that reached a real
+        person was a real registration."""
+        import handlers.event_reminders as reminders
+
+        class Leads:
+            def list_for_tenant(self, _tenant, **_kw):
+                return [{"event_id": "ev_1", "occurrence_id": "occ_1",
+                         "fields": {"email": "a@b.co"}}]
+
+        registrant = reminders._registrants_for(Leads(), "t1", "ev_1")["occ_1"][0]
+        self.assertEqual(registrant["page_id"], "")
+        self.assertEqual(registrant["stripe_mode"], "live")
+
+
+class EverySenderGoesThroughTheResolverTests(unittest.TestCase):
+    """The rule §4 states: "No emitter reads `Site.organization` or the user profile directly." It is the
+    rule that keeps one answer one answer, and nothing enforces it but this."""
+
+    ALLOWED_SITE_READERS = {
+        # The resolver itself, and the Sites API.
+        "src/stripe_link/sender_identity.py", "src/handlers/sites.py",
+        # The renderer: a PAGE's own organization markup, which is not a message.
+        "src/stripe_link/runtime/html.py",
+    }
+
+    def test_no_message_sender_reads_Site_organization_directly(self):
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        offenders = []
+        for path in sorted((root / "src").rglob("*.py")):
+            rel = str(path.relative_to(root))
+            if rel in self.ALLOWED_SITE_READERS:
+                continue
+            source = path.read_text()
+            if not any(w in source for w in ("send_email", "mailer_send", "send_sms", "sms_send")):
+                continue
+            # Receiver-aware, like the dead-field guard: `identity.get("organization")` is the
+            # resolver's own answer being passed on, which is the point; anything else is a sender
+            # reading the Site for itself.
+            for receiver in re.findall(r"(\w+)(?:\s*or\s*\{\})?\.get\(\"organization\"\)", source):
+                if receiver != "identity":
+                    offenders.append(f"{rel}: {receiver}.get('organization')")
+        self.assertEqual(offenders, [], "\n".join(offenders))
+
+
 class NoEmitterReadsTheDeadFieldsAnyMoreTests(unittest.TestCase):
     """The fields are still ON the profile until §P4 removes them, so nothing stops a new sender reading
     them again. This is what notices."""

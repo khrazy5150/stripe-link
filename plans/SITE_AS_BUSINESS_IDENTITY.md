@@ -277,9 +277,41 @@ that rule is what preserves §2's guarantee while changing its scope.
   the only one SES has been shown (P3). Legacy invites carrying no `page_id` keep the old first-Site scan.
   Not yet done here: `handlers/cart_recovery.py` has its own copy of the first-Site lookup, which P2
   replaces rather than this phase duplicating the fix into.
-- **P2 — the shared resolver.** Introduce `sending_identity(tenant_id, site_id=...)` and the page→Site
-  lookup (§3.1). Move receipts, cart recovery, reminders, invoices and purchase-manage onto it one at a
-  time, each with a test proving which Site's name it used.
+- **P2 — the shared resolver. SHIPPED 2026-11-03** (`stripe_link/sender_identity.py`,
+  `tests/test_sending_identity.py`, `tests/test_sender_identity_wiring.py`).
+  `sending_identity(tenant_id, *, site_id="", page_id="", mode="live")` returns
+  `{business_name, reply_to, organization, source}`. Three rules, in order: a NAMED Site wins (`site_id`,
+  or `page_id` through the page's `site_id` edge, falling back to the route-map scan); ONE unambiguous
+  Site wins (nothing narrowed the message but the tenant has exactly one business — a Site with no
+  organization is not a second candidate, because ambiguity is between businesses, not Sites); otherwise
+  the TENANT answers and `source` records that it did. With two businesses and no context the resolver
+  **declines to pick** — one wrong-but-consistent name beats a coin flip between two, which is what the
+  two `_tenant_organization` copies were doing.
+
+  It lives in its own module, not in `mailer.py`: `test_env_var_grants` propagates what a module reaches
+  to every function importing it, and in the mailer it left fifteen send-only functions declared
+  `SITES_TABLE`/`PAGES_TABLE` and granted read on both for a lookup they never perform.
+
+  **Every tenant-authored sender is on it**: the order receipt and tip-renewal notice (from
+  `order.attribution.page_id` + `stripe_mode`), the tracking email, purchase-manage's link email and
+  cancellation (the link email lists several purchases, so it uses their page only when they agree on
+  one), the abandoned-cart nudge (the cart now records its `page_id`; the published page already carried
+  it), the review invite (P1), the invoice, the staff delegation notice, the lead-magnet download (name
+  only — its verified-address gate is untouched), the appointment reminder SMS, and the webinar
+  confirmation / reminder / cancellation. Each sweep caches by `(tenant, page)`, never by tenant: a
+  per-tenant cache would sign every message in one pass with whichever Site resolved first, which is the
+  reported bug one layer down.
+
+  **Four of them were resolving their name from fields that are always empty** —
+  `TenantProfile.business_name` / `support_email`, dead on every tenant in every environment since before
+  they were written. The invoice, the delegation notice and the appointment reminder therefore named no
+  business at all, and `purchase_manage._business_name` read the tenant profile for a USER-profile field,
+  returned `""` every time, and made a buyer's own purchase page say "the seller". Two receiver-aware
+  guards now watch both rules (`identity["business_name"]` is the point, `profile.get("business_name")`
+  is the bug), each with a companion test proving it matches something.
+
+  Still tenant-level by design: `send_email`'s own last-resort fallback for a caller that states no
+  sender, and platform-authored mail, which has no Site. **Reply-To is untouched throughout** — see P3.
 - **P3 — per-Site Reply-To** *(CONFIRMED in scope 2026-11-03)*. Make `domain/business_email.py`'s
   verification Site-scoped: a code per Site address, same TTL and attempt limits. **Fallback is the
   tenant's VERIFIED address, never the Site's unverified one.** The Sites editor must surface the

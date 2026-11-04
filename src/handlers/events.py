@@ -102,20 +102,28 @@ def _registrants_by_occurrence(leads_repo, tenant_id, event_id):
         email = str((lead.get("fields") or {}).get("email") or "").strip()
         if email:
             grouped.setdefault(str(lead.get("occurrence_id") or ""), []).append(
-                {"email": email, "name": str((lead.get("fields") or {}).get("name") or "")})
+                {"email": email, "name": str((lead.get("fields") or {}).get("name") or ""),
+                 "page_id": str(lead.get("page_id") or ""),
+                 "stripe_mode": str(lead.get("stripe_mode") or "live")})
     return grouped
 
 
 def _notify_cancelled(saved, occurrence, registrant, replacement, tenant_id):
     from stripe_link.domain.registration_email import registration_cancelled
     from stripe_link.mailer import send_email
+    from stripe_link.sender_identity import sending_identity
 
     message = registration_cancelled(saved, occurrence, name=registrant.get("name") or "",
                                      replacement=replacement)
     if not message["subject"]:
         return
+    # Same business that confirmed the seat has to be the one calling it off, resolved from the page the
+    # person registered on (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
+    identity = sending_identity(tenant_id, page_id=str(registrant.get("page_id") or ""),
+                                mode=str(registrant.get("stripe_mode") or "live"))
     send_email(to=registrant["email"], subject=message["subject"], html=message["html"],
-               text=message["text"], tenant_id=tenant_id)
+               text=message["text"], tenant_id=tenant_id,
+               from_name=identity["business_name"], reply_to=identity["reply_to"])
 
 
 __all__ = ["handler", "CANCELLED"]

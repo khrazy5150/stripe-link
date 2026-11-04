@@ -832,7 +832,9 @@ Resources:
           LEADS_TABLE: !Ref LeadsTable
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
+          PAGES_TABLE: !Ref PagesTable
           PRODUCTS_TABLE: !Ref ProductsTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           # The confirmation is sent AS THE TENANT, and the sender identity comes off the owner's
           # profile. Without this the mail goes out with no identity at all (plans/WEBINAR.md P2).
@@ -842,6 +844,13 @@ Resources:
       Handler: handlers.leads.handler
       Description: Lead capture — public ingest + tenant-scoped read/manage.
       Policies:
+        # WHO the message is from: the registration records the page it came from, the page names
+        # the Site, and the Site carries the business identity
+        # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
@@ -1083,6 +1092,8 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           EVENTS_TABLE: !Ref EventsTable
           LEADS_TABLE: !Ref LeadsTable
+          PAGES_TABLE: !Ref PagesTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-event-reminders-${Environment}"
@@ -1091,6 +1102,13 @@ Resources:
       Timeout: 120
       Description: Emails registrants before their session. Driven by EVENTS, not by scanning leads.
       Policies:
+        # WHO the message is from: the registration records the page it came from, the page names
+        # the Site, and the Site carries the business identity
+        # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         # CRUD on events: the sweep stamps each notice back onto the occurrence so it cannot repeat.
         - DynamoDBCrudPolicy:
             TableName: !Ref EventsTable
@@ -1128,6 +1146,8 @@ Resources:
           # Cancelling a session emails the people who registered, which means listing them
           # (LeadsTable) and sending as the tenant (profiles for tier + sender identity).
           LEADS_TABLE: !Ref LeadsTable
+          PAGES_TABLE: !Ref PagesTable
+          SITES_TABLE: !Ref SitesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
           # Reachable but unused: the repository module names every table, and envreach follows imports
           # transitively because a missing variable fails at RUNTIME. Declared without a matching IAM
@@ -1139,6 +1159,13 @@ Resources:
       Handler: handlers.events.handler
       Description: Scheduled events (webinars) and their occurrences — tenant-scoped CRUD.
       Policies:
+        # WHO the message is from: the registration records the page it came from, the page names
+        # the Site, and the Site carries the business identity
+        # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref EventsTable
         - DynamoDBReadPolicy:

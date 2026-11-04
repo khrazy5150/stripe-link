@@ -211,7 +211,8 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
         return error_response(str(exc), code="invalid_lead")
 
     if scheduled_event is not None:
-        _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id)
+        _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id,
+                                        page_id=str(lead.get("page_id") or ""), mode=mode)
         # Best-effort, and AFTER the lead is safely stored: a failed count must not lose a registration.
         # Read-compare-write, so a burst can overbook by one (plans/WEBINAR.md §4) -- the registration is
         # the record that matters, and the count exists to close the door roughly, not exactly.
@@ -224,7 +225,8 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
     return json_response({"lead_id": lead_id, "status": "captured"}, status_code=201)
 
 
-def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id):
+def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id, *,
+                                    page_id="", mode="live"):
     """Confirm the seat, with the calendar file. Best-effort by design.
 
     A send that fails must never cost the registration: the lead is already stored, and a visitor who sees
@@ -240,6 +242,7 @@ def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tena
         from stripe_link.domain.ics import invite_for_occurrence
         from stripe_link.domain.registration_email import registration_confirmation
         from stripe_link.mailer import send_email
+        from stripe_link.sender_identity import sending_identity
 
         occurrence = occurrence_by_id(scheduled_event, occurrence_id)
         if occurrence is None:
@@ -248,9 +251,14 @@ def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tena
             scheduled_event, occurrence, name=str((fields or {}).get("name") or ""))
         if not message["subject"]:
             return
+        # WHO the confirmation is from. Stated rather than left to the mailer's tenant-level fallback,
+        # because the registration happened ON A PAGE and that page names the Site whose business is
+        # running the session (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
+        identity = sending_identity(tenant_id, page_id=page_id, mode=mode)
         send_email(
             to=recipient, subject=message["subject"], html=message["html"], text=message["text"],
-            tenant_id=tenant_id,
+            tenant_id=tenant_id, from_name=identity["business_name"],
+            reply_to=identity["reply_to"],
             calendar_invite=invite_for_occurrence(scheduled_event, occurrence),
             calendar_filename="session.ics",
         )
