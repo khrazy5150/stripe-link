@@ -390,9 +390,49 @@ that rule is what preserves §2's guarantee while changing its scope.
   **`shipping_cutoff_hour` and `timezone` did NOT move** — asserted by a test, not just intended. They are
   operational rather than identity, `timezone` is already duplicated by `TenantAvailability`/booking, and
   both stay on the tenant profile until they get their own decision.
-- **P4 — remove the UserProfile Business section** *(only once P2 covers every send path, or the fallback
-  is accepted as permanent)*. Removing it is a data migration, not a UI change: `business_name` /
-  `business_email` are read by 16 modules, and `business.brands` backs a live picker.
+- **P4 — remove the UserProfile Business section. PART DONE 2026-11-03; the rest is BLOCKED on a
+  decision.** Discovery changed the shape of this phase, so recording what was found before any more of it
+  is cut.
+
+  **The Business block is doing TWO different jobs under one heading**, and only one of them is identity:
+
+  | Field | Job | Can P4 remove it? |
+  |---|---|---|
+  | `brands` | identity | **Yes** — now on the Site (§P3b). Migration written. |
+  | `name` | identity, BUT also the renderer's fallback for a page with no Site, and the shipping ship-from name | Not yet — see below |
+  | `email` / `email_verified` / `email_verification` | identity, BUT the only proven reply address any tenant has today | Not yet |
+  | `phone` | **operational** — shipping ship-from (`shipping._seller_contact`) | No |
+  | `address` | **operational** — ship-from, AND the timezone inference (`store_timezone` derives from it) | No |
+  | `timezone`, `shipping_cutoff_hour` | **operational** — delivery estimate | No, decided in §P3b |
+  | `sources` | provenance for the Stripe Connect seed | Follows whatever it describes |
+
+  So *"remove the Business section"* cannot be done as written: four of its fields have nothing to do with
+  identity and three consumers read them. What P4 actually means is **remove the identity half**.
+
+  **Done:** `deploy/migrate_profile_brands_to_site.py` (dry-run default, tested in
+  `tests/test_brand_migration.py` because it writes). It moves `business.brands` onto the tenant's Site
+  **only where the answer is unambiguous — exactly ONE Site carrying an organization**, the same rule
+  `sender_identity.site_organization` uses: with two businesses the platform cannot know which owns "Luxe
+  Wellness", and guessing puts one business's brand in the other's picker, which is the bug this plan
+  exists to close. Ambiguous tenants are reported for the tenant to assign by hand. Additive, idempotent,
+  and it holds no profiles repository at all, so it cannot touch the profile copy. **Dev: 0 profiles carry
+  a brand**, so the builder's profile-brands fallback is already dead code there.
+  The Profile screen now says what it has become rather than claiming to be the business identity.
+
+  **Blocked, and why.** Removing `name` / `email` means removing a FALLBACK that is still load-bearing:
+
+  1. a **published page can have no Site** — measured, `page_cYSn7b6QvLA` is published in live mode with
+     no `site_id` — and its brand label falls through `Site → preferences.business_name → display_name`.
+     Remove the middle one and that page is headed by the owner's personal name.
+  2. **no tenant has adopted per-Site identity yet** — dev has no Site brands and no verified Site email,
+     so today every send still resolves its reply address through the profile. Removing it now regresses
+     every tenant who has verified one.
+
+  So the remaining question is a ROLLOUT question, not a code one: *does the tenant-level fallback get
+  deleted once tenants have moved, or is it accepted as permanent?* Both are defensible — permanent is one
+  extra read and a safety net for an unattached page; deleted is the clean end state §3 argues for. **It
+  cannot be answered from the code, and prod's contents are unknown** (the audit that would tell us how
+  many prod tenants have a business name, brands or a verified address needs a prod read).
 
 ## 6. Open decisions — author input needed
 

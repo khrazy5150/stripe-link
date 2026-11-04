@@ -49,9 +49,17 @@
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Business</h2></header>
       <div class="dashboard-card-body">
+        <!-- Business identity moved to the Site (plans/SITE_AS_BUSINESS_IDENTITY.md). This section is
+             now two things wearing one heading: an ACCOUNT-LEVEL FALLBACK for the name and reply address,
+             used by any site that has not set its own, and the OPERATIONAL fields (address, phone,
+             timezone, cutoff) that shipping and delivery estimates genuinely read from the account. Said
+             plainly here, because a tenant who edits a name on this screen expecting their storefront to
+             change would otherwise be quietly disappointed. -->
         <p class="field-note">
-          Your business identity. Used for the brand shown on landing pages and (soon) local-SEO signals.
-          All optional. When you connect Google Business Profile later, it can keep these in sync.
+          <strong>Each site has its own business identity</strong> — name, address, brands and reply
+          address live on the site, in <em>Sites → Edit → Business</em>, so you can run more than one
+          business from one account. What you set here is the fallback any site that has not filled its own
+          in, plus the account-level details shipping uses. All optional.
         </p>
         <div class="offer-two-column">
           <label class="offer-field">
@@ -101,14 +109,18 @@
             That domain accepts mail to any address, so we could not confirm this specific mailbox — the code will.
           </small>
           <small v-else-if="businessEmailVerified">Replies to emails you send go here. Verified {{ formatDate(form.business.email_verified_at) }}.</small>
-          <small v-else>Verify this address to send emails from your landing pages. It is also the public contact in your structured data.</small>
+          <small v-else>Verify this address so customer replies reach you. A site with its own verified address uses that instead; this is the fallback for one that has not set one.</small>
         </div>
         <p v-if="hasStripeSourcedFields" class="field-note">
           Some details were filled automatically from your Stripe account. Edit any field to override it.
         </p>
         <div class="offer-field">
           <span>Brand Name(s)</span>
-          <small>Optional. An offer can display one of these; otherwise it falls back to the business name, then the product name.</small>
+          <!-- Offers no longer pick a brand at all (author, 2026-11-03): an offer is created before a
+               page and before a Site, so there is no business to pick from. Brands are chosen in the page
+               builder, from the brands of that page's site. This list stays as the fallback for a site
+               that has none of its own, and §P4's migration moves it. -->
+          <small>Optional, and better set per site. A page picks its heading from <em>its own site's</em> brands; these are offered only to a site that has none yet.</small>
           <div v-for="(brand, index) in form.business.brands" :key="index" class="brand-row">
             <input v-model.trim="form.business.brands[index]" type="text" placeholder="e.g. Luxe Wellness" />
             <button type="button" class="secondary-action compact" @click="removeBrand(index)">Remove</button>
