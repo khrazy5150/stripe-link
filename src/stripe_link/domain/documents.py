@@ -3057,6 +3057,20 @@ def validate_site_organization(organization: Any) -> None:
         raise DocumentValidationError("Site organization must be an object.")
     optional_string(organization, "name", "organization.name", max_length=120)
     optional_string(organization, "legal_name", "organization.legal_name", max_length=200)
+    # Brands THIS business owns (plans/SITE_AS_BUSINESS_IDENTITY.md §P3b). Uncapped and untrimmed, exactly
+    # like `business.brands` it moves from: a stricter rule here would refuse a list the tenant could
+    # already save on their profile, which is a migration that fails on its own data.
+    brands = organization.get("brands")
+    if brands is not None and (not isinstance(brands, list)
+                               or any(not isinstance(brand, str) for brand in brands)):
+        raise DocumentValidationError("organization.brands must be an array of strings.")
+    # Per-field provenance, so an auto-seed never clobbers a value the tenant set (see
+    # domain/connect_sync.seed_business_identity, which still writes the tenant profile's copy).
+    sources = organization.get("sources")
+    if sources is not None and (not isinstance(sources, dict)
+                                or any(not isinstance(v, str) for v in sources.values())):
+        raise DocumentValidationError(
+            "organization.sources must be a map of field name to source string.")
     if organization.get("entity_type") is not None:
         require_enum(organization, "entity_type", SITE_ENTITY_TYPES, "organization.entity_type")
     if organization.get("business_type") is not None:

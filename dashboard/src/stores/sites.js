@@ -23,6 +23,11 @@ export function organizationFromBusiness(business = {}) {
   // validated in the form instead.
   return pruneEmpty({
     name: business.name || "",
+    // Brands come WITH the business identity (plans/SITE_AS_BUSINESS_IDENTITY.md P3b). A tenant whose
+    // first Site is derived from their profile keeps the brand list they already built; without this they
+    // would open the brand picker on a new Site and find it empty.
+    brands: Array.isArray(business.brands) ? business.brands.filter(Boolean) : [],
+    sources: business.sources && typeof business.sources === "object" ? { ...business.sources } : {},
     entity_type: "OnlineStore",
     telephone: isE164(business.phone) ? normalizeE164(business.phone) : "",
     email: business.email || "",
@@ -39,6 +44,18 @@ export function organizationFromBusiness(business = {}) {
 // A DNS-safe slug suggestion for a tenant's store subdomain, seeded from the business name.
 export function suggestSubdomain(business = {}) {
   return slugify(business.name || business.brand || "");
+}
+
+/**
+ * The brand names one Site's business owns.
+ *
+ * Brands belong to the business that owns them (P3b), so a Quill page must not be able to show
+ * "Poliaxis Nutrition". Where a surface knows WHICH Site it is authoring for — the page builder does,
+ * through its Site step — it asks with that Site and gets exactly that business's brands.
+ */
+export function siteBrands(site) {
+  const brands = (site || {}).organization?.brands;
+  return Array.isArray(brands) ? brands.filter(Boolean) : [];
 }
 
 export function buildDefaultSite(pages, business = {}, subdomain = "") {
@@ -147,6 +164,30 @@ export const useSitesStore = defineStore("sites", {
       const query = new URLSearchParams({ name: String(name || "") });
       if (siteId) query.set("site_id", siteId);
       return apiRequest(`/sites/subdomain?${query.toString()}`);
+    },
+    /**
+     * Every brand this tenant owns, each tagged with the Site that owns it.
+     *
+     * For a surface that genuinely cannot know the Site yet: an OFFER is authored before any page exists
+     * for it, and resolving offer -> page -> Site would need the whole pages list for a dropdown. An empty
+     * picker would block authoring, so the union is offered and each option carries its Site's name —
+     * which is what actually prevents the mistake scoping was for, by making ownership visible at the
+     * point of choice instead of hiding it.
+     *
+     * `profileBrands` is folded in while UserProfile.business.brands still exists (P4 removes it), so no
+     * tenant loses their list mid-migration.
+     */
+    brandOptions(profileBrands = []) {
+      const seen = new Map();
+      for (const site of this.sites) {
+        for (const brand of siteBrands(site)) {
+          if (!seen.has(brand)) seen.set(brand, site.organization?.name || site.name || "");
+        }
+      }
+      for (const brand of profileBrands || []) {
+        if (brand && !seen.has(brand)) seen.set(brand, "");
+      }
+      return [...seen].map(([brand, owner]) => ({ brand, owner }));
     },
     _replace(site) {
       const index = this.sites.findIndex((s) => s.site_id === site.site_id);

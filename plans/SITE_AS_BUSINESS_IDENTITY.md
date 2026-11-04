@@ -341,10 +341,37 @@ that rule is what preserves §2's guarantee while changing its scope.
 
   `SitesFunction` gains the three grants the tenant-level flow already had (Debounce by secret path, SES,
   read on UserProfilesTable) plus two routes.
-- **P3b — brands move to the Site.** Add `brands[]` + `sources{}` to `Site.organization`; scope the Offers
-  brand picker to the offer's Site (depends on §3.1's page→Site resolution, same as P2). Decide separately
-  where `shipping_cutoff_hour` and `timezone` live — they are operational, not identity, and must not
-  migrate by accident.
+- **P3b — brands move to the Site. SHIPPED 2026-11-03** (`schemas/Site.schema.json`,
+  `domain/documents.py`, `dashboard/src/stores/sites.js`, `Sites.vue`, `LandingPages.vue`, `Offers.vue`,
+  `tests/test_site_brands.py`). `Site.organization` gains `brands[]` and `sources{}`; the Sites editor
+  manages brands per business; `organizationFromBusiness` carries them into a derived default Site so a
+  tenant's first Site keeps the list they already built.
+
+  **Deviation from this plan's wording, deliberate.** It said *"scope the Offers brand picker to the
+  offer's Site"*. The two surfaces that offer brands know different amounts, so they behave differently:
+
+  - the **page builder** scopes STRICTLY to `selectedSite`. This is where it matters — the brand chosen
+    there becomes the headline on a page belonging to exactly one business — and the builder already has a
+    Site step, so there is nothing to guess.
+  - the **Offers screen** cannot be scoped. An offer is authored before any page exists for it, so there
+    is no page to resolve a Site through; resolving it would mean loading the whole pages list for a
+    dropdown, and a brand-new offer would face an empty one either way. It offers the union and names the
+    owner beside each brand *when the tenant has more than one Site*. Making ownership visible at the
+    point of choice is what actually prevents the mistake scoping was for; hiding the ambiguity behind a
+    filtered list that is sometimes wrong is not.
+
+  Migration safety, in both: the tenant profile's list is a FALLBACK, used only where the Site declares no
+  brands of its own, so nobody opens an empty dropdown before §P4 removes it. An offer already naming a
+  brand no Site declares keeps it selectable, or saving the offer would silently reset its brand. The
+  validator accepts exactly what `business.brands` accepted — uncapped, untrimmed — because a stricter
+  rule would refuse a list the tenant could already save; the dashboard trims and de-duplicates on save.
+
+  `sources{}` is a CARRIER with no writer yet, as this plan asked: `connect_sync.seed_business_identity`
+  still stamps the tenant profile's copy, and pointing it at the Site is the GBP work.
+
+  **`shipping_cutoff_hour` and `timezone` did NOT move** — asserted by a test, not just intended. They are
+  operational rather than identity, `timezone` is already duplicated by `TenantAvailability`/booking, and
+  both stay on the tenant profile until they get their own decision.
 - **P4 — remove the UserProfile Business section** *(only once P2 covers every send path, or the fallback
   is accepted as permanent)*. Removing it is a data migration, not a UI change: `business_name` /
   `business_email` are read by 16 modules, and `business.brands` backs a live picker.

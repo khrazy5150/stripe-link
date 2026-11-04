@@ -179,6 +179,18 @@
                 </select>
               </label>
             </div>
+            <!-- Brands belong to the business that owns them (plans/SITE_AS_BUSINESS_IDENTITY.md P3b), so
+                 they are managed HERE rather than once for the whole account. Same markup as the Profile
+                 screen's list, so a tenant meets the same control in both places during the migration. -->
+            <div class="offer-field">
+              <span>Brand name(s)</span>
+              <small>Optional. An offer on this site can display one of these; otherwise it falls back to the business name, then the product name.</small>
+              <div v-for="(brand, index) in form.org.brands" :key="index" class="brand-row">
+                <input v-model.trim="form.org.brands[index]" type="text" placeholder="e.g. Luxe Wellness" />
+                <button type="button" class="secondary-action compact" @click="removeOrgBrand(index)">Remove</button>
+              </div>
+              <button type="button" class="secondary-action compact" @click="addOrgBrand">+ Add brand</button>
+            </div>
             <label class="offer-field"><span>Description</span><textarea v-model.trim="form.org.description" rows="2" /></label>
             <div class="offer-two-column">
               <label class="offer-field">
@@ -1043,13 +1055,21 @@ async function confirmSiteEmailVerification() {
   }
 }
 
+function addOrgBrand() {
+  form.org.brands.push("");
+}
+
+function removeOrgBrand(index) {
+  form.org.brands.splice(index, 1);
+}
+
 function cancelSiteEmailVerification() {
   emailVerify.step = "idle";
   emailVerify.code = "";
   emailVerify.error = "";
 }
 
-const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
+const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", brands: [], legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -1815,6 +1835,7 @@ function openEdit(site) {
   creatorNormalized.value = form.creatorUsername;
   form.org = {
     name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
+    brands: Array.isArray(org.brands) ? [...org.brands] : [],
     business_type: org.business_type || "",
     description: org.description || "", telephone: org.telephone || "", email: org.email || "",
     address: { locality: address.locality || "", region: address.region || "", street: address.street || "", postal_code: address.postal_code || "", country: address.country || "US" },
@@ -1834,9 +1855,14 @@ function openEdit(site) {
 
 async function saveEdit({ keepOpen = false } = {}) {
   formError.value = "";
+  const brands = [...new Set((form.org.brands || []).map((b) => String(b || "").trim()).filter(Boolean))];
   const organization = {
     ...editing.value.organization,
     name: form.org.name || undefined,
+    // Trimmed and de-duplicated here rather than refused by the validator: the validator accepts whatever
+    // `business.brands` accepted, so that a migration cannot fail on its own data. Omitted entirely when
+    // empty, so a Site nobody has given brands keeps the shape it had.
+    brands: brands.length ? brands : undefined,
     legal_name: form.org.legal_name || undefined,
     entity_type: form.org.entity_type || undefined,
     business_type: form.org.business_type || undefined,

@@ -130,6 +130,20 @@
           "description": "Public storefront/brand name (the tenant.brand_label). Distinct from product.brand (manufacturer).",
           "maxLength": 120
         },
+        "brands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Brand names THIS business owns, offered to an offer's brand picker. Brands belong to the business that owns them, not to the tenant: a tenant running two Sites must not be able to show one business's brand on the other's page. Distinct from product.brand, which is the manufacturer. Moved here from UserProfile.business.brands (plans/SITE_AS_BUSINESS_IDENTITY.md P3b)."
+        },
+        "sources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Per-field provenance: field name -> 'stripe'|'manual'|'gbp'|'derived'. What stops an auto-seed (Stripe Connect, later a Google Business Profile) clobbering a value the tenant set themselves \u2014 fill-empty-only is the guarantee, this records where a value came from. Per-business, so it moves with the identity. Carrier only for now: the seeder in domain/connect_sync.py still writes the tenant profile's copy, and pointing it at the Site is the GBP work (plans/BUSINESS_PROFILE_AND_GBP.md)."
+        },
         "legal_name": {
           "type": [
             "string",

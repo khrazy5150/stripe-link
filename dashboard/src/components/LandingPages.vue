@@ -3060,7 +3060,7 @@ import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
-import { useSitesStore } from "../stores/sites";
+import { siteBrands, useSitesStore } from "../stores/sites";
 import { useCouponsStore } from "../stores/coupons";
 import { searchableItemText } from "../composables/offerItems";
 import { filterRows } from "../composables/indexedList";
@@ -5481,7 +5481,19 @@ function isStorefrontPage(page) {
 
 // Storefront headline source: an existing business brand (dropdown) OR a typed custom store name (textbox) —
 // mutually exclusive. With no brands set up, it's always the custom name; when brands exist the tenant chooses.
-const storeBrands = computed(() => profileStore.brands || []);
+//
+// Scoped to the SITE this page is being created on (plans/SITE_AS_BUSINESS_IDENTITY.md P3b). This is the
+// surface where scoping actually matters: the brand picked here becomes the headline on a page that belongs
+// to one business, so offering another business's brands here is how a Quill storefront comes to be
+// headlined "Poliaxis Nutrition". The builder knows its Site — it is the Site step — so there is nothing to
+// guess.
+//
+// The tenant profile's list is the fallback only while that Site declares no brands of its own, so a tenant
+// mid-migration still sees the brands they have always had rather than an empty dropdown (P4 removes it).
+const storeBrands = computed(() => {
+  const own = siteBrands(selectedSite.value);
+  return own.length ? own : (profileStore.brands || []);
+});
 // Effective mode: honor an explicit choice, else default to "brand" when brands exist, "custom" otherwise.
 const storefrontNameMode = computed(() => form.storefront.nameMode || (storeBrands.value.length ? "brand" : "custom"));
 // The selected brand, defaulting to the first one so the dropdown is never blank.

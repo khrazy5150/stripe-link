@@ -258,10 +258,14 @@
               <span>Brand</span>
               <select v-model="form.brand">
                 <option value="">No brand — use business, then product name</option>
-                <option v-for="brand in profileBrands" :key="brand" :value="brand">{{ brand }}</option>
-                <option v-if="form.brand && !profileBrands.includes(form.brand)" :value="form.brand">{{ form.brand }}</option>
+                <!-- The owner is shown only when there is more than one business to confuse: with a single
+                     Site every brand belongs to it and the suffix would be noise on every row. -->
+                <option v-for="option in brandOptions" :key="option.brand" :value="option.brand">
+                  {{ option.brand }}{{ brandOptions.length && option.owner && sitesStore.sites.length > 1 ? ` — ${option.owner}` : "" }}
+                </option>
+                <option v-if="form.brand && !brandOptions.some((o) => o.brand === form.brand)" :value="form.brand">{{ form.brand }}</option>
               </select>
-              <small>Optional. The brand shown on the landing page. Manage your brands in Profile → Business.</small>
+              <small>Optional. The brand shown on the landing page. Manage each business's brands in Sites → Edit → Business.</small>
             </label>
 
             <div v-if="landingProducts.length" class="detected-offer-type">
@@ -968,6 +972,7 @@ import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, usePro
 import { defaultCtaLabel } from "../composables/pageComposer";
 import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
+import { useSitesStore } from "../stores/sites";
 import { useAiProviderStore } from "../stores/aiProvider";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
@@ -982,7 +987,13 @@ const couponStore = useCouponsStore();
 const servicesStore = useServicesStore();
 const profileStore = useProfileStore();
 profileStore.ensureLoaded();
-const profileBrands = computed(() => profileStore.brands);
+const sitesStore = useSitesStore();
+sitesStore.ensureLoaded();
+// Brands live on the Site that owns them (plans/SITE_AS_BUSINESS_IDENTITY.md P3b). An offer is authored
+// before any page exists for it, so this screen cannot know which Site it belongs to — it offers every
+// brand the tenant owns and names the owner beside each, which is what keeps the choice honest. The page
+// BUILDER, which does know its Site, scopes strictly.
+const brandOptions = computed(() => sitesStore.brandOptions(profileStore.brands));
 function serviceObjFor(serviceId) {
   return servicesStore.services.find((s) => s.service_id === serviceId) || null;
 }
