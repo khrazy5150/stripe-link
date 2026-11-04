@@ -610,15 +610,15 @@ class MultiplePurchaseTests(unittest.TestCase):
         # The header read "Poliaxis Nutrition" while the body said "the seller", in one message,
         # because they read different sources.
         import handlers.purchase_manage as pm
-        original = pm.tenant_email_identity
-        pm.tenant_email_identity = lambda t: {"business_name": "Poliaxis Nutrition", "reply_to": ""}
+        original = pm.sending_identity
+        pm.sending_identity = lambda t, **_kw: {"business_name": "Poliaxis Nutrition", "reply_to": ""}
         try:
             sent = self.send(self.orders()[:3])
             self.assertIn("Poliaxis Nutrition", sent["subject"])
             self.assertIn("Poliaxis Nutrition", sent["text"])
             self.assertNotIn("the seller", sent["text"])
         finally:
-            pm.tenant_email_identity = original
+            pm.sending_identity = original
 
     def test_an_unnamed_subscription_does_not_say_subscription_twice(self):
         unnamed = [{"order_id": "u", "customer": {"email": self.CONTACT}, "created_at": 100,
@@ -685,21 +685,21 @@ class CancellationEmailTests(unittest.TestCase):
         self.sent = []
         self.calls = []
         self._stripe, self._creds, self._business, self._identity = (
-            pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity)
+            pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.sending_identity)
         pm.stripe_request = lambda method, path, **kwargs: (
             self.calls.append((method, path, kwargs.get("data")))
             or {"id": "sub_1", "cancel_at_period_end": True,
                 "items": {"data": [{"current_period_end": self.PERIOD_END}]}})
         pm.checkout_credentials = lambda *a, **k: ("sk_test", "acct_1")
         pm._business_name = lambda tenant_id: "Poliaxis"
-        pm.tenant_email_identity = lambda tenant_id: {"business_name": "Poliaxis",
+        pm.sending_identity = lambda tenant_id, **_kw: {"business_name": "Poliaxis",
                                                       "reply_to": "hi@poliaxis.com"}
         self.tokens = FakeTokens()
         self.tokens.put(purchase_token_doc("t1", "good", order_id="o1",
                                            email="sam@example.com", now=0))
 
     def tearDown(self):
-        pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity = (
+        pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.sending_identity = (
             self._stripe, self._creds, self._business, self._identity)
 
     class Keys:
@@ -851,18 +851,18 @@ class CancelRecordsItLocallyTests(unittest.TestCase):
 
     def setUp(self):
         self._stripe, self._creds, self._business, self._identity = (
-            pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity)
+            pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.sending_identity)
         pm.stripe_request = lambda method, path, **kwargs: {
             "id": "sub_1", "items": {"data": [{"current_period_end": 1790714125}]}}
         pm.checkout_credentials = lambda *a, **k: ("sk_test", "acct_1")
         pm._business_name = lambda t: "Poliaxis"
-        pm.tenant_email_identity = lambda t: {"business_name": "Poliaxis", "reply_to": ""}
+        pm.sending_identity = lambda t, **_kw: {"business_name": "Poliaxis", "reply_to": ""}
         self.tokens = FakeTokens()
         self.tokens.put(purchase_token_doc("t1", "good", order_id="o1", email="s@x.com", now=0))
         self.saved = []
 
     def tearDown(self):
-        pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.tenant_email_identity = (
+        pm.stripe_request, pm.checkout_credentials, pm._business_name, pm.sending_identity = (
             self._stripe, self._creds, self._business, self._identity)
 
     class Keys:

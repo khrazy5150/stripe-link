@@ -383,7 +383,7 @@ class PersistTests(unittest.TestCase):
             orders_repo=self.orders, notifications_repo=self.notifications, ledger_repo=self.ledger,
             products_repo=None, now_fn=lambda: 1790000500,
             receipt_mailer=lambda *a, **k: self.sent.append((a, k)) or {"status": "sent"},
-            email_context_loader=lambda tenant_id: {},
+            email_context_loader=lambda tenant_id, **_kw: {},
             **kw,
         )
 
@@ -425,7 +425,7 @@ class PersistTests(unittest.TestCase):
             orders_repo=self.orders, notifications_repo=self.notifications, ledger_repo=self.ledger,
             products_repo=None, now_fn=lambda: 1790000600,
             receipt_mailer=lambda *a, **k: self.sent.append((a, k)) or {"status": "sent"},
-            email_context_loader=lambda tenant_id: {},
+            email_context_loader=lambda tenant_id, **_kw: {},
         )
         self.assertEqual(again["status"], "duplicate")
         self.assertEqual(self.orders.puts, first_orders)

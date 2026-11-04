@@ -2385,6 +2385,8 @@ Resources:
           CARTS_TABLE: !Ref CartsTable
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           ORDERS_TABLE: !Ref OrdersTable
+          PAGES_TABLE: !Ref PagesTable
+          SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
@@ -2393,6 +2395,12 @@ Resources:
       Handler: handlers.purchase_manage.handler
       Description: Customer self-service for one purchase - cancel future payments or request a refund.
       Policies:
+        # WHO this message is from: the page the order came from names the Site, and the Site
+        # carries the business identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
         # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
         - DynamoDBReadPolicy:
@@ -3334,6 +3342,7 @@ Resources:
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
           ORDERS_TABLE: !Ref OrdersTable
+          PAGES_TABLE: !Ref PagesTable
           PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           PRODUCTS_TABLE: !Ref ProductsTable
           REFUNDS_TABLE: !Ref RefundsTable
@@ -3420,6 +3429,10 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PlatformConfigTable}"
                 - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PlatformConfigTable}/index/*"
+                # The page a receipt was bought from, to name WHICH of the tenant's businesses signs it
+                # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only; SitesTable is already above.
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PagesTable}"
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PagesTable}/index/*"
                 - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TenantProfilesTable}"
                 - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TenantProfilesTable}/index/*"
                 - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTable}"
@@ -3533,6 +3546,7 @@ Resources:
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
           ORDERS_TABLE: !Ref OrdersTable
+          PAGES_TABLE: !Ref PagesTable
           PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           PLATFORM_PLANS_TABLE: !Ref PlatformPlansTable
           PRODUCTS_TABLE: !Ref ProductsTable
@@ -3550,6 +3564,12 @@ Resources:
       Handler: handlers.platform_billing_webhook.handler
       Description: Receives platform-account Stripe Billing events for tenant SaaS subscriptions.
       Policies:
+        # WHO this message is from: the page the order came from names the Site, and the Site
+        # carries the business identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
@@ -4296,9 +4316,11 @@ Resources:
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           OFFERS_TABLE: !Ref OffersTable
           ORDERS_TABLE: !Ref OrdersTable
+          PAGES_TABLE: !Ref PagesTable
           PRODUCTS_TABLE: !Ref ProductsTable
           SHIPMENTS_TABLE: !Ref ShipmentsTable
           SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
+          SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
@@ -4307,6 +4329,12 @@ Resources:
       Handler: handlers.shipping.handler
       Description: Tenant shipping configuration API.
       Policies:
+        # WHO this message is from: the page the order came from names the Site, and the Site
+        # carries the business identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         # The Shipping screen tells a tenant which PRODUCTS still need measuring — orders
         # containing an unmeasured product ship one parcel per item, which costs more
         # (plans/SHIPPING_PROVIDERS.md). Read-only, and best-effort: a products table that will
@@ -5184,11 +5212,13 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTable
           # Refund defaults: the product no longer carries a stamped copy, so the promise and the
           # return requirement are resolved from the tenant's settings (plans/REFUND_POLICY_AND_GUARANTEES.md P3).
+          PAGES_TABLE: !Ref PagesTable
           PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           PRODUCTS_TABLE: !Ref ProductsTable
           REFUNDS_TABLE: !Ref RefundsTable
           SHIPMENTS_TABLE: !Ref ShipmentsTable
           SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
+          SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
@@ -5197,6 +5227,12 @@ Resources:
       Handler: handlers.orders.handler
       Description: Order history plus fulfilment state, the manual mark-as-shipped path, and address checks.
       Policies:
+        # WHO this message is from: the page the order came from names the Site, and the Site
+        # carries the business identity (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         # The shipping QUOTE the order transacted on, for the transit days of the service that actually
         # shipped -- marking an order shipped recomputes the buyer's arrival date from the day it really
         # left (plans/THANK_YOU_PAGE.md P4). Read-only; shares CartsTable with carts and tokens.

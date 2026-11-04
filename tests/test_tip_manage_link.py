@@ -129,7 +129,7 @@ class ReceiptTests(unittest.TestCase):
 
         result = send_order_receipt(
             ORDER, "t1", mailer_send=fake_send,
-            context_loader=lambda tenant: {"business_name": "Poliaxis", "support_email": ""},
+            context_loader=lambda tenant, **_kw: {"business_name": "Poliaxis", "support_email": ""},
             manage_url="https://api.example.com/tips/manage?t=tok",
         )
         self.assertEqual(result["status"], "sent")
@@ -266,7 +266,7 @@ class RenewalNoticeTests(unittest.TestCase):
                 event, tenant_id="t1", event_type=event_type,
                 tip_tokens_repo=repo if repo is not None else FakeTokens(),
                 mailer_send=lambda **kwargs: sent.update(kwargs),
-                context_loader=lambda tenant: {"business_name": "Poliaxis", "support_email": ""},
+                context_loader=lambda tenant, **_kw: {"business_name": "Poliaxis", "support_email": ""},
                 now_fn=lambda: 1000,
             )
         return result, sent

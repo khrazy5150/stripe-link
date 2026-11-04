@@ -51,7 +51,8 @@ from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
-from stripe_link.mailer import send_email, tenant_email_identity
+from stripe_link.mailer import send_email
+from stripe_link.sender_identity import sending_identity
 from stripe_link.domain.coupon_grants import is_grant_code
 from stripe_link.domain.coupon_redemptions import amounts_from_session, redemption_document
 from stripe_link.repositories.documents import (
@@ -288,7 +289,7 @@ def handler(
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
-    email_context_loader: Callable[[str], dict[str, str]] | None = None,
+    email_context_loader: Callable[..., dict[str, str]] | None = None,
     secret_cipher=None,
     line_items_fetcher: Callable[..., list[dict[str, Any]]] | None = None,
 ):
@@ -926,7 +927,7 @@ def persist_checkout_session_completed(
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
-    email_context_loader: Callable[[str], dict[str, str]] | None = None,
+    email_context_loader: Callable[..., dict[str, str]] | None = None,
     line_items: list[dict[str, Any]] | None = None,
     # The charge's REAL Stripe fee, when it could be read. Empty leaves the estimate in place.
     actual_fees: dict[str, int] | None = None,
@@ -1852,7 +1853,8 @@ def notify_tip_renewal(
             live=bool(invoice.get("livemode")),
             now=now,
         )
-        context = (context_loader or load_tenant_email_context)(tenant_id)
+        context = (context_loader or load_tenant_email_context)(
+            tenant_id, page_id=str(metadata.get("page_id") or ""), mode=mode)
         content = tip_renewal_content(
             business_name=context.get("business_name", ""),
             amount=int(invoice.get("amount_paid") or 0),
@@ -1917,10 +1919,16 @@ def resolve_download_links(order: dict[str, Any], tenant_id: str, products_repo)
         return []
 
 
-def load_tenant_email_context(tenant_id: str) -> dict[str, str]:
+def load_tenant_email_context(tenant_id: str, *, page_id: str = "", mode: str = "live") -> dict[str, str]:
     """What the receipt BODY says the business is called, and where a reply goes.
 
-    Resolved from the same place the envelope is (`tenant_email_identity`), because they were resolved
+    `page_id` and `mode` name WHICH of the tenant's businesses sold this, through the one resolver every
+    emitter shares (plans/SITE_AS_BUSINESS_IDENTITY.md §4). Without them a tenant running two Sites got
+    one business's name on the other's receipt; with them a receipt is signed by the Site whose page the
+    buyer actually bought from. The mode is not optional in practice -- a Site lives at
+    `SITE#<mode>#<site_id>`, so a test-mode order resolved against live answers with nothing.
+
+    Resolved from the same place the envelope is (`sending_identity`), because they were resolved
     from different places and it showed: the first real renewal receipt (prod, 2026-09-23) arrived From
     "Poliaxis Nutrition" — the mailer's choke point had done its job — with the subject "Your order
     receipt" and no business name in the card. The body was still reading `TenantProfile.business_name`
@@ -1931,7 +1939,7 @@ def load_tenant_email_context(tenant_id: str) -> dict[str, str]:
     TenantProfile is kept as a fallback rather than deleted: it is where a business name WOULD live if one
     were ever written there, and preferring it over an empty answer costs nothing.
     """
-    identity = tenant_email_identity(tenant_id)
+    identity = sending_identity(tenant_id, page_id=page_id, mode=mode)
     business_name = identity.get("business_name") or ""
     support_email = identity.get("reply_to") or ""
     if not business_name and os.environ.get("TENANT_PROFILES_TABLE"):
@@ -1948,7 +1956,7 @@ def send_order_receipt(
     tenant_id: str,
     *,
     mailer_send: Callable[..., Any] | None = None,
-    context_loader: Callable[[str], dict[str, str]] | None = None,
+    context_loader: Callable[..., dict[str, str]] | None = None,
     download_links: list[dict[str, str]] | None = None,
     manage_url: str = "",
 ) -> dict[str, Any]:
@@ -1959,7 +1967,9 @@ def send_order_receipt(
     if not email:
         return {"status": "skipped", "reason": "no_customer_email"}
     try:
-        context = (context_loader or load_tenant_email_context)(tenant_id)
+        context = (context_loader or load_tenant_email_context)(
+            tenant_id, page_id=str((order.get("attribution") or {}).get("page_id") or ""),
+            mode=str(order.get("stripe_mode") or order.get("mode") or "live"))
         content = receipt_content(
             order,
             business_name=context.get("business_name", ""),
@@ -2402,7 +2412,7 @@ def persist_subscription_renewal(
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
-    email_context_loader: Callable[[str], dict[str, str]] | None = None,
+    email_context_loader: Callable[..., dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Record a subscription RENEWAL as an order, with its notification, ledger entry and receipt.
 

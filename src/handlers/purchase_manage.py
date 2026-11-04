@@ -54,7 +54,8 @@ from stripe_link.domain.request_throttle import (
 from stripe_link.ids import generate_id
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.domain.email_layout import button, paragraph, render_email
-from stripe_link.mailer import send_email, tenant_email_identity
+from stripe_link.mailer import send_email
+from stripe_link.sender_identity import sending_identity
 from stripe_link.repositories.documents import (
     RepositoryError,
     notifications_repository,
@@ -216,7 +217,7 @@ def _lookup(body, *, orders_repo, tokens_repo, throttles_repo, mailer_send, now_
                     mode=mode, now=now,
                 ))
                 minted.append((order, token))
-            _send_link(minted, tenant_id, mailer_send)
+            _send_link(minted, tenant_id, mailer_send, mode=mode)
             break
     except Exception:  # noqa: BLE001 - a lookup failure must look exactly like a miss, never like an error
         pass
@@ -257,7 +258,20 @@ def _throttled(tenant_id, key, throttles_repo, now) -> bool:
     return False
 
 
-def _send_link(minted, tenant_id, mailer_send):
+def _one_page(orders) -> str:
+    """The page every one of these purchases came from, or "" when they did not agree.
+
+    One email lists several purchases, and a tenant can run several businesses. If they all came from one
+    page they came from one business and that business signs the message; if they came from two, no single
+    business can honestly sign it, so the resolver is given nothing and falls back
+    (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
+    """
+    pages = {str((order.get("attribution") or {}).get("page_id") or "") for order in orders}
+    pages.discard("")
+    return next(iter(pages)) if len(pages) == 1 else ""
+
+
+def _send_link(minted, tenant_id, mailer_send, *, mode="live"):
     """One email listing every purchase we found, each with its own link.
 
     Listing rather than picking is the fix. `select_order` returned the newest match and stopped, so a
@@ -270,7 +284,8 @@ def _send_link(minted, tenant_id, mailer_send):
     if not email:
         return
     tenant_id_str = tenant_id
-    identity = tenant_email_identity(tenant_id_str)
+    identity = sending_identity(tenant_id_str, page_id=_one_page(order for order, _t in minted),
+                                mode=mode)
     # The identity is the same source the email HEADER uses. Reading a different one here is how the
     # header said "Poliaxis Nutrition" while the body said "the seller" in the same message.
     business = (identity.get("business_name") or _business_name(tenant_id_str) or "").strip()
@@ -454,7 +469,7 @@ def _cancel(order, tenant_id, mode, business, *, token="", stripe_repo, secret_c
     # so the only record was a tab the customer could close -- and someone unsure whether they
     # cancelled calls their bank, which is the dispute this flow exists to prevent.
     if email:
-        identity = tenant_email_identity(tenant_id)
+        identity = sending_identity(tenant_id, page_id=_one_page([order]), mode=mode)
         content = cancellation_content(
             business_name=identity.get("business_name") or (business if business != "the seller" else ""),
             product=order_label(order),

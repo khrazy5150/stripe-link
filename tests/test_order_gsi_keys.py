@@ -154,7 +154,7 @@ class SubscriptionPurchasePersistsTests(unittest.TestCase):
             checkout_sessions_table=self.PlainTable(),
             orders_table=orders,
             receipt_mailer=lambda **kw: sent.append(kw),
-            email_context_loader=lambda tid: {"business_name": "Acme", "support_email": "h@a.com"},
+            email_context_loader=lambda tid, **_kw: {"business_name": "Acme", "support_email": "h@a.com"},
         )
         return result, orders, sent
 

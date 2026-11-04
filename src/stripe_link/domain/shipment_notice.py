@@ -17,7 +17,8 @@ import os
 from typing import Any
 
 from stripe_link.domain.receipts import shipment_tracking_content
-from stripe_link.mailer import send_email, tenant_email_identity
+from stripe_link.mailer import send_email
+from stripe_link.sender_identity import sending_identity
 
 
 def revision_for(order: dict[str, Any], shipment: dict[str, Any], tenant_id: str, mode: str,
@@ -74,7 +75,13 @@ def notify_buyer(order: dict[str, Any], shipment: dict[str, Any], tenant_id: str
     if not email:
         return {"sent": False, "reason": "no_customer_email"}
     try:
-        identity = tenant_email_identity(tenant_id, user_profiles_repo)
+        # The business that SOLD it signs the tracking email, resolved from the order's own page and
+        # Stripe mode (plans/SITE_AS_BUSINESS_IDENTITY.md §4) -- a tenant shipping for two businesses must
+        # not have one of them tell the other's buyer where their parcel is.
+        identity = sending_identity(
+            tenant_id, page_id=str((order.get("attribution") or {}).get("page_id") or ""),
+            mode=str(order.get("stripe_mode") or order.get("mode") or "live"),
+            profiles_repo=user_profiles_repo)
         lines = order.get("line_items") or []
         items = str((lines[0] or {}).get("name") or "") if len(lines) == 1 else ""
         if not items:

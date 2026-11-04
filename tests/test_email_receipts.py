@@ -89,7 +89,7 @@ class WebhookReceiptHookTests(unittest.TestCase):
         result = send_order_receipt(
             ORDER, "tenant_demo",
             mailer_send=lambda **kw: sent.append(kw),
-            context_loader=lambda tid: {"business_name": "Acme Co", "support_email": "help@acme.com"},
+            context_loader=lambda tid, **_kw: {"business_name": "Acme Co", "support_email": "help@acme.com"},
         )
         self.assertEqual(result["status"], "sent")
         self.assertEqual(sent[0]["to"], "ada@example.com")
@@ -113,7 +113,7 @@ class WebhookReceiptHookTests(unittest.TestCase):
         result = send_order_receipt(
             ORDER, "tenant_demo",
             mailer_send=boom,
-            context_loader=lambda tid: {"business_name": "", "support_email": ""},
+            context_loader=lambda tid, **_kw: {"business_name": "", "support_email": ""},
         )
         self.assertEqual(result["status"], "failed")
         self.assertIn("SES down", result["error"])
@@ -158,7 +158,7 @@ class DuplicateDeliveryDedupTests(unittest.TestCase):
             checkout_sessions_table=self._PlainTable(),
             orders_table=orders_table,
             receipt_mailer=lambda **kw: sent.append(kw),
-            email_context_loader=lambda tid: {"business_name": "Acme", "support_email": "h@a.com"},
+            email_context_loader=lambda tid, **_kw: {"business_name": "Acme", "support_email": "h@a.com"},
         )
         first = persist_checkout_session_completed(self._event(), **kwargs)
         second = persist_checkout_session_completed(self._event(), **kwargs)  # concurrent Connect twin
@@ -232,13 +232,47 @@ class ReceiptContextTests(unittest.TestCase):
     def test_the_context_loader_uses_the_shared_identity(self):
         import handlers.stripe_webhook as webhook
 
-        with patch.object(webhook, "tenant_email_identity",
+        with patch.object(webhook, "sending_identity",
                           return_value={"business_name": "Poliaxis Nutrition",
                                         "reply_to": "owner@example.com"}):
             context = webhook.load_tenant_email_context("t1")
 
         self.assertEqual(context["business_name"], "Poliaxis Nutrition")
         self.assertEqual(context["support_email"], "owner@example.com")
+
+    def test_the_receipt_resolves_the_business_from_the_ORDERS_OWN_PAGE_AND_MODE(self):
+        """A tenant running two Sites got one business's name on the other's receipt. The order already
+        records where the buyer converted and which Stripe mode it was, and both have to reach the
+        resolver: the page says WHICH business, and the mode says which partition to look in -- a
+        test-mode order resolved against live finds nothing (plans/SITE_AS_BUSINESS_IDENTITY.md §4)."""
+        import handlers.stripe_webhook as webhook
+
+        seen = {}
+
+        def loader(tenant_id, **kwargs):
+            seen.update({"tenant_id": tenant_id, **kwargs})
+            return {"business_name": "Quill", "support_email": "hi@quill.test"}
+
+        order = {"order_id": "o1", "customer": {"email": "buyer@example.com"}, "amounts": {"total": 100},
+                 "stripe_mode": "test", "attribution": {"page_id": "page_qui"}}
+        sent = []
+        webhook.send_order_receipt(order, "t1", mailer_send=lambda **kw: sent.append(kw),
+                                   context_loader=loader)
+
+        self.assertEqual(seen, {"tenant_id": "t1", "page_id": "page_qui", "mode": "test"})
+        self.assertEqual(sent[0]["from_name"], "Quill")
+
+    def test_an_order_with_no_mode_recorded_resolves_LIVE(self):
+        """Every order written since the mode split carries one; the ones that predate it are live, because
+        test mode did not exist when they were made."""
+        import handlers.stripe_webhook as webhook
+
+        seen = {}
+        webhook.send_order_receipt(
+            {"order_id": "o1", "customer": {"email": "b@e.com"}}, "t1",
+            mailer_send=lambda **kw: None,
+            context_loader=lambda tenant_id, **kw: seen.update(kw) or {"business_name": "X"})
+        self.assertEqual(seen, {"page_id": "", "mode": "live"})
 
     def test_a_named_business_reaches_the_subject(self):
         content = receipt_content(RenewalReceiptTests.RENEWAL, business_name="Poliaxis Nutrition")
