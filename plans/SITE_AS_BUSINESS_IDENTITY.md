@@ -440,9 +440,34 @@ that rule is what preserves §2's guarantee while changing its scope.
   and the cutoff hour. So the "operational fields" are a smaller move than this table implies, and the
   real work is making `ShippingConfig` itself per-Site.
 
-  So the order is: migrate → confirm nothing is left → delete the reads and the Profile fields. The
-  migration is written and tested; the deletion is gated on it having RUN, in prod as well as dev, and
-  **prod's contents are unknown here** (the audit needs a prod read this session was refused).
+  **The gate was framed wrong, and this is the correction (2026-11-04).** "Delete it once the migration
+  has run everywhere" is a condition that may never become true: a tenant running two businesses gets
+  `ambiguous` forever, because which Site owns "Luxe Wellness" is genuinely unknowable. The migration
+  CLEARS blockers; it cannot be the thing that declares there are none.
+
+  The gate is now **`deploy/audit_tenant_fallback.py`** (read-only, logic tested in
+  `tests/test_tenant_fallback_audit.py`), which asks the answerable question: *if
+  `business.{name,email,brands}` vanished right now, what would change?* Three independent verdicts,
+  because the three fields are reached for three different reasons and a tenant can be safe to delete
+  `brands` from and not `name`:
+
+  | Field | Reached by |
+  |---|---|
+  | `name` | a Site with no `organization.name`, **or a page attached to no Site at all** (`resolve_business_name` ends at the owner's own name, so a live page would be re-branded after a person) |
+  | `email` | any Site with no VERIFIED address (the fall-through is the signup email, which survives — so this changes where replies land rather than losing them) |
+  | `brands` | a brand name no Site of theirs carries (empties a dropdown; the data is untouched either way) |
+
+  **Dev verdict, 2026-11-04:** `EMAIL` safe, `BRANDS` safe, `NAME` blocked by **exactly one** thing — the
+  published live page `page_cYSn7b6QvLA` ("Build a $10K/month newsletter"), attached to no Site. Its slug
+  says `poliaxis-nutrition-…` while the only LIVE Site is Quill, so attaching it is a routing decision for
+  the author rather than an obvious repair. The builder can no longer create an unattached page
+  (`leaveSiteStep` refuses), so this is legacy drift, not an ongoing source.
+
+  **Prod verdict: unknown.** Three sessions have now been refused the prod DynamoDB read. One command
+  answers it: `PYTHONPATH=src python3 deploy/audit_tenant_fallback.py prod`.
+
+  So the remaining order is: clear the blockers each environment reports → audit says safe in dev AND prod
+  → delete the reads and the Profile fields. Nothing else about P4 needs deciding.
 
   Two things that make the deletion safer than it first looked:
 

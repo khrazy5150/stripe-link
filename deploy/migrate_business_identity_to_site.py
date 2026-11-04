@@ -6,8 +6,14 @@ Carries `business.name`, `business.brands`, and a VERIFIED `business.email`. Not
 and the author has them moving under their own plan rather than riding along with identity (2026-11-03).
 
 The author chose the clean end state: once every tenant has moved, the tenant-level fallback is DELETED
-rather than kept as a safety net. This script is what "has moved" means, so the reads can only be removed
-after it has run everywhere.
+rather than kept as a safety net.
+
+**This script is NOT the gate for that deletion, and saying so here because it was written as if it were.**
+A tenant running two businesses gets `ambiguous` forever — which Site owns "Luxe Wellness" is genuinely
+unknowable — so "has the migration run everywhere" is a condition that may never become true. The gate is
+`deploy/audit_tenant_fallback.py`, which asks the answerable question instead: *if the fields vanished
+right now, what would change?* This script is the thing that CLEARS blockers the audit reports; the audit
+is what says when there are none left.
 
 **Only migrates where the answer is unambiguous: a tenant with exactly ONE Site carrying an organization.**
 That is the same rule `sender_identity.site_organization` uses, and for the same reason — with two
