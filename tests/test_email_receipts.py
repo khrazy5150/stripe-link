@@ -49,12 +49,15 @@ class MailerTests(unittest.TestCase):
 
     def test_send_email_builds_ses_request(self):
         ses = FakeSes()
+        # NOT example.com: `send_email` now refuses a reserved domain outright, because SES retries one
+        # for 840 minutes and returns a DSN to our own support mailbox (2026-11-04). A test that EXECUTES
+        # the real mailer needs an address that could exist; nothing is sent either way.
         with patch.dict(os.environ, {"EMAIL_FROM_ADDRESS": "support@juniorbay.net"}, clear=False):
-            send_email(to="ada@example.com", subject="Hi", html="<p>Hi</p>", text="Hi",
+            send_email(to="ada@acme.co", subject="Hi", html="<p>Hi</p>", text="Hi",
                        from_name="Acme Co", reply_to="help@acme.com", client=ses)
         req = ses.sent[0]
         self.assertEqual(req["FromEmailAddress"], "Acme Co <support@juniorbay.net>")
-        self.assertEqual(req["Destination"]["ToAddresses"], ["ada@example.com"])
+        self.assertEqual(req["Destination"]["ToAddresses"], ["ada@acme.co"])
         self.assertEqual(req["ReplyToAddresses"], ["help@acme.com"])
         self.assertEqual(req["Content"]["Simple"]["Subject"]["Data"], "Hi")
 
@@ -253,7 +256,7 @@ class ReceiptContextTests(unittest.TestCase):
             seen.update({"tenant_id": tenant_id, **kwargs})
             return {"business_name": "Quill", "support_email": "hi@quill.test"}
 
-        order = {"order_id": "o1", "customer": {"email": "buyer@example.com"}, "amounts": {"total": 100},
+        order = {"order_id": "o1", "customer": {"email": "buyer@acme.co"}, "amounts": {"total": 100},
                  "stripe_mode": "test", "attribution": {"page_id": "page_qui"}}
         sent = []
         webhook.send_order_receipt(order, "t1", mailer_send=lambda **kw: sent.append(kw),

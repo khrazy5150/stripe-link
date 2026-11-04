@@ -137,8 +137,11 @@ class TheMailerItselfIsEXECUTEDTests(unittest.TestCase):
 
     def _send(self, **over):
         client = FakeSes()
-        kwargs = {"to": "buyer@example.com", "subject": "You're registered", "html": "<p>See you</p>",
-                  "text": "See you", "from_name": "Quill", "reply_to": "hi@quill.test",
+        # NOT example.com, and not `hi@quill.test` either: `send_email` now refuses a reserved domain,
+        # because SES retries one for 840 minutes and returns a DSN to our own support mailbox
+        # (2026-11-04). A test that EXECUTES the real mailer needs addresses that could exist.
+        kwargs = {"to": "buyer@acme.co", "subject": "You're registered", "html": "<p>See you</p>",
+                  "text": "See you", "from_name": "Quill", "reply_to": "hi@quill.co",
                   "client": client}
         kwargs.update(over)
         send_email(**kwargs)
@@ -158,7 +161,7 @@ class TheMailerItselfIsEXECUTEDTests(unittest.TestCase):
         request = self._send(calendar_invite="BEGIN:VCALENDAR\nEND:VCALENDAR",
                              calendar_filename="session.ics")
         message = _parse(request)
-        self.assertEqual(message["Reply-To"], "hi@quill.test")
+        self.assertEqual(message["Reply-To"], "hi@quill.co")
         parts = {part.get_content_type(): part for part in message.walk()}
         self.assertIn("text/calendar", parts)
         self.assertEqual(parts["text/calendar"].get_filename(), "session.ics")
@@ -168,12 +171,12 @@ class TheMailerItselfIsEXECUTEDTests(unittest.TestCase):
 
     def test_ReplyToAddresses_is_still_set_on_the_calendar_send(self):
         request = self._send(calendar_invite="BEGIN:VCALENDAR\nEND:VCALENDAR")
-        self.assertEqual(request["ReplyToAddresses"], ["hi@quill.test"])
+        self.assertEqual(request["ReplyToAddresses"], ["hi@quill.co"])
 
     def test_a_plain_send_still_uses_the_SIMPLE_content(self):
         request = self._send()
         self.assertIn("Simple", request["Content"])
-        self.assertEqual(request["ReplyToAddresses"], ["hi@quill.test"])
+        self.assertEqual(request["ReplyToAddresses"], ["hi@quill.co"])
 
     def test_no_reply_address_sets_no_header(self):
         request = self._send(reply_to="")

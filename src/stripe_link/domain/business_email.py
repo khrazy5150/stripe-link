@@ -51,6 +51,37 @@ ALIAS_DOMAINS = frozenset({
 })
 
 
+# Domains RESERVED BY THE RFCs, which can never have an MX record and can never receive mail:
+# RFC 2606 (example.*, .test, .invalid, .localhost) and RFC 6761. Distinct from DISPOSABLE_DOMAINS above,
+# which are real inboxes we would rather a BUSINESS did not use — these are not inboxes at all.
+#
+# Sending to one costs SES 840 minutes of retries and then returns a Delivery Status Notification to the
+# platform's own support mailbox. Thousands of those accumulated there before anyone looked
+# (reported 2026-11-04), every one of them a message that never had a recipient.
+UNDELIVERABLE_DOMAINS = frozenset({
+    "example.com", "example.net", "example.org", "example.edu",
+    "test", "invalid", "localhost", "local",
+})
+UNDELIVERABLE_SUFFIXES = (".test", ".invalid", ".localhost", ".local", ".example")
+
+
+def is_undeliverable(value: str) -> bool:
+    """True for an address no mail server can ever accept — reserved by RFC, not merely unwise.
+
+    The question is deliberately narrow. "Will this bounce?" cannot be answered here and guessing at it
+    would refuse real customers; "can this domain exist at all?" is a fact, and the answer is no.
+    """
+    address = str(value or "").strip().lower()
+    if not looks_like_email(address):
+        return True                 # not an address at all; nothing can be delivered to it
+    domain = address.rsplit("@", 1)[-1]
+    if domain in UNDELIVERABLE_DOMAINS or domain.endswith(UNDELIVERABLE_SUFFIXES):
+        return True
+    # SUBDOMAINS of a reserved name are reserved too (RFC 2606 reserves the whole tree). Matched on a
+    # leading dot so `examples.com` — a real domain somebody owns — is not swept up with `example.com`.
+    return any(domain.endswith(f".{reserved}") for reserved in UNDELIVERABLE_DOMAINS)
+
+
 def disposable_domain_of(value: str) -> str:
     """The matched domain, or "". Matches SUBDOMAINS too: a service that hands out
     `{uuid}@sandbox.zazamail.link` is not defeated by listing the bare domain."""

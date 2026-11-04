@@ -16,7 +16,7 @@ import os
 from email.utils import formataddr
 from typing import Any
 
-from stripe_link.domain.business_email import email_identity
+from stripe_link.domain.business_email import email_identity, is_undeliverable
 from stripe_link.domain.platform_signature import (
     shows_platform_signature,
     signature_html,
@@ -154,6 +154,16 @@ def send_email(
     recipient = str(to or "").strip()
     if not recipient:
         raise EmailError("Recipient email is required.")
+    # AN ADDRESS THAT CAN NEVER RECEIVE is refused HERE, at the one choke point every send passes through,
+    # rather than in each caller — the next feature that mails something would forget, which is exactly how
+    # this went unnoticed. Reserved domains (RFC 2606/6761) have no MX and never will, so SES retries for
+    # 840 minutes and then returns a Delivery Status Notification to the platform's own support mailbox.
+    # Thousands had piled up there before anyone looked (reported 2026-11-04).
+    #
+    # Refused rather than silently dropped: a caller that believes it sent something is how a tenant comes
+    # to think a customer was emailed. Every caller already treats a failed send as a failed send.
+    if is_undeliverable(recipient):
+        raise EmailError(f"{recipient} cannot receive email (reserved or malformed address).")
     if not html and not text:
         raise EmailError("Email must include an html or text body.")
 
