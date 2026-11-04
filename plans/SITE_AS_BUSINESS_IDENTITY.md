@@ -169,7 +169,7 @@ Options, none free of cost:
 
 | | |
 |---|---|
-| **Soft-lock extra Sites** | Keep serving published pages; refuse edits and new publishes on Sites over the cap, tenant picks which stay active. Preserves free-forever; most work. |
+| **Soft-lock extra Sites** ✅ **CHOSEN 2026-11-03** | Keep serving published pages; refuse edits and new publishes on Sites over the cap, **tenant picks which stay active**. Preserves free-forever; most work. |
 | **Read-only over the cap** | Everything keeps serving, nothing over the cap can be edited. Simpler, blunter. |
 | **Grandfather existing** | Cap applies to NEW Sites only. Zero disruption, but the tier never converts anyone who already has three. |
 
@@ -178,12 +178,45 @@ keeps the free-forever promise while making the tier mean something.
 
 ### Two live facts that constrain the rollout
 
-1. **The free tier currently advertises "Unlimited landing pages"** (`DEFAULT_FREE_FEATURES`) and `sites`
-   sits in `FREE_TIER_CAPABILITIES` with no cap anywhere in the codebase — verified: there is no
-   `max_sites`, no site-count gate, nothing. Capping to 1 changes a promise already on the pricing card.
+1. **No site-count gate exists anywhere** — verified: no `max_sites`, no counter, nothing. The cap is new
+   machinery, not a changed constant. Note the free tier's "Unlimited landing pages" is **not** in
+   conflict: it means unlimited pages *within* a Site (author, 2026-11-03), which stays true. The card
+   needs a Sites line added, not that line corrected.
 2. **The author's own dev tenant has 3 Sites** (`poliaxis-nutrition`, `poliaxis-nutrition-test`, `quill`,
    `quill-test` subdomains). So the "Poliaxis vs Quill" email is two of three real businesses on one
    tenant — this plan's motivating bug and its motivating revenue case are the same account.
+
+## 3c. The cap counts LIVE-mode Sites (resolved 2026-11-03)
+
+**Vocabulary first, because an earlier draft of this plan got it wrong.** *Sandbox* is the DEV DEPLOYMENT
+(`sandbox.juniorbay.com`) — developer-only, no tenant ever touches it, and irrelevant to pricing.
+*Production* (`app.juniorbay.com`) is where every tenant lives, and it carries BOTH Stripe modes: `test`
+(off by default — where a tenant builds, then copies to live) and `live`. Keys carry `#mode=test` /
+`#mode=live` to separate the data inside one deployment. "A sandbox Site" is not a thing. See
+`plans/STRIPE_MODE_STORAGE.md` and the standing rule that `environment == prod` is abolished legacy for
+`mode == live`.
+
+**The keying, measured on dev.** `sites_repository` is `mode_scoped=True`, so a Site lives at
+`SITE#<mode>#<site_id>`, and a Site copied to the other mode **keeps its `site_id`**:
+
+```
+SITE#live#site_rWLjyL57Pn5Gk5     1 live Site
+SITE#test#site_rWLjyL57Pn5Gk5     the same Site, copied to test
+SITE#test#site_3SxIqyfqnqrbmo     a test-only Site
+```
+
+So "how many Sites does this tenant have" has three possible answers (1 live, 2 test, 2 distinct ids) and
+the cap must say which.
+
+**Decision: count Sites in LIVE mode.** Test mode is the staging area the cross-mode copy feature exists to
+serve; charging for staging would penalise the safe workflow. And an uncapped test mode costs nothing
+commercially — test Sites serve on `*.jbay.be` / `*.jbay.uk`, are **always noindex**, and take test-mode
+Stripe payments only, so no real customer and no real money can reach one. A tenant who builds five
+businesses in test mode has sold nothing; the cap bites the moment they want one live.
+
+**Consequence for the counter:** the gate reads the LIVE partition only. A tenant at their cap can still
+open a test Site to try the next idea — which is the behaviour that makes the tier feel fair rather than
+punitive, and it costs nothing to allow.
 
 ## 4. Proposed shape
 
@@ -233,6 +266,5 @@ that rule is what preserves §2's guarantee while changing its scope.
 5. **§3b — the Site cap numbers and the downgrade rule.** Free 1 / Basic 3 / Pro 10 as stated? And what
    happens to Sites over the cap on downgrade — soft-lock, read-only, or grandfather? *Recommendation:
    soft-lock with tenant choice; it is the only option compatible with free-forever.*
-6. **§3b — does the cap apply to TEST-mode Sites?** The author's tenant has `quill` and `quill-test`. If a
-   sandbox Site counts against the cap, a 1-Site free tenant cannot test anything. *Leaning: cap LIVE-mode
-   Sites only.* This is the kind of detail that makes a tier feel punitive if it is got wrong.
+6. ~~**§3b — does the cap apply to TEST-mode Sites?**~~ **RESOLVED 2026-11-03 — cap LIVE-mode Sites only.**
+   See §3c.
