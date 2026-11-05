@@ -542,7 +542,7 @@ def zone_state(zone: dict[str, Any]) -> str:
 
 def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_records_fn,
               observe_fn, repository, site_id: str = "", observe_ns_fn=None,
-              scan_fn=None) -> dict[str, Any]:
+              scan_fn=None, find_zone_fn=None) -> dict[str, Any]:
     """Create the zone, read what the import found, compare it with live DNS, and record the zone.
 
     **The zone is created before the review can run, and that is safe.** Cloudflare's import scan only
@@ -558,11 +558,25 @@ def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_rec
     `observe_fn(domain)` returns `(records, complete)` -- the caller's independent lookup and whether it
     actually succeeded. The flag is passed straight through to `review`, which requires it, because
     "found no mail" and "could not ask" are opposite answers that both arrive as an empty list.
+
+    **`find_zone_fn` ADOPTS a zone our account already holds** rather than failing to create a second
+    one. A domain registered through Cloudflare Registrar on our account arrives with its zone already
+    made, so creation is not the first step for it -- it is a step that has already happened. Optional so
+    that every existing caller and test keeps its behaviour; passing it only ever turns a hard Cloudflare
+    error into the state the caller was asking for.
+
+    Adoption does NOT relax the review. An adopted zone goes through the same scan, the same comparison
+    against live DNS and the same mail gate as a created one, because "we already host it" says nothing
+    about whether moving its serving records is safe.
     """
     # BEFORE the zone exists. Once it does, the delegation may already be ours and the question
     # "where did this domain point?" has no answer left anywhere.
     prior, _ = observe_ns_fn(domain) if observe_ns_fn else ((), False)
-    zone = create_zone_fn(domain)
+    # ADOPT, THEN CREATE. A zone we already hold is not an error and not a second zone to make.
+    zone = (find_zone_fn(domain) if find_zone_fn else None)
+    adopted = bool(zone)
+    if not adopted:
+        zone = create_zone_fn(domain)
     zone_id = str(zone.get("id") or "")
     # ASK for the import. Creating the zone does not perform one, whatever `jump_start` claims.
     if scan_fn:
@@ -575,6 +589,11 @@ def provision(*, tenant_id: str, domain: str, now: int, create_zone_fn, list_rec
     summary = review(imported, observed, observed_complete=bool(observed_complete))
     record = managed_zone_record(tenant_id, domain, zone, now, site_id=site_id,
                                  observed_name_servers=prior)
+    # WHOSE ZONE THIS WAS BEFORE WE RECORDED IT. Offboarding hands back `observed_name_servers`, and for
+    # an adopted zone those are already Cloudflare's own -- there is no previous provider to restore,
+    # because there was never a delegation anywhere else. Stored so that "move this domain elsewhere"
+    # can say so instead of handing the tenant back the nameservers they are already on.
+    record["adopted"] = adopted
     record["review"] = stored_review(summary, now=int(now))
     repository.put(record)
     return {

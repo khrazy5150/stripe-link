@@ -284,6 +284,83 @@ class FakeZoneRepo:
         return document
 
 
+class AdoptingAZoneWeAlreadyHoldTests(unittest.TestCase):
+    """A domain registered through Cloudflare Registrar on OUR account arrives with its zone already
+    made, so `POST /zones` fails and the tenant sees a raw Cloudflare error on a button press.
+
+    That is not an error state: a zone we already hold is the END the flow is trying to reach. Found the
+    day the platform registered its own first domain (delightfinds.com, 2026-11-04) and discovered the
+    code had no path for it -- the same shape any tenant who registers at Cloudflare will hit.
+    """
+
+    ZONE = {"id": "z-existing", "status": "active",
+            "name_servers": ["kim.ns.cloudflare.com", "walt.ns.cloudflare.com"]}
+
+    def _provision(self, *, found, imported=(), observed=(), complete=True):
+        from stripe_link.domain.managed_dns import provision
+        created = []
+
+        def create(domain):
+            created.append(domain)
+            return {"id": "z-new", "status": "pending", "name_servers": ["a.ns", "b.ns"]}
+
+        repo = FakeZoneRepo()
+        result = provision(
+            tenant_id="t1", domain="example.com", now=1_000,
+            create_zone_fn=create,
+            find_zone_fn=lambda d: dict(found) if found else None,
+            list_records_fn=lambda zid: list(imported),
+            observe_fn=lambda d: (list(observed), complete),
+            repository=repo,
+        )
+        return result, repo, created
+
+    def test_an_existing_zone_is_ADOPTED_and_no_second_one_is_made(self):
+        """The whole point. Creating a second zone for a domain we already serve would orphan the first
+        while the delegation may already point at it."""
+        result, repo, created = self._provision(found=self.ZONE)
+        self.assertEqual(created, [], "create must not be called when the zone is already ours")
+        self.assertEqual(repo.saved[0]["zone_id"], "z-existing")
+        self.assertTrue(repo.saved[0]["adopted"])
+
+    def test_with_NO_existing_zone_it_still_creates_one(self):
+        """The ordinary path is untouched -- adoption only ever replaces a failure."""
+        _result, repo, created = self._provision(found=None)
+        self.assertEqual(created, ["example.com"])
+        self.assertEqual(repo.saved[0]["zone_id"], "z-new")
+        self.assertFalse(repo.saved[0]["adopted"])
+
+    def test_an_adopted_zone_STILL_FACES_THE_MAIL_GATE(self):
+        """"We already host it" says nothing about whether moving its serving records is safe. A zone
+        carrying mail blocks exactly as a created one would."""
+        result, _repo, _created = self._provision(
+            found=self.ZONE, imported=[WEB], observed=[WEB, *GOOGLE_MX])
+        self.assertTrue(result["review"]["blocked"])
+        self.assertEqual(result["name_servers"], [], "a blocked review hands over nothing")
+
+    def test_an_adopted_CLEAN_zone_hands_over_its_nameservers(self):
+        records = [WEB]
+        result, _repo, _created = self._provision(found=self.ZONE, imported=records, observed=records)
+        self.assertFalse(result["review"]["blocked"])
+        self.assertEqual(result["name_servers"], ["kim.ns.cloudflare.com", "walt.ns.cloudflare.com"])
+
+    def test_NO_find_function_behaves_exactly_as_before(self):
+        """Every existing caller omits it. Adoption must be something a caller opts into, not a change
+        of behaviour they inherit."""
+        from stripe_link.domain.managed_dns import provision
+        created = []
+        repo = FakeZoneRepo()
+        provision(
+            tenant_id="t1", domain="example.com", now=1_000,
+            create_zone_fn=lambda d: created.append(d) or dict(self.ZONE),
+            list_records_fn=lambda zid: [],
+            observe_fn=lambda d: ([], True),
+            repository=repo,
+        )
+        self.assertEqual(created, ["example.com"])
+        self.assertFalse(repo.saved[0]["adopted"])
+
+
 class ProvisionTests(unittest.TestCase):
     """Create the zone, read the import, compare it with live DNS, record the zone."""
 

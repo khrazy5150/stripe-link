@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from stripe_link.domain.custom_domains import CLOUDFLARE_API_BASE, CustomDomainError
@@ -69,6 +70,39 @@ def create_zone(domain: str, *, account_id: str, api_token: str, opener=None) ->
         "POST", "/zones", api_token=api_token, opener=opener,
         data={"name": name, "account": {"id": account_id}, "type": "full", "jump_start": True},
     )
+
+
+def find_zone(domain: str, *, account_id: str, api_token: str, opener=None) -> dict[str, Any] | None:
+    """The zone for this domain if our account ALREADY holds one, else None.
+
+    `create_zone` is a POST that fails outright when the zone exists, and there are two ordinary ways for
+    it to exist before anyone asks us to make it:
+
+    1. **The domain was registered through Cloudflare Registrar on our own account.** Registration
+       creates the zone as part of itself, so every such domain arrives already hosted. This is how the
+       platform's own first domain reached us (delightfinds.com, 2026-11-04) and it is the shape any
+       tenant who registers at Cloudflare will hit.
+    2. A previous run got as far as creating the zone and failed before the record was written.
+
+    Both used to surface as a raw Cloudflare error on a button press. Neither is an error: the zone being
+    ours is the END STATE provisioning is trying to reach, arrived at by a different road.
+
+    Scoped to our account by `account.id`, so a zone of the same name on somebody else's account is not
+    visible here and cannot be adopted. That is a property of the query, not a check -- which is the way
+    round we want it, because a check can be forgotten.
+    """
+    name = str(domain or "").strip().lower().rstrip(".")
+    if not name:
+        return None
+    result = cloudflare_account_request(
+        "GET", f"/zones?name={quote(name)}&account.id={quote(str(account_id))}&per_page=1",
+        api_token=api_token, opener=opener,
+    )
+    # A list response, unlike every other call in this module. An empty list is the ordinary answer and
+    # means "not ours", so it must not read as a failure.
+    if isinstance(result, list):
+        return dict(result[0]) if result else None
+    return dict(result) if result else None
 
 
 def scan_zone_records(zone_id: str, *, api_token: str, opener=None) -> dict[str, Any]:

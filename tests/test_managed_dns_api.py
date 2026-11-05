@@ -46,6 +46,14 @@ class FakeZones:
     def list_for_tenant(self, tenant_id):
         return [dict(d) for (t, _), d in self.docs.items() if t == tenant_id]
 
+    def find_by_id(self, domain):
+        """Cross-tenant lookup by domain, which the real repo does via GSI1. Modelled here because the
+        claim guard depends on it: a fake without it would make the guard look like it passes."""
+        for (_tenant, stored), document in self.docs.items():
+            if stored == domain:
+                return dict(document)
+        return None
+
     def put(self, document):
         self.docs[(document["tenant_id"], document["domain"])] = dict(document)
         return document
@@ -76,6 +84,7 @@ class StartTests(unittest.TestCase):
         zones = zones or FakeZones()
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb-router-dev")), \
              patch.object(managed_dns_api, "create_zone", return_value=ZONE), \
+             patch.object(managed_dns_api, "find_zone", return_value=None), \
              patch.object(managed_dns_api, "list_zone_dns_records", return_value=imported), \
              patch.object(managed_dns_api, "_detect", return_value=ELIGIBLE), \
              patch.object(managed_dns_api, "observe_mail_records", return_value=(observed, complete)):
@@ -125,6 +134,7 @@ class StartTests(unittest.TestCase):
         zones = FakeZones()
         with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "s")), \
              patch.object(managed_dns_api, "create_zone", return_value=ZONE) as created, \
+             patch.object(managed_dns_api, "find_zone", return_value=None), \
              patch.object(managed_dns_api, "list_zone_dns_records", return_value=[]), \
              patch.object(managed_dns_api, "_detect", return_value=ELIGIBLE), \
              patch.object(managed_dns_api, "observe_mail_records", return_value=([], True)):
@@ -218,6 +228,65 @@ class StartTests(unittest.TestCase):
         self.assertEqual(body_of(response)["error"], "managed_dns_not_configured")
 
 
+class ADomainAnotherTenantAlreadyHoldsTests(unittest.TestCase):
+    """`_zone_for` is tenant-scoped, so it answers "have I started this?" and nothing about anyone else.
+
+    That was survivable only while `create_zone` ran first: Cloudflare refused the duplicate and the
+    refusal did this gate's job by accident. Adopting an existing zone removes the accident, so the gate
+    has to exist on purpose -- otherwise a second tenant naming a domain we already host would take over
+    its zone and be handed the right to write its DNS.
+    """
+
+    def _start(self, zones, tenant=TENANT):
+        evt = {"httpMethod": "POST", "pathParameters": {"site_id": "site_1"},
+               "queryStringParameters": {"tenant_id": tenant},
+               "body": json.dumps({"domain": "example.com", "import": True})}
+        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb-router-dev")), \
+             patch.object(managed_dns_api, "create_zone", return_value=ZONE), \
+             patch.object(managed_dns_api, "find_zone", return_value=None), \
+             patch.object(managed_dns_api, "list_zone_dns_records", return_value=[]), \
+             patch.object(managed_dns_api, "_detect", return_value=ELIGIBLE), \
+             patch.object(managed_dns_api, "observe_mail_records", return_value=([], True)):
+            return managed_dns_api.start(evt, FakeSites(), "site_1", repo=zones)
+
+    def test_another_tenants_domain_is_REFUSED(self):
+        zones = FakeZones([{"tenant_id": "someone_else", "domain": "example.com", "zone_id": "z9"}])
+        response = self._start(zones)
+        self.assertEqual(response["statusCode"], 409)
+        self.assertEqual(body_of(response)["error"], "domain_claimed")
+
+    def test_the_refusal_does_not_touch_their_zone(self):
+        """Refusing late would still have written a record pointing at somebody else's zone."""
+        zones = FakeZones([{"tenant_id": "someone_else", "domain": "example.com", "zone_id": "z9"}])
+        self._start(zones)
+        self.assertNotIn((TENANT, "example.com"), zones.docs)
+        self.assertEqual(zones.docs[("someone_else", "example.com")]["zone_id"], "z9",
+                         "the other tenant's record must be untouched")
+
+    def test_MY_OWN_claim_is_not_a_refusal(self):
+        """The same row under my own tenant is the resume path, not a conflict -- it must still recheck."""
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "name_servers": ["a.ns", "b.ns"]}])
+        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb-router-dev")), \
+             patch.object(managed_dns_api, "scan_zone_records", return_value={}), \
+             patch.object(managed_dns_api, "list_zone_dns_records", return_value=[]), \
+             patch.object(managed_dns_api, "observe_mail_records", return_value=([], True)):
+            response = managed_dns_api.start(
+                event(body={"domain": "example.com", "import": True}), FakeSites(), "site_1", repo=zones)
+        self.assertNotEqual(response["statusCode"], 409)
+
+    def test_an_UNREADABLE_claim_check_refuses_rather_than_assuming_it_is_free(self):
+        """An absence is not a pass. A failed lookup means we cannot prove the domain is unclaimed, and
+        the same rule governs `review(observed_complete=...)` and `eligibility` -- silence refuses."""
+        class Exploding(FakeZones):
+            def find_by_id(self, domain):
+                raise RuntimeError("dynamo down")
+
+        response = self._start(Exploding())
+        self.assertEqual(response["statusCode"], 503)
+        self.assertEqual(body_of(response)["error"], "claim_check_failed")
+
+
 class StatusTests(unittest.TestCase):
     def _status(self, zone_status, stored_status="pending"):
         zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
@@ -257,6 +326,53 @@ class StatusTests(unittest.TestCase):
                          ["example.com/*", "*.example.com/*"])
         self.assertEqual(zones.docs[(TENANT, "example.com")]["status"], "active")
 
+    def test_a_zone_that_was_ALREADY_ACTIVE_still_gets_wired(self):
+        """An ADOPTED zone is born active -- a Cloudflare Registrar domain is already delegated to us --
+        so there is no pending->active edge to wait for. The old condition waited for that edge, which
+        meant the panel showed LIVE while `_activate` had never run and the domain served nothing."""
+        response, rec, route, _zones = self._status("active", stored_status="active")
+        self.assertTrue(body_of(response)["activated"])
+        self.assertEqual(rec.call_count, 2)
+        self.assertEqual(len(route.call_args_list), 2)
+
+    def test_it_is_NOT_wired_twice(self):
+        """`activated_at` is the idempotency key. Re-polling an already-wired zone must not re-author its
+        records -- the panel polls this endpoint continuously."""
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "active", "activated_at": 1_700_000_000}])
+        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb-router-dev")), \
+             patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "active"}), \
+             patch.object(managed_dns_api, "_attach_to_site", return_value=True), \
+             patch.object(managed_dns_api, "create_dns_record") as rec, \
+             patch.object(managed_dns_api, "create_worker_route") as route:
+            response = managed_dns_api.status(event("GET", query={"domain": "example.com"}),
+                                              FakeSites(), "site_1", mode="live", repo=zones)
+        self.assertFalse(body_of(response)["activated"])
+        rec.assert_not_called()
+        route.assert_not_called()
+
+    def test_a_FAILED_activation_is_retried_on_the_next_poll(self):
+        """It used to stamp `activated_at` whatever happened, and the stamp was also what suppressed the
+        retry -- so one transient Cloudflare error left the domain permanently unwired, with the panel
+        reporting LIVE. The stamp now means "this worked", so a failure simply tries again."""
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "active"}])
+
+        def poll(attach_ok):
+            with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb")), \
+                 patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "active"}), \
+                 patch.object(managed_dns_api, "_attach_to_site", return_value=attach_ok), \
+                 patch.object(managed_dns_api, "create_dns_record"), \
+                 patch.object(managed_dns_api, "create_worker_route"):
+                return managed_dns_api.status(event("GET", query={"domain": "example.com"}),
+                                              FakeSites(), "site_1", mode="live", repo=zones)
+
+        self.assertFalse(body_of(poll(False))["activated"])
+        self.assertNotIn("activated_at", zones.docs[(TENANT, "example.com")],
+                         "a failed activation must not look done")
+        self.assertTrue(body_of(poll(True))["activated"], "the next poll retries and succeeds")
+        self.assertIn("activated_at", zones.docs[(TENANT, "example.com")])
+
     def test_activation_attaches_the_domain_to_the_site(self):
         """THE HALF THAT WAS MISSING. Cloudflare records and Worker routes get a request to our edge;
         they do not tell the edge what to answer with. Without the Site attachment there is no
@@ -287,8 +403,21 @@ class StatusTests(unittest.TestCase):
                                               FakeSites(), "site_1", mode="live", repo=zones)
         self.assertFalse(body_of(response)["activated"])
 
-    def test_an_already_active_zone_is_not_rewired_on_every_poll(self):
-        _, rec, route, _ = self._status("active", stored_status="active")
+    def test_an_already_WIRED_zone_is_not_rewired_on_every_poll(self):
+        """This asserted on the stored STATUS until adoption existed, which was the same thing while
+        every zone was created pending: active-in-our-record implied we had watched it get there and
+        wired it on the way. An adopted zone is stored active and unwired from its first moment, so the
+        question had to become "did we wire it?" -- `test_it_is_NOT_wired_twice` above is the same
+        property asked that way, and this is kept pointing at it."""
+        zones = FakeZones([{"tenant_id": TENANT, "domain": "example.com", "zone_id": "z1",
+                            "status": "active", "activated_at": 1_700_000_000}])
+        with patch.object(managed_dns_api, "_config", return_value=("acct", "tok", "jb")), \
+             patch.object(managed_dns_api, "get_zone", return_value={"id": "z1", "status": "active"}), \
+             patch.object(managed_dns_api, "_attach_to_site", return_value=True), \
+             patch.object(managed_dns_api, "create_dns_record") as rec, \
+             patch.object(managed_dns_api, "create_worker_route") as route:
+            managed_dns_api.status(event("GET", query={"domain": "example.com"}),
+                                   FakeSites(), "site_1", mode="live", repo=zones)
         rec.assert_not_called()
         route.assert_not_called()
 

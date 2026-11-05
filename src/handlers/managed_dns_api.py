@@ -31,6 +31,7 @@ from stripe_link.domain.cloudflare_zones import (
     create_worker_route,
     create_zone,
     delete_zone,
+    find_zone,
     get_zone,
     list_zone_dns_records,
     scan_zone_records,
@@ -147,6 +148,25 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
                         repair=bool(body.get("repair")),
                         confirm=bool(body.get("confirm")))
 
+    # IS THIS DOMAIN ALREADY SOMEBODY ELSE'S? `_zone_for` above is tenant-scoped, so it answers "have I
+    # started this?" and nothing about anyone else. That was survivable only while `create_zone` was the
+    # first thing to run: Cloudflare refused the duplicate and the refusal did the gate's job by
+    # accident. Adoption removes that accident -- a second tenant naming a domain we already host would
+    # otherwise take over its zone and be handed the right to write its DNS.
+    #
+    # An absence is not a pass here: a FAILED lookup must not read as "nobody owns it"
+    # (see the `observed_complete` rule in `managed_dns.review`), so an error refuses.
+    try:
+        claimed = repo.find_by_id(domain)
+    except Exception:  # noqa: BLE001 - cannot prove it is free, so do not treat it as free
+        logger.exception("managed dns: could not check the claim on %s", domain)
+        return error_response("We could not check this domain just now. Please try again in a moment.",
+                              status_code=503, code="claim_check_failed")
+    if claimed and str(claimed.get("tenant_id") or "") != tenant_id:
+        return error_response(
+            "This domain is already connected to another account. If it is yours, disconnect it there "
+            "first.", status_code=409, code="domain_claimed")
+
     # DETECT BEFORE CREATING, on every path. The plain button press stops here and returns the verdict;
     # only an explicit `import` goes on to make a zone.
     verdict = _detect(domain)
@@ -163,6 +183,9 @@ def start(event, sites_repository, site_id, *, mode="test", repo=None):
         result = managed_dns.provision(
             tenant_id=tenant_id, domain=domain, now=int(time.time()),
             create_zone_fn=lambda d: create_zone(d, account_id=account_id, api_token=api_token),
+            # Adopt the zone when our account already holds one -- a domain registered through
+            # Cloudflare Registrar on this account arrives with its zone already made.
+            find_zone_fn=lambda d: find_zone(d, account_id=account_id, api_token=api_token),
             list_records_fn=lambda zid: list_zone_dns_records(zid, api_token=api_token),
             observe_fn=observe_mail_records,
             observe_ns_fn=observe_name_servers,
@@ -252,11 +275,23 @@ def status(event, sites_repository, site_id, *, mode="test", repo=None):
     previous = record.get("status")
     record["status"] = state
     activated = False
-    if state == "active" and previous != "active":
+    # HAVE WE WIRED IT YET? -- not "did it just become active?". The two agree whenever a zone is created
+    # pending and becomes active while we watch, which was every zone until adoption existed. An ADOPTED
+    # zone is born `active` (a Cloudflare Registrar domain is already delegated to us), so the edge this
+    # used to wait for never arrives: the panel would show LIVE, `_activate` would never run, and the
+    # domain would serve nothing with nothing anywhere saying why.
+    #
+    # `activated_at` is the idempotency key the old condition was standing in for, and asking it directly
+    # is both correct for a zone that arrives active and unchanged for one that does not.
+    if state == "active" and not record.get("activated_at"):
         activated = _activate(record, api_token=api_token, worker_script=worker_script)
         # Both halves, and the second is the one that makes the domain serve rather than 404.
         activated = _attach_to_site(record, sites_repository, site_id, mode) and activated
-        record["activated_at"] = int(time.time())
+        # ONLY ON SUCCESS. Stamping regardless marked the work done when it had failed, and because the
+        # stamp was also what suppressed the retry, a transient Cloudflare error left the domain
+        # permanently unwired. The panel polls anyway, so an unstamped failure simply tries again.
+        if activated:
+            record["activated_at"] = int(time.time())
     if record["status"] != previous or activated:
         repo.put(record)
     return json_response({

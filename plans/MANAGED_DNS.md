@@ -9,6 +9,52 @@
 | P3 — activation + API | **DONE**: proven on a live domain, now behind `POST/GET/DELETE /sites/{site_id}/managed-dns` (`handlers/managed_dns_api.py`) |
 | P4 — the dashboard flow | **DONE**: `composables/managedDns.js` + the Sites panel, four server-decided states |
 | P5 — offboarding | **DONE**: "Move this domain elsewhere" downloads the zone file and shows the nameservers to restore |
+| P6 — adopt a zone we already hold | **DONE 2026-11-04**: `cloudflare_zones.find_zone` · `provision(find_zone_fn=)` · the claim guard in `managed_dns_api.start` |
+
+## 0. P6 — the domain that arrives already hosted (2026-11-04)
+
+**The case the flow had no path for.** A domain registered through Cloudflare Registrar **on our own
+account** has its zone created as part of registration. So `provision` opened with `POST /zones` for a
+zone that already existed, Cloudflare refused it, and the tenant got a raw API error on a button press.
+
+Found the day the platform registered its own first domain (`delightfinds.com`) and discovered it was
+its own first customer for this. It is not an edge case: it is what every tenant who registers at
+Cloudflare will hit, and it is the shape the discarded "sell domains through Junior Bay" plan would have
+made universal.
+
+**Steps 1–5 of §2 are no-ops for such a domain** — no zone to create, nothing to import, no mail to
+protect, no nameservers to change, no delegation to wait for. Only step 6 is left: write the serving
+records. Adoption is therefore not a special case bolted on; it is the ordinary flow arriving at step 6
+by a shorter road.
+
+Three things it required, and two of them were latent bugs rather than new work:
+
+1. **`find_zone(domain, account_id=...)`** — scoped to our account by the query, so a zone of the same
+   name on somebody else's account is invisible rather than merely rejected. `provision(find_zone_fn=)`
+   adopts what it returns and creates only when it returns nothing. The review, the scan and the mail
+   gate are unchanged: *we already host it* says nothing about whether moving its serving records is safe.
+
+2. **A cross-tenant claim guard.** `_zone_for` is tenant-scoped, so it answers "have I started this?"
+   and nothing about anyone else. That was survivable only while `create_zone` ran first — Cloudflare's
+   duplicate refusal did the gate's job **by accident**. Adoption removes the accident, so a second
+   tenant naming a domain we already host would have taken over its zone and been handed the right to
+   write its DNS. `repo.find_by_id(domain)` (GSI1, cross-tenant) now refuses it, and an unreadable
+   lookup refuses too — the same rule as `review(observed_complete=)` and `eligibility`.
+
+3. **Activation was EDGE-TRIGGERED and silently never fired.** `status` wired the serving path on
+   `state == "active" and previous != "active"`. An adopted zone is born `active`, so that edge never
+   arrives: the panel would show LIVE (`managedDnsState` returns LIVE on `status === "active"`) while
+   `_activate` had never run and the domain served nothing, with nothing anywhere saying why. The
+   condition is now `not record.get("activated_at")` — the idempotency key the edge was standing in for.
+
+   The same change fixed a pre-existing bug beside it: `activated_at` was stamped whatever happened, and
+   the stamp was also what suppressed the retry, so **one transient Cloudflare error left a domain
+   permanently unwired**. It is now stamped only on success, and the panel's own polling retries.
+
+**Still open:** the panel calls an adopted zone's state LIVE immediately, which is true, but the
+eligibility copy on the way in still reads "this domain looks safe to move" for a domain already on our
+nameservers. Cosmetic, and the record now carries `adopted: true` for whoever words it.
+
 
 Every Cloudflare call takes an injected `opener`, so P2 is fully tested against fakes. **It cannot run
 live yet**: the token has no `com.cloudflare.api.account.zone.create` (§5).

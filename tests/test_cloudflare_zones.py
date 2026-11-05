@@ -16,6 +16,7 @@ from stripe_link.domain.cloudflare_zones import (
     create_worker_route,
     create_zone,
     delete_zone,
+    find_zone,
     get_zone,
     list_zone_dns_records,
     scan_zone_records,
@@ -64,6 +65,48 @@ def ok(result):
 
 
 BASE = "https://api.cloudflare.com/client/v4"
+
+
+class FindZoneTests(unittest.TestCase):
+    """Does our account ALREADY hold this zone? Asked so that `create_zone`'s "already exists" stops
+    being the way we find out.
+
+    A domain registered through Cloudflare Registrar on our own account arrives with its zone already
+    made, which is how the platform's first domain reached us and how any tenant registering at
+    Cloudflare will arrive.
+    """
+
+    URL = f"{BASE}/zones?name=example.com&account.id=acct1&per_page=1"
+
+    def test_an_existing_zone_comes_back(self):
+        opener = FakeOpener({("GET", self.URL): ok([{"id": "z-existing", "status": "active"}])})
+        zone = find_zone("Example.COM.", account_id="acct1", api_token="tok", opener=opener)
+        self.assertEqual(zone["id"], "z-existing")
+
+    def test_an_EMPTY_LIST_is_not_ours_rather_than_an_error(self):
+        """The ordinary answer for a domain we do not host. Reading it as a failure would turn the
+        common case into an exception and send the caller down the error path."""
+        opener = FakeOpener({("GET", self.URL): ok([])})
+        self.assertIsNone(find_zone("example.com", account_id="acct1", api_token="tok", opener=opener))
+
+    def test_it_is_SCOPED_TO_OUR_ACCOUNT(self):
+        """A zone of this name on somebody else's account must not be visible, and that is a property of
+        the query rather than a check afterwards -- a check can be forgotten, a query cannot."""
+        opener = FakeOpener({("GET", self.URL): ok([])})
+        find_zone("example.com", account_id="acct1", api_token="tok", opener=opener)
+        _method, url, _body = opener.calls[0]
+        self.assertIn("account.id=acct1", url)
+        self.assertIn("name=example.com", url)
+
+    def test_the_name_is_normalised_before_it_is_sent(self):
+        """Same normalisation as `create_zone`, or the lookup misses the very zone creation would then
+        collide with -- which is the worst of both: an error the adopt path exists to prevent."""
+        opener = FakeOpener({("GET", self.URL): ok([])})
+        find_zone("  Example.COM.  ", account_id="acct1", api_token="tok", opener=opener)
+        self.assertIn("name=example.com", opener.calls[0][1])
+
+    def test_an_empty_domain_never_reaches_cloudflare(self):
+        self.assertIsNone(find_zone("", account_id="acct1", api_token="tok", opener=FakeOpener({})))
 
 
 class CreateZoneTests(unittest.TestCase):
