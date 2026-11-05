@@ -97,21 +97,40 @@ class ThePagesOwnBrandDrivesTheTitleTests(unittest.TestCase):
             html.resolved_brand_label({"brand": "Legacy Offer Brand"}, self._page("Luxe Wellness")),
             "Luxe Wellness")
 
-    def test_the_offers_stored_brand_is_the_next_answer(self):
-        """So a page that has never picked a brand keeps the title it has today."""
+    def test_the_SITE_outranks_the_offers_stored_brand(self):
+        """REVERSED 2026-11-05, and the reversal is the point.
+
+        This used to assert the offer's legacy brand won, to keep existing titles stable. That stability
+        was the bug: the header reads the Site, so a page with no brand of its own was headed "Delight
+        Finds" and titled "| Poliaxis Nutrition" -- two businesses on one document, which is the exact
+        fault this resolver exists to prevent. It also broke the promise printed beside the builder's
+        picker: "No brand means the page is headed by this site's business name."
+        """
         self.assertEqual(html.resolved_brand_label({"brand": "Legacy Offer Brand"}, self._page("")),
-                         "Legacy Offer Brand")
+                         "Quill")
 
     def test_then_the_SITE(self):
         self.assertEqual(html.resolved_brand_label({}, self._page("")), "Quill")
 
+    def test_the_legacy_brand_still_answers_when_there_is_NO_Site(self):
+        """What the fallback was really protecting, kept: it is reordered, not dropped.
+
+        A page with no Site -- a legacy page, or an A/B variant deliberately held off the route map --
+        has no Organization to be titled by, and falling straight to the platform brand would lose a name
+        the tenant really did choose.
+        """
+        html._RENDER_ORG.clear()
+        self.assertEqual(html.resolved_brand_label({"brand": "Legacy Offer Brand"}, self._page("")),
+                         "Legacy Offer Brand")
+
     def test_a_page_with_no_brand_label_section_at_all_still_resolves(self):
         self.assertEqual(html.resolved_brand_label({}, {"sections": []}), "Quill")
 
-    def test_a_caller_passing_NO_page_is_unchanged(self):
+    def test_a_caller_passing_NO_page_still_resolves(self):
         """`resolved_brand_label` is called from two places and both pass the page; the default keeps any
-        other caller, and every existing test, working."""
-        self.assertEqual(html.resolved_brand_label({"brand": "Legacy Offer Brand"}), "Legacy Offer Brand")
+        other caller working. Omitting the page says nothing about the SITE, which is still known here and
+        still outranks the offer's legacy brand -- so this asserts the ordering, not just the arity."""
+        self.assertEqual(html.resolved_brand_label({"brand": "Legacy Offer Brand"}), "Quill")
 
     def test_a_HIDDEN_brand_header_is_not_a_brand_claim(self):
         """A tenant who switched the header off has not chosen a brand for the page — reading its leftover

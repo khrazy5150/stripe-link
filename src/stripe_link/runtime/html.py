@@ -2573,16 +2573,27 @@ def resolved_brand_label(presentation: dict[str, Any], page: dict[str, Any] | No
     than carrying the Site name while its own header says something else. Before this, the header read the
     page and the title read the OFFER, and the two could name different businesses on one document.
 
-    `presentation.brand` stays below it as a legacy fallback: offers written before brands moved to the
-    Site still carry one, and dropping it would change the title of every page already relying on it. The
-    Offers screen no longer writes it — an offer has no Site, so it was never the right place to pick a
-    brand from (author, 2026-11-03).
+    Then the Site's Organization name — the single-source business identity.
 
-    Then the Site's Organization name (the single-source business identity), then the platform brand.
+    `presentation.brand` sits BELOW that, not above it (author, 2026-11-05). It used to outrank the Site,
+    which meant a page with no brand of its own was titled by an offer written before brands moved to the
+    Site, while its header -- which already reads the Site -- said something else. That is the same
+    two-businesses-on-one-document fault this function exists to prevent, just moved into the <title>, and
+    it broke the promise the builder prints next to the picker: *"No brand means the page is headed by
+    this site's business name."* It said nothing about the offer's.
+
+    It is REORDERED, not dropped, so the fallback still answers for a page with no Site at all -- a legacy
+    page, or an A/B variant held off the route map -- which is the case the fallback was really protecting.
+    A page that HAS a Site is now titled by that Site. The Offers screen stopped writing the field in the
+    first place because an offer has no Site, so it was never the right place to pick a brand from
+    (author, 2026-11-03); letting it outrank the Site contradicted that reasoning.
+
+    A tenant who genuinely wants a different brand per page picks one in the builder, and it still wins
+    above everything here.
     """
     return (page_brand_label(page)
-            or str((presentation or {}).get("brand") or "").strip()
             or str(_RENDER_ORG.get("name") or "").strip()
+            or str((presentation or {}).get("brand") or "").strip()
             or PLATFORM_BRAND)
 
 
