@@ -495,7 +495,13 @@ that rule is what preserves §2's guarantee while changing its scope.
   exactly that and the gate had not been told. Fixed 2026-11-04: it accepts the SITE's verified address
   first, then the account's. A gate nobody can pass is not a gate, it is an outage.
 
-  ### `email` DELETED 2026-11-04
+  ### `email` DELETED 2026-11-04 — SHIPPED DEV + PROD
+
+  Deployed and verified in both environments the same day (6efb0ee). Verification was the served artefact,
+  not the deploy's exit code: the two `/profile/business-email/*` routes are confirmed absent from both
+  live REST APIs (only `/sites/{site_id}/business-email/*` remains), and the dashboard's served bundle hash
+  matches the build in both. The prod changeset was audited before executing — 99 changes, only two
+  Removes, both the retired routes' own Lambda permissions, no replacements and nothing stateful touched.
 
   The audit said safe in BOTH environments, the download gate had already been taught the per-Site
   address, and no tenant in either environment had ever verified an account-level one — so the field was
