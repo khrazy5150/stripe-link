@@ -5417,9 +5417,29 @@ function pendingSiteUrl(page) {
   return sitePublicUrl(page);
 }
 // Slug shown on the metrics row, capped so a long slug can't blow out the card (full value on hover via title).
+// THE SITE'S ROUTE MAP IS THE ADDRESS. `page.route.slug` is an internal seed: the Site decides where a
+// page actually answers, and the two diverge the moment a page is attached at anything else -- re-attached
+// at a tidier slug, moved, or placed at "/" as the homepage. Reading the seed printed a path no visitor
+// could reach, directly under the card's own (correct) URL, which read the route map. A tenant who fixed
+// the offer slug and re-attached saw the stale one here and reasonably concluded nothing had worked
+// (reported 2026-11-05).
+//
+// The seed still answers for a page with no Site, where there is no route map to ask and it is the only
+// thing resembling an address.
 function displaySlug(page) {
-  const slug = `/${page.route?.slug || ""}`;
+  const slug = `/${sitePageSlug(page) || page.route?.slug || ""}`;
   return slug.length > 32 ? `${slug.slice(0, 31)}…` : slug;
+}
+
+// The slug this page answers on within its Site, by the same rules `sitePublicUrl` follows: a reserved
+// funnel slug is a step in someone else's funnel, not this page's address.
+function sitePageSlug(page) {
+  for (const s of sitesStore.sites) {
+    for (const [slug, entry] of Object.entries(s.pages || {})) {
+      if (entry?.page_id === page?.page_id && !entry?.funnel_role) return slug.replace(/^\//, "");
+    }
+  }
+  return "";
 }
 
 // The Site this storefront belongs to (editing) or is being attached to (creating, once chosen). Its route map
