@@ -263,11 +263,42 @@ Direct Meta/TikTok/YouTube integration requires **app review measured in weeks-t
 not positioned to do now. An aggregator has already passed those reviews. **Implementation #1: Outstand.so**
 (candidate; also evaluated: Ayrshare). Claimed terms (2026-08-28, **not independently verified**): built for
 SaaS embedding without white-label surcharge; **$19/mo base including 3,000 posts**, then $0.007/post
-(→$0.005 over 10k), **unlimited connected profiles**; Managed Keys **and** BYOK with branded OAuth.
+(→$0.005 over 10k), ~~unlimited connected profiles~~ **100 connected accounts — corrected 2026-11-05, see §6.2b**; Managed Keys **and** BYOK with branded OAuth.
 
 At 60 posts/tenant/month that means the **first ~50 premium tenants publish inside the $19 base**, and ~$40/mo
 total at 100 tenants — publishing is <1% of a $69 tier. Per-*profile* pricing (the common alternative) is the
 model that scales badly; avoiding it is the structural win.
+
+### 6.2b ✅ PERMISSION GRANTED — and the one claim it corrects (2026-11-05)
+
+**Outstand granted written permission to resell on the $19 plan, limited to 100 CONNECTED ACCOUNTS.**
+That closes both of §6.2a's blockers at once: resale is permitted (finding 1), and it is permitted on the
+$19 tier rather than only on some unnamed production tier (finding 2). §11's Step 0 is done.
+
+**One §6.2 claim is corrected: "unlimited connected profiles" is wrong. The ceiling is 100.** The post
+economics are untouched — the 3,000-post base and the $0.007 overage are neither confirmed nor
+contradicted by the permission reply, and remain unverified marketing until §11's spike.
+
+**Where the ceiling actually bites.** The account cap and the post base run out at roughly the same
+place, which is a coincidence worth knowing rather than relying on:
+
+| Profiles a tenant connects | Tenants inside 100 accounts | Posts/mo at 60 per tenant | Inside the 3,000 base? |
+|---|---|---|---|
+| 1 (IG only) | 100 | 6,000 | No — ~$21/mo overage |
+| **2 (IG + TikTok)** | **50** | **3,000** | **Exactly at it** |
+| 3 | 33 | 2,000 | Yes |
+| 4 | 25 | 1,500 | Yes |
+
+So §6.2's "first ~50 premium tenants inside the $19 base" survives — at two profiles per tenant it is
+almost exactly right, for a different reason than it gave. At 50 tenants × $69 that is $3,450/mo of
+revenue against ~$19 of publishing cost, and §6.2's "<1% of a $69 tier" holds.
+
+**The new open question, and it is the one without an answer.** Posts have a published overage rate;
+ACCOUNTS now have a ceiling with no stated behaviour at 101. Three possibilities, and they are not close
+in consequence: a higher tier exists (fine, re-price), accounts are negotiable per-contract (fine, ask
+early), or 100 is hard (then the business caps at 25-100 tenants on this vendor and A6/BYOK stops being
+a "later" phase and becomes the growth path). **Ask before the spike** — same reasoning as §6.2a: a week
+of paid testing should not be spent learning something an email answers.
 
 ### 6.2a ⚠️ RESALE NEEDS THEIR WRITTEN PERMISSION — the gate nobody priced (author, 2026-11-03)
 
@@ -470,11 +501,11 @@ mistaken for a generation endpoint. A5 automates the posting; it is not what mak
 | Phase | Deliverable |
 |---|---|
 | **A0 — Prereq** | ✅ **SHIPPED 2026-11-01** — `OfferSemanticAnalyzer` + the `facts.positioning` enrichment tier |
-| **A1 — Context** | 🟡 **domain layer built 2026-11-01, NOTHING DEPLOYED** — see §10a |
+| **A1 — Context** | ✅ **DEPLOYED dev + prod** (`jb-attention-stack-prod`, 2026-11-03; verified 2026-11-05). Dev carries real rows; prod is deployed and empty |
 | **A2 — Attribution** | `?src=` slugs, click ingestion, checkout attribution, per-post/per-pillar GMV *(early — see §8)* |
 | **A3 — Campaign engine** | ✅ **SHIPPED dev 2026-11-02** — intensity-aware plan, batch-written queue |
 | **A4 — Calendar UI** | ✅ **dev 2026-11-02** — dated table, skip/restore, move, CSV + clipboard export. **Drag deferred** |
-| **A5 — Publishing** | ⛔ **BLOCKED on §11's unrun paid vendor spike** — adapter + reconnection + 15-min sweep |
+| **A5 — Publishing** | 🟡 **UNBLOCKED 2026-11-05** — resale permission granted (§6.2b). Remaining gate is §11's unrun paid spike — adapter + reconnection + 15-min sweep |
 | **A6 — BYOK migration** | ⛔ **BLOCKED on Meta/TikTok/YouTube app review** (§6.2: weeks-to-months) and on A5 |
 | **Later** | performance-weighted pillar selection; more platforms; direct per-platform adapters |
 
@@ -677,7 +708,8 @@ deliberately not papered over with a fourth private decrypt.
 
 ## 11. Verify before A5 hardens
 
-**Step 0, added 2026-11-03: get the resale permission IN WRITING, and the tier it applies to.** Outstand
+**Step 0 — ✅ DONE 2026-11-05: permission granted, $19 tier, 100 connected accounts (§6.2b).**
+Originally: get the resale permission IN WRITING, and the tier it applies to. Outstand
 permits resale only by written permission and the $19 plan is developer access only (§6.2a). A refusal ends
 the Outstand path, so this is the cheapest question and it must be asked first — the spike below cannot
 validate pricing for a tier the author is not allowed to resell on.
