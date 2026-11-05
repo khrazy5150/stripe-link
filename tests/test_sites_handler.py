@@ -44,6 +44,77 @@ class SitesHandlerTests(unittest.TestCase):
                         "queryStringParameters": params}, None, repository=self.repo, registry=self.registry)
         return json.loads(resp["body"])
 
+    def _site(self, label):
+        """A Site with its OWN platform hostname: `base_site()` hardcodes one, and the subdomain registry
+        is first-claim-wins, so two of them collide at the reservation long before any cap is consulted."""
+        return base_site(name=label.title(),
+                         hosting={"type": "platform", "platform_hostname": f"{label}.jbay.uk",
+                                  "custom_domain": None},
+                         # Its own route map too: `base_site()` ships a fixed page_id, and a page belongs
+                         # to at most one Site, so two of them collide at `_assert_pages_unassigned`.
+                         pages={"/": {"page_id": f"page_{label}", "page_type": "landing", "enabled": True}})
+
+    def _with_cap(self, allowance):
+        """Patch the tenant's allowance where the handler reads it. The resolver is pure and tested in
+        test_site_cap.py; this is about the HANDLER's behaviour around it."""
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        return patch.object(sites_handler, "_site_allowance", return_value=allowance)
+
+    def test_a_new_site_over_the_cap_is_refused(self):
+        with self._with_cap(1):
+            first = self._post(self._site("one"))
+            self.assertEqual(first["statusCode"], 201)
+            second = self._post(self._site("two"))
+        self.assertEqual(second["statusCode"], 403)
+        self.assertEqual(json.loads(second["body"])["error"], "site_cap_reached")
+
+    def test_an_EXISTING_site_can_still_be_edited_at_the_cap(self):
+        """The gate is on CREATE, never on the upsert as a whole. Gating both would lock a tenant who is
+        at their limit out of editing the Sites they already have -- and out of archiving their way back
+        under it, which is the only route they have."""
+        with self._with_cap(1):
+            created = json.loads(self._post(self._site("one"))["body"])["site"]
+            again = self._post({**self._site("one"), "name": "Renamed", "site_id": created["site_id"]})
+        self.assertEqual(again["statusCode"], 201)
+        self.assertEqual(json.loads(again["body"])["site"]["name"], "Renamed")
+
+    def test_an_archived_site_frees_a_slot(self):
+        """Archiving is how the tenant picks which Sites stay active, so it has to free one."""
+        with self._with_cap(1):
+            created = json.loads(self._post(self._site("one"))["body"])["site"]
+            self.repo.put({**created, "status": "archived"})
+            second = self._post(self._site("two"))
+        self.assertEqual(second["statusCode"], 201)
+
+    def test_a_site_over_the_cap_is_soft_locked_for_edits(self):
+        """Published pages keep serving (nothing here deletes or unpublishes); the EDITING stops."""
+        with self._with_cap(2):
+            one = json.loads(self._post(self._site("one"))["body"])["site"]
+            two = json.loads(self._post(self._site("two"))["body"])["site"]
+        self.repo.put({**one, "created_at": 100})
+        self.repo.put({**two, "created_at": 200})
+        with self._with_cap(1):   # a downgrade: the NEWER Site is the one that locks
+            blocked = self._post({**self._site("two"), "name": "Two edited", "site_id": two["site_id"]})
+            allowed = self._post({**self._site("one"), "name": "One edited", "site_id": one["site_id"]})
+        self.assertEqual(blocked["statusCode"], 403)
+        self.assertEqual(json.loads(blocked["body"])["error"], "site_over_cap")
+        self.assertEqual(allowed["statusCode"], 201, "the Site inside the cap must still be editable")
+
+    def test_an_unreadable_profile_fails_OPEN(self):
+        """A quota that cannot resolve itself must not 500 a tenant action or stop a paying customer
+        working. Enforcement degrades to ALLOWED, never to broken.
+
+        Patched at the repository, not at `_site_allowance`: the whole point is that the function reached
+        for the profile and could not have it, so stubbing the resolver would skip the code under test.
+        """
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        broken = type("Broken", (), {"get": lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no table"))})()
+        with patch("stripe_link.repositories.documents.tenant_profiles_repository", return_value=broken):
+            self.assertIsNone(sites_handler._site_cap_error("tenant_demo", self.repo, "live"),
+                              "an unreadable profile must not block the create")
+
     def test_attach_page_rejects_reserved_funnel_slug(self):
         site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
         resp = handler({

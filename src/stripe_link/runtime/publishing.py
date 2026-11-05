@@ -655,6 +655,37 @@ def _enable_site_route(site: dict[str, Any], page_id: str) -> bool:
     return changed
 
 
+def _assert_site_within_cap(site: dict[str, Any] | None, tenant_id: str,
+                            sites_repository: Any, tenant_profiles_repository: Any) -> None:
+    """Raise `PublishError` when this page's Site is over the tenant's plan cap (§P5).
+
+    FAILS OPEN on anything it cannot read. A quota it cannot resolve must not stop a tenant publishing:
+    the harm of wrongly refusing a paying customer's page is immediate and visible, and the harm of
+    publishing one page too many is a number in a table. The create gate is the lever that matters.
+
+    A page with NO Site is never capped -- an unattached page (a legacy one, an A/B variant held off the
+    route map) belongs to no Site, so there is no allowance it can be over.
+    """
+    if not site or sites_repository is None or tenant_profiles_repository is None:
+        return
+    try:
+        from stripe_link.domain.site_quota import UNLIMITED, locked_site_ids, over_cap_message, site_allowance
+
+        tenant = tenant_profiles_repository.get(tenant_id, tenant_id)
+        allowance = site_allowance(tenant)["allowance"]
+        if allowance == UNLIMITED:
+            return
+        locked = locked_site_ids(sites_repository.list_for_tenant(tenant_id) or [], allowance)
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("site cap: could not resolve the cap while publishing for %s", tenant_id)
+        return
+    if str(site.get("site_id") or "") in locked:
+        raise PublishError(
+            f"Site '{site.get('site_id')}' is over this plan's limit, so its pages cannot be "
+            f"republished. {over_cap_message(allowance)}"
+        )
+
+
 def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str, category: str,
                               composition: str = "") -> bool:
     """Record a landing page's offer_id + product category on its Site route-map entry so category pages can
@@ -1406,6 +1437,11 @@ def publish_page_document(
     # you read the canonical. One consistent query per publish is the cheapest honest fix -- this is a
     # background stream handler, not a request path, and the base-table query supports it.
     site = find_site_for_page(sites_repository, tenant_id, seo_identity_page_id, consistent=True)
+    # THE SOFT-LOCK's second half (plans/SITE_AS_BUSINESS_IDENTITY.md §P5). A Site over the plan's cap
+    # keeps every artifact it has already published -- nothing is deleted and the shop stays open -- but it
+    # stops producing NEW ones. Refused as a PublishError, which this pipeline treats as permanent and
+    # drops loudly, because no number of retries turns "you are over your plan" into a success.
+    _assert_site_within_cap(site, tenant_id, sites_repository, tenant_profiles_repository)
     # A catalog_grid (including a collection-embed) resolves its cards from the Site route map BEFORE offers
     # load, so the referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2,
     # plans/SITE_COLLECTIONS.md P1). Collections referenced by the page are loaded here.

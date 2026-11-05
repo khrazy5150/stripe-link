@@ -3,7 +3,8 @@ from typing import Any, Callable
 
 from stripe_link.domain.entitlements import plan_entitlements
 from stripe_link.domain.platform_billing import (DEFAULT_AI_IMAGE_QUALITY, plan_ai_generations,
-                                                  plan_ai_image_qualities, plan_ai_images)
+                                                  plan_ai_image_qualities, plan_ai_images, plan_sites)
+from stripe_link.domain.site_quota import DEFAULT_FREE_SITES
 from stripe_link.domain.fees import normalize_tier_id
 from stripe_link.domain.platform_billing import billing_status_from_stripe, platform_plan
 
@@ -104,6 +105,12 @@ def reconcile_platform_subscription_event(
             # generating on the platform's Bedrock bill indefinitely.
             updates["ai_generations"] = 0
             updates["ai_images"] = 0
+            # SITES DROP TO THE FREE FLOOR, NOT TO ZERO -- the one allowance here that must not be
+            # zeroed with the rest. Free-forever means a working store: a canceled tenant keeps one Site
+            # serving, and the pricing pivot's rule is that a lapsed subscription sells on at the
+            # free-tier fee. Zeroing it would soft-lock the only Site they have and take a paying-again
+            # customer's shop off the internet for lapsing (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
+            updates["sites"] = DEFAULT_FREE_SITES
             # And reset the QUALITY ceiling rather than leaving it. A canceled tenant has no images, so
             # it changes nothing today -- but a stale `high` sitting on a profile is exactly the kind of
             # denormalized field that is still there, and still trusted, after the reason for it is gone.
@@ -132,6 +139,9 @@ def reconcile_platform_subscription_event(
                 # profile precisely so it never touches the plans table. A quality ceiling left behind
                 # here would be read on every image request.
                 updates["ai_images"] = plan_ai_images(plan)
+                # The Site cap travels the same road and for the same reason: the Site handlers read a
+                # number off the profile so they never touch the plans table on a create.
+                updates["sites"] = plan_sites(plan)
                 # The GRANTED SET, not a ceiling. `plan_ai_image_qualities` reads either shape, so a
                 # plan row still carrying the old single field denormalizes to the same meaning.
                 updates["ai_image_qualities"] = plan_ai_image_qualities(plan)

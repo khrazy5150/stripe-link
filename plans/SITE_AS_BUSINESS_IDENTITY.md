@@ -569,7 +569,44 @@ that rule is what preserves §2's guarantee while changing its scope.
   scope, so under the Site scope it could never be confirmed — it would be a code that looks live and is
   permanently dead.
 
-- **P5 — the Site cap. NOT BUILT. Every decision is already made; none of the code exists.**
+- **P5 — the Site cap. SHIPPED DEV 2026-11-05.** (`domain/site_quota.py`, `domain/platform_billing.py`,
+  `domain/platform_subscription_sync.py`, `handlers/sites.py`, `runtime/publishing.py`,
+  `handlers/platform_subscription.py`, `tests/test_site_cap.py`)
+
+  Built exactly to the locked decisions below. What landed:
+
+  - `domain/site_quota.py` — the pure resolver. `site_allowance(tenant)` → `{allowance, source}`;
+    `countable_sites` / `locked_site_ids` decide WHICH Sites are over. Reads nothing: the numbers arrive
+    off the tenant, the same contract `ai_quota.entitlement_for` keeps.
+  - **The number is a row edit.** `plan_sites` reads the generic `limits` map first, so pricing a tier at
+    10 Sites is a Pricing-screen edit with no deploy. Denormalized onto the tenant by the billing webhook
+    beside `ai_generations`, so no Site write ever touches PlatformPlansTable — which also kept the Sites
+    function from needing a new IAM grant (the table-grant test caught the first attempt).
+  - **Cancellation drops to the FREE FLOOR, not to zero**, unlike its AI siblings. Zeroing it would
+    soft-lock the only Site a lapsed tenant has — a shop taken off the internet for lapsing, which the
+    free-forever rule forbids. This is the one line here that could cost a real storefront.
+  - **Create gate** on new site_ids only; an existing Site stays editable at the cap, or a tenant at
+    their limit could neither edit nor archive their way back under it. The cross-mode copy posts to the
+    same endpoint with the target mode, so it is gated BEFORE the write as §P5 requires.
+  - **Soft-lock** on edits (`handlers/sites.py`) and on new publishes (`runtime/publishing.py`, raised as
+    a permanent `PublishError`). Already-published artifacts are never touched: the work stops, the shop
+    stays open.
+  - **Archiving is the picker.** It already keeps every address and username reserved, so "the tenant
+    picks which stay active" needed no new UI — archived Sites simply do not count. The oldest stay
+    active, ordered by `created_at` then `site_id` so the answer cannot move between page loads.
+  - Every gate **fails open**. A quota that cannot read its inputs must not 500 a tenant or stop a paying
+    customer; the create gate is the lever that matters.
+  - The cap is **visible**: `sites` is on the plan cards and the free card derives its count from the
+    same config the gate spends from, so the copy cannot drift from what is enforced.
+
+  **Not built, deliberately:** no dashboard affordance yet — a locked Site refuses with
+  `site_over_cap` and a sentence naming the number and the way out, but nothing surfaces the cap
+  BEFORE the tenant hits it. That is the next slice, and it is the one that decides whether this reads
+  as a product boundary or a bug.
+
+  Original plan text follows.
+
+- **P5 (as planned). Every decision was already made; none of the code existed.**
 
   This is §3b's whole point — *"Site becomes the unit of a business, and the number of Sites becomes the
   tier axis"* — and it is the half of this plan that makes the multi-business tier sellable. P1–P4 made

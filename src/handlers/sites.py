@@ -635,6 +635,23 @@ def create_site(event, repository, registry=None, mode="test"):
             # another business's customer replies. Changing the address drops the proof
             # (plans/SITE_AS_BUSINESS_IDENTITY.md §P3).
             organization.update(preserve_email_verification(organization, (existing or {}).get("organization")))
+        # THE CAP, and only for a Site that does not exist yet. This endpoint is an upsert, so gating it
+        # unconditionally would lock a tenant out of EDITING the Sites they already have the moment they
+        # went over -- the opposite of a soft-lock, and it would strand them with no way to archive their
+        # way back under (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
+        if existing is None:
+            over = _site_cap_error(str(document.get("tenant_id") or ""), repository, mode)
+            if over is not None:
+                return over
+        else:
+            # SOFT-LOCK. An existing Site over the cap keeps serving every published page -- taking a
+            # storefront down for a lapsed subscription is not a lever we have -- but its EDITING stops.
+            # Archiving is deliberately still allowed through `delete_site`/archive, because archiving is
+            # how the tenant chooses which Sites stay active and it must never be the thing that is
+            # blocked (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
+            locked = _locked_site_error(existing, repository, mode)
+            if locked is not None:
+                return locked
         record_hosting_history(existing, document)
         validate_site(document)
         _assert_pages_unassigned(repository, document)
@@ -649,6 +666,81 @@ def create_site(event, repository, registry=None, mode="test"):
     # rename would have got a 500 instead of the sentence explaining what happened.
     except (CustomDomainError, DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_site")
+
+
+def _site_allowance(tenant_id: str, mode: str) -> int:
+    """How many Sites this tenant may run in `mode` (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
+
+    FAILS OPEN, like `require_capability` beside it: a cap that cannot read its own inputs must not 500 a
+    tenant action or stop a paying customer working. Enforcement degrades to "allowed", never to broken.
+
+    THE TENANT PROFILE ONLY. The paid numbers are denormalized there by the billing webhook precisely so
+    this path never reads PlatformPlansTable -- the same rule `ai_generations` follows. Reaching for the
+    plans table here to look up the free floor would buy a new IAM grant and an extra read on every Site
+    write, to learn a constant.
+    """
+    from stripe_link.domain.site_quota import UNLIMITED, site_allowance
+    from stripe_link.repositories.documents import tenant_profiles_repository
+
+    try:
+        tenant = tenant_profiles_repository().get(tenant_id, tenant_id)
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("site cap: could not read the profile for %s", tenant_id)
+        return UNLIMITED
+    return site_allowance(tenant)["allowance"]
+
+
+def _countable_sites(tenant_id: str, repository, mode: str) -> list[dict]:
+    """The tenant's cap-countable Sites IN THIS MODE. The repository is already mode-scoped, so this is
+    the mode's own partition rather than a filter anyone has to remember to apply."""
+    from stripe_link.domain.site_quota import countable_sites
+
+    return countable_sites(repository.list_for_tenant(tenant_id) or [])
+
+
+def _site_cap_error(tenant_id: str, repository, mode: str):
+    """A 403 when creating one more Site would exceed the plan, else None."""
+    from stripe_link.domain.site_quota import UNLIMITED, over_cap_message
+
+    if not tenant_id:
+        return None
+    allowance = _site_allowance(tenant_id, mode)
+    if allowance == UNLIMITED:
+        return None
+    try:
+        count = len(_countable_sites(tenant_id, repository, mode))
+    except Exception:  # noqa: BLE001 - fail open; a cap that cannot count must not block
+        logger.exception("site cap: could not count Sites for %s", tenant_id)
+        return None
+    if count < max(int(allowance), 0):
+        return None
+    logger.info("site cap reached for %s in %s: %s of %s", tenant_id, mode, count, allowance)
+    return error_response(over_cap_message(allowance), status_code=403, code="site_cap_reached")
+
+
+def _locked_site_error(site: dict, repository, mode: str):
+    """A 403 when this Site is over the tenant's cap, else None. Fails open like its siblings."""
+    from stripe_link.domain.site_quota import UNLIMITED, locked_site_ids, over_cap_message
+
+    tenant_id = str((site or {}).get("tenant_id") or "")
+    site_id = str((site or {}).get("site_id") or "")
+    if not tenant_id or not site_id:
+        return None
+    allowance = _site_allowance(tenant_id, mode)
+    if allowance == UNLIMITED:
+        return None
+    try:
+        locked = locked_site_ids(repository.list_for_tenant(tenant_id) or [], allowance)
+    except Exception:  # noqa: BLE001 - fail open
+        logger.exception("site cap: could not resolve locked Sites for %s", tenant_id)
+        return None
+    if site_id not in locked:
+        return None
+    logger.info("site %s is over the cap for %s (%s allowed)", site_id, tenant_id, allowance)
+    return error_response(
+        f"This Site is paused because it is over your plan's limit. {over_cap_message(allowance)}",
+        status_code=403, code="site_over_cap",
+    )
 
 
 def _reserve_subdomain(registry, document: dict) -> None:

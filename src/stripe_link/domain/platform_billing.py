@@ -3,6 +3,9 @@ import time
 from typing import Any, Callable
 
 from stripe_link.common import normalize_stripe_mode
+# The Site-cap defaults live beside the resolver that applies them (domain/site_quota.py), so the number
+# and its reasoning stay in one file rather than drifting apart across two.
+from stripe_link.domain.site_quota import DEFAULT_FREE_SITES, DEFAULT_PLAN_SITES
 from stripe_link.repositories.platform_plans import platform_plans_repository
 
 # Manual edits to PlatformPlansTable take effect within this TTL (mirrors cached_billing_config, fees.py).
@@ -92,6 +95,23 @@ def plan_ai_images(plan: dict[str, Any] | None) -> int:
     return _as_int((plan or {}).get("ai_images"), DEFAULT_PLAN_AI_IMAGES)
 
 
+def plan_sites(plan: dict[str, Any] | None) -> int:
+    """How many Sites this plan grants PER MODE (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
+
+    Reads the generic `limits` map first via `plan_limit`, so adding the number to a plan is a row edit on
+    the Pricing screen rather than a deploy -- and a top-level `sites` field still works for a row that
+    sets it directly. Denormalized onto the tenant by the billing webhook like its AI siblings, so the
+    Site handlers never read the plans table.
+
+    NOT keyed on `fee_tier`: that is the transaction-FEE tier, which every paid plan shares, so a 1/3/10
+    ladder keyed there would collapse to one number the moment a second paid plan existed -- the same trap
+    `ai_generations` documents.
+    """
+    if plan and "sites" in plan:
+        return _as_int(plan.get("sites"), DEFAULT_PLAN_SITES)
+    return plan_limit(plan, "sites", DEFAULT_PLAN_SITES)
+
+
 def plan_ai_image_qualities(plan: dict[str, Any] | None) -> list[str]:
     """Which image qualities this plan GRANTS, cheapest first.
 
@@ -162,6 +182,13 @@ def free_ai_generations(mode: str, repository: Any | None = None) -> int:
     because that decision has already been reversed once."""
     config = cached_platform_billing(mode, repository)["config"]
     return _as_int(config.get("ai_free_generations"), DEFAULT_FREE_AI_GENERATIONS)
+
+
+def free_sites(mode: str, repository: Any | None = None) -> int:
+    """How many Sites the FREE tier gets per mode. One, and editable on the config row like every other
+    number here — the floor is a product decision that will be argued again, not a constant."""
+    config = cached_platform_billing(mode, repository)["config"]
+    return _as_int(config.get("free_sites"), DEFAULT_FREE_SITES)
 
 
 def plan_limits(plan: dict[str, Any] | None) -> dict[str, int]:

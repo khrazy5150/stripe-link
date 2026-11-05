@@ -41,6 +41,11 @@ def _default_return_url() -> str:
 _ALLOWANCE_LABELS = (
     ("ai_generations", "AI-written pages a month"),
     ("ai_images", "AI images a month"),
+    # The tier axis itself (plans/SITE_AS_BUSINESS_IDENTITY.md §3b): a Site IS a business, so this is the
+    # line that says what the multi-business plans are for. "per mode" is stated because the number is per
+    # set of books -- a buyer reading "3 Sites" and finding 3 in test AND 3 in live should find that a
+    # pleasant surprise, not a discrepancy they have to ask about.
+    ("sites", "Sites (per mode)"),
 )
 
 
@@ -66,11 +71,20 @@ def _free_plan(mode: str, plans_repository) -> dict[str, Any]:
     Derived rather than written, because a number typed into marketing copy drifts from the number the
     generator enforces, and the tenant finds out at the moment they are refused.
     """
-    from stripe_link.domain.platform_billing import (cached_platform_billing, trial_ai_generations,
-                                                     trial_ai_images)
+    from stripe_link.domain.platform_billing import (cached_platform_billing, free_sites,
+                                                     trial_ai_generations, trial_ai_images)
 
     config = cached_platform_billing(mode, plans_repository)["config"]
     features = [str(f) for f in (config.get("free_plan_features") or DEFAULT_FREE_FEATURES) if f]
+    # DERIVED, for the same reason the AI line below is: the Site cap is the tier axis
+    # (plans/SITE_AS_BUSINESS_IDENTITY.md §3b), so the number on the free card has to be the number the
+    # gate actually enforces. Typed into copy it would drift, and the tenant would find out at the moment
+    # they are refused -- which is precisely when a pricing page has lost their trust.
+    # APPENDED, not put first: an admin who wrote their own `free_plan_features` meant that copy to lead,
+    # and the same rule governs `_public_plan` ("Hand-written `features` win").
+    free_site_count = free_sites(mode, plans_repository)
+    if free_site_count > 0:
+        features.append(f"{free_site_count:,} Site" + ("" if free_site_count == 1 else "s"))
     try:
         days = int(os.environ.get("TRIAL_PERIOD_DAYS", "14"))
     except (TypeError, ValueError):
@@ -95,8 +109,15 @@ def _plan_highlights(plan: dict[str, Any]) -> list[str]:
     """
     out: list[str] = []
     for key, label in _ALLOWANCE_LABELS:
+        # BOTH SHAPES. An allowance is either a named top-level field (`ai_generations`, the original two)
+        # or an entry in the generic `limits` map that lets a new capability be a row edit rather than a
+        # deploy. Reading only the first meant a plan priced on `limits.sites` advertised nothing, and a
+        # card showing no numbers is exactly the "$29 reads as an expensive $19" problem above.
+        raw = plan.get(key)
+        if raw is None:
+            raw = (plan.get("limits") or {}).get(key)
         try:
-            count = int(plan.get(key) or 0)
+            count = int(raw or 0)
         except (TypeError, ValueError):
             continue
         if count > 0:
