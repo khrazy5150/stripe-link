@@ -19,6 +19,53 @@ sales and feeds that back.
 
 Competitors don't do this. It is the single most differentiating thing on the roadmap.
 
+## 1a. Competitive position — what the nearest product actually sells (2026-11-05)
+
+**ViralSpy and Higgsfield are two different companies, and conflating them is easy to do.** ViralSpy was
+this plan's *predecessor vendor candidate*, rejected in `HIGGSFIELD_INTEGRATION.md` §0 (*"no API, sold
+single-seat accounts and forbade resale"*). It is not Higgsfield under another name, and it is not a
+supplier — it is the nearest thing to a competitor the roadmap has.
+
+**What it sells, read off its own pricing page ($47/mo, 14-day trial):** find the top viral videos in a
+niche, score them, explain why each went viral, produce a tailored script, and give step-by-step filming
+directions — plus a content library and a calendar.
+
+**The test that separates it from this plan is where the WORK lands.** Its own words: *"so you know what
+to capture **when you film**"*, *"where to stand, what to say, how to deliver it."* Every output ends
+with the tenant holding a camera. It sells **the formula, not the artifact** — a brief. The tenant still
+supplies production, posting, and somewhere for the traffic to land.
+
+| | the brief-seller ($47) | this plan (~$69) |
+|---|---|---|
+| What to say | script + filming directions | derived from the offer itself (A0/A3) |
+| **Who films it** | **the tenant** | nobody — generated (`HIGGSFIELD_INTEGRATION.md`) |
+| **Who posts it** | **the tenant** | nobody — published (§6, A5) |
+| **Did it sell anything** | **unanswerable** | per-post / per-pillar GMV (§8, A2 shipped) |
+
+**The last row is structural, not a feature gap, and it is the whole §8 argument.** A research tool has
+no checkout, so it can never attribute a sale — the money never passes through it. A calendar that cannot
+say which post produced revenue is a planning tool. This is what §8 means by *"the piece competitors most
+conspicuously lack"*, and the competitor's own pricing page is the evidence: a library, a calendar, and
+no revenue number anywhere on it.
+
+**The honest gap, recorded so it is a decision rather than a discovery.** Three of its eight bullets are
+outward-looking trend research — what is blowing up in this niche, scored, with a reason. This plan's
+pillars generate from the OFFER's own semantics and look outward at nothing. For a buyer who wants to
+know what is trending, we are not better; we are different and dearer. `HIGGSFIELD_INTEGRATION.md` §5b
+already notes why closing it would be cheap *if we choose to* — trend data is the one thing with a real
+shared-cache lever, because every tenant asks about the same hashtags in the same week, which is exactly
+what generated video is not.
+
+**Evidential caveat.** All of the above is read from a public pricing page — their marketing, not a
+product audit. §6.2's rule applies to competitors as well as vendors: treat it as a claim until something
+tests it. The structural point (no checkout, therefore no attribution) is the part that does not depend
+on their copy being accurate.
+
+**Marketing rule (author, 2026-11-05): the campaign NAMES NO COMPETITOR.** Positioning is on our own
+value — *a way to stop the headache of making attention-grabbing content for social media, and to find
+out which of it produced business*. Comparative advertising would teach our buyer a cheaper product
+exists and frame us as the expensive option, on an axis we did not choose.
+
 ## 2. ⭐ Architectural position — this is the sibling of Conversion Context
 
 `plans/OFFER_SEMANTIC_ANALYZER.md` is design-locked and already names its future consumers, explicitly
