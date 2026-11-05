@@ -493,6 +493,23 @@ def attach_page(event, repository, site_id, mode="test", pages_repo=None):
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
     pages = dict(site.get("pages") or {})
+    # THE ROOT IS NOT A SLOT THIS ACTION MAY EMPTY. Attach already refuses to place a page AT "/" and
+    # points at the homepage action; it did not stop the mirror image -- moving the page that is ALREADY
+    # at "/" somewhere else. `_attach_page_to_site` pops a page from its old slug, so attaching the
+    # homepage at a tidier address silently left the Site with no root at all, and a verified custom
+    # domain answering 404 at its own front door with nothing on screen to say why (2026-11-05).
+    #
+    # Refused rather than auto-promoting another page: which page becomes the homepage is a decision only
+    # the tenant can make, and guessing would replace a visible 404 with a storefront quietly serving
+    # something nobody chose. `set_homepage` is one click and already moves the displaced page to its own
+    # slug, so the way out is the action this message names.
+    if str((pages.get("/") or {}).get("page_id") or "") == page_id:
+        logger.info("attach rejected for %s: page %s is the homepage of %s", tenant_id, page_id, site_id)
+        return error_response(
+            "That page is this Site's homepage. Set another page as the homepage first — "
+            "the current one moves to its own slug automatically.",
+            code="homepage_move_refused",
+        )
     _attach_page_to_site(
         pages, page_id=page_id, slug=slug,
         page_type=str(body.get("page_type") or "landing").strip() or "landing",
@@ -1134,7 +1151,17 @@ def _recompute_eligibility(site, tenant_id, now):
         site, connect_verified=connect_verified, connect_restricted=connect_restricted,
         domain_verified=site_domain_verified(site),
     )
-    site["indexing"] = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
+    # `reasons` is DROPPED, not merged past. It was never written by this side -- the dashboard seeds it
+    # once at Site creation (`["no_custom_domain"]`) and nothing has updated it since -- so merging the
+    # old `indexing` dict carried a stale reason forward over every recomputation. A Site on a live
+    # custom domain ended up storing `eligibility: "eligible"` beside `reasons: ["no_custom_domain"]`:
+    # the verdict and its stated cause flatly contradicting each other in one record.
+    #
+    # Nothing reads it today, so this is not a live bug -- it is the shape of one. Every emitter wrote and
+    # none withdrew, which is how a notice outlives its cause; the next reader to trust that field would
+    # inherit the contradiction rather than discover it (`feedback_a_notice_must_mirror_its_predicate`).
+    indexing = {key: value for key, value in (site.get("indexing") or {}).items() if key != "reasons"}
+    site["indexing"] = {**indexing, "eligibility": eligibility, "eligibility_updated_at": now}
     return eligibility
 
 

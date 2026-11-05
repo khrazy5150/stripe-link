@@ -83,7 +83,10 @@ export function buildDefaultSite(pages, business = {}, subdomain = "") {
     status: "active",
     hosting: { type: "platform", platform_subdomain: chosen },
     organization: organizationFromBusiness(business),
-    indexing: { eligibility: "blocked", reasons: ["no_custom_domain"] },
+    // No `reasons`: the server owns eligibility and recomputes it on every save. The client used to seed
+    // `["no_custom_domain"]` here and nothing ever updated it, so a Site that later connected a domain
+    // kept storing the reason it had been blocked months earlier, next to a verdict that said otherwise.
+    indexing: { eligibility: "blocked" },
     pages: map,
   };
 }

@@ -151,6 +151,47 @@ class SitesHandlerTests(unittest.TestCase):
             body = self._list()
         self.assertEqual(body["site_cap"]["remaining"], 0)
 
+    def test_attach_refuses_to_move_the_homepage_off_the_root(self):
+        """A Site must not lose its front door to a slug tidy-up.
+
+        Attach already refuses to place a page AT "/" and points at the homepage action; it did not stop
+        the mirror image. `_attach_page_to_site` pops a page from its old slug, so attaching the homepage
+        at a tidier address left the Site with NO root -- a verified custom domain answering 404 at its
+        own front door, with nothing on screen to say why (2026-11-05).
+        """
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        resp = self._attach(site_id, "page_home01", "/gift-ideas")
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertEqual(json.loads(resp["body"])["error"], "homepage_move_refused")
+        still = self.repo.get("tenant_demo", site_id)["pages"]
+        self.assertEqual(still["/"]["page_id"], "page_home01", "the root must be untouched by a refusal")
+
+    def test_a_NON_homepage_page_still_moves_freely(self):
+        """The guard is about the ROOT, not about moving pages."""
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_other", "status": "published"})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            self._attach(site_id, "page_other", "/first")
+            moved = self._attach(site_id, "page_other", "/second")
+        entries = json.loads(moved["body"])["site"]["pages"]
+        self.assertIn("/second", entries)
+        self.assertNotIn("/first", entries)
+
+    def test_recomputing_eligibility_drops_a_stale_reason(self):
+        """Every emitter wrote and none withdrew: a Site on a live custom domain stored
+        `eligibility: "eligible"` beside `reasons: ["no_custom_domain"]` -- the verdict and its stated
+        cause contradicting each other in one record."""
+        from handlers import sites as sites_handler
+        site = {**base_site(), "site_id": "site_x", "tenant_id": "tenant_demo",
+                "indexing": {"eligibility": "blocked", "reasons": ["no_custom_domain"], "seo_enabled": True}}
+        sites_handler._recompute_eligibility(site, "tenant_demo", 123)
+        self.assertNotIn("reasons", site["indexing"])
+        self.assertEqual(site["indexing"]["eligibility_updated_at"], 123)
+        self.assertTrue(site["indexing"]["seo_enabled"], "unrelated keys must survive")
+
     def test_attach_page_rejects_reserved_funnel_slug(self):
         site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
         resp = handler({

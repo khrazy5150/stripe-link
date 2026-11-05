@@ -810,13 +810,13 @@
                   <span class="font-mono">{{ slug }}</span> — {{ entry.label || entry.page_id }}
                   <em>({{ entry.page_type || 'landing' }}{{ entry.category ? ', ' + entry.category : '' }}{{ entry.enabled === false ? ', disabled' : '' }})</em>
                 </span>
-                <button type="button" class="link-danger" :disabled="removeBusy === entry.page_id" @click="removePage(entry.page_id)">
+                <button type="button" class="link-danger" :disabled="removeBusy === entry.page_id" @click="pendingRemovePage = { page_id: entry.page_id, slug, label: entry.label || entry.page_id }">
                   {{ removeBusy === entry.page_id ? "Removing…" : "Remove" }}
                 </button>
               </li>
             </ul>
             <p v-if="removeError" class="field-error">{{ removeError }}</p>
-            <small>Removing a page frees it to join another Site. Page routing, slugs, and navigation get a full editor in a later phase.</small>
+            <small>Removing a page frees it to join another Site, and applies straight away — it is not held until you press Save Site. Page routing, slugs, and navigation get a full editor in a later phase.</small>
           </div>
         </div>
         <p v-if="archiveError" class="field-error">{{ archiveError }}</p>
@@ -871,6 +871,24 @@
       </template>
     </ConfirmDialog>
 
+    <!-- ASKS, because it ACTS. This button commits to the server the moment it is pressed, while sitting
+         in a dialog whose Cancel/Save Site pair implies everything in it is staged -- so Remove then
+         Cancel left the page detached and the tenant believing they had backed out (2026-11-05). The
+         confirm is what makes the immediacy visible; the copy says what it costs on a live Site. -->
+    <ConfirmDialog
+      :open="!!pendingRemovePage"
+      danger
+      title="Remove this page from the Site?"
+      :confirm-label="removeBusy ? 'Removing…' : 'Remove'"
+      :busy="!!removeBusy"
+      @cancel="pendingRemovePage = null"
+      @confirm="confirmRemovePage"
+    >
+      <strong>{{ pendingRemovePage?.label }}</strong> stops serving at
+      <span class="font-mono">{{ pendingRemovePage?.slug }}</span> on this Site, so that address starts
+      returning a page-not-found. The page itself is kept and is free to join another Site. This applies
+      immediately — pressing Cancel on the Site dialog afterwards will not put it back.
+    </ConfirmDialog>
     <ConfirmDialog
       :open="!!copyPlan"
       :danger="!!copyPlan?.existingSite"
@@ -927,6 +945,7 @@ const usernameChangesLeft = computed(() => {
   return Number.isFinite(site?.usernames_left) ? site.usernames_left : 3;
 });
 const formError = ref("");
+const pendingRemovePage = ref(null);
 const hostingDomainHint = computed(() => store.hostingDomain || "jbay.uk");
 const entityTypes = ["OnlineStore", "Organization", "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store"];
 
@@ -1896,6 +1915,13 @@ async function createSite() {
   } catch (error) {
     formError.value = error.message || "Failed to create site.";
   }
+}
+
+async function confirmRemovePage() {
+  const pending = pendingRemovePage.value;
+  if (!pending) return;
+  await removePage(pending.page_id);
+  if (!removeError.value) pendingRemovePage.value = null;
 }
 
 async function removePage(pageId) {
