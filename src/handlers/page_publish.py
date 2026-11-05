@@ -6,6 +6,7 @@ from typing import Any
 
 from boto3.dynamodb.types import TypeDeserializer
 
+from stripe_link.domain.documents import DocumentValidationError
 from stripe_link.domain.platform_suspension import is_suspended
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -318,13 +319,21 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
             logger.exception("Page publish is misconfigured, will retry: %s", exc)
             if item_identifier:
                 failures.append({"itemIdentifier": item_identifier})
-        except PublishError as exc:
+        except (PublishError, DocumentValidationError) as exc:
             # PERMANENT. Every PublishError is a data condition -- an offer/product/service the page points at
             # is gone, a tenant_id mismatch, a missing bucket -- and no number of retries turns it into a
             # success. Reporting it as a batch item failure asks DynamoDB Streams to retry the record, and the
             # stream retries a failed record IN ORDER: the shard stops dead behind it, so every page saved
             # afterwards -- by any tenant -- silently stops rendering and never gets its route. One page whose
             # offer had been deleted blocked the shard for hours exactly this way. Drop it loudly instead.
+            #
+            # `DocumentValidationError` belongs here for the SAME reason, and was missing: a document that
+            # does not satisfy its schema will not start satisfying it on the third delivery. It reached the
+            # transient branch below instead and did precisely what the paragraph above warns about -- one
+            # offer whose stored semantic model could not re-validate stopped the shard, and every page saved
+            # behind it silently kept serving its old artifact while the dashboard reported success
+            # (2026-11-05). The lesson generalises: it is not enough to drop the permanent errors we named,
+            # because the default for anything unnamed is to retry forever and take the shard down with it.
             logger.error(
                 "Dropping page stream record permanently (page=%s tenant=%s): %s",
                 (page or {}).get("page_id"), (page or {}).get("tenant_id"), exc,

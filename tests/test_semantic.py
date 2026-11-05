@@ -1,6 +1,7 @@
 """Offer Semantic Model — deterministic core (plans/OFFER_SEMANTIC_ANALYZER.md). Pure meaning; slug + label
 are the P1 consumers."""
 import json
+from decimal import Decimal
 import unittest
 from pathlib import Path
 
@@ -27,6 +28,30 @@ def _prod(pid, name, category, product_type="physical", recurring=False):
 def _offer(product_ids, brand="", intent="transaction"):
     return {"product_intent": intent, "presentation": {"brand": brand},
             "items": [{"product_id": p, "quantity": 1} for p in product_ids]}
+
+
+def _as_dynamodb_returns_it(value):
+    """Every number becomes a `Decimal`, which is exactly what boto3 hands back for a stored document."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _as_dynamodb_returns_it(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_as_dynamodb_returns_it(v) for v in value]
+    return value
+
+
+def _leaves(value):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _leaves(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _leaves(v)
+    else:
+        yield value
 
 
 class AnalyzeOfferTests(unittest.TestCase):
@@ -171,6 +196,29 @@ class ValidateSemanticModelTests(unittest.TestCase):
     def test_rejects_unknown_source(self):
         model = self._model()
         model["interpretation"]["source"] = "vibes"
+        with self.assertRaises(DocumentValidationError):
+            validate_semantic_model(model)
+
+    def test_a_model_read_back_from_dynamodb_still_validates(self):
+        """THE ROUND TRIP. The validator runs on both sides of storage, so it has to accept what storage returns.
+
+        DynamoDB hands every stored numeric back as `Decimal`, and `isinstance(x, int)` is False for it. The
+        analyzer's own output is ints and floats, so every test here passed while the persisted cache --
+        re-validated on each publish -- could never pass. A well-formed model became a permanent publish
+        failure, and because the stream retries in order it stopped a whole shard (2026-11-05,
+        offer_0M9d8EqfB9m). Asserting only the in-memory shape is what let that through.
+        """
+        model = _as_dynamodb_returns_it(self._model())
+        self.assertTrue(
+            any(isinstance(v, Decimal) for v in _leaves(model)),
+            "fixture is pointless unless it actually carries Decimals",
+        )
+        validate_semantic_model(model)  # no raise
+
+    def test_a_decimal_that_is_not_whole_is_still_not_an_integer(self):
+        """Tolerating Decimal must not quietly widen `integer` to accept 1.5."""
+        model = self._model()
+        model["interpretation"]["generated_at"] = Decimal("1.5")
         with self.assertRaises(DocumentValidationError):
             validate_semantic_model(model)
 

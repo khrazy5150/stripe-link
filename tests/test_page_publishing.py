@@ -929,6 +929,49 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual(result, {"batchItemFailures": []}, "a permanent failure must not ask for a retry")
 
+    def test_a_document_that_fails_its_schema_is_dropped_not_retried(self):
+        """A schema failure is permanent too, and it was the one permanent error reported as transient.
+
+        `DocumentValidationError` is not a `PublishError`, so it fell through to the generic handler and was
+        reported as a batch item failure -- the exact thing the sibling test above exists to prevent. In
+        production one offer whose stored semantic model could not re-validate stopped the shard, and every
+        page saved behind it kept serving its old artifact while the dashboard reported a successful publish
+        (2026-11-05). A document does not start satisfying its schema on the third delivery.
+        """
+        offer = dict(self.offers_repo.get("tenant_demo", "offer_simple_coffee") or {})
+        # Invalid in a way no retry can repair: `generated_at` is an integer in the contract.
+        offer["semantic_model"] = {"facts": {}, "interpretation": {"generated_at": "not-a-number"}}
+        broken_offers = FakeRepository("offer_id", [offer])
+
+        event = {
+            "Records": [
+                {
+                    "eventID": "poison",
+                    "eventName": "MODIFY",
+                    "dynamodb": {"NewImage": stream_image(self.page)},
+                }
+            ]
+        }
+
+        with patch.dict(os.environ, {
+            "ENVIRONMENT": "dev",
+            "PAGES_BUCKET": "pages",
+            "PAGES_PREVIEW_BUCKET": "preview",
+            "PAGES_DISTRIBUTION_DOMAIN": "pages.example.com",
+            "PREVIEW_DISTRIBUTION_DOMAIN": "preview.example.com",
+        }, clear=False):
+            result = handler(
+                event,
+                None,
+                offers_repo=broken_offers,
+                products_repo=self.products_repo,
+                s3_client=self.s3,
+                cloudfront_client=self.cloudfront,
+            )
+
+        self.assertEqual(result, {"batchItemFailures": []},
+                         "an unsatisfiable schema must not hold the shard open")
+
     def test_one_bad_record_does_not_stop_the_good_records_behind_it(self):
         event = {
             "Records": [

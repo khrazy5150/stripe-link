@@ -8,6 +8,7 @@ now the validator *is* the schema, so the only thing to keep in step is the docu
 that equality test. The repo keeps third-party deps out (src/requirements.txt is empty), so `check_schema` is a
 small in-repo interpreter of the JSON-Schema subset this contract uses — never a `jsonschema` dependency.
 """
+from decimal import Decimal
 from typing import Any
 
 _ENTITY = {
@@ -156,10 +157,21 @@ def _type_ok(instance: Any, expected: str) -> bool:
         return isinstance(instance, list)
     if expected == "string":
         return isinstance(instance, str)
+    # DECIMAL COUNTS AS A NUMBER. DynamoDB hands every stored numeric back as `Decimal`, and
+    # `isinstance(x, int)` is False for it -- the trap that has already 404'd published pages in this repo
+    # (`feedback_decimal_from_dynamo`, and the same idiom in domain/shipping_charges.py :: _whole).
+    #
+    # It bit here because this validator runs on BOTH sides of a round trip: the analyzer's output is
+    # ints and floats and validates clean, then the persisted cache is re-validated on every publish --
+    # as Decimals -- and could never pass. A well-formed model became a permanent publish failure, and
+    # because the stream retries in order, one such offer stopped a whole shard from rendering any page
+    # (2026-11-05, Security Mini Cam / offer_0M9d8EqfB9m).
     if expected == "integer":
+        if isinstance(instance, Decimal):
+            return instance == instance.to_integral_value()
         return isinstance(instance, int) and not isinstance(instance, bool)
     if expected == "number":
-        return isinstance(instance, (int, float)) and not isinstance(instance, bool)
+        return isinstance(instance, (int, float, Decimal)) and not isinstance(instance, bool)
     if expected == "boolean":
         return isinstance(instance, bool)
     if expected == "null":
