@@ -5688,13 +5688,35 @@ function buildStorefrontPageDocument(collectionId) {
   ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
 
+// The route slug is PUBLIC: it is the path on the Site's domain (delightfinds.com/<slug>), carried in the
+// page's own canonical. The seed it comes from is `offer.slug`, which `slug_from_model` deliberately
+// prefixes with the offer's BRAND -- right when a page's only address was a bare artifact URL that named
+// no business, wrong once a Site supplies the brand through the domain itself. It produced
+// `delightfinds.com/poliaxis-nutrition-microwave-cooking-pan`: the wrong business, stated twice.
+//
+// Stripped HERE rather than in `slug_from_model`, because `offer.slug` has other readers and an offer is
+// not owned by one Site. And ONLY for the seed of a NEW attach -- an entry that already has a slug keeps
+// it (handlers/sites.py :: _attach_page_to_site carries it over), so no published URL moves on its own.
+function routeSlugSeed(page) {
+  const seed = slugify(page?.route?.slug || page?.name || page?.page_id);
+  const offer = (offers.value || []).find((entry) => entry.offer_id === page?.offer_id) || null;
+  const brand = slugify(offer?.presentation?.brand || "");
+  if (!brand) return seed;
+  // The slug carries at most the brand's first two tokens (`_tokens(brand.name, 2)` in domain/semantic.py),
+  // so a longer brand never matches whole -- try that shorter prefix too rather than silently not stripping.
+  for (const prefix of [brand, brand.split("-").slice(0, 2).join("-")]) {
+    if (prefix && seed.startsWith(`${prefix}-`)) return seed.slice(prefix.length + 1);
+  }
+  return seed;
+}
+
 // Attach a page to a Site's route map. A storefront becomes the Site's homepage (slug "/"); every other
 // kind attaches at its own slug. Throws on failure (callers decide how to surface it).
 function attachPageToSiteCore(page, siteId, kind, category) {
   if (kind === "storefront") {
     return sitesStore.setHomepage(siteId, page.page_id, page.tenant_id);
   }
-  const slug = `/${slugify(page.route?.slug || page.name || page.page_id)}`;
+  const slug = `/${routeSlugSeed(page)}`;
   const pageType = kind === "category" ? "category" : kind === "profile" ? "about" : "landing";
   return sitesStore.attachPage(
     siteId,
