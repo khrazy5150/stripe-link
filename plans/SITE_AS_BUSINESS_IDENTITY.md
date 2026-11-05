@@ -399,7 +399,7 @@ that rule is what preserves §2's guarantee while changing its scope.
   | Field | Job | Can P4 remove it? |
   |---|---|---|
   | `brands` | identity | **Yes** — now on the Site (§P3b). Migration written. |
-  | `name` | identity, BUT also the renderer's fallback for a page with no Site, and the shipping ship-from name | Not yet — see below |
+  | `name` | identity, BUT it SEEDS the first Site (dashboard `organizationFromBusiness`) and is the renderer's fallback for a page with no Site | **No — re-measured 2026-11-05, see below** |
   | `email` / `email_verified` / `email_verification` | identity | **DONE 2026-11-04** — proven per Site (§P3); no tenant had ever verified an account-level one |
   | `phone` | **operational** — shipping ship-from (`shipping._seller_contact`) | No |
   | `address` | **operational** — ship-from, AND the timezone inference (`store_timezone` derives from it) | No |
@@ -568,6 +568,25 @@ that rule is what preserves §2's guarantee while changing its scope.
   The pending verification record is deliberately NOT carried: its `code_hash` is salted with the tenant
   scope, so under the Site scope it could never be confirmed — it would be a code that looks live and is
   permanently dead.
+
+- **P4's `name`: re-measured 2026-11-05, and the answer changed from "not yet" to "no".**
+
+  The stated blocker was published pages attached to no Site. **There are none** — zero in dev and zero
+  in prod. What the earlier audit counted was `page.site_id`, which is a CACHE of `Site.pages`, not the
+  source of truth; five pages were routed by a Site while their reverse edge sat empty, so an attached
+  page read as unattached. `deploy/backfill_page_site_id.py` repaired dev (4 stamped); prod still has
+  `page_yK7q5BlSd0u` outstanding because the apply was not run there.
+
+  **Measuring the right thing removed the blocker and revealed a better reason not to delete the field.**
+  `business.name` has one backend reader (`attach_owner_display_name`, the Site-less render fallback) —
+  but in the dashboard it SEEDS a Site's creation: `organizationFromBusiness` derives the new Site's
+  `organization.name`, its `name`, and its subdomain label from it (`stores/sites.js`). It is the
+  bootstrap for the tenant's FIRST Site, which is the one moment there is no Site to read identity from.
+
+  So the field is not a leftover; it is the other end of the chain this plan builds. Deleting it would
+  leave Site creation with nothing to pre-fill and the onboarding path asking a tenant to type their
+  business name a second time. **The remaining work is to decide where that seed should live**, not to
+  remove it — and that is a product decision, not a cleanup.
 
 - **P5 — the Site cap. SHIPPED DEV 2026-11-05.** (`domain/site_quota.py`, `domain/platform_billing.py`,
   `domain/platform_subscription_sync.py`, `handlers/sites.py`, `runtime/publishing.py`,
