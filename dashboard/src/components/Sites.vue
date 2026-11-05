@@ -820,6 +820,12 @@
             {{ archiveBusy ? "Working…" : "Archive Site" }}
           </button>
           <span class="footer-spacer"></span>
+          <!-- Said HERE as well as beside the field it came from. The banner at the top of this dialog is
+               off-screen whenever the tenant is working near the bottom, which is exactly when they reach
+               for Save -- so a failed save, or a gate holding the button down, read as "nothing happens". -->
+          <small v-if="saveEditBlockedReason || formError" class="field-error save-blocked-reason">
+            {{ formError || saveEditBlockedReason }}
+          </small>
           <button type="button" class="secondary-action" @click="editing = null">Cancel</button>
           <button type="button" class="primary-action" :disabled="!canSaveEdit" @click="saveEdit">
             {{ store.saving ? "Saving..." : "Save Site" }}
@@ -1781,7 +1787,24 @@ async function disconnectDomain() {
 
 const orgPhoneError = computed(() => phoneError(form.org.telephone));
 const canCreate = computed(() => !store.saving && createAvailable.value);
-const canSaveEdit = computed(() => !store.saving && editCheck.state.available && !orgPhoneError.value);
+
+// WHY the save is blocked, or "" when it is not. Printed beside the button, because a disabled button in
+// a long scrolled modal is indistinguishable from a broken one: the phone error renders up in Business and
+// `formError` at the very top, so a tenant working at the footer saw a solid-looking button do nothing.
+//
+// An UNCHECKED address no longer blocks. `available` starts false and only turns true ~350ms after an
+// async round trip, and stays false forever when the field is empty -- so the whole Site was unsavable
+// until a check the tenant never asked for happened to succeed. Only a check that actually came back
+// NEGATIVE blocks now, which is the thing worth refusing over (reported 2026-11-05).
+const saveEditBlockedReason = computed(() => {
+  if (orgPhoneError.value) return orgPhoneError.value;
+  if (editCheck.state.checking) return "Checking that store address…";
+  if (editCheck.state.checked && !editCheck.state.available) {
+    return editCheck.state.reason || "That store address isn't available.";
+  }
+  return "";
+});
+const canSaveEdit = computed(() => !store.saving && !saveEditBlockedReason.value);
 
 async function loadPages() {
   try {
@@ -2340,6 +2363,14 @@ onMounted(async () => {
 }
 .footer-spacer {
   flex: 1 1 auto;
+}
+/* Shares the footer row with the buttons, so it has to be allowed to shrink and wrap rather than push
+   Save off the end of a narrow dialog. */
+.save-blocked-reason {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 0.75rem;
+  text-align: right;
 }
 .hours-row {
   display: flex;
