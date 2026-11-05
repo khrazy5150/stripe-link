@@ -5,6 +5,7 @@ from typing import Any, Callable
 from stripe_link.common import normalize_stripe_mode
 # The Site-cap defaults live beside the resolver that applies them (domain/site_quota.py), so the number
 # and its reasoning stay in one file rather than drifting apart across two.
+from stripe_link.domain.account_quota import DEFAULT_PLAN_CONNECTED_ACCOUNTS
 from stripe_link.domain.site_quota import DEFAULT_FREE_SITES, DEFAULT_PLAN_SITES
 from stripe_link.repositories.platform_plans import platform_plans_repository
 
@@ -93,6 +94,19 @@ def plan_ai_generations(plan: dict[str, Any] | None) -> int:
 def plan_ai_images(plan: dict[str, Any] | None) -> int:
     """The monthly AI image allowance this plan grants. Denormalized onto the tenant like its sibling."""
     return _as_int((plan or {}).get("ai_images"), DEFAULT_PLAN_AI_IMAGES)
+
+
+def plan_connected_accounts(plan: dict[str, Any] | None) -> int:
+    """How many social accounts this plan lets a tenant connect (plans/ATTENTION_PRIMITIVE.md §6.2c).
+
+    Reads the generic `limits` map first via `plan_limit`, so changing it is a Pricing-screen row edit
+    rather than a deploy — which matters more here than for the other allowances, because this number is
+    what decides when the publishing vendor's $19 → $129 step lands (§6.2c). It is a cost dial, and a cost
+    dial that needs a deploy is one nobody turns.
+    """
+    if plan and "connected_accounts" in plan:
+        return _as_int(plan.get("connected_accounts"), DEFAULT_PLAN_CONNECTED_ACCOUNTS)
+    return plan_limit(plan, "connected_accounts", DEFAULT_PLAN_CONNECTED_ACCOUNTS)
 
 
 def plan_sites(plan: dict[str, Any] | None) -> int:

@@ -378,6 +378,20 @@ Letting every tenant connect four profiles brings the cliff forward **four times
 7.2%, improving immediately after — but the difference between 1 and 4 profiles is the difference between
 a rounding error and a line somebody has to explain.
 
+**✅ BUILT 2026-11-05 (the number; enforcement lands with the connect flow).**
+`stripe-link` `domain/account_quota.py` resolves it, `plan_connected_accounts` reads it off the plan
+row's generic `limits` map (a Pricing-screen edit, no deploy — a cost dial that needs a deploy is one
+nobody turns), the billing webhook denormalizes it onto the tenant, and it appears on the plan cards so a
+buyer sees the number before meeting it. **Default 3: one per supported channel** (`../attention`
+`domain/channels.py`), which puts the vendor cliff at ~33 tenants as a chosen number rather than an
+accident. `may_connect()` is the gate the connect flow will call — asked BEFORE the OAuth round trip,
+because a tenant who authorises Instagram and is then refused has given a third party access for nothing.
+
+**One asymmetry worth knowing**, pinned by a test: on cancellation `sites` drops to the FREE FLOOR (a
+storefront survives a lapse) while `connected_accounts` drops to ZERO (vendor capacity does not). Getting
+that backwards either takes a lapsed tenant's shop offline or keeps billing us for someone who stopped
+paying.
+
 **So connected profiles should be a PLAN ALLOWANCE, not an unlimited.** This is the same shape as the
 Site cap (`SITE_AS_BUSINESS_IDENTITY.md` §P5, shipped 2026-11-05) and should reuse its machinery rather
 than inventing a second one: a `connected_accounts` entry in the plan row's generic `limits` map,

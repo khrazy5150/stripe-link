@@ -297,6 +297,27 @@ class ReconcileWebhookTests(unittest.TestCase):
         # Subscribing writes the PLAN's fee tier onto the tenant (this fixture plan carries fee_tier "basic").
         self.assertEqual(tenants.docs["t1"]["tier_id"], "free")
 
+    def test_cancellation_treats_SITES_and_CONNECTED_ACCOUNTS_differently(self):
+        """The asymmetry is the whole point, and getting it backwards costs real things.
+
+        A Site is the tenant's own storefront and free-forever means a WORKING one, so sites drop to the
+        free floor (1), never to zero — zeroing it would soft-lock the only Site a lapsed tenant has and
+        take their shop off the internet for lapsing.
+
+        A connected social account is the opposite: it spends OUR publishing allowance on every post it
+        receives, and `attention` is not a free-tier capability at all. Left behind, a canceled tenant
+        keeps costing us vendor capacity (plans/ATTENTION_PRIMITIVE.md §6.2c).
+        """
+        tenants = FakeTenantRepo([_tenant(sites=10, connected_accounts=4,
+                                          stripe_subscription_id="sub_1")])
+        reconcile_platform_subscription_event(
+            self._event("customer.subscription.deleted",
+                        {"id": "sub_1", "status": "canceled", "metadata": {"tenant_id": "t1"}}),
+            mode="test", tenant_repo=tenants)
+        self.assertEqual(tenants.docs["t1"]["sites"], 1, "a storefront survives a cancellation")
+        self.assertEqual(tenants.docs["t1"]["connected_accounts"], 0,
+                         "vendor capacity does not")
+
     def test_subscription_updated_sets_pro_fee_tier_from_plan(self):
         plan = {"plan_key": "premium", "label": "Premium", "monthly_amount": 1900, "price_id": "price_prem",
                 "trial_days": 0, "active": True, "sort_order": 1, "fee_tier": "pro",

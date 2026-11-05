@@ -3,7 +3,8 @@ from typing import Any, Callable
 
 from stripe_link.domain.entitlements import plan_entitlements
 from stripe_link.domain.platform_billing import (DEFAULT_AI_IMAGE_QUALITY, plan_ai_generations,
-                                                  plan_ai_image_qualities, plan_ai_images, plan_sites)
+                                                  plan_ai_image_qualities, plan_ai_images,
+                                                  plan_connected_accounts, plan_sites)
 from stripe_link.domain.site_quota import DEFAULT_FREE_SITES
 from stripe_link.domain.fees import normalize_tier_id
 from stripe_link.domain.platform_billing import billing_status_from_stripe, platform_plan
@@ -111,6 +112,12 @@ def reconcile_platform_subscription_event(
             # free-tier fee. Zeroing it would soft-lock the only Site they have and take a paying-again
             # customer's shop off the internet for lapsing (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
             updates["sites"] = DEFAULT_FREE_SITES
+            # CONNECTED ACCOUNTS DO GO TO ZERO, and the asymmetry with `sites` above is the point. A Site
+            # is the tenant's own storefront and free-forever means a working one; a connected social
+            # account spends OUR publishing allowance on every post it receives, and `attention` is not a
+            # free-tier capability at all. Leaving accounts behind on a canceled plan would keep billing
+            # us for someone who stopped paying (plans/ATTENTION_PRIMITIVE.md §6.2c).
+            updates["connected_accounts"] = 0
             # And reset the QUALITY ceiling rather than leaving it. A canceled tenant has no images, so
             # it changes nothing today -- but a stale `high` sitting on a profile is exactly the kind of
             # denormalized field that is still there, and still trusted, after the reason for it is gone.
@@ -142,6 +149,9 @@ def reconcile_platform_subscription_event(
                 # The Site cap travels the same road and for the same reason: the Site handlers read a
                 # number off the profile so they never touch the plans table on a create.
                 updates["sites"] = plan_sites(plan)
+                # The publishing cost dial travels the same road: the connect path reads a number off the
+                # profile so it never touches the plans table mid-OAuth.
+                updates["connected_accounts"] = plan_connected_accounts(plan)
                 # The GRANTED SET, not a ceiling. `plan_ai_image_qualities` reads either shape, so a
                 # plan row still carrying the old single field denormalizes to the same meaning.
                 updates["ai_image_qualities"] = plan_ai_image_qualities(plan)

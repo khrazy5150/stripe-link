@@ -46,6 +46,10 @@ _ALLOWANCE_LABELS = (
     # set of books -- a buyer reading "3 Sites" and finding 3 in test AND 3 in live should find that a
     # pleasant surprise, not a discrepancy they have to ask about.
     ("sites", "Sites (per mode)"),
+    # The publishing cost dial, said out loud (plans/ATTENTION_PRIMITIVE.md §6.2c). A buyer comparing a
+    # campaign tier needs to know how many places it posts to, and we need the number to be a promise we
+    # chose rather than one adoption sets for us.
+    ("connected_accounts", "Connected social accounts"),
 )
 
 
