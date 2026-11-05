@@ -172,21 +172,34 @@ class TheTenantAnswersLastTests(unittest.TestCase):
         self.assertEqual(sending_identity("")["source"], "none")
 
 
-class ReplyToStaysTheTenantsTests(unittest.TestCase):
-    """The display name and the reply address come from different places ON PURPOSE, and this is the one
-    asymmetry in the design worth a test of its own: SES will mail from any Reply-To it is handed, so the
-    platform only ever uses an address the tenant has proven they can receive at. A Site's address becomes
-    usable when verification is Site-scoped (§P3) — not before."""
+class ReplyToIsPROVENOrItIsTheSignupAddressTests(unittest.TestCase):
+    """The one asymmetry in the design worth a test of its own: SES will mail from any Reply-To it is
+    handed, so the platform only ever uses an address the tenant has PROVEN they receive at. §P3 made that
+    proof Site-scoped and §P4 deleted the account-level field, so there are exactly two answers left — the
+    Site's verified address, or the Cognito signup address, which is proof of the same thing obtained by a
+    stronger flow.
 
-    def test_the_site_names_the_message_and_the_tenant_takes_the_replies(self):
+    `PROFILE` still carries a verified `business.email`; that is what a pre-§P4 tenant's stored document
+    looks like, and these prove it is no longer read."""
+
+    def test_a_site_that_proved_an_address_takes_its_own_replies(self):
+        sites = Sites([{"site_id": "site_qui", "tenant_id": "t1", "pages": {},
+                        "organization": {**QUILL, "email": "hi@quill.test", "email_verified": True}}])
+        identity = resolve(site_id="site_qui", sites_repo=sites)
+        self.assertEqual(identity["business_name"], "Quill")
+        self.assertEqual(identity["reply_to"], "hi@quill.test")
+
+    def test_a_site_that_proved_NOTHING_falls_to_the_SIGNUP_address(self):
+        """Not to the tenant's retired `business.email`, and not to nowhere: a customer answering a
+        receipt has to reach the merchant."""
         identity = resolve(site_id="site_qui")
         self.assertEqual(identity["business_name"], "Quill")
-        self.assertEqual(identity["reply_to"], "hi@poliaxis.test")
+        self.assertEqual(identity["reply_to"], "owner@example.test")
 
     def test_an_unverified_site_email_is_IGNORED(self):
         sites = Sites([{"site_id": "site_qui", "tenant_id": "t1", "pages": {},
                         "organization": {**QUILL, "email": "anyone@quill.test"}}])
-        self.assertEqual(resolve(site_id="site_qui", sites_repo=sites)["reply_to"], "hi@poliaxis.test")
+        self.assertEqual(resolve(site_id="site_qui", sites_repo=sites)["reply_to"], "owner@example.test")
 
 
 class TheModeIsAlwaysThreadedTests(unittest.TestCase):

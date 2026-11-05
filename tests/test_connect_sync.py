@@ -44,7 +44,6 @@ class BusinessProfileSeedTests(unittest.TestCase):
     def test_seed_extracts_and_normalizes(self):
         seed = business_profile_seed(account())
         self.assertEqual(seed["name"], "Bean Bros")
-        self.assertEqual(seed["email"], "hi@bean.bros")
         self.assertEqual(seed["phone"], "+12065551234")            # normalized to E.164
         self.assertEqual(seed["address"]["street"], "1 Main St")
         self.assertEqual(seed["address"]["locality"], "Denver")
@@ -55,19 +54,31 @@ class BusinessProfileSeedTests(unittest.TestCase):
         seed = business_profile_seed(account(business_profile={"name": "X", "support_phone": "555"}))
         self.assertNotIn("phone", seed)
 
+    def test_the_EMAIL_is_never_extracted(self):
+        """§P4: `seed_business_identity` is the seed's only consumer and it no longer fills the field, so
+        a key here would be output nothing reads — and the next reader would assume otherwise."""
+        self.assertNotIn("email", business_profile_seed(account()))
+
     def test_fill_empty_only_and_provenance(self):
-        existing = {"name": "My Own Shop", "phone": "+15550001111"}   # tenant already set these
-        seed = {"name": "Bean Bros", "email": "hi@bean.bros", "phone": "+12065551234"}
+        existing = {"name": "My Own Shop"}                            # tenant already set this one
+        seed = {"name": "Bean Bros", "phone": "+12065551234"}
         business, changed = seed_business_identity(existing, seed)
         self.assertTrue(changed)
         self.assertEqual(business["name"], "My Own Shop")             # not clobbered
-        self.assertEqual(business["phone"], "+15550001111")           # not clobbered
-        self.assertEqual(business["email"], "hi@bean.bros")           # filled (was empty)
-        self.assertEqual(business["sources"], {"email": "stripe"})    # only the filled field is stamped
+        self.assertEqual(business["phone"], "+12065551234")           # filled (was empty)
+        self.assertEqual(business["sources"], {"phone": "stripe"})    # only the filled field is stamped
+
+    def test_an_EMAIL_in_the_seed_is_IGNORED_even_when_the_profile_has_none(self):
+        """The strongest form of §P4's rule: the one case where seeding WOULD have fired. Stripe holding
+        an address is not the tenant proving they read it — that proof is per Site now (§P3)."""
+        business, changed = seed_business_identity({"name": "A", "phone": "+15550001111"},
+                                                   {"email": "hi@bean.bros"})
+        self.assertFalse(changed)
+        self.assertNotIn("email", business)
 
     def test_no_change_when_all_present(self):
-        _, changed = seed_business_identity({"name": "A", "email": "b@c.d", "phone": "+15550001111"},
-                                            {"name": "X", "email": "y@z.w", "phone": "+12065551234"})
+        _, changed = seed_business_identity({"name": "A", "phone": "+15550001111"},
+                                            {"name": "X", "phone": "+12065551234"})
         self.assertFalse(changed)
 
 

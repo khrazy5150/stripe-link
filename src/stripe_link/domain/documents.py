@@ -2593,6 +2593,13 @@ def validate_business_identity(business: Any) -> None:
     if not isinstance(business, dict):
         raise DocumentValidationError("User profile business must be an object.")
     optional_string(business, "name", "business.name")
+    # `business.email` IS RETIRED BUT STILL TOLERATED, which is deliberately unlike `business.brands`
+    # below (plans/SITE_AS_BUSINESS_IDENTITY.md §P4). Nothing reads it any more -- a reply address is the
+    # Site's verified one or the signup address -- but refusing it here would be a different thing from
+    # refusing brands: ZERO profiles ever carried a brand, while profiles DO carry this, because
+    # `connect_sync` seeded it from the Stripe account until 2026-11-04. The Profile screen saves by
+    # posting the whole stored document back, so a refusal would make those tenants unable to save their
+    # profile at all -- turning a dead field into an outage. It is accepted and ignored.
     optional_string(business, "email", "business.email")
     require_e164(business, "phone", "Business phone")
     # THE STORE'S WORKING DAY, as an IANA zone name. Suggested from the business address and freely

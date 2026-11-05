@@ -315,7 +315,7 @@ def config_for_site(config: dict | None, site_id: str = "") -> dict:
     return resolved
 
 
-def sender_address(ship_from: dict, business: dict | None = None, owner_email: str = "", *,
+def sender_address(ship_from: dict, owner_email: str = "", *,
                    organization: dict | None = None) -> dict:
     """The ship-from address with an email on it, because a carrier will not buy a label without one.
 
@@ -323,11 +323,17 @@ def sender_address(ship_from: dict, business: dict | None = None, owner_email: s
     reject a rate request, so a tenant can price a parcel all week and only discover the gap at the moment
     they try to post it (reported 2026-10-05, on a ship-from address saved before the field mattered).
 
-    The address's own email wins -- it is the one the tenant typed on the warehouse itself. Then **the
-    SELLING BUSINESS's verified address** (plans/SHIPPING_PER_SITE.md §S2): a label's sender address is
-    for the carrier to reach THEM, and a tenant running two shops had both labels carry the account's
-    single address. Then the account's business email, then the account the tenant signs in with. All four
-    are the seller.
+    THREE sources, each of them the seller:
+
+    1. the address's own email -- the one the tenant typed on the warehouse itself;
+    2. the **SELLING BUSINESS's verified address** (plans/SHIPPING_PER_SITE.md §S2): a label's sender
+       address is for the carrier to reach THEM, and a tenant running two shops had both labels carry the
+       account's single address;
+    3. the account the tenant signs in with.
+
+    There were four until §P4 deleted the account-level business email; it sat between 2 and 3 and this
+    took it as a `business` dict, which is why the parameter is gone rather than ignored -- a parameter
+    nothing reads is one a caller keeps supplying in the belief it matters.
 
     The Site's address must be VERIFIED to be used, for the same reason it must be to carry a Reply-To:
     nobody has proven an unverified one is reachable, and a carrier's "we could not deliver" notice going
@@ -340,7 +346,7 @@ def sender_address(ship_from: dict, business: dict | None = None, owner_email: s
         return address
     org = organization if isinstance(organization, dict) else {}
     site_email = _clean(org.get("email")) if org.get("email_verified") else ""
-    fallback = site_email or _clean((business or {}).get("email")) or _clean(owner_email)
+    fallback = site_email or _clean(owner_email)
     if fallback:
         address["email"] = fallback
     return address

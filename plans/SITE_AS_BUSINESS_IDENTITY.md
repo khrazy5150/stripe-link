@@ -400,7 +400,7 @@ that rule is what preserves §2's guarantee while changing its scope.
   |---|---|---|
   | `brands` | identity | **Yes** — now on the Site (§P3b). Migration written. |
   | `name` | identity, BUT also the renderer's fallback for a page with no Site, and the shipping ship-from name | Not yet — see below |
-  | `email` / `email_verified` / `email_verification` | identity, BUT the only proven reply address any tenant has today | Not yet |
+  | `email` / `email_verified` / `email_verification` | identity | **DONE 2026-11-04** — proven per Site (§P3); no tenant had ever verified an account-level one |
   | `phone` | **operational** — shipping ship-from (`shipping._seller_contact`) | No |
   | `address` | **operational** — ship-from, AND the timezone inference (`store_timezone` derives from it) | No |
   | `timezone`, `shipping_cutoff_hour` | **operational** — delivery estimate | No, decided in §P3b |
@@ -484,7 +484,7 @@ that rule is what preserves §2's guarantee while changing its scope.
   (`page_cYSn7b6QvLA`, slug `poliaxis-nutrition-…`) sits in an environment whose only LIVE Site is Quill,
   so even the obvious repair is a judgement call.
 
-  **`email` STAYS, and the audit's "safe" was INCOMPLETE — worth recording as a limit of the tool.** The
+  **`email` — the audit said "safe" and that was INCOMPLETE, worth recording as a limit of the tool.** The
   audit asks whether any DATA still uses a field; it cannot see a CODE path that requires the field to be
   *settable*. `handlers/downloads.py` gates lead-magnet email on a verified ACCOUNT business email, so
   deleting the field would make that gate unpassable forever.
@@ -495,9 +495,59 @@ that rule is what preserves §2's guarantee while changing its scope.
   exactly that and the gate had not been told. Fixed 2026-11-04: it accepts the SITE's verified address
   first, then the account's. A gate nobody can pass is not a gate, it is an outage.
 
-  So the remaining order is unchanged and now precise: attach 3 named pages to Sites → re-run the audit →
-  `name` can go. `email` additionally needs the download gate to stop requiring an account-level address,
-  which the §P3 flow now makes possible.
+  ### `email` DELETED 2026-11-04
+
+  The audit said safe in BOTH environments, the download gate had already been taught the per-Site
+  address, and no tenant in either environment had ever verified an account-level one — so the field was
+  carrying nothing and the only thing left to remove was the machinery that offered to fill it.
+
+  Gone: the two endpoints (`POST /profile/business-email/start|confirm`) and their routes, the Debounce
+  and SES grants on `UserProfileFunction` that existed only for them, the Profile screen's Business Email
+  field with its three handlers, and the Stripe Connect seed that quietly wrote `business.email` from the
+  connected account (`connect_sync` now seeds `name` and `phone` only — an address Stripe holds is not an
+  address this tenant proved they read).
+
+  `reply_to_address` now has ONE source, the signup address, and is reached only when the Site has
+  nominated nothing or has not yet proven it. That is the whole user-visible consequence, stated plainly:
+
+  > **A business's reply address is now the Site's, or the account's signup address. Nothing else.** A
+  > tenant who wants customer replies to reach a business mailbox verifies it at **Sites → Edit →
+  > Business**; until they do, replies reach the address they signed up with. Lead-magnet delivery is
+  > stricter than that and always was — it needs a *verified* address, so it needs the Site flow.
+
+  **The same gate existed one layer up, with the same bug.** `LandingPages.vue` disables the *"Sends an
+  email with the file"* ribbon action when the business cannot send — so a tenant learns before uploading
+  a file and writing copy for a button that would refuse — and it read `profile.business.email_verified`
+  and said *"go to your Profile page to enter a business email."* Deleting the field would have disabled
+  that action for every tenant forever while pointing at the one screen that cannot fix it. It now reads
+  the selected Site's `organization`, treats unknown as permitted rather than accusing a set-up tenant,
+  and names Sites → Edit → Business. Worth noting as a pattern: **a server-side gate and its UI preview
+  are two readers of one fact, and only the server one was found by the audit** — the audit asks what
+  reads the DATA, and a disabled dropdown reads it to decide what to offer.
+
+  **The validator TOLERATES the field rather than refusing it — the opposite call to `brands`, and the
+  difference is the data, not the principle.** Zero profiles ever carried a brand, so refusing it cost
+  nothing. Profiles *do* carry `business.email`, because `connect_sync` seeded it from the Stripe account
+  until today, and the Profile screen saves by posting the whole stored document back — so a refusal would
+  stop those tenants saving their profile at all. A dead field is not worth an outage. It validates and
+  nothing reads it, with `test_TOLERATES_the_retired_email_field_rather_than_refusing_it` holding the
+  reason so the next person to tidy it finds the measurement rather than an inconsistency.
+
+  Two dead things fell out with the field, both removed rather than left ignored: `sender_address`'s
+  `business` parameter (and so `_seller_contact`, whose `(business, owner_email)` tuple existed only to
+  feed it, now `_seller_email`), and `business_profile_seed`'s `email` key — `seed_business_identity` was
+  its only consumer and had stopped filling the field, so it was output nothing read. A parameter nothing
+  reads is one a caller keeps supplying in the belief it matters.
+
+  `tests/test_business_email_endpoints.py` retired with the endpoints. Four of its properties were about
+  the RULES for codes rather than the endpoint — the code is stored hashed, rubbish never reaches the paid
+  validator, a rejected address gets no code, a catch-all is reported and still gets one — and those were
+  only ever asserted through the tenant flow, so they moved to
+  `tests/test_site_email_verification.py` rather than going out with it. The per-Site file additionally
+  proves what the retired one could not: a code for one Site does not confirm another.
+
+  **So the remaining order is now just `name`:** attach the 3 named pages to Sites → re-run the audit →
+  `name` can go. Nothing in the code blocks it; the pages are a routing decision.
 
   Two things that make the deletion safer than it first looked:
 

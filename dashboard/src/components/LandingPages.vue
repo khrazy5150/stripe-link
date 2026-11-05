@@ -1373,7 +1373,7 @@
                             <option value="promote_page">Promotes another of my pages</option>
                             <option value="download">Downloads a file</option>
                             <option value="email_file" :disabled="!businessEmailVerified">
-                              Sends an email with the file{{ businessEmailVerified ? "" : " — needs a verified business email" }}
+                              Sends an email with the file{{ businessEmailVerified ? "" : " — needs a verified email on this site" }}
                             </option>
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
@@ -1392,8 +1392,8 @@
                       <!-- Blocking, not a warning after the fact: the tenant should learn they cannot send
                            BEFORE uploading a file and writing copy for a button that will refuse to work. -->
                       <p v-if="element.cta.action === 'email_file' && !businessEmailVerified" class="field-error">
-                        You must first enter a valid business email address before using this feature!
-                        Go to your Profile page to enter a business email.
+                        {{ selectedSite?.name || "This site" }} has no verified email address, so it cannot
+                        send the file. Verify one under Sites → Edit → Business, then come back.
                       </p>
                       <div v-if="element.cta.action === 'download' || element.cta.action === 'email_file'" class="offer-field">
                         <span>File to hand over</span>
@@ -3099,7 +3099,7 @@ import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/u
 import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
 import { shippingIsQuotable } from "../composables/shippingQuotable";
 import { CLOSING_SECTIONS, elementOrderMode, isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, renderedVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, orderSectionKeys, isRepeatableSection, offerlessComposition, offerlessSections, offerlessState, catalogGridSection, goalChrome } from "../composables/pageComposer";
-import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
+import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney, serviceFlowCard } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -4940,7 +4940,6 @@ function resetWizard() {
 // Load on first search-box focus so filtering works without clicking Load Pages first (mirrors Products).
 function ensurePagesLoaded() {
   if (!pagesLoaded.value && !loading.value) loadPages();
-  loadBusinessEmailState();
 }
 
 // Auto-load the pages list on mount so it's fresh immediately — and, since this view is keyed on the
@@ -7384,21 +7383,21 @@ async function resetSectionOrder() {
 
 // Three ribbons stop being interruptions and become wallpaper, which destroys the only property that
 // makes the element worth having (plans/ATTENTION_PRIMITIVE.md §4a "the wallpaper rule"). Capped at two.
-// Whether this tenant may send email at all. The SEND is the real gate (handlers/downloads.py) — this only
+// Whether THIS PAGE'S SITE may send email. The SEND is the real gate (handlers/downloads.py) — this only
 // tells the tenant before they invest effort in a button that would refuse to work.
-const businessEmailVerified = ref(false);
-
-async function loadBusinessEmailState() {
-  try {
-    const session = getAuthSession() || {};
-    const body = await apiRequest("/profile", { params: { user_id: session.user_id || "" } });
-    businessEmailVerified.value = Boolean(body.profile?.business?.email_verified);
-  } catch {
-    // Unknown is not "unverified": a failed profile load must not accuse a verified tenant of not being
-    // set up. The send-time gate is what actually decides.
-    businessEmailVerified.value = true;
-  }
-}
+//
+// It read `profile.business.email_verified` and asked the tenant to "go to your Profile page" until §P4
+// deleted that field and the Profile screen stopped offering it. Left alone it would have disabled this
+// action for every tenant forever while pointing at a screen that cannot fix it — the same shape as the
+// server-side gate this plan already had to repair, in the UI instead.
+const businessEmailVerified = computed(() => {
+  const org = selectedSite.value?.organization;
+  // UNKNOWN IS NOT "UNVERIFIED". Before a Site is chosen, or while the Sites list is still loading, there
+  // is nothing to judge — and accusing a set-up tenant is worse than letting them proceed to a gate that
+  // decides properly. A notice has to be actionable to be worth showing.
+  if (!org) return true;
+  return Boolean(org.email_verified) && Boolean(String(org.email || "").trim());
+});
 
 // THE RIBBON CAP IS A CONTENT JUDGEMENT, not a technical one, and it was only ever right for a page that
 // sells ONE thing: there, a third interruption stops interrupting and becomes wallpaper. On a page that

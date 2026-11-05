@@ -277,11 +277,15 @@ def lead_download_handler(
     # 2026-11-04 by deploy/audit_tenant_fallback.py), so this refused EVERY lead-magnet send with
     # "Its owner needs to verify a business email address" while offering a per-Site way to do exactly
     # that. A gate nobody can pass is not a gate, it is an outage.
-    reply_to = verified_email(organization) or verified_email(business)
+    #
+    # It accepted the Site's address FIRST and the account's second for one day. §P4 then deleted the
+    # account-level field, so the Site's is the only proof there is -- and a page attached to no Site
+    # cannot deliver a lead magnet at all, which is why the message names where to prove one.
+    reply_to = verified_email(organization)
     if not reply_to:
         return error_response(
-            "This page cannot send email yet. Verify an email address for its site "
-            "(Sites → Edit → Business), or for your account in Profile.",
+            "This page cannot send email yet. Verify an email address for its site in "
+            "Sites → Edit → Business.",
             status_code=409, code="sender_unverified",
         )
     # An empty business name must not fall back to the platform's bare address — that hands the recipient

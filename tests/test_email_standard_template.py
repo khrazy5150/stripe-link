@@ -50,19 +50,26 @@ class FakeClient:
 
 
 class IdentityResolutionTests(unittest.TestCase):
-    def test_a_verified_business_email_is_preferred(self):
-        identity = email_identity({
-            "business": {"name": BUSINESS, "email": "biz@x.com", "email_verified": True},
-            "email": "signup@x.com"})
+    def test_a_VERIFIED_SITE_address_is_preferred(self):
+        """The Site is the business, so its proven address is where that business's replies go."""
+        identity = email_identity({"business": {"name": BUSINESS}, "email": "signup@x.com"},
+                                  {"name": "Quill", "email": "hi@quill.test", "email_verified": True})
+        self.assertEqual(identity, {"business_name": "Quill", "reply_to": "hi@quill.test"})
 
-        self.assertEqual(identity, {"business_name": BUSINESS, "reply_to": "biz@x.com"})
+    def test_the_tenants_OWN_business_email_is_NEVER_used_verified_or_not(self):
+        """§P4 deleted the field (plans/SITE_AS_BUSINESS_IDENTITY.md). It is still in every stored
+        document of every tenant who ran the retired verification flow, which is exactly why this asserts
+        the verified case too -- reading it would put one business's address on another's mail."""
+        for business in ({"name": BUSINESS, "email": "biz@x.com", "email_verified": True},
+                         {"name": BUSINESS, "email": "biz@x.com"}):
+            with self.subTest(business=business):
+                identity = email_identity({"business": business, "email": "signup@x.com"})
+                self.assertEqual(identity["reply_to"], "signup@x.com")
 
-    def test_an_unverified_business_email_falls_back_to_the_signup_address(self):
-        # The measured reality: on 2026-09-23 not one tenant in dev or prod had ever verified a business
-        # email, so gating on verification alone is what left every reply undeliverable.
-        identity = email_identity({
-            "business": {"name": BUSINESS, "email": "biz@x.com"}, "email": "signup@x.com"})
-
+    def test_an_unverified_SITE_address_falls_back_to_the_signup_address(self):
+        # Pending is not proven, and SES will mail from any Reply-To it is handed.
+        identity = email_identity({"business": {"name": BUSINESS}, "email": "signup@x.com"},
+                                  {"name": "Quill", "email": "hi@quill.test"})
         self.assertEqual(identity["reply_to"], "signup@x.com")
 
     def test_the_name_falls_through_business_then_display_then_person(self):

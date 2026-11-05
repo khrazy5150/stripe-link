@@ -876,7 +876,7 @@ def live_rates_for(config, tenant_id, *, parcels, destination, secret_cipher):
     if not name or not secret_ref:
         return {"options": [], "error": "no_provider"}
     from_address = sender_address((config or {}).get("ship_from_address") or {},
-                                  *_seller_contact(tenant_id, None))
+                                  _seller_email(tenant_id, None))
     if not from_address.get("postal_code"):
         # A carrier prices a JOURNEY. Without an origin there is nothing to price, and Shippo rejects the
         # request rather than guessing -- so this is caught here where it can be named.
@@ -1637,7 +1637,7 @@ def quote_rates(event, repository, secret_cipher, *, products_repo=None, orders_
             # one click later with the carrier's wording. Fixing only the purchase looked right and
             # changed nothing (2026-10-05).
             from_address=sender_address(site_config.get("ship_from_address") or {},
-                                        *_seller_contact(tenant_id, None),
+                                        _seller_email(tenant_id, None),
                                         organization=site.get("organization")),
             to_address=order.get("shipping_address") or {},
             parcel=parcels[0],
@@ -1722,18 +1722,22 @@ def selling_site(order, mode):
         return {}
 
 
-def _seller_contact(tenant_id, user_profiles_repo):
-    """`(business, owner_email)` for the tenant, or `({}, "")`. Never raises: a missing profile means the
-    ship-from address has to carry its own email, which is the next thing checked anyway."""
+def _seller_email(tenant_id, user_profiles_repo):
+    """The tenant's sign-in address, or `""`. Never raises: a missing profile means the ship-from address
+    has to carry its own email, which is the next thing checked anyway.
+
+    It returned `(business, owner_email)` until §P4 deleted the account-level business email -- the only
+    consumer was `sender_address`, and the `business` half had no reader left.
+    """
     try:
         repo = user_profiles_repo or (user_profiles_repository()
                                       if os.environ.get("USER_PROFILES_TABLE") else None)
         if repo is None:
-            return {}, ""
+            return ""
         owner = repo.get(tenant_id, tenant_id) or {}
-        return (owner.get("business") or {}), str(owner.get("email") or "")
+        return str(owner.get("email") or "")
     except Exception:  # noqa: BLE001
-        return {}, ""
+        return ""
 
 
 def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_repo=None,
@@ -1796,9 +1800,9 @@ def buy_label(event, repository, secret_cipher, *, products_repo=None, orders_re
     # AN EMAIL ON THE SENDER, or the carrier refuses the purchase. Shippo rejects a label with
     # `address_from.email must not be empty` and does NOT reject a RATE request, so a tenant can price
     # parcels all week and only meet the gap at the moment they try to post one. Falls back to the
-    # business email, then the account they sign in with -- all three are the seller.
+    # SELLING SITE's verified address, then the account they sign in with -- all three are the seller.
     from_address = sender_address(site_config.get("ship_from_address") or {},
-                                  *_seller_contact(tenant_id, user_profiles_repo),
+                                  _seller_email(tenant_id, user_profiles_repo),
                                   organization=site.get("organization"))
     if not str(from_address.get("email") or "").strip():
         # Named where it can be fixed, rather than relayed in the carrier's words.

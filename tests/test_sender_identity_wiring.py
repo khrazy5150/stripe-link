@@ -115,10 +115,10 @@ class TheDelegationNoticeAsksTheResolverTests(unittest.TestCase):
 
 class TheLeadMagnetDownloadAsksTheResolverTests(unittest.TestCase):
     """This one keeps its own Reply-To gate: the email may only go out from a VERIFIED address, and that
-    gate is the whole reason the block exists. Only the NAME comes from the Site."""
+    gate is the whole reason the block exists. Since §P4 the address it gates on is the SITE's, so both
+    halves of the identity come from the Site and an unproven one sends nothing rather than falling back."""
 
     def _call(self, organization):
-        import handlers.downloads as downloads
         from tests.test_lead_download import ASSET, FakeMailer, VERIFIED_PROFILE, call, page
 
         mailer = FakeMailer()
@@ -128,31 +128,48 @@ class TheLeadMagnetDownloadAsksTheResolverTests(unittest.TestCase):
             seen.update({"tenant_id": tenant_id, **kwargs})
             return dict(organization)
 
-        with mock.patch.object(downloads, "site_organization", resolver):
-            response = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb",
-                             "fields": {"email": "visitor@example.com"}},
-                            doc=page({"action": "email_file", "asset": ASSET}), mailer=mailer,
-                            profile=VERIFIED_PROFILE)
+        response = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb",
+                         "fields": {"email": "visitor@example.com"}},
+                        doc=page({"action": "email_file", "asset": ASSET}), mailer=mailer,
+                        profile=VERIFIED_PROFILE, site_resolver=resolver)
         return response, mailer, seen
 
     def test_the_SITE_names_the_delivery_email(self):
         """The profile says "Poliaxis Nutrition"; the page belongs to Quill, and Quill is who delivers."""
-        response, mailer, _seen = self._call({"name": "Quill"})
+        response, mailer, _seen = self._call({"name": "Quill", "email": "hi@quill.test",
+                                              "email_verified": True})
         self.assertEqual(response["statusCode"], 200, response.get("body"))
         self.assertEqual(mailer.sent[0]["from_name"], "Quill")
 
-    def test_the_REPLY_ADDRESS_is_still_the_gated_verified_one(self):
-        _response, mailer, _seen = self._call({"name": "Quill", "email": "anyone@quill.test"})
-        self.assertEqual(mailer.sent[0]["reply_to"], "owner@poliaxis.co")
+    def test_the_REPLY_ADDRESS_IS_THE_SITES_TOO_NOW(self):
+        """It was the account's verified address until §P4 deleted that field. Both halves of the identity
+        are the Site's, which is the point of the phase: a tenant's second business must be able to send
+        under its own name AND take its own replies."""
+        _response, mailer, _seen = self._call({"name": "Quill", "email": "hi@quill.test",
+                                               "email_verified": True})
+        self.assertEqual(mailer.sent[0]["reply_to"], "hi@quill.test")
+
+    def test_an_UNVERIFIED_site_address_sends_nothing_at_all(self):
+        """Not "falls back to the account" -- there is nothing left to fall back to, and SES will mail from
+        any Reply-To it is handed."""
+        response, mailer, _seen = self._call({"name": "Quill", "email": "anyone@quill.test"})
+        self.assertEqual(response["statusCode"], 409)
+        self.assertEqual(mailer.sent, [])
 
     def test_it_asks_about_THIS_PAGE(self):
-        _response, _mailer, seen = self._call({"name": "Quill"})
+        _response, _mailer, seen = self._call({"name": "Quill", "email": "hi@quill.test",
+                                               "email_verified": True})
         self.assertEqual(seen["page_id"], "p1")
         self.assertEqual(seen["tenant_id"], "t1")
 
-    def test_a_page_with_no_site_falls_back_to_the_profile_name(self):
-        _response, mailer, _seen = self._call({})
-        self.assertEqual(mailer.sent[0]["from_name"], "Poliaxis Nutrition")
+    def test_a_page_with_no_site_CANNOT_deliver_a_lead_magnet(self):
+        """The one behaviour §P4 took away, recorded rather than left to be discovered: it used to send
+        under the profile's name and the account's verified address. A page with no Site now has no proven
+        address, so the gate refuses it and the message says where to prove one."""
+        response, mailer, _seen = self._call({})
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("Sites", response["body"])
+        self.assertEqual(mailer.sent, [])
 
 
 class TheRegistrationEmailsNameTheirPagesBusinessTests(unittest.TestCase):

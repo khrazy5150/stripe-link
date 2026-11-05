@@ -186,15 +186,19 @@ def preserve_email_verification(incoming_org: Any, existing_org: Any) -> dict[st
     }
 
 
-def verified_email(business: Any) -> str:
+def verified_email(organization: Any) -> str:
     """The address a tenant-authored send may reply to, or "" — the ONE question the send-time gate asks.
+
+    Takes a SITE's `organization` block. It used to be called with the account's `business` block too;
+    §P4 deleted that field, so the only proven address is now the Site's (§P3) and the shapes no longer
+    need to be interchangeable.
 
     Pending is not verified. A tenant who types an address and never confirms it must not be able to send,
     or the verification is decorative.
     """
-    business = business if isinstance(business, dict) else {}
-    email = str(business.get("email") or "").strip()
-    return email if email and business.get("email_verified") else ""
+    organization = organization if isinstance(organization, dict) else {}
+    email = str(organization.get("email") or "").strip()
+    return email if email and organization.get("email_verified") else ""
 
 
 def sender_display_name(profile: Any) -> str:
@@ -224,10 +228,10 @@ def sender_display_name(profile: Any) -> str:
 def reply_to_address(profile: Any) -> str:
     """Where a customer's reply should land, or "" when the tenant has no reachable address at all.
 
-    Two sources, in this order, and the second is the one that actually fires today:
-
-    1. the VERIFIED business email — the address the tenant deliberately nominated for replies;
-    2. the SIGNUP email — the Cognito account address, proven at registration.
+    ONE source here, and it is the LAST resort: the SIGNUP email, the Cognito account address proven at
+    registration. The address a business nominates for replies is the SITE's, verified per Site (§P3), and
+    `email_identity` tries that before falling here — this function is only reached when the Site has
+    nominated nothing or has not yet proven it.
 
     The signup email is a legitimate fallback rather than a hole in `verified_email`'s gate: that gate
     exists because SES will mail from any Reply-To a tenant types, so the platform has to prove the address
@@ -239,10 +243,10 @@ def reply_to_address(profile: Any) -> str:
     alone left every customer reply undeliverable to the merchant.
     """
     profile = profile if isinstance(profile, dict) else {}
-    business = profile.get("business") if isinstance(profile.get("business"), dict) else {}
-    verified = verified_email(business)
-    if verified:
-        return verified
+    # THE ACCOUNT'S OWN BUSINESS EMAIL IS GONE (plans/SITE_AS_BUSINESS_IDENTITY.md §P4, 2026-11-04).
+    # A business's reply address is the SITE's, verified per Site (§P3); `email_identity` tries that
+    # first and falls here. What remains is the signup address, which lives on the profile rather than
+    # in the `business` block and so survives P4 untouched.
     signup = str(profile.get("email") or "").strip()
     return signup if looks_like_email(signup) else ""
 

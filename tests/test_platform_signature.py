@@ -119,8 +119,10 @@ class CallSiteTests(unittest.TestCase):
         "src/handlers/review_invites.py": "tenant_id=tenant_id",
         "src/handlers/stripe_webhook.py": "tenant_id=tenant_id",
         "src/stripe_link/delegation.py": "tenant_id=tenant_id",
-        # Junior Bay's OWN mail to a tenant, deliberately opted out rather than forgotten.
-        "src/handlers/profile.py": "signature=False",
+        # Junior Bay's OWN mail to a tenant, deliberately opted out rather than forgotten. It used to be
+        # `profile.py` as well; §P4 retired the account-level business-email verification, so the only
+        # platform->tenant send left is the Site-scoped one.
+        "src/handlers/sites.py": "signature=False",
     }
 
     def test_every_sender_states_its_intent(self):

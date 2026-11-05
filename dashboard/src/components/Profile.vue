@@ -75,43 +75,12 @@
             <small v-else>International format, e.g. +12065551234 — same standard as your account phone.</small>
           </label>
         </div>
-        <div class="offer-field">
-          <span>Business Email</span>
-          <div class="business-email-row">
-            <input v-model.trim="form.business.email" type="email" placeholder="hello@yourbusiness.com" :disabled="emailVerify.step === 'code'" />
-            <span v-if="businessEmailVerified" class="business-email-badge verified">Verified</span>
-            <button
-              v-else-if="emailVerify.step !== 'code'"
-              class="secondary-action compact"
-              type="button"
-              :disabled="!form.business.email || emailVerify.busy"
-              @click="startEmailVerification"
-            >{{ emailVerify.busy ? "Checking..." : "Verify" }}</button>
-          </div>
+        <!-- BUSINESS EMAIL RETIRED (plans/SITE_AS_BUSINESS_IDENTITY.md P4, 2026-11-04). A business's
+             reply address belongs to the site that IS the business and is verified there, in
+             Sites -> Edit -> Business. Leaving the field here would let a tenant verify an address that
+             drives nothing — the worse half of a half-migration. Customer replies now reach the site's
+             verified address, or your sign-in email if it has none. -->
 
-          <!-- The code step replaces the field rather than sitting beside it: there is one thing to do here
-               and splitting attention between an address box and a code box is how people paste the wrong one. -->
-          <div v-if="emailVerify.step === 'code'" class="business-email-code">
-            <label class="offer-field">
-              <span>Enter the 6-digit code we emailed to {{ emailVerify.pending }}</span>
-              <input v-model.trim="emailVerify.code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" />
-            </label>
-            <div class="business-email-actions">
-              <button class="secondary-action compact" type="button" @click="cancelEmailVerification">Cancel</button>
-              <button class="primary-action compact" type="button" :disabled="emailVerify.code.length !== 6 || emailVerify.busy" @click="confirmEmailVerification">
-                {{ emailVerify.busy ? "Checking..." : "Confirm" }}
-              </button>
-            </div>
-            <small class="field-note">The code expires in 5 minutes.</small>
-          </div>
-
-          <small v-if="emailVerify.error" class="field-error">{{ emailVerify.error }}</small>
-          <small v-else-if="emailVerify.catchAll" class="field-note">
-            That domain accepts mail to any address, so we could not confirm this specific mailbox — the code will.
-          </small>
-          <small v-else-if="businessEmailVerified">Replies to emails you send go here. Verified {{ formatDate(form.business.email_verified_at) }}.</small>
-          <small v-else>Verify this address so customer replies reach you. A site with its own verified address uses that instead; this is the fallback for one that has not set one.</small>
-        </div>
         <p v-if="hasStripeSourcedFields" class="field-note">
           Some details were filled automatically from your Stripe account. Edit any field to override it.
         </p>
@@ -208,63 +177,6 @@ const timezoneSuggested = ref("");
 // working day, and a second copy is a second answer to "which zones exist".
 const timezoneChoices = computed(() => timeZoneOptions(form.business.timezone));
 
-// Verification state. Deliberately NOT part of `form`: it is a transient workflow, not a profile field,
-// and mixing it in would send it to the save endpoint.
-const emailVerify = reactive({ step: "idle", code: "", pending: "", busy: false, error: "", catchAll: false });
-
-// Verified means verified for the address CURRENTLY typed. Editing the field to something else must drop
-// the badge immediately, or a tenant sees "Verified" next to an address that is nothing of the sort.
-const businessEmailVerified = computed(() =>
-  Boolean(rawDoc.value.business?.email_verified)
-  && (form.business.email || "").trim().toLowerCase() === (rawDoc.value.business?.email || "").toLowerCase(),
-);
-
-async function startEmailVerification() {
-  emailVerify.busy = true;
-  emailVerify.error = "";
-  emailVerify.catchAll = false;
-  try {
-    const body = await apiRequest("/profile/business-email/start", {
-      method: "POST",
-      body: { tenant_id: getTenantId(), user_id: userId, email: form.business.email },
-    });
-    emailVerify.pending = form.business.email;
-    emailVerify.catchAll = Boolean(body.catch_all);
-    emailVerify.step = "code";
-    emailVerify.code = "";
-  } catch (err) {
-    emailVerify.error = err.message || "We could not send the code. Please try again.";
-  } finally {
-    emailVerify.busy = false;
-  }
-}
-
-async function confirmEmailVerification() {
-  emailVerify.busy = true;
-  emailVerify.error = "";
-  try {
-    const body = await apiRequest("/profile/business-email/confirm", {
-      method: "POST",
-      body: { tenant_id: getTenantId(), user_id: userId, code: emailVerify.code },
-    });
-    // The server is the source of truth for what is verified, so take its answer rather than assuming.
-    rawDoc.value = { ...rawDoc.value, business: { ...(rawDoc.value.business || {}), email: body.email, email_verified: true } };
-    form.business.email = body.email;
-    emailVerify.step = "idle";
-    emailVerify.code = "";
-  } catch (err) {
-    emailVerify.error = err.message || "That code is not right.";
-  } finally {
-    emailVerify.busy = false;
-  }
-}
-
-function cancelEmailVerification() {
-  emailVerify.step = "idle";
-  emailVerify.code = "";
-  emailVerify.error = "";
-}
-
 const hasStripeSourcedFields = computed(() =>
   Object.values((rawDoc.value.business || {}).sources || {}).includes("stripe"),
 );
@@ -301,7 +213,7 @@ function placeToDocument(place = {}) {
 
 function emptyBusiness() {
   // `null` cutoff and blank timezone both mean "use the suggestion" -- see cleanBusiness.
-  return { name: "", email: "", phone: "", address: emptyPlace(), timezone: "",
+  return { name: "", phone: "", address: emptyPlace(), timezone: "",
            shipping_cutoff_hour: null };
 }
 
@@ -314,7 +226,6 @@ function cleanBusiness(business, original = {}) {
   );
   const result = {};
   if (business.name) result.name = business.name;
-  if (business.email) result.email = business.email;
   if (business.phone) result.phone = normalizeE164(business.phone);
   if (Object.keys(address).length) result.address = address;
   // Sent only when the tenant actually CHOSE one. Blank means "follow my address", which keeps working if
@@ -354,7 +265,6 @@ function applyProfile(profile) {
   const address = business.address || {};
   form.business = {
     name: business.name || "",
-    email: business.email || "",
     phone: business.phone || "",
     address: placeFromDocument(address),
     timezone: business.timezone || "",

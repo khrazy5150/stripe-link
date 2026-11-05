@@ -1651,11 +1651,11 @@ Resources:
       Handler: handlers.sites.handler
       Description: JSON-first Sites API (the public aggregate root — plans/SITE_OBJECT.md).
       Policies:
-        # Per-Site Reply-To verification (plans/SITE_AS_BUSINESS_IDENTITY.md §P3) — the same three grants
-        # the tenant-level flow on /profile/business-email already has: Debounce validates the address as
-        # it is typed, SES sends the confirmation code to it, and the mailer can resolve a sender identity
-        # from the owner's profile. The secret is scoped by path; SES is unscoped because the platform
-        # identity is the only sender there is.
+        # Per-Site Reply-To verification (plans/SITE_AS_BUSINESS_IDENTITY.md §P3). Debounce validates the
+        # address as it is typed, SES sends the confirmation code to it, and the mailer can resolve a
+        # sender identity from the owner's profile. The secret is scoped by path; SES is unscoped because
+        # the platform identity is the only sender there is. This is now the ONLY place that verifies a
+        # business email — the account-level flow it was modelled on was retired by §P4.
         - DynamoDBReadPolicy:
             TableName: !Ref UserProfilesTable
         - Version: "2012-10-17"
@@ -4292,19 +4292,9 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserProfilesTable
-        # Debounce validates a business email as it is entered, and SES sends the confirmation code to it.
-        # Both are scoped: the secret by path, SES because the platform identity is the only sender.
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/debounce/*"
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-                - sesv2:SendEmail
-              Resource: "*"
+        # NO Debounce and NO SES here any more: the account-level business-email verification this
+        # function used to run is retired (plans/SITE_AS_BUSINESS_IDENTITY.md §P4). The per-Site flow that
+        # replaced it lives on SitesFunction, which carries its own copy of these two grants.
       Events:
         GetProfile:
           Type: Api
@@ -4318,18 +4308,6 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /profile
             Method: PUT
-        StartBusinessEmail:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /profile/business-email/start
-            Method: POST
-        ConfirmBusinessEmail:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /profile/business-email/confirm
-            Method: POST
 
   NotificationsFunction:
     Type: AWS::Serverless::Function

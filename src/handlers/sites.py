@@ -1001,9 +1001,11 @@ def start_site_email_verification(event, repository, site_id, *, mailer_send=Non
                                   now_fn=lambda: int(time.time()), code_fn=None, validator=None):
     """Mail a code to the address this Site wants its customer replies to reach.
 
-    The Site-scoped twin of `profile.start_business_email_verification`, and deliberately a twin rather
-    than a generalisation of it: the two store their pending record in different documents, and the only
-    thing they genuinely share -- the rules about codes -- already lives in `domain/business_email.py`.
+    This began as the Site-scoped twin of an account-level `profile.start_business_email_verification`,
+    deliberately a twin rather than a generalisation: the two stored their pending record in different
+    documents, and the only thing they genuinely shared -- the rules about codes -- already lived in
+    `domain/business_email.py`. §P4 then deleted the account-level one, so this is the ONLY way a tenant
+    proves a reply address, and `domain/business_email.py` is where its rules are still tested.
 
     The code goes to the NEW address, which is the whole point: it proves the tenant controls the mailbox
     they are asking us to put in every Reply-To for this business. It is salted with the SITE, so proving

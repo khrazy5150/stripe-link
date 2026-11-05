@@ -77,8 +77,12 @@ class FakePages:
         return {"tenant_id": tenant_id, "page_id": page_id, "site_id": f"site_{page_id.split('_')[1][:3]}"}
 
 
-PROFILE = {"user_id": "t1", "business": {"name": "Poliaxis Nutrition", "email": "hi@poliaxis.test",
-                                         "email_verified": True}}
+# `business.email` is retired (§P4) and kept here on purpose: it is what a pre-§P4 tenant's stored
+# document holds, so its presence proves the resolver ignores it. `email` is the Cognito signup address,
+# which lives outside the `business` block and is the last-resort reply address.
+PROFILE = {"user_id": "t1", "email": "owner@signup.test",
+           "business": {"name": "Poliaxis Nutrition", "email": "hi@poliaxis.test",
+                        "email_verified": True}}
 
 
 class FakeProfiles:
@@ -212,11 +216,28 @@ class TheFallbacksKeepSendingTests(unittest.TestCase):
         self.assertEqual(result["failed"], 0)
         self.assertEqual(sent[0]["from_name"], "Poliaxis Nutrition")
 
-    def test_REPLY_TO_still_comes_from_the_verified_tenant_identity(self):
-        """Per-Site Reply-To waits on per-Site email verification (§P3). Until then the display name is
-        the Site's and the reply address is the tenant's — the only address SES has been shown."""
+    def test_REPLY_TO_IS_THE_SITES_ONCE_THE_SITE_HAS_PROVEN_ONE(self):
+        """§P3 shipped per-Site verification and §P4 deleted the account-level field, so both halves of
+        the identity are now this Site's: a review invite for a Quill order is signed Quill AND replies to
+        Quill, which is the whole bug this file was opened for."""
+        sites = FakeSites([
+            {"site_id": "site_pol", "tenant_id": "t1", "organization": dict(POLIAXIS),
+             "pages": {"/p": {"page_id": "page_pol"}}},
+            {"site_id": "site_qui", "tenant_id": "t1",
+             "organization": {**QUILL, "email": "hi@quill.test", "email_verified": True},
+             "pages": {"/q": {"page_id": "page_qui"}}},
+        ])
+        _result, sent = sweep(FakeInvites([invite(page_id="page_qui")]), sites=sites)
+        self.assertEqual(sent[0]["from_name"], "Quill")
+        self.assertEqual(sent[0]["reply_to"], "hi@quill.test")
+
+    def test_a_SITE_WITH_NO_PROVEN_ADDRESS_replies_to_the_SIGNUP_address(self):
+        """Never to the tenant's retired `business.email`, which this profile still carries. The signup
+        address is the one remaining fallback -- a Cognito account email, proof of reachability obtained
+        by a stronger flow than the code."""
         _result, sent = sweep(FakeInvites([invite(page_id="page_qui")]))
-        self.assertEqual(sent[0]["reply_to"], "hi@poliaxis.test")
+        self.assertEqual(sent[0]["from_name"], "Quill")
+        self.assertEqual(sent[0]["reply_to"], "owner@signup.test")
 
 
 if __name__ == "__main__":

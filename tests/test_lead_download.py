@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import unittest
+from unittest import mock
 
 os.environ.setdefault("MEDIA_BUCKET", "test-media-bucket")
 
@@ -51,17 +52,34 @@ class FakeMailer:
         return {"MessageId": "m1"}
 
 
+# The profile still carries a verified business email because a pre-§P4 tenant's stored document does.
+# It is NOT what lets these sends through any more -- `VERIFIED_SITE` is (§P4 deleted the account-level
+# field, so the only proof of a reply address is the Site's). Keeping it here is deliberate: it proves the
+# gate ignores it.
 VERIFIED_PROFILE = {"business": {"name": "Poliaxis Nutrition", "email": "owner@poliaxis.co",
                                  "email_verified": True}}
+VERIFIED_SITE = {"name": "Poliaxis Nutrition", "email": "owner@poliaxis.co", "email_verified": True}
 
 
-def call(body, *, doc, leads=None, s3=None, mailer=None, profile=VERIFIED_PROFILE):
-    return lead_download_handler(
-        {"httpMethod": "POST", "body": json.dumps(body)}, None,
-        pages_repo=FakeRepo(doc), leads_repo=leads or FakeRepo(), s3_client=s3 or FakeS3(),
-        mailer_send=mailer or FakeMailer(), profiles_repo=FakeRepo(profile),
-        now_fn=lambda: 1700000000,
-    )
+def call(body, *, doc, leads=None, s3=None, mailer=None, profile=VERIFIED_PROFILE, site=None,
+         site_resolver=None):
+    """`site` is the PAGE'S Site organization, which is where a proven reply address lives (§P3/§P4).
+    Pass `site={}` for a page whose Site has nominated nothing.
+
+    `site_resolver` replaces the resolver outright, for a caller that wants to observe what the handler
+    ASKS for rather than only what it does with the answer. It is a parameter rather than a second
+    `mock.patch` by the caller because this function patches the same name -- two patches of one target
+    and the inner one silently wins, which is a test that passes while asserting nothing.
+    """
+    organization = VERIFIED_SITE if site is None else site
+    resolver = site_resolver or (lambda *_a, **_kw: dict(organization))
+    with mock.patch("handlers.downloads.site_organization", resolver):
+        return lead_download_handler(
+            {"httpMethod": "POST", "body": json.dumps(body)}, None,
+            pages_repo=FakeRepo(doc), leads_repo=leads or FakeRepo(), s3_client=s3 or FakeS3(),
+            mailer_send=mailer or FakeMailer(), profiles_repo=FakeRepo(profile),
+            now_fn=lambda: 1700000000,
+        )
 
 
 class DomainTests(unittest.TestCase):
@@ -278,28 +296,39 @@ class SenderIdentityTests(unittest.TestCase):
 
     CTA = {"action": "email_file", "asset": ASSET}
 
-    def test_an_unverified_business_email_cannot_send(self):
-        for business in ({}, {"email": "owner@poliaxis.co"}, {"email": "", "email_verified": True}):
-            with self.subTest(business=business):
+    def test_an_unverified_SITE_email_cannot_send(self):
+        """Four shapes of "not proven", including the one §P4 created: a Site that nominated nothing while
+        the tenant's own retired `business.email` still sits there verified."""
+        for site in ({}, {"email": "owner@poliaxis.co"}, {"email": "", "email_verified": True},
+                     {"name": "Quill"}):
+            with self.subTest(site=site):
                 res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb",
                             "fields": {"email": "a@b.co"}},
-                           doc=page(self.CTA), profile={"business": business})
+                           doc=page(self.CTA), site=site, profile=VERIFIED_PROFILE)
                 self.assertEqual(res["statusCode"], 409)
                 self.assertIn("sender_unverified", res["body"])
+
+    def test_the_tenants_OWN_verified_address_does_NOT_open_the_gate(self):
+        """§P4 stated as a gate test. Every tenant who ran the retired flow still has this field; honouring
+        it would let one business deliver a lead magnet replying to another business's mailbox."""
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+                   doc=page(self.CTA), site={}, profile=VERIFIED_PROFILE)
+        self.assertEqual(res["statusCode"], 409)
+        self.assertIn("Sites", res["body"], "the message must name where the address is actually proven")
 
     def test_pending_is_not_verified(self):
         # A tenant who types an address and never confirms it must not be able to send, or the whole
         # verification step is decorative.
         res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
                    doc=page(self.CTA),
-                   profile={"business": {"email": "owner@poliaxis.co", "email_verification": {"pending_email": "x"}}})
+                   site={"email": "owner@poliaxis.co", "email_verification": {"pending_email": "x"}})
         self.assertEqual(res["statusCode"], 409)
 
-    def _send(self, *, doc, profile=VERIFIED_PROFILE):
+    def _send(self, *, doc, profile=VERIFIED_PROFILE, site=None):
         mailer = FakeMailer()
         res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
-                   doc=doc, mailer=mailer, profile=profile)
-        self.assertEqual(res["statusCode"], 200)
+                   doc=doc, mailer=mailer, profile=profile, site=site)
+        self.assertEqual(res["statusCode"], 200, res.get("body"))
         return mailer.sent[0]
 
     def test_the_headers_carry_the_tenant_not_the_platform(self):
@@ -311,16 +340,21 @@ class SenderIdentityTests(unittest.TestCase):
         self.assertEqual(sent["subject"], "25 superfoods every athlete should eat",
                          "the subject is the ribbon headline -- the promise the visitor actually clicked")
 
+    # An UNNAMED Site that has proven an address: the sender identity has to come from somewhere, and the
+    # two tests below are the fallbacks for a sole trader who named the mailbox and nothing else.
+    NAMELESS_SITE = {"email": "k@x.co", "email_verified": True}
+
     def test_a_tenant_with_no_business_name_still_sends_under_their_own(self):
         # A bare support@juniorbay.net hands the recipient the PLATFORM's mail, which is the failure this
         # whole feature exists to prevent. A sole trader who skipped the business name still has a name.
-        profile = {"business": {"email": "k@x.co", "email_verified": True}, "display_name": "Keith De Costa"}
-        self.assertEqual(self._send(doc=page(self.CTA), profile=profile)["from_name"], "Keith De Costa")
+        profile = {"business": {}, "display_name": "Keith De Costa"}
+        sent = self._send(doc=page(self.CTA), profile=profile, site=self.NAMELESS_SITE)
+        self.assertEqual(sent["from_name"], "Keith De Costa")
 
     def test_first_and_last_name_are_the_last_resort_before_giving_up(self):
-        profile = {"business": {"email": "k@x.co", "email_verified": True},
-                   "first_name": "Keith", "last_name": "De Costa"}
-        self.assertEqual(self._send(doc=page(self.CTA), profile=profile)["from_name"], "Keith De Costa")
+        profile = {"business": {}, "first_name": "Keith", "last_name": "De Costa"}
+        sent = self._send(doc=page(self.CTA), profile=profile, site=self.NAMELESS_SITE)
+        self.assertEqual(sent["from_name"], "Keith De Costa")
 
     def test_a_ribbon_with_no_headline_falls_back_to_the_page_name(self):
         doc = {**page(self.CTA), "name": "NAD Supplement Landing Page"}

@@ -60,23 +60,28 @@ class TheTenantCanExplainTests(unittest.TestCase):
 
 class ALabelNeedsASenderEmailTests(unittest.TestCase):
     def test_the_addresss_own_email_wins(self):
-        out = sender_address({"name": "X", "email": "a@b.com"}, {"email": "biz@c.com"}, "me@d.com")
+        out = sender_address({"name": "X", "email": "a@b.com"}, "me@d.com",
+                             organization={"email": "hi@site.test", "email_verified": True})
         self.assertEqual(out["email"], "a@b.com")
 
-    def test_then_the_business_email(self):
-        self.assertEqual(sender_address({"name": "X"}, {"email": "biz@c.com"}, "me@d.com")["email"],
-                         "biz@c.com")
+    def test_then_the_SELLING_SITES_verified_address(self):
+        """It was the account's business email here until §P4 deleted that field. A label's sender address
+        is for the carrier to reach the seller, and the seller is the Site."""
+        self.assertEqual(sender_address({"name": "X"}, "me@d.com",
+                                        organization={"email": "hi@site.test",
+                                                      "email_verified": True})["email"],
+                         "hi@site.test")
 
     def test_then_the_account_they_sign_in_with(self):
         """All three are the seller, and a label's sender address is for the carrier to reach THEM."""
-        self.assertEqual(sender_address({"name": "X"}, {}, "me@d.com")["email"], "me@d.com")
+        self.assertEqual(sender_address({"name": "X"}, "me@d.com")["email"], "me@d.com")
 
     def test_with_none_it_adds_nothing_rather_than_a_blank(self):
-        self.assertNotIn("email", sender_address({"name": "X"}, {}, ""))
+        self.assertNotIn("email", sender_address({"name": "X"}, ""))
 
     def test_the_original_address_is_not_mutated(self):
         original = {"name": "X"}
-        sender_address(original, {"email": "biz@c.com"})
+        sender_address(original, "me@d.com")
         self.assertNotIn("email", original)
 
     def test_the_failure_is_named_where_it_can_be_FIXED(self):
@@ -90,13 +95,13 @@ class ALabelNeedsASenderEmailTests(unittest.TestCase):
         self.assertIn("Shipping screen", block)
 
     def test_a_missing_profile_never_raises(self):
-        from handlers.shipping import _seller_contact
+        from handlers.shipping import _seller_email
 
         class Exploding:
             def get(self, *a, **k):
                 raise RuntimeError("dynamo down")
 
-        self.assertEqual(_seller_contact("t1", Exploding()), ({}, ""))
+        self.assertEqual(_seller_email("t1", Exploding()), "")
 
 
 class TheEmailMustBeOnTheRATETests(unittest.TestCase):

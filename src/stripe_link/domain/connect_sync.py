@@ -73,9 +73,9 @@ def business_profile_seed(account: dict[str, Any]) -> dict[str, Any]:
     name = str(business_profile.get("name") or company.get("name") or "").strip()
     if name:
         seed["name"] = name
-    email = str(business_profile.get("support_email") or account.get("email") or "").strip()
-    if email:
-        seed["email"] = email
+    # NO `email`. `seed_business_identity` is the only consumer and it stopped seeding the field
+    # (plans/SITE_AS_BUSINESS_IDENTITY.md §P4), so extracting it would produce output nothing reads --
+    # and a later reader would reasonably assume a key in the seed is wired to something.
     phone = normalize_e164(business_profile.get("support_phone") or company.get("phone") or "")
     if _E164_RE.match(phone):
         seed["phone"] = phone
@@ -90,11 +90,18 @@ def seed_business_identity(
 ) -> tuple[dict[str, Any], bool]:
     """Fill ONLY empty fields of `business` from `seed`, stamping provenance in business['sources']. Never
     overwrites a value the tenant (or another source) already set — the fill-empty rule IS the "never clobber"
-    guarantee. Returns (business, changed)."""
+    guarantee. Returns (business, changed).
+
+    Fills `name`, `phone` and `address`. NOT `email` — see below."""
     business = dict(business or {})
     sources = dict(business.get("sources") or {})
     changed = False
-    for key in ("name", "email", "phone"):
+    # `email` is NOT seeded any more (plans/SITE_AS_BUSINESS_IDENTITY.md §P4, 2026-11-04). The account's
+    # business email drove a Reply-To and the lead-magnet sender gate; both now resolve from the SITE's
+    # verified address, so seeding an unverified one from Stripe would write a field nothing reads.
+    # `name` and `phone` stay: name is still the fallback until its own blocker clears, phone is
+    # operational (the shipping ship-from contact).
+    for key in ("name", "phone"):
         if seed.get(key) and not str(business.get(key) or "").strip():
             business[key] = seed[key]
             sources[key] = source

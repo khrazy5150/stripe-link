@@ -173,6 +173,22 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaises(DocumentValidationError):
             validate_user_profile(doc)
 
+    def test_TOLERATES_the_retired_email_field_rather_than_refusing_it(self):
+        """The opposite call to `brands` above, and the difference is the DATA, not the principle.
+
+        `business.email` is just as retired (§P4 deleted every reader; a reply address is the Site's
+        verified one or the signup address). But ZERO profiles ever carried a brand, while profiles DO
+        carry this one -- `connect_sync` seeded it from the Stripe account until 2026-11-04 -- and the
+        Profile screen saves by posting the whole stored document back. Refusing it would stop those
+        tenants saving their profile at all, turning a dead field into an outage.
+
+        So it validates and nothing reads it. If that ever changes, this test is the thing that has to be
+        deleted deliberately rather than a save that starts failing in production.
+        """
+        doc = self._user_profile()
+        doc["business"] = {"name": "Luxe Spa", "email": "hi@luxe.test", "email_verified": True}
+        validate_user_profile(doc)
+
     def test_accepts_profile_without_business(self):
         validate_user_profile(self._user_profile())
 

@@ -122,30 +122,30 @@ class TheLabelsSenderEmailTests(unittest.TestCase):
 
     def test_the_addresss_OWN_email_still_wins(self):
         address = {**HQ, "email": "warehouse@quill.test"}
-        got = sender_address(address, {"email": "acct@p.test"}, "signin@p.test",
+        got = sender_address(address, "signin@p.test",
                              organization={"email": "hi@quill.test", "email_verified": True})
         self.assertEqual(got["email"], "warehouse@quill.test")
 
     def test_a_VERIFIED_site_address_comes_next(self):
-        got = sender_address(dict(HQ), {"email": "acct@p.test"}, "signin@p.test",
+        got = sender_address(dict(HQ), "signin@p.test",
                              organization={"email": "hi@quill.test", "email_verified": True})
         self.assertEqual(got["email"], "hi@quill.test")
 
     def test_an_UNVERIFIED_site_address_is_IGNORED(self):
         """Same rule as the Reply-To: nobody has proven it is reachable, and a carrier's "we could not
-        deliver" notice going nowhere is worse than one going to the account owner."""
-        got = sender_address(dict(HQ), {"email": "acct@p.test"}, "signin@p.test",
-                             organization={"email": "hi@quill.test"})
-        self.assertEqual(got["email"], "acct@p.test")
+        deliver" notice going nowhere is worse than one going to the account owner.
 
-    def test_then_the_account_then_the_signin_address(self):
-        self.assertEqual(sender_address(dict(HQ), {"email": "acct@p.test"}, "signin@p.test")["email"],
-                         "acct@p.test")
-        self.assertEqual(sender_address(dict(HQ), {}, "signin@p.test")["email"], "signin@p.test")
+        It used to fall to the account's business email; §P4 deleted that, so it falls to the sign-in
+        address -- the only other thing the tenant has proven they receive at."""
+        got = sender_address(dict(HQ), "signin@p.test", organization={"email": "hi@quill.test"})
+        self.assertEqual(got["email"], "signin@p.test")
+
+    def test_then_the_signin_address(self):
+        self.assertEqual(sender_address(dict(HQ), "signin@p.test")["email"], "signin@p.test")
 
     def test_nothing_anywhere_leaves_NO_email_rather_than_a_guess(self):
         """`buy_label` then names the gap where it can be fixed instead of relaying the carrier's wording."""
-        self.assertNotIn("email", sender_address(dict(HQ), {}, ""))
+        self.assertNotIn("email", sender_address(dict(HQ), ""))
 
 
 class TheSeamIsONEReadTests(unittest.TestCase):

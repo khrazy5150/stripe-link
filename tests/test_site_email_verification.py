@@ -16,7 +16,10 @@ Four properties, and each is one mistake away from a tenant receiving another bu
    Site must not send replies nowhere.
 """
 import json
+import pathlib
 import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 from handlers.sites import confirm_site_email, create_site, start_site_email_verification
 from tests.fakes import FakeSubdomainRegistry
@@ -188,6 +191,63 @@ class TheRoundTripTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 404)
 
 
+class TheAddressIsVETTEDBeforeAnyCodeGoesOutTests(unittest.TestCase):
+    """Ported from the retired `test_business_email_endpoints.py` when the tenant-level endpoint was
+    deleted (§P4). These four properties belong to the RULES about codes, which both endpoints always
+    shared -- they were only ever asserted through the tenant one, so retiring that file without moving
+    them would have dropped the coverage silently.
+    """
+
+    def test_the_code_is_stored_HASHED_not_in_the_clear(self):
+        """The security property. A pending record sits in a document the dashboard reads back, and a
+        plaintext code there is a code anybody with read access can use."""
+        repo = Repo(site())
+        start_site_email_verification(
+            event({"email": "hi@quill.test"}), repo, "site_qui",
+            mailer_send=lambda **kw: {"MessageId": "m"}, now_fn=lambda: 1000,
+            code_fn=lambda: "123456", validator=ALLOW)
+        self.assertNotIn("123456", json.dumps(repo.get("t1", "site_qui"), default=str))
+
+    def test_obvious_rubbish_never_reaches_the_VALIDATOR(self):
+        """Shape and disposable are decided locally. Sending them to Debounce spends a paid lookup to
+        learn what the string itself already said."""
+        for email in ("not-an-email", "x@mailinator.com"):
+            with self.subTest(email=email):
+                def boom(_email):
+                    raise AssertionError("the validator should not have been called")
+
+                response = start_site_email_verification(
+                    event({"email": email}), Repo(site()), "site_qui",
+                    mailer_send=lambda **kw: None, code_fn=lambda: "123456", validator=boom)
+                self.assertEqual(response["statusCode"], 400)
+
+    def test_an_address_the_validator_REJECTS_gets_no_code(self):
+        """Debounce fails open on an outage but is obeyed on a verdict: a mailbox it says does not exist
+        would cost SES 14 hours of retries and return a bounce."""
+        sent = []
+        response = start_site_email_verification(
+            event({"email": "ghost@quill.test"}), Repo(site()), "site_qui",
+            mailer_send=lambda **kw: sent.append(kw), code_fn=lambda: "123456",
+            validator=lambda _e: {"allowed": False, "reason": "No such mailbox.", "catch_all": False})
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"], "rejected_email")
+        self.assertEqual(sent, [], "a rejected address must not be mailed")
+
+    def test_a_CATCH_ALL_domain_is_reported_and_still_gets_its_code(self):
+        """A catch-all accepts everything, so Debounce cannot tell whether the mailbox is real -- which is
+        exactly what the code then settles. Blocking here would lock out every tenant on a catch-all
+        domain; reporting it lets the dashboard say why the answer was soft."""
+        sent = []
+        response = start_site_email_verification(
+            event({"email": "info@quill.test"}), Repo(site()), "site_qui",
+            mailer_send=lambda **kw: sent.append(kw) or {"MessageId": "m"},
+            code_fn=lambda: "111111",
+            validator=lambda _e: {"allowed": True, "reason": "", "catch_all": True})
+        self.assertEqual(response["statusCode"], 200, response.get("body"))
+        self.assertTrue(json.loads(response["body"])["catch_all"])
+        self.assertEqual(len(sent), 1)
+
+
 class TheStateIsServerOwnedTests(unittest.TestCase):
     """The Sites editor posts the whole `organization` back, so anything a client can put in the payload is
     something a client can assert."""
@@ -238,6 +298,10 @@ class TheStateIsServerOwnedTests(unittest.TestCase):
 
 
 class TheReplyToFallbackTests(unittest.TestCase):
+    """Two sources since §P4 deleted the account-level business email: the Site's VERIFIED address, then
+    the SIGNUP address. `PROFILE` still carries a verified `business.email` on purpose -- it is what a
+    pre-P4 tenant's stored document looks like, and these assert that it is no longer consulted."""
+
     def test_a_verified_site_address_wins(self):
         identity = email_identity(PROFILE, {"name": "Quill", "email": "hi@quill.test",
                                             "email_verified": True})
@@ -245,18 +309,65 @@ class TheReplyToFallbackTests(unittest.TestCase):
         self.assertEqual(identity["business_name"], "Quill")
 
     def test_an_UNVERIFIED_site_address_is_ignored(self):
-        """The hole the gate exists to close. Falling back is also what keeps a half-set-up second Site
-        from sending replies nowhere."""
+        """The hole the gate exists to close: SES mails from any Reply-To it is handed, so an address
+        nobody proved must not become one."""
         identity = email_identity(PROFILE, {"name": "Quill", "email": "hi@quill.test"})
-        self.assertEqual(identity["reply_to"], "hi@poliaxis.test")
+        self.assertEqual(identity["reply_to"], "owner@signup.test")
 
-    def test_a_site_with_no_address_falls_back(self):
-        self.assertEqual(email_identity(PROFILE, {"name": "Quill"})["reply_to"], "hi@poliaxis.test")
+    def test_a_site_with_no_address_falls_back_to_the_SIGNUP_address(self):
+        """Not nowhere. A customer answering a receipt has to reach the merchant, and the Cognito account
+        address is proof of reachability obtained by a stronger flow than the code."""
+        self.assertEqual(email_identity(PROFILE, {"name": "Quill"})["reply_to"], "owner@signup.test")
 
-    def test_neither_verified_means_NO_reply_to_rather_than_a_guess(self):
+    def test_the_tenants_OWN_business_email_is_NEVER_consulted(self):
+        """§P4, stated as a test rather than left as an absence. The stored block still holds a verified
+        address for every tenant who ever ran the retired flow; reading it would re-create the bug the
+        phase exists to remove -- one business's address on another business's mail."""
+        identity = email_identity(
+            {"email": "owner@signup.test",
+             "business": {"name": "Poliaxis Nutrition", "email": "hi@poliaxis.test",
+                          "email_verified": True}},
+            {"name": "Quill"})
+        self.assertEqual(identity["reply_to"], "owner@signup.test")
+        self.assertNotEqual(identity["reply_to"], "hi@poliaxis.test")
+
+    def test_no_signup_address_means_NO_reply_to_rather_than_a_guess(self):
+        """A message with no Reply-To is worse than one the platform invents a Reply-To for -- but only
+        just, and inventing one sends a customer to a mailbox that cannot help them."""
         identity = email_identity({"business": {"name": "P", "email": "unverified@p.test"}},
                                   {"name": "Quill", "email": "hi@quill.test"})
         self.assertEqual(identity["reply_to"], "")
+
+
+class TheBUILDERGateReadsTheSiteTooTests(unittest.TestCase):
+    """The same gate, one layer up, and it had the same bug.
+
+    `LandingPages.vue` disables the "Sends an email with the file" ribbon action when the business cannot
+    send, so the tenant learns BEFORE uploading a file and writing copy for a button that would refuse.
+    It read `profile.business.email_verified` — the field §P4 deleted — and told the tenant to *"go to
+    your Profile page to enter a business email"*, a screen that no longer offers one. Left alone it would
+    have disabled the action for every tenant forever while pointing at the one place that cannot fix it.
+    """
+
+    BUILDER = (ROOT / "dashboard/src/components/LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_it_no_longer_reads_the_deleted_PROFILE_field(self):
+        self.assertNotIn("profile?.business?.email_verified", self.BUILDER)
+
+    def test_it_reads_the_SELECTED_SITES_organization(self):
+        block = self.BUILDER.split("const businessEmailVerified", 1)[1].split("\n});", 1)[0]
+        self.assertIn("selectedSite.value?.organization", block)
+        self.assertIn("email_verified", block)
+
+    def test_an_UNKNOWN_site_is_PERMITTED_not_accused(self):
+        """Before a Site is chosen, and while the list is still loading, there is nothing to judge. A
+        notice has to be actionable, and the send-time gate decides properly either way."""
+        block = self.BUILDER.split("const businessEmailVerified", 1)[1].split("\n});", 1)[0]
+        self.assertIn("if (!org) return true;", block)
+
+    def test_the_hint_names_the_screen_that_can_FIX_it(self):
+        self.assertNotIn("Go to your Profile page to enter a business email", self.BUILDER)
+        self.assertIn("Sites \u2192 Edit \u2192 Business", self.BUILDER)
 
 
 if __name__ == "__main__":
