@@ -74,6 +74,60 @@ class SitesHandlerTests(unittest.TestCase):
             resp = self._attach(site_id, "page_prod", "/prod")
         self.assertEqual(json.loads(resp["body"])["site"]["pages"]["/prod"]["offer_id"], "offer_1")
 
+    def _set_homepage(self, site_id, page_id):
+        return handler({
+            "httpMethod": "POST", "resource": "/sites/{site_id}/homepage",
+            "pathParameters": {"site_id": site_id},
+            "body": json.dumps({"tenant_id": "tenant_demo", "page_id": page_id}),
+        }, None, repository=self.repo, registry=self.registry)
+
+    def test_set_homepage_records_the_offer_link_too(self):
+        """Setting the homepage places a page on the Site exactly as attaching does, so it must record the
+        same link. It did not, and the gap was invisible until the homepage was itself a catalog grid: the
+        listicle listed its own siblings, every one resolved through `offer_id`, and the entry the homepage
+        action wrote had none -- so the page rendered with an empty grid and nothing explained why."""
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_list", "status": "published", "offer_id": "offer_9"})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            resp = self._set_homepage(site_id, "page_list")
+        self.assertEqual(json.loads(resp["body"])["site"]["pages"]["/"]["offer_id"], "offer_9")
+
+    def test_set_homepage_still_refuses_to_link_a_draft(self):
+        """The homepage path inherits the draft rule, not just the happy path: a draft has no live artifact."""
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_wip", "status": "draft", "offer_id": "offer_8"})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            resp = self._set_homepage(site_id, "page_wip")
+        self.assertNotIn("offer_id", json.loads(resp["body"])["site"]["pages"]["/"])
+
+    def test_moving_a_page_to_a_new_slug_keeps_its_offer_link(self):
+        """A MOVE must not drop what the entry already knew.
+
+        `_attach_page_to_site` rebuilds the entry from scratch and carried only the label, so re-attaching a
+        page at a different slug silently cleared `offer_id` -- dropping it from every catalog grid until it
+        was published again. The fields describe the PAGE, not the slug it sits at.
+        """
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_prod", "status": "published", "offer_id": "offer_1"})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            self._attach(site_id, "page_prod", "/prod")
+            # The move is the part under test, so the page document is unavailable for a re-read: only the
+            # carry-over can supply the link here.
+            with patch.object(sites_handler, "pages_repository", return_value=FakeDocumentRepository("page_id")):
+                resp = self._attach(site_id, "page_prod", "/gear")
+        entries = json.loads(resp["body"])["site"]["pages"]
+        self.assertNotIn("/prod", entries, "the page should have moved, not been duplicated")
+        self.assertEqual(entries["/gear"]["offer_id"], "offer_1")
+
     def test_attach_draft_page_does_not_record_offer_link(self):
         # A draft has no live artifact, so it must NOT become grid-eligible on attach (would dead-link).
         from unittest.mock import patch

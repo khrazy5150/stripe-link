@@ -320,15 +320,24 @@ def _attach_page_to_site(pages: dict, *, page_id, slug, page_type, category=None
         pages.pop(slug)
         pages[_unique_slug(taken, seed)] = dict(occupant)
     existing_label = None
+    # CARRIED OVER, exactly as the label is. These three are denormalized facts about the PAGE, not about
+    # the slug it happens to sit at, so rebuilding the entry from scratch must not drop them when a page
+    # simply MOVES. `offer_id` is the one that bites: a catalog grid resolves its members through it
+    # (runtime/publishing.py :: _collection_grid_items), so an entry without it is silently dropped from
+    # every grid that lists the page -- the listicle renders blank and nothing says why. Re-publishing the
+    # page was the only way to get it back, which is why "attach, THEN publish" had become folklore.
+    carried = {}
     for existing_slug, entry in list(pages.items()):
         if isinstance(entry, dict) and entry.get("page_id") == page_id:
             existing_label = entry.get("label")
+            carried = {key: entry[key] for key in ("offer_id", "category", "composition") if entry.get(key)}
             if existing_slug != slug:
                 pages.pop(existing_slug)
     new_entry = {"page_id": page_id, "page_type": page_type, "enabled": True}
+    new_entry.update(carried)
     if label or existing_label:
         new_entry["label"] = label or existing_label
-    if category:
+    if category:  # an explicit category still wins over the carried one
         new_entry["category"] = category
     pages[slug] = new_entry
 
@@ -435,6 +444,11 @@ def set_homepage(event, repository, site_id, mode="test", pages_repo=None):
     pages = dict(site.get("pages") or {})
     _attach_page_to_site(pages, page_id=page_id, slug="/",
                          page_type=str(body.get("page_type") or "homepage").strip() or "homepage")
+    # THE SAME LINK `attach_page` records, and it was missing here -- the two actions place a page on the
+    # Site and differ only in which slug. A homepage set but not yet re-published therefore had no
+    # `offer_id` on its entry, so a catalog grid listing it dropped it silently: the listicle that is the
+    # Site's own homepage rendered blank, which is how this was found (2026-11-05).
+    _record_offer_link_on_attach(pages, page_id, tenant_id, mode=mode)
     site["pages"] = pages
     saved, error = _save_site_pages(repository, site, pages_repo, mode=mode)
     return error or json_response({"site": saved})
