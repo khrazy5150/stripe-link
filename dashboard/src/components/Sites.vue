@@ -4,9 +4,19 @@
       <div>
         <h1>Sites</h1>
         <p>Your public website — the domain, identity, and SEO that every landing page inherits.</p>
+        <!-- SAID BEFORE IT BITES. §P5 shipped the cap's enforcement without this, which left a tenant to
+             meet their own plan limit as a 403 on a button that looked like it should work. -->
+        <p v-if="capLabel" class="site-cap-line" :class="{ 'is-full': capIsFull }">{{ capLabel }}</p>
       </div>
       <div class="button-row">
-        <button v-if="store.sites.length && !creating" class="primary-action" type="button" @click="startCreate">Add New Site</button>
+        <button
+          v-if="store.sites.length && !creating"
+          class="primary-action"
+          type="button"
+          :disabled="capIsFull"
+          :title="capIsFull ? capFullReason : ''"
+          @click="startCreate"
+        >Add New Site</button>
         <button class="secondary-action" type="button" :disabled="store.loading" @click="reload">
           {{ store.loading ? "Loading..." : "Reload" }}
         </button>
@@ -68,6 +78,9 @@
       <header class="dashboard-card-header">
         <h2>{{ site.name }}</h2>
         <div class="button-row">
+          <!-- `over_cap` is the SERVER's verdict, carried on each Site, so the badge and the 403 can
+               never disagree about which Site is paused. -->
+          <span v-if="site.over_cap" class="product-status archived" :title="capFullReason">Paused — over plan</span>
           <span class="product-status" :class="indexClass(site)">{{ indexLabel(site) }}</span>
           <a v-if="siteStoreUrl(site)" class="secondary-action" :href="siteStoreUrl(site)" target="_blank" rel="noopener noreferrer">Visit store ↗</a>
           <button class="secondary-action" type="button" :disabled="copyBusy" @click="copySiteToEnvironment(site)">
@@ -85,6 +98,13 @@
           <div><dt>Pages</dt><dd>{{ Object.keys(site.pages || {}).length }}</dd></div>
           <div><dt>Status</dt><dd>{{ site.status }}</dd></div>
         </dl>
+        <!-- SOFT-lock, and the wording has to carry that: the shop is still open. A tenant who reads
+             "paused" and assumes their storefront is down would act on an emergency that is not
+             happening (plans/SITE_AS_BUSINESS_IDENTITY.md §P5). -->
+        <p v-if="site.over_cap" class="field-error">
+          This Site is over your plan's limit. Its published pages keep serving normally — editing and
+          publishing are paused. Archive a Site you are not using, or upgrade, to bring it back.
+        </p>
         <p class="field-note">{{ indexReason(site) }}</p>
       </div>
     </div>
@@ -1786,7 +1806,27 @@ async function disconnectDomain() {
 }
 
 const orgPhoneError = computed(() => phoneError(form.org.telephone));
-const canCreate = computed(() => !store.saving && createAvailable.value);
+// THE CAP, in the three forms the screen needs (plans/SITE_AS_BUSINESS_IDENTITY.md §P5). The server
+// resolves it -- `site_cap` on the /sites response -- rather than the client re-deriving it from a plan,
+// so what the screen says and what the gate enforces cannot drift apart.
+const capIsFull = computed(() => {
+  const cap = store.siteCap || {};
+  return !cap.unlimited && typeof cap.remaining === "number" && cap.remaining <= 0;
+});
+// "2 of 3 Sites used" reads as a budget; it is deliberately shown at every level rather than only when
+// full, because a limit a tenant only learns about at the moment of refusal is the thing being fixed.
+const capLabel = computed(() => {
+  const cap = store.siteCap || {};
+  if (cap.unlimited || typeof cap.allowance !== "number") return "";
+  const noun = cap.allowance === 1 ? "Site" : "Sites";
+  return `${cap.used} of ${cap.allowance} ${noun} used on this plan, in this mode.`;
+});
+const capFullReason = computed(() =>
+  capIsFull.value
+    ? "You have used every Site your plan includes in this mode. Archive one you are not using, or upgrade."
+    : "");
+
+const canCreate = computed(() => !store.saving && createAvailable.value && !capIsFull.value);
 
 // WHY the save is blocked, or "" when it is not. Printed beside the button, because a disabled button in
 // a long scrolled modal is indistinguishable from a broken one: the phone error renders up in Business and
@@ -2363,6 +2403,15 @@ onMounted(async () => {
 }
 .footer-spacer {
   flex: 1 1 auto;
+}
+.site-cap-line {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+.site-cap-line.is-full {
+  color: var(--danger, #b42318);
+  opacity: 1;
 }
 /* Shares the footer row with the buttons, so it has to be allowed to shrink and wrap rather than push
    Save off the end of a narrow dialog. */

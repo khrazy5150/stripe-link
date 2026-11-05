@@ -599,10 +599,22 @@ that rule is what preserves §2's guarantee while changing its scope.
   - The cap is **visible**: `sites` is on the plan cards and the free card derives its count from the
     same config the gate spends from, so the copy cannot drift from what is enforced.
 
-  **Not built, deliberately:** no dashboard affordance yet — a locked Site refuses with
-  `site_over_cap` and a sentence naming the number and the way out, but nothing surfaces the cap
-  BEFORE the tenant hits it. That is the next slice, and it is the one that decides whether this reads
-  as a product boundary or a bug.
+  **The affordance landed the same day** (`handlers/sites.py` `_site_cap_state`,
+  `dashboard/src/stores/sites.js`, `dashboard/src/components/Sites.vue`). `GET /sites` now carries
+  `site_cap` (`allowance`/`used`/`remaining`/`unlimited`/`source`) and an `over_cap` flag per Site, so:
+
+  - the Sites header reads *"2 of 3 Sites used on this plan, in this mode"* at every level, not only
+    when full — a limit first met at the point of refusal is the thing being fixed;
+  - **Add New Site** disables itself at the cap with the reason on hover, instead of offering a button
+    that 403s;
+  - a Site over the cap wears a *Paused — over plan* badge and a line saying what that actually costs:
+    **its published pages keep serving**, editing and publishing are paused. The wording carries the
+    soft-lock deliberately — a tenant who reads "paused" and assumes their storefront is down would act
+    on an emergency that is not happening.
+
+  The verdict is the SERVER's, resolved by the one `_site_allowance` the gates use, so the badge and the
+  refusal cannot disagree. Writing the test for this is what caught a second, divergent resolver in the
+  first draft of the list endpoint.
 
   Original plan text follows.
 

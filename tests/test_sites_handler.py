@@ -59,7 +59,8 @@ class SitesHandlerTests(unittest.TestCase):
         test_site_cap.py; this is about the HANDLER's behaviour around it."""
         from unittest.mock import patch
         from handlers import sites as sites_handler
-        return patch.object(sites_handler, "_site_allowance", return_value=allowance)
+        return patch.object(sites_handler, "_site_allowance",
+                            return_value={"allowance": allowance, "source": "plan"})
 
     def test_a_new_site_over_the_cap_is_refused(self):
         with self._with_cap(1):
@@ -114,6 +115,41 @@ class SitesHandlerTests(unittest.TestCase):
         with patch("stripe_link.repositories.documents.tenant_profiles_repository", return_value=broken):
             self.assertIsNone(sites_handler._site_cap_error("tenant_demo", self.repo, "live"),
                               "an unreadable profile must not block the create")
+
+    def _list(self):
+        return json.loads(handler({"httpMethod": "GET", "queryStringParameters": {"tenant_id": "tenant_demo"}},
+                                  None, repository=self.repo, registry=self.registry)["body"])
+
+    def test_the_list_says_the_cap_before_it_bites(self):
+        """The whole point of this slice: a cap a tenant only meets as a 403 reads as a bug."""
+        with self._with_cap(3):
+            self._post(self._site("one"))
+            body = self._list()
+        self.assertEqual(body["site_cap"]["allowance"], 3)
+        self.assertEqual(body["site_cap"]["used"], 1)
+        self.assertEqual(body["site_cap"]["remaining"], 2)
+        self.assertFalse(body["site_cap"]["unlimited"])
+
+    def test_the_list_marks_which_site_is_over_the_cap(self):
+        """Carried per Site and resolved by the SERVER, so the badge and the refusal cannot disagree."""
+        with self._with_cap(2):
+            one = json.loads(self._post(self._site("one"))["body"])["site"]
+            two = json.loads(self._post(self._site("two"))["body"])["site"]
+        self.repo.put({**one, "created_at": 100})
+        self.repo.put({**two, "created_at": 200})
+        with self._with_cap(1):
+            by_id = {s["site_id"]: s for s in self._list()["sites"]}
+        self.assertFalse(by_id[one["site_id"]]["over_cap"])
+        self.assertTrue(by_id[two["site_id"]]["over_cap"], "the newer Site is the one that locks")
+
+    def test_remaining_never_goes_negative(self):
+        """"-1 left" is not a sentence any screen should have to print."""
+        with self._with_cap(2):
+            self._post(self._site("one"))
+            self._post(self._site("two"))
+        with self._with_cap(1):
+            body = self._list()
+        self.assertEqual(body["site_cap"]["remaining"], 0)
 
     def test_attach_page_rejects_reserved_funnel_slug(self):
         site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]

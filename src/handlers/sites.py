@@ -668,7 +668,7 @@ def create_site(event, repository, registry=None, mode="test"):
         return error_response(str(exc), code="invalid_site")
 
 
-def _site_allowance(tenant_id: str, mode: str) -> int:
+def _site_allowance(tenant_id: str, mode: str = "") -> dict:
     """How many Sites this tenant may run in `mode` (plans/SITE_AS_BUSINESS_IDENTITY.md §P5).
 
     FAILS OPEN, like `require_capability` beside it: a cap that cannot read its own inputs must not 500 a
@@ -686,8 +686,8 @@ def _site_allowance(tenant_id: str, mode: str) -> int:
         tenant = tenant_profiles_repository().get(tenant_id, tenant_id)
     except Exception:  # noqa: BLE001 - see the docstring
         logger.exception("site cap: could not read the profile for %s", tenant_id)
-        return UNLIMITED
-    return site_allowance(tenant)["allowance"]
+        return {"allowance": UNLIMITED, "source": "unreadable"}
+    return site_allowance(tenant)
 
 
 def _countable_sites(tenant_id: str, repository, mode: str) -> list[dict]:
@@ -704,7 +704,7 @@ def _site_cap_error(tenant_id: str, repository, mode: str):
 
     if not tenant_id:
         return None
-    allowance = _site_allowance(tenant_id, mode)
+    allowance = _site_allowance(tenant_id, mode)["allowance"]
     if allowance == UNLIMITED:
         return None
     try:
@@ -726,7 +726,7 @@ def _locked_site_error(site: dict, repository, mode: str):
     site_id = str((site or {}).get("site_id") or "")
     if not tenant_id or not site_id:
         return None
-    allowance = _site_allowance(tenant_id, mode)
+    allowance = _site_allowance(tenant_id, mode)["allowance"]
     if allowance == UNLIMITED:
         return None
     try:
@@ -825,9 +825,44 @@ def list_sites(event, repository):
     # to one. A cap discovered at the point of refusal reads as a bug; one known in advance is a guardrail.
     for site in sites:
         site["usernames_left"] = usernames_left(site)
+    # The Site cap travels the same road as `usernames_left` above, for the reason stated there: a cap
+    # discovered at the point of refusal reads as a bug, one known in advance is a guardrail. §P5 shipped
+    # the enforcement without this, which left a tenant to meet their own plan limit as a 403.
+    cap = _site_cap_state(tenant_id, sites)
+    for site in sites:
+        site["over_cap"] = str(site.get("site_id") or "") in cap["locked_site_ids"]
     return json_response({"sites": sites, "hosting_domain": hosting_domain(),
                           "creator_domain": creator_hosting_domain(),
-                          "creator_serving": creator_serving_enabled()})
+                          "creator_serving": creator_serving_enabled(),
+                          "site_cap": {key: cap[key] for key in ("allowance", "used", "remaining",
+                                                                 "unlimited", "source")}})
+
+
+def _site_cap_state(tenant_id: str, sites: list[dict]) -> dict:
+    """What the Sites screen needs to show the cap BEFORE it bites: the number, how much is spent, and
+    which Sites are over it.
+
+    Computed from the Sites the caller already loaded, so showing the cap costs one profile read and no
+    extra query. Fails open to `unlimited`, like every other gate here -- a screen that cannot resolve
+    the cap shows no limit rather than inventing one and telling a paying tenant they are full.
+    """
+    from stripe_link.domain.site_quota import UNLIMITED, countable_sites, locked_site_ids
+
+    # THE SAME resolver the gates use. Resolving it a second way here is how a screen and a refusal come
+    # to disagree about whether a tenant is full -- the exact confusion this slice exists to remove.
+    resolved = _site_allowance(tenant_id)
+    allowance = resolved["allowance"]
+    used = len(countable_sites(sites))
+    unlimited = allowance == UNLIMITED
+    return {
+        "allowance": None if unlimited else max(int(allowance), 0),
+        "used": used,
+        # None rather than a negative number: "−1 left" is not a sentence any screen should have to print.
+        "remaining": None if unlimited else max(int(allowance) - used, 0),
+        "unlimited": unlimited,
+        "source": resolved["source"],
+        "locked_site_ids": set() if unlimited else locked_site_ids(sites, allowance),
+    }
 
 
 def _refresh_eligibility(repository, tenant_id, sites):

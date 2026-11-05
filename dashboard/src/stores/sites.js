@@ -104,6 +104,9 @@ export const useSitesStore = defineStore("sites", {
     // goes live (otherwise every tenant in the meantime gets one derived from their store label), but only a
     // serving domain may be shown as a page's public address.
     creatorServing: false,
+    // The Site cap, as the server resolved it (plans/SITE_AS_BUSINESS_IDENTITY.md §P5). `unlimited: true`
+    // until the first load answers, so a screen that has not asked yet never claims the tenant is full.
+    siteCap: { allowance: null, used: 0, remaining: null, unlimited: true, source: "" },
   }),
   getters: {
     hasSites: (state) => state.sites.length > 0,
@@ -130,6 +133,7 @@ export const useSitesStore = defineStore("sites", {
         if (body.hosting_domain) this.hostingDomain = body.hosting_domain;
         this.creatorDomain = body.creator_domain || "";
         this.creatorServing = !!body.creator_serving;
+        if (body.site_cap) this.siteCap = body.site_cap;
         this.loaded = true;
       } catch (error) {
         this.error = error.message || "Failed to load sites.";
