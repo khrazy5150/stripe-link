@@ -338,6 +338,12 @@ model that scales badly; avoiding it is the structural win.
 That closes both of §6.2a's blockers at once: resale is permitted (finding 1), and it is permitted on the
 $19 tier rather than only on some unnamed production tier (finding 2). §11's Step 0 is done.
 
+**⚠️ THE 100 IS NOT AUTOMATIC ON PURCHASE (2026-11-05).** Buying the $19 tier does not enable the
+commercial 100-account allowance; it is enabled by them, by email, AFTER the purchase. So the critical
+path is **buy → email → wait**, and the wait is a third party's reply, not a deploy. Start the email the
+same hour as the purchase. There are also no public API docs on this tier: the documentation arrives with
+the purchase, which is why no adapter can be written ahead of it (§6.1's fake exists for exactly this).
+
 **One §6.2 claim is corrected: "unlimited connected profiles" is wrong. The ceiling is 100.** The post
 economics are untouched — the 3,000-post base and the $0.007 overage are neither confirmed nor
 contradicted by the permission reply, and remain unverified marketing until §11's spike.
