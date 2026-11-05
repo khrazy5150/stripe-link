@@ -56,6 +56,22 @@ already notes why closing it would be cheap *if we choose to* — trend data is 
 shared-cache lever, because every tenant asks about the same hashtags in the same week, which is exactly
 what generated video is not.
 
+**Trend-SEEKING is not trend-SETTING, and we should not build the seeking half (author, 2026-11-05).**
+Recreating what already worked for a stranger is lagging by construction — the window has closed by the
+time the pattern is visible, and "person centred, trendy caption" is an observation, not a moat. Building
+our own version buys onto their axis, which is the one thing this section argues against.
+
+**The feedback loop is the better version of the same idea, and §10's Later row already names it:
+performance-weighted pillar selection.** A research tool reports what got VIEWS for someone else; §8
+reports what got SALES for THIS tenant, on their own audience. That is trend-setting for an audience of
+one — the only audience paying them. It needs no scraping, no data licensing and no platform-research
+agreement, because the data is already ours: the click is our slug and the sale is our checkout.
+
+The one rung missing from that loop is platform-side reach (views → clicks; §8 already owns clicks →
+sales). Whether we get it cheaply depends on the publishing vendor's API, which is **§11a item 3** — a
+free question during a week already paid for. Outstand is a PUBLISHER, so it may return metrics on posts
+it sent; it will not return competitor intelligence, and expecting that of it is a category error.
+
 **Evidential caveat.** All of the above is read from a public pricing page — their marketing, not a
 product audit. §6.2's rule applies to competitors as well as vendors: treat it as a claim until something
 tests it. The structural point (no checkout, therefore no attribution) is the part that does not depend
@@ -308,7 +324,7 @@ behind the same contract.
 ### 6.2 Aggregator first — the approval gauntlet is the real blocker
 Direct Meta/TikTok/YouTube integration requires **app review measured in weeks-to-months**, which the author is
 not positioned to do now. An aggregator has already passed those reviews. **Implementation #1: Outstand.so**
-(candidate; also evaluated: Ayrshare). Claimed terms (2026-08-28, **not independently verified**): built for
+(**CHOSEN 2026-11-05** — not a candidate; also evaluated: Ayrshare, no longer live). Claimed terms (2026-08-28, **not independently verified**): built for
 SaaS embedding without white-label surcharge; **$19/mo base including 3,000 posts**, then $0.007/post
 (→$0.005 over 10k), ~~unlimited connected profiles~~ **100 connected accounts — corrected 2026-11-05, see §6.2b**; Managed Keys **and** BYOK with branded OAuth.
 
@@ -789,7 +805,30 @@ permits resale only by written permission and the $19 plan is developer access o
 the Outstand path, so this is the cheapest question and it must be asked first — the spike below cannot
 validate pricing for a tier the author is not allowed to resell on.
 
-Then run a **paid one-week spike** with the chosen vendor: one real IG account, publish a carousel and a
-video, then **deliberately revoke the token mid-queue** and read the error. That single test validates
-pricing, embedding rights, and — most importantly — the failure behavior the whole scheduling design
-depends on. Vendor claims in §6.2 are unverified marketing until this passes.
+**VENDORS SETTLED 2026-11-05 (author).** Both, and no further evaluation: **Outstand** for publishing
+(§6.2b permission granted) and **Higgsfield** for video (`HIGGSFIELD_INTEGRATION.md` §0). Ayrshare is no
+longer a live alternative; §6.2a's fallback table stands only as the record of what refusal would have
+cost. The spike below is now a VERIFICATION of a chosen vendor, not a selection between candidates.
+
+Then run a **paid one-week spike**: one real IG account, publish a carousel and a video, then
+**deliberately revoke the token mid-queue** and read the error. That single test validates pricing,
+embedding rights, and — most importantly — the failure behavior the whole scheduling design depends on.
+Vendor claims in §6.2 are unverified marketing until this passes.
+
+### 11a. The spike checklist — what one paid week must answer
+
+Ordered by what blocks the most work if the answer is bad. Each is cheap only while the account is
+already open and paid for; every one of them becomes a second week if it is missed.
+
+| # | Question | Why it blocks something |
+|---|---|---|
+| 1 | **Revoke a token mid-queue — what does the API return?** | §6.4 makes reconnection a first-class state rather than an error path. That design needs the actual status code and body, not a guess. |
+| 2 | **Does `publish()` return `{external_post_id, live_url}` as §6.1 assumes?** | The adapter contract is the insurance. If the vendor returns neither, the contract changes shape before anything is built on it. |
+| 3 | **Per-post METRICS: does the API return views / engagement / reach for a post we published?** | ⭐ **The one that upgrades a "Later" into a differentiator.** §8 already measures clicks→sales; platform metrics add views→clicks, which lets §10's performance-weighted pillar selection rank on real reach instead of conversion alone. Record granularity (per post? per profile?), latency (minutes? next day?), and whether it is a push or a poll. A **no** does not break anything — it means the view half needs per-platform analytics APIs, which lands in A6/BYOK and should be priced there, not assumed here. |
+| 4 | **Is a post schedulable at the vendor, or must we hold the queue?** | §7 reuses the 15-min sweep rather than scheduling per post. If the vendor schedules natively the sweep gets simpler; if not, §7 is already right. |
+| 5 | **Does one connected account count once, or once per platform?** | §6.2c's whole cost model is accounts-per-tenant. "100 accounts" means something different if IG+Reels is two. |
+| 6 | **What does the 101st account actually do** — hard refuse, auto-upgrade, or silent overage? | §6.2c assumes a hard step at $129. An auto-upgrade that bills without asking is a different risk. |
+| 7 | **Media limits**: max video length/size, accepted codecs, carousel count. | Decides what `HIGGSFIELD_INTEGRATION.md` may generate. Generating a clip the publisher refuses is the worst ordering available. |
+
+**Record the answers in §6.2 and strike "not independently verified" from the claims that pass.** The
+figures there have already moved once by 30× (§6.2b); the point of a paid week is to stop guessing.
