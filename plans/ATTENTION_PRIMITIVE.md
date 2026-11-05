@@ -293,12 +293,40 @@ So §6.2's "first ~50 premium tenants inside the $19 base" survives — at two p
 almost exactly right, for a different reason than it gave. At 50 tenants × $69 that is $3,450/mo of
 revenue against ~$19 of publishing cost, and §6.2's "<1% of a $69 tier" holds.
 
-**The new open question, and it is the one without an answer.** Posts have a published overage rate;
-ACCOUNTS now have a ceiling with no stated behaviour at 101. Three possibilities, and they are not close
-in consequence: a higher tier exists (fine, re-price), accounts are negotiable per-contract (fine, ask
-early), or 100 is hard (then the business caps at 25-100 tenants on this vendor and A6/BYOK stops being
-a "later" phase and becomes the growth path). **Ask before the spike** — same reasoning as §6.2a: a week
-of paid testing should not be spent learning something an email answers.
+### 6.2c The account ladder, answered (2026-11-05)
+
+**$19/mo up to 100 accounts; $129/mo ("Business") at 101 and above.** A hard step, not an overage — the
+101st account costs $110/mo, the 102nd through however-far-Business-reaches cost nothing.
+
+**The step is small and self-absorbing.** At $69/tenant it takes **two tenants** to pay for the crossing
+($110 ÷ $69 = 1.6), and the tenant that triggers it is net −$41 for one month. That is a dip, not a wall.
+
+**What decides when the dip arrives is PROFILES PER TENANT, and that is a product lever we control:**
+
+| Profiles/tenant | $19 covers | Peak publishing cost, at the crossing | At 2× that many tenants |
+|---|---|---|---|
+| 1 (IG only) | **100 tenants** | 1.85% of revenue | 0.93% |
+| 2 | 50 tenants | 3.67% | 1.87% |
+| 3 | 33 tenants | 5.50% | 2.83% |
+| 4 | 25 tenants | **7.19%** | 3.74% |
+
+Letting every tenant connect four profiles brings the cliff forward **four times sooner** and makes it
+**four times more painful** at the moment it lands. Publishing never threatens the business — worst case
+7.2%, improving immediately after — but the difference between 1 and 4 profiles is the difference between
+a rounding error and a line somebody has to explain.
+
+**So connected profiles should be a PLAN ALLOWANCE, not an unlimited.** This is the same shape as the
+Site cap (`SITE_AS_BUSINESS_IDENTITY.md` §P5, shipped 2026-11-05) and should reuse its machinery rather
+than inventing a second one: a `connected_accounts` entry in the plan row's generic `limits` map,
+denormalized onto the tenant by the billing webhook, resolved by a pure function, enforced at connect
+time with the number shown BEFORE it bites. §P5 already proved every part of that path.
+
+It also gives the tier ladder something to sell: *"1 profile on the lower rung, 3 on the top"* is a real
+difference a buyer understands, and it keeps our own cost curve where we chose to put it.
+
+**Still open:** does Business cap accounts too, and does it raise the 3,000-post base? One more email,
+same reasoning as §6.2a — the answer changes nothing above but it decides whether there is a THIRD cliff
+waiting, and that is worth knowing before the spike prices anything.
 
 ### 6.2a ⚠️ RESALE NEEDS THEIR WRITTEN PERMISSION — the gate nobody priced (author, 2026-11-03)
 
