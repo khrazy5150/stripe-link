@@ -624,6 +624,67 @@ invites). The publisher is a **fourth of the same shape**: query posts due ≤ n
 adapter, mark published/failed with retry/backoff. This avoids per-post EventBridge Scheduler limits, matches
 established patterns, and costs essentially nothing.
 
+### 7a. Two decisions the corrected contract forces (design note, 2026-11-06)
+
+§6.1's contract now returns a per-destination `status` that starts `pending`. That raises two questions
+that must be answered together, because each constrains the other.
+
+#### Decision 1 — how we learn a post actually published: POLL, not webhook (for now)
+
+The vendor fires webhooks within seconds of completion. The sweep in §7 would learn the same thing within
+fifteen minutes. **Take the fifteen minutes.**
+
+- A webhook means a new PUBLIC, unauthenticated endpoint, plus signature verification, replay protection
+  and dedup. This repository's webhook scars are all in exactly that area: two environments both
+  processing the same test events, a duplicate signing secret, and a legacy endpoint set delivering four
+  copies of everything. None of those were logic bugs; they were delivery bugs, and they are the standing
+  cost of accepting inbound calls.
+- The latency buys nothing here. A payment must be confirmed in seconds because a shopper is waiting. A
+  social post that failed at 09:02 and is noticed at 09:15 costs nobody anything — the tenant is not
+  blocked, no money moved, and the retry path is identical either way.
+- §7 already plans a fourth `rate(15 minutes)` sweep of the same shape as the three that exist. Reusing it
+  is a query and a dispatch, not a new surface.
+
+**The one case latency does hurt** is a tenant pressing "Post now" and watching the screen. Handle that
+without a public endpoint: the adapter re-reads the post once, a few seconds after the call, purely to
+give immediate feedback. If it is still `pending`, the sweep owns it. That is a UI nicety, never the
+source of truth.
+
+**Revisit if** per-post metrics (§11a #3) turn out to be push-only, or if a tenant-visible "published!"
+moment needs to be real-time. Then the webhook earns its cost, and this decision is cheap to reverse
+because the sweep stays either way.
+
+#### Decision 2 — ONE Post with a destinations map, not N independent records
+
+A publish to three networks is **one Post document** carrying a `destinations` map keyed by connected
+account id, each value holding that destination's own `status`, `external_post_id`, `error` and
+`published_at`.
+
+Why one, not three:
+
+- It matches the vendor. `post_id` names the whole fan-out and is what a cancel or delete needs; three
+  records would each have to carry the same id and agree about it.
+- It matches the tenant. "I posted this once, to three places" is the thing that happened. Three rows
+  make the UI do a join to tell them so.
+- There is already a precedent for per-entry, server-owned state in one document: `same_as` entries carry
+  a `verification` block the client may never set, restored on every write by `preserve_verification`.
+  Publish status is the same shape and should borrow it, including the rule that a client may send
+  destinations but never their status.
+
+**And the one thing that makes it safe.** A single document with many independently-updating children is
+precisely the read-modify-write trap this codebase has been bitten by: load, mutate one child, put the
+lot, and a sibling updated meanwhile is silently lost — while the response still looks right, because it
+is built from the in-memory copy. So:
+
+> **Every status write is a targeted update to one key** — `SET #destinations.#account.#status = :v` —
+> **never a whole-document put.** The sweep may be updating three destinations of the same Post in the
+> same second; that must be three independent writes that cannot lose each other.
+
+`SimpleKeyRepository.set_attribute` (built 2026-11-05 for the Sabbath setting) is the same pattern one
+level shallower and is the thing to generalise. Two DynamoDB rules it already encodes, both learned the
+hard way: the partition key may never appear in an update expression, and two overlapping document paths
+may not appear in one expression.
+
 ## 8. Attribution — ship this EARLY — **A2 SHIPPED 2026-11-01**
 
 > **Built in `stripe-link`, not in `../sam/attention`.** The published page, the view beacon and both
