@@ -173,29 +173,88 @@ def window(local_now: datetime.datetime, *, latitude: float, longitude: float,
     return start, end
 
 
+def wall_time(day: datetime.date, hour: int, minute: int,
+              tz: datetime.tzinfo) -> datetime.datetime:
+    """A local wall-clock moment, resolved through a DST transition.
+
+    Two days a year a wall time is not a moment. On the spring-forward the named time may not EXIST
+    (02:30 where the clock jumps 02:00 to 03:00); on the autumn fall-back it happens TWICE. Both are
+    silent: Python will hand back a datetime either way, and it is only wrong later.
+
+    - **Nonexistent** -> the first real moment after the gap. A closure that cannot begin at the time it
+      was set for should begin as soon as it can, not an hour early.
+    - **Ambiguous** -> the EARLIER of the two (`fold=0`). For a closure START the earlier reading closes
+      sooner, which is the safe direction for an observance; nobody is harmed by a shop shutting a little
+      early, and the opposite choice would keep it open during a window the tenant meant to be closed.
+
+    Narrow but real: above the Arctic Circle the polar night and the DST change do not usually overlap --
+    but Svalbard's runs 26 Oct to 15 Feb, straight through Norway's late-October transition.
+    """
+    naive = datetime.datetime(day.year, day.month, day.day, int(hour), int(minute))
+    aware = naive.replace(tzinfo=tz, fold=0)
+    rendered = aware.astimezone(datetime.timezone.utc).astimezone(tz).replace(tzinfo=None)
+    if rendered != naive:
+        # The named time fell in a spring-forward gap; `fold=0` already resolves to the instant just
+        # after it, which is the first real moment. Re-derive it rather than trusting the naive value.
+        return aware.astimezone(datetime.timezone.utc).astimezone(tz)
+    return aware
+
+
 def manual_window(local_now: datetime.datetime, *, weekday: int, hour: int, minute: int,
                   duration_hours: float) -> tuple[datetime.datetime, datetime.datetime]:
-    """The tenant's own window, for a location where the sun does not set.
+    """The tenant's own window, for a place where the sun does not set.
 
-    Anchored on the same look-BACK rule as the solar one, so a window that runs past midnight still
+    Anchored on the same look-BACK rule as the solar one, so a window running past midnight still
     contains the moments after midnight.
+
+    **The duration is ABSOLUTE hours, not wall-clock hours.** Adding a `timedelta` to an aware datetime
+    does WALL-CLOCK arithmetic -- Friday 18:00 plus 24h is Saturday 18:00 even when the clocks changed in
+    between, which is 23 or 25 real hours. The tenant asked for a span of time, and the Sabbath this
+    stands in for is ~24 hours of actual time, so the arithmetic is done in UTC and converted back.
     """
+    tz = local_now.tzinfo or datetime.timezone.utc
     day = (local_now - datetime.timedelta(days=(local_now.weekday() - int(weekday)) % 7)).date()
-    start_local = local_now.tzinfo and datetime.datetime(
-        day.year, day.month, day.day, int(hour), int(minute), tzinfo=local_now.tzinfo)
+    start = wall_time(day, hour, minute, tz)
     hours = max(MIN_MANUAL_HOURS, min(MAX_MANUAL_HOURS, float(duration_hours)))
-    return start_local, start_local + datetime.timedelta(hours=hours)
+    end_utc = start.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=hours)
+    return start, end_utc.astimezone(tz)
 
 
-def is_closed(local_now: datetime.datetime, start: datetime.datetime, end: datetime.datetime) -> bool:
+def validate_manual_window(manual: Any) -> dict[str, Any] | None:
+    """A stored manual window, normalized, or None if it is not usable.
+
+    None rather than an exception, and None leaves the store OPEN: a half-filled polar setting should not
+    close a shop at a time nobody chose, which is the same direction everything else here fails in.
+    """
+    if not isinstance(manual, dict):
+        return None
+    try:
+        weekday, hour, minute = int(manual.get("weekday", _FRIDAY)), int(manual["hour"]), int(manual["minute"])
+        hours = float(manual.get("duration_hours", MIN_MANUAL_HOURS))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (0 <= weekday <= 6 and 0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return {"weekday": weekday, "hour": hour, "minute": minute,
+            "duration_hours": max(MIN_MANUAL_HOURS, min(MAX_MANUAL_HOURS, hours))}
+
+
+def is_closed(local_now: datetime.datetime, start: datetime.datetime,
+              end: datetime.datetime) -> bool:
     """Is the store inside its closure window? Inclusive of both ends.
 
-    Inclusive because the boundary is a moment a tenant chose, and a buyer who reaches checkout exactly
-    at sundown should see the closure they asked for rather than slip through on a rounding.
+    **Compared in UTC, deliberately.** When two aware datetimes share the same `tzinfo` object Python
+    ignores it and compares the WALL CLOCKS -- documented behaviour, and a trap here, because wall clocks
+    are not monotonic: on a fall-back 01:30 happens twice, so a naive comparison can order a later moment
+    before an earlier one. The solar window arrives in UTC and `local_now` in the store's zone, so that
+    path was already safe; a MANUAL window arrives in the store's zone and would have been compared
+    naively against a clock in the same zone. Converting first makes both paths the same.
+
+    Inclusive because the boundary is a moment a tenant chose, and a buyer reaching checkout exactly at
+    sundown should see the closure they asked for rather than slip through on a rounding.
     """
-    return start <= local_now <= end
-
-
+    utc = datetime.timezone.utc
+    return start.astimezone(utc) <= local_now.astimezone(utc) <= end.astimezone(utc)
 # --- The stored setting, and the question a caller actually asks -------------------------------------
 
 
@@ -226,7 +285,7 @@ def config(profile: Any) -> dict[str, Any]:
     """
     stored = (profile or {}).get("sabbath") if isinstance(profile, dict) else None
     stored = stored if isinstance(stored, dict) else {}
-    manual = stored.get("manual") if isinstance(stored.get("manual"), dict) else None
+    manual = validate_manual_window(stored.get("manual"))
     return {
         "enabled": bool(stored.get("enabled")),
         "before_minutes": clamp_buffer(stored.get("before_minutes"), DEFAULT_BEFORE_MINUTES),
@@ -277,11 +336,13 @@ def assert_open(profile: Any, organization: Any, *, timezone_name: str = "",
             span = window(local_now, latitude=here[0], longitude=here[1],
                           before_minutes=setting["before_minutes"],
                           after_minutes=setting["after_minutes"])
-        if span is None and setting["manual"]:
-            manual = setting["manual"]
-            span = manual_window(local_now, weekday=int(manual.get("weekday", _FRIDAY)),
-                                 hour=int(manual.get("hour", 18)), minute=int(manual.get("minute", 0)),
-                                 duration_hours=float(manual.get("duration_hours", MIN_MANUAL_HOURS)))
+        if span is None:
+            # ONLY when the sun does not set. The manual window is the polar fallback, not a second way
+            # to configure an ordinary store -- a tenant in Denver who filled it in by accident should
+            # still be closed by their real sundown, which is the thing they actually observe.
+            manual = validate_manual_window(setting["manual"])
+            if manual:
+                span = manual_window(local_now, **manual)
         if span is None:
             return
         start, end = span

@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 from stripe_link.domain.sabbath import (DEFAULT_AFTER_MINUTES, DEFAULT_BEFORE_MINUTES,
                                         MAX_BUFFER_MINUTES, SabbathClosedError, assert_open,
                                         clamp_buffer, config, coordinates, is_closed,
-                                        manual_window, sunset_on_local_date, sunset_utc, window)
+                                        manual_window, sunset_on_local_date, sunset_utc,
+                                        validate_manual_window, wall_time, window)
 
 ST_GEORGE = (37.0965, -113.5684)     # the tenant's own business address
 TROMSO = (69.6496, 18.9560)          # inside the Arctic circle
@@ -157,20 +158,127 @@ class TheWindowTests(unittest.TestCase):
 
 
 class TheManualWindowTests(unittest.TestCase):
+    """For places where the sun does not set — above the Arctic Circle, not merely 'far north'.
+
+    Utqiagvik AK (71.3N), Tromso (69.6N), Bodo (67.3N) and Murmansk (69.0N) need this. Anchorage,
+    Fairbanks, Oslo, St Petersburg and Reykjavik do NOT: their sun still sets, however briefly.
+    """
+
+    OSLO = ZoneInfo("Europe/Oslo")
+
     def test_duration_is_bounded_to_the_length_of_a_sabbath(self):
-        now = datetime.datetime(2026, 11, 6, 12, tzinfo=ZoneInfo("Europe/Oslo"))
-        _, end = manual_window(now, weekday=4, hour=18, minute=0, duration_hours=200)
-        start, _ = manual_window(now, weekday=4, hour=18, minute=0, duration_hours=200)
+        now = datetime.datetime(2026, 11, 6, 12, tzinfo=self.OSLO)
+        start, end = manual_window(now, weekday=4, hour=18, minute=0, duration_hours=200)
         self.assertEqual(end - start, datetime.timedelta(hours=25))
         start, end = manual_window(now, weekday=4, hour=18, minute=0, duration_hours=1)
         self.assertEqual(end - start, datetime.timedelta(hours=24))
 
     def test_it_closes_the_store_over_its_window(self):
-        tz = ZoneInfo("Europe/Oslo")
-        now = datetime.datetime(2026, 11, 6, 19, tzinfo=tz)
+        now = datetime.datetime(2026, 11, 6, 19, tzinfo=self.OSLO)
         start, end = manual_window(now, weekday=4, hour=18, minute=0, duration_hours=24)
         self.assertTrue(is_closed(now, start, end))
-        self.assertFalse(is_closed(datetime.datetime(2026, 11, 6, 17, tzinfo=tz), start, end))
+        self.assertFalse(is_closed(datetime.datetime(2026, 11, 6, 17, tzinfo=self.OSLO), start, end))
+
+    def test_the_duration_is_ABSOLUTE_hours_across_a_clock_change(self):
+        """Adding a timedelta to an aware datetime does WALL-CLOCK arithmetic: Friday 18:00 + 24h is
+        Saturday 18:00 even when the clocks changed in between, which is 23 or 25 real hours. The tenant
+        asked for a span of time, and the Sabbath this stands in for is ~24 hours of actual time.
+
+        Norway falls back on 2026-10-25, so this window spans the extra hour."""
+        saturday = datetime.datetime(2026, 10, 24, 12, tzinfo=self.OSLO)
+        start, end = manual_window(saturday, weekday=5, hour=18, minute=0, duration_hours=24)
+        # Compared in UTC on purpose: subtracting two aware datetimes that share a `tzinfo` makes Python
+        # ignore it and subtract the WALL CLOCKS, which reports 23 hours for a real 24. That is the same
+        # trap `is_closed` converts away, and asserting it the naive way would have "proved" the bug.
+        utc = datetime.timezone.utc
+        self.assertEqual(end.astimezone(utc) - start.astimezone(utc), datetime.timedelta(hours=24),
+                         "24 hours must mean 24 REAL hours")
+        # The wall clock therefore differs by an hour, which is the correct consequence.
+        self.assertNotEqual(start.strftime("%H:%M"), end.strftime("%H:%M"))
+
+    def test_is_closed_is_not_fooled_by_a_repeated_wall_clock(self):
+        """When two aware datetimes share a `tzinfo` Python ignores it and compares WALL CLOCKS, which
+        are not monotonic: Norway's 02:00-03:00 happens twice on 2026-10-25.
+
+        The window below ENDS at 02:30 inside that repeat. A moment at 02:15 in the SECOND pass is
+        really 01:15 UTC -- 45 minutes AFTER the window closed -- but its wall clock reads earlier, so a
+        naive comparison reports the store still shut. The store would stay closed for an extra hour,
+        once a year, and only in the autumn.
+
+        (My first attempt at this test used a window ending at 18:00 and passed with the bug present:
+        both comparisons agreed there, so it proved nothing. The boundary has to be INSIDE the repeated
+        hour for the two readings to differ.)
+        """
+        start, end = manual_window(datetime.datetime(2026, 10, 24, 12, tzinfo=self.OSLO),
+                                   weekday=5, hour=2, minute=30, duration_hours=24)
+        second_pass = datetime.datetime(2026, 10, 25, 2, 15, tzinfo=self.OSLO, fold=1)
+        self.assertFalse(is_closed(second_pass, start, end),
+                         "02:15 in the second pass is 45 minutes after the window closed")
+        first_pass = datetime.datetime(2026, 10, 25, 2, 15, tzinfo=self.OSLO, fold=0)
+        self.assertTrue(is_closed(first_pass, start, end),
+                        "the same wall clock in the FIRST pass is still inside it")
+
+    def test_a_start_time_that_does_not_EXIST_resolves_forward(self):
+        """Norway springs forward on 2026-03-29: 02:00 jumps to 03:00, so 02:30 never happens. A closure
+        that cannot begin when it was set for should begin as soon as it can, not an hour early."""
+        got = wall_time(datetime.date(2026, 3, 29), 2, 30, self.OSLO)
+        self.assertEqual(got.astimezone(datetime.timezone.utc).astimezone(self.OSLO), got)
+        self.assertGreaterEqual(got.hour, 3, "must land after the gap, not before it")
+
+    def test_an_AMBIGUOUS_start_time_takes_the_earlier_reading(self):
+        """On 2026-10-25 Norway's 02:30 happens twice. For a closure START the earlier one closes sooner,
+        which is the safe direction: nobody is harmed by shutting a little early."""
+        got = wall_time(datetime.date(2026, 10, 25), 2, 30, self.OSLO)
+        later = datetime.datetime(2026, 10, 25, 2, 30, tzinfo=self.OSLO, fold=1)
+        self.assertLess(got.astimezone(datetime.timezone.utc), later.astimezone(datetime.timezone.utc))
+
+    def test_an_ordinary_time_is_untouched(self):
+        got = wall_time(datetime.date(2026, 11, 6), 18, 0, self.OSLO)
+        self.assertEqual(got.strftime("%Y-%m-%d %H:%M"), "2026-11-06 18:00")
+
+
+class TheManualWindowValidatorTests(unittest.TestCase):
+    def test_it_accepts_a_complete_setting(self):
+        got = validate_manual_window({"weekday": 4, "hour": 18, "minute": 30, "duration_hours": 24.5})
+        self.assertEqual(got, {"weekday": 4, "hour": 18, "minute": 30, "duration_hours": 24.5})
+
+    def test_a_half_filled_setting_is_None_and_leaves_the_store_OPEN(self):
+        """Closing a shop at a time nobody chose is the one outcome this must never produce."""
+        for bad in (None, {}, "friday", {"hour": 18}, {"hour": 99, "minute": 0},
+                    {"hour": 18, "minute": 61}, {"hour": "six", "minute": 0},
+                    {"weekday": 9, "hour": 18, "minute": 0}):
+            self.assertIsNone(validate_manual_window(bad), repr(bad))
+
+    def test_duration_is_clamped_to_a_sabbath(self):
+        self.assertEqual(validate_manual_window(
+            {"hour": 18, "minute": 0, "duration_hours": 500})["duration_hours"], 25)
+        self.assertEqual(validate_manual_window(
+            {"hour": 18, "minute": 0, "duration_hours": 2})["duration_hours"], 24)
+
+
+class ThePolarFallbackTests(unittest.TestCase):
+    ARCTIC = {"geo": {"latitude": 69.6496, "longitude": 18.9560}}      # Tromso
+    MIDSUMMER = datetime.datetime(2026, 6, 19, 20, tzinfo=ZoneInfo("Europe/Oslo"))
+
+    def test_it_is_used_ONLY_when_the_sun_does_not_set(self):
+        """A tenant in Denver who filled it in by accident should still be closed by their real sundown,
+        which is the thing they actually observe."""
+        profile = {"sabbath": {"enabled": True,
+                               "manual": {"weekday": 0, "hour": 3, "minute": 0, "duration_hours": 24}}}
+        # Monday 3am would close a Denver store by the MANUAL window; the solar one says Monday is open.
+        assert_open(profile, {"geo": {"latitude": ST_GEORGE[0], "longitude": ST_GEORGE[1]}},
+                    timezone_name="America/Denver",
+                    now=datetime.datetime(2026, 11, 9, 4, tzinfo=ZoneInfo("America/Denver")))
+
+    def test_a_polar_store_closes_on_its_manual_window(self):
+        profile = {"sabbath": {"enabled": True,
+                               "manual": {"weekday": 4, "hour": 18, "minute": 0, "duration_hours": 24}}}
+        with self.assertRaises(SabbathClosedError):
+            assert_open(profile, self.ARCTIC, timezone_name="Europe/Oslo", now=self.MIDSUMMER)
+
+    def test_a_polar_store_with_a_BROKEN_manual_window_stays_open(self):
+        profile = {"sabbath": {"enabled": True, "manual": {"weekday": 4}}}
+        assert_open(profile, self.ARCTIC, timezone_name="Europe/Oslo", now=self.MIDSUMMER)
 
 
 class TheStoredSettingTests(unittest.TestCase):
