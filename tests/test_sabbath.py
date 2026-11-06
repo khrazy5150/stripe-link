@@ -483,3 +483,38 @@ class EveryPlaceThatTakesMoneyIsGatedTests(unittest.TestCase):
                 self.assertLess(source.index("assert_not_suspended(_profile)"),
                                 source.index("assert_store_open(_profile"),
                                 f"{name}: the platform's refusals must come first")
+
+
+class BookingAnswersTheSamePlatformQuestionsTests(unittest.TestCase):
+    """`booking` takes payment but had neither platform gate — found 2026-11-05 while gating the Sabbath.
+
+    A store suspended for abuse could still take paid bookings, and a held slot is a commitment to a
+    customer the merchant cannot honour. Gated at RESERVE as well as checkout: a suspended store taking
+    "free" reservations is still doing business.
+    """
+
+    def _booking_source(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers" / "booking.py").read_text()
+
+    def test_reserve_and_checkout_both_ask(self):
+        source = self._booking_source()
+        self.assertIn("_assert_platform_allows", source)
+        self.assertEqual(source.count("assert_not_suspended"), 3,
+                         "the import, the shared helper, and the checkout route")
+
+    def test_the_platform_refusals_come_before_the_merchants(self):
+        source = self._booking_source()
+        self.assertLess(source.index("assert_not_suspended(_profile)"),
+                        source.index("assert_store_open(_profile"),
+                        "a suspended store must not be reported as merely observing the Sabbath")
+
+    def test_customer_self_service_is_NOT_gated(self):
+        """Cancel, reschedule and view act on an appointment the customer ALREADY bought. Blocking those
+        punishes the buyer for the merchant's suspension, and the same reasoning keeps domain teardown
+        open in any mode: handing something back must never be the thing that is blocked."""
+        source = self._booking_source()
+        for route in ("def manage_cancel_route", "def manage_reschedule_route", "def manage_view_route"):
+            start = source.index(route)
+            body = source[start:source.index("\ndef ", start + 1)]
+            self.assertNotIn("_assert_platform_allows", body, f"{route} must stay open to the customer")

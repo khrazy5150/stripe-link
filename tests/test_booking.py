@@ -288,3 +288,53 @@ class CompensationSnapshotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SuspendedTenantsTakeNoBookingsTests(unittest.TestCase):
+    """`booking` takes payment but had NEITHER platform gate — found 2026-11-05 while gating the Sabbath.
+
+    Under the free-forever pivot `BLOCKED_BILLING_STATUSES` is {"suspended"}, so this only ever stops a
+    tenant we deliberately shut down for abuse. An expired trial and a canceled subscription keep
+    working, which is the pricing model, not an oversight.
+    """
+
+    def _reserve(self, profile):
+        env = make_env(unit_amount=12000)
+        env["tenant_repo"] = FakeDocumentRepository("tenant_id")
+        if profile:
+            env["tenant_repo"].put(profile)
+        return handler(reserve_event(next_valid_slot_iso()), None, **env)
+
+    def test_a_suspended_tenant_cannot_hold_a_slot(self):
+        """Gated at RESERVE, not just at payment: a suspended store taking a 'free' reservation is still
+        doing business, and a held slot is a commitment to a customer it cannot honour."""
+        response = self._reserve({"tenant_id": "t1", "billing_status": "suspended"})
+        self.assertEqual(response["statusCode"], 402)
+        self.assertEqual(json.loads(response["body"])["error"], "tenant_billing_hold")
+
+    def test_a_platform_suspension_is_refused_too(self):
+        response = self._reserve({"tenant_id": "t1", "platform_status": "suspended"})
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(json.loads(response["body"])["error"], "tenant_suspended")
+
+    def test_an_ORDINARY_tenant_still_books(self):
+        """The gate must not be so eager it refuses the thing it exists to allow."""
+        response = self._reserve({"tenant_id": "t1", "billing_status": "active"})
+        self.assertEqual(response["statusCode"], 201)
+
+    def test_an_EXPIRED_TRIAL_still_books(self):
+        """Free-forever: an expired trial downgrades to the free tier, it does not close the shop."""
+        response = self._reserve({"tenant_id": "t1", "billing_status": "trial", "trial_ends_at": 1})
+        self.assertEqual(response["statusCode"], 201)
+
+    def test_an_unreadable_profile_FAILS_OPEN(self):
+        """A cross-cutting gate must never itself break a booking. A suspension that slips through is
+        visible and reversible; a booking refused because a table was briefly unreadable is a customer
+        who goes elsewhere."""
+        class Broken:
+            def get(self, *a, **k):
+                raise RuntimeError("no table")
+        env = make_env(unit_amount=12000)
+        env["tenant_repo"] = Broken()
+        response = handler(reserve_event(next_valid_slot_iso()), None, **env)
+        self.assertEqual(response["statusCode"], 201)

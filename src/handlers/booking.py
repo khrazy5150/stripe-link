@@ -24,6 +24,8 @@ from stripe_link.domain.booking import (
 )
 from stripe_link.domain.booking_credits import EntitlementError, restore, spend
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
+from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
 from stripe_link.sabbath_gate import (SabbathClosedError, assert_store_open,
                                       closed_response as sabbath_closed_response)
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
@@ -100,7 +102,8 @@ def handler(
         # Booking credits are looked up only when the request claims a plan; a tenant with no recurring
         # services never touches the table.
         return reserve_route(event, repos, slot_locks_repo or slot_locks_repository(),
-                             credits_repo=credits_repo or _credits_repo(mode))
+                             credits_repo=credits_repo or _credits_repo(mode),
+                             tenant_repo=tenant_repo)
     if "/appointments/checkout" in path and method == "POST":
         return checkout_route(
             event, appointments_repo,
@@ -121,7 +124,31 @@ def handler(
     return error_response("Unsupported booking route.", status_code=404, code="not_found")
 
 
-def reserve_route(event, repos, slot_locks_repo, credits_repo=None):
+def _assert_platform_allows(tenant_id: str, tenant_repo=None):
+    """A 402/403 when the platform has stopped this tenant, else None.
+
+    FAILS OPEN on a missing repo or an unreadable profile, like `entitlement_gate`: a cross-cutting gate
+    must never itself break a booking, and enforcement degrading to "allowed" is the recoverable
+    direction. A suspension that slips through is visible and reversible; a booking refused because a
+    table was briefly unreadable is a customer who goes elsewhere.
+    """
+    try:
+        repo = tenant_repo or tenant_profiles_repository()
+        profile = repo.get(tenant_id, tenant_id) or {}
+    except Exception:  # noqa: BLE001 - see the docstring
+        return None
+    try:
+        assert_billing_in_good_standing(profile)
+        assert_not_suspended(profile)
+    except BillingStatusError as exc:
+        return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SuspendedError:
+        return error_response("This store is not currently able to take orders.",
+                              status_code=403, code="tenant_suspended")
+    return None
+
+
+def reserve_route(event, repos, slot_locks_repo, credits_repo=None, tenant_repo=None):
     services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo = repos
     try:
         body = parse_json_body(event)
@@ -140,6 +167,18 @@ def reserve_route(event, repos, slot_locks_repo, credits_repo=None):
     if not service or service.get("active") is False:
         return error_response("Service not found.", status_code=404, code="not_found")
     tenant_id = str(service.get("tenant_id") or "")
+
+    # THE PLATFORM'S OWN REFUSALS, which this route did not have (gap found 2026-11-05 while gating the
+    # Sabbath). Under the free-forever pivot `BLOCKED_BILLING_STATUSES` is {"suspended"}, so this only
+    # ever stops a tenant we deliberately shut down for abuse -- an expired trial or a canceled
+    # subscription keep working, which is the pricing model.
+    #
+    # Gated BEFORE the slot is held, not at payment: a suspended store taking "free" reservations is
+    # still doing business, and a held slot is a commitment to a customer we cannot honour.
+    gate = _assert_platform_allows(tenant_id, tenant_repo)
+    if gate is not None:
+        return gate
+
     requested_fulfiller = str(body.get("fulfiller_id") or "").strip() or None
 
     now = int(time.time())
@@ -334,13 +373,20 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
         return error_response(f"{mode} Stripe keys are not configured.", status_code=400, code="stripe_not_configured")
 
     _profile = tenant_repo.get(tenant_id, tenant_id) or {}
+    # The platform's refusals run FIRST, before the merchant's own closure below -- a suspended store
+    # reported as merely observing the Sabbath would tell a shopper to come back on Sunday to a shop we
+    # closed. Same order as checkout, cart_checkout and upsell.
+    try:
+        assert_billing_in_good_standing(_profile)
+        assert_not_suspended(_profile)
+    except BillingStatusError as exc:
+        return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SuspendedError:
+        return error_response("This store is not currently able to take orders.",
+                              status_code=403, code="tenant_suspended")
     # The closure the TENANT chose (plans/TODO.md "Sabbath mode"). A booking that takes payment is a sale
     # like any other, so it closes with the rest of the shop.
     #
-    # NOTE, and it is not this feature's to fix: this route has no `assert_not_suspended` or
-    # `assert_billing_in_good_standing`, unlike the other three places that charge. So a store suspended
-    # for abuse can still take paid bookings. Flagged 2026-11-05; widening that gate is a separate
-    # decision with its own blast radius, and quietly adding it here would bury it.
     try:
         assert_store_open(_profile, tenant_id=tenant_id, mode=mode)
     except SabbathClosedError as exc:
