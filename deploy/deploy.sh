@@ -3,6 +3,25 @@ set -euo pipefail
 
 ENVIRONMENT="${1:-dev}"
 STACK_NAME="jb-stripe-link-stack-${ENVIRONMENT}"
+
+# SAY THE VERDICT IN THE OUTPUT, not only in the exit code.
+#
+# `set -e` above propagates a failure correctly -- verified 2026-11-06 by forcing one, which exited 2.
+# But a caller who pipes this script to `tail`, `grep` or `head` gets the PIPELINE's status, which is the
+# pager's and is always 0. The status is then gone while the output remains, so the output is where the
+# verdict has to live. This cost a day in that session: a prod changeset that failed EarlyValidation was
+# read as success, because the error scrolled past mid-log and the exit code had already been discarded.
+#
+# The banner is the LAST line either way, which is precisely what `tail` shows.
+_deploy_verdict() {
+  local rc=$?
+  if (( rc == 0 )); then
+    echo "==> DEPLOY OK (${ENVIRONMENT})"
+  else
+    echo "==> DEPLOY FAILED (${ENVIRONMENT}) -- exit ${rc}. Nothing after the failing step ran." >&2
+  fi
+}
+trap _deploy_verdict EXIT
 REGION="${AWS_REGION:-us-west-2}"
 API_CUSTOM_DOMAIN_NAME="${API_CUSTOM_DOMAIN_NAME:-}"
 API_CUSTOM_DOMAIN_CERTIFICATE_ARN="${API_CUSTOM_DOMAIN_CERTIFICATE_ARN:-}"

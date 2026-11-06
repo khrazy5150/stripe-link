@@ -2,6 +2,18 @@
 set -euo pipefail
 
 ENVIRONMENT="${1:-dev}"
+
+# Same reason as deploy/deploy.sh: `set -e` propagates the status, but a caller piping this to `tail`
+# gets the pager's status instead and the failure vanishes. The banner is the last line either way.
+_dashboard_verdict() {
+  local rc=$?
+  if (( rc == 0 )); then
+    echo "==> DASHBOARD DEPLOY OK (${ENVIRONMENT})"
+  else
+    echo "==> DASHBOARD DEPLOY FAILED (${ENVIRONMENT}) -- exit ${rc}." >&2
+  fi
+}
+trap _dashboard_verdict EXIT
 STACK_NAME="${STACK_NAME:-jb-stripe-link-stack-${ENVIRONMENT}}"
 REGION="${AWS_REGION:-us-west-2}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
