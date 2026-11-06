@@ -317,9 +317,35 @@ Sorting posts by `due_at` in the SK makes "what's due now?" a cheap range query 
 ## 6. Publishing — vendor-agnostic adapter
 
 ### 6.1 The interface is the insurance
-One normalized adapter contract (`publish(payload) -> {external_post_id, live_url}`) with the post payload
-stored in **our** schema, never a vendor's request format. Direct per-platform adapters can slot in later
-behind the same contract.
+One normalized adapter contract with the post payload stored in **our** schema, never a vendor's request
+format. Direct per-platform adapters can slot in later behind the same contract.
+
+**⚠️ THE ORIGINAL CONTRACT WAS WRONG IN TWO WAYS, corrected 2026-11-06 against the published docs
+(§6.2g).** It read `publish(payload) -> {external_post_id, live_url}`.
+
+1. **There is no `live_url`.** The vendor returns a `platformPostId` and no permalink. A URL can sometimes
+   be composed per network from that id plus the account's username, but not for every network and not
+   reliably — so the contract must not promise one. Anything that needs a link must treat it as absent.
+2. **One publish FANS OUT to many accounts, and the original shape has room for one result.** `POST
+   /v1/posts/` takes an `accounts` array and answers with a per-account entry carrying its own `status`
+   (`pending|published|failed|deleted`), `platformPostId`, `error` and `publishedAt`. So a single call can
+   half-succeed — published to Instagram, failed on LinkedIn — and a contract returning one id cannot say
+   so. That is the more damaging of the two errors: it would have been discovered as data loss in the
+   retry path rather than as a compile error.
+
+The corrected shape:
+
+```
+publish(payload) -> PublishResult
+  PublishResult: { post_id, scheduled_at, results: [AccountResult] }
+  AccountResult:  { account_id, network, username, status, external_post_id, error, published_at }
+```
+
+`post_id` is the vendor's handle for the whole fan-out and is what a later cancel or delete needs;
+`results` is what the queue reconciles against, one row per destination. **Status is not boolean**: a
+publish is `pending` until the vendor has actually posted, so the adapter returns a state to be polled or
+awaited by webhook, never a success/failure the caller can branch on immediately.
+
 
 ### 6.2 Aggregator first — the approval gauntlet is the real blocker
 Direct Meta/TikTok/YouTube integration requires **app review measured in weeks-to-months**, which the author is
