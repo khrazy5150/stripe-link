@@ -3799,10 +3799,38 @@ choice.
   - Checkout refuses with **503 `store_closed_sabbath`** carrying `resume_at` + `timezone`. 503 not 403:
     this is temporary and the shopper should come back. It runs AFTER billing and suspension so a
     platform refusal is never masked by the friendlier message.
-- **STILL TO BUILD (P2):** the branded closure page (artwork already exists at
+- **P2a SHIPPED dev 2026-11-05 — every place that takes money is gated identically.** `sabbath_gate.py`
+  decides the status, the error code and the body shape once, so `checkout`, `cart_checkout`, `upsell` and
+  `booking` cannot tell a shopper two different things. `booking` turned out to have had NEITHER platform
+  gate (billing or suspension) — found while adding this one, fixed in the same pass.
+- **P2b SHIPPED dev 2026-11-05 — the setting moved to `TenantConfig`, not the tenant profile.** The profile
+  would have been free (every paying handler already holds it) but the billing webhook writes it as
+  `tenant_repo.put({**tenant, **updates})`, a load-mutate-put: a tenant saving this in the ~100ms between
+  that read and that write would have it silently reverted. `TenantConfig` has exactly one writer — the
+  tenant. One keyed read against a Stripe round trip.
+- **P2c SHIPPED dev 2026-11-05 — the Preferences UI, with the server-computed preview.**
+  - A **separate `GET`/`PUT /sabbath`**, not a second writer of `PUT /config`. The Configuration screen
+    saves that document WHOLE; a load-mutate-put from Preferences would restore its own stale copy of the
+    refund policies and legal links over whatever Configuration had just saved, and would look like it had
+    worked. `SimpleKeyRepository.set_attribute` writes one attribute and upserts, because the config table
+    starts empty and a tenant with no document is the likeliest to be switching this on.
+  - **The preview is not a decoration: without it the toggle lies.** Everything in `domain/sabbath` fails
+    open, so an enabled setting on a Site with no `organization.geo` is a store that never closes, with no
+    error and nothing to look at. The read answers per Site with the resolved window, and distinguishes
+    *no coordinates* (add them in Sites) from *no sundown* (set a manual window) — two problems with two
+    different fixes. `effective: false` beside an enabled setting is the sentence that breaks the silence.
+  - `domain/sabbath.status()` and the gate share ONE resolution path (`_span`), so the preview cannot drift
+    from what actually happens. The solar maths stays server-side; a JavaScript copy would be a second
+    implementation of the one number this feature is about. `upcoming_span` is the preview's question only —
+    the gate asks about now, or it would close the store on a Tuesday.
+  - **The bug the tests caught:** `validate_manual_window` CLAMPS the duration, so normalizing before
+    validating turned a tenant's "3 hours" into 24 and stored it as though they had asked — while
+    `PUT /config` refuses the same input. Validate first, then normalize. Buffers still clamp (90 means
+    "as much as you allow"); a 3-hour "Sabbath" is a different thing being configured, so it is refused.
+  - The manual-window editor ships with it, opening on its own when a Site reports no sundown.
+- **STILL TO BUILD (P3):** the branded closure page (artwork already exists at
   `s3://www.juniorbay.net/images/frontpage/sabbath/`, 16 photos — pick one, do not source new art); the
-  Preferences UI with a "closed now / reopens at" preview; the manual-window editor for polar tenants;
-  gating cart/booking/upsell the same way checkout now is; the optional JS-island notice on cached pages.
+  optional JS-island notice on cached pages; **Sabbath has not shipped to PROD at all yet.**
 - **Why deferred:** feature idea captured for prioritization; no code.
 
 ### Age / identity verification gate (Stripe Identity)

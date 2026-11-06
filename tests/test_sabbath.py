@@ -11,8 +11,9 @@ from zoneinfo import ZoneInfo
 from stripe_link.domain.sabbath import (DEFAULT_AFTER_MINUTES, DEFAULT_BEFORE_MINUTES,
                                         MAX_BUFFER_MINUTES, SabbathClosedError, assert_open,
                                         clamp_buffer, config, coordinates, is_closed,
-                                        manual_window, sunset_on_local_date, sunset_utc,
-                                        validate_manual_window, wall_time, window)
+                                        manual_window, status, sunset_on_local_date, sunset_utc,
+                                        timezone_for, upcoming_span, validate_manual_window, wall_time,
+                                        window)
 
 ST_GEORGE = (37.0965, -113.5684)     # the tenant's own business address
 TROMSO = (69.6496, 18.9560)          # inside the Arctic circle
@@ -518,3 +519,113 @@ class BookingAnswersTheSamePlatformQuestionsTests(unittest.TestCase):
             start = source.index(route)
             body = source[start:source.index("\ndef ", start + 1)]
             self.assertNotIn("_assert_platform_allows", body, f"{route} must stay open to the customer")
+
+
+class ThePreviewAgreesWithTheGateTests(unittest.TestCase):
+    """`status` is what the settings screen draws. It must never say something the gate would not do."""
+
+    ORG = {"geo": {"latitude": ST_GEORGE[0], "longitude": ST_GEORGE[1]}}
+    ON = {"sabbath": {"enabled": True, "before_minutes": 18, "after_minutes": 40}}
+
+    def _at(self, day, hour):
+        return datetime.datetime(2026, 11, day, hour, tzinfo=ZoneInfo("America/Denver"))
+
+    def _status(self, profile, org, **kwargs):
+        return status(profile, org, timezone_name="America/Denver", **kwargs)
+
+    def test_closed_now_matches_the_gate_raising(self):
+        """THE ONE THAT MATTERS. Two implementations of "is it closed" would eventually disagree, and the
+        tenant would trust the one that is only drawing a picture."""
+        for day, hour in ((6, 12), (6, 20), (7, 12), (7, 23), (8, 2), (4, 12)):
+            moment = self._at(day, hour)
+            raised = False
+            try:
+                assert_open(self.ON, self.ORG, timezone_name="America/Denver", now=moment)
+            except SabbathClosedError:
+                raised = True
+            with self.subTest(moment=moment.isoformat()):
+                self.assertEqual(self._status(self.ON, self.ORG, now=moment)["closed_now"], raised)
+
+    def test_mid_week_it_reports_the_NEXT_window_not_last_weeks(self):
+        """`window` anchors on the Friday on or BEFORE now, so a Tuesday preview would otherwise show a
+        window that finished three days ago -- and the tenant would read it as "already over"."""
+        got = self._status(self.ON, self.ORG, now=self._at(3, 10))   # Tuesday
+        self.assertFalse(got["closed_now"])
+        self.assertTrue(got["starts_at"].startswith("2026-11-06"), got["starts_at"])
+        self.assertTrue(got["ends_at"].startswith("2026-11-07"), got["ends_at"])
+
+    def test_inside_the_window_it_reports_THIS_window(self):
+        got = self._status(self.ON, self.ORG, now=self._at(6, 20))
+        self.assertTrue(got["closed_now"])
+        self.assertTrue(got["starts_at"].startswith("2026-11-06"), got["starts_at"])
+
+    def test_NO_COORDINATES_is_reported_rather_than_left_silent(self):
+        """The whole reason this function exists: the gate fails open, so a tenant with no geo gets a
+        store that never closes and no error. `has_coordinates` is what turns that into a sentence."""
+        got = self._status(self.ON, {}, now=self._at(6, 20))
+        self.assertFalse(got["has_coordinates"])
+        self.assertEqual(got["source"], "none")
+        self.assertFalse(got["closed_now"])
+        self.assertIsNone(got["sun_sets"], "there was no place to ask about")
+
+    def test_a_polar_site_says_the_sun_does_not_set(self):
+        org = {"geo": {"latitude": TROMSO[0], "longitude": TROMSO[1]}}
+        got = status(self.ON, org, timezone_name="Europe/Oslo",
+                     now=datetime.datetime(2026, 6, 19, 20, tzinfo=ZoneInfo("Europe/Oslo")))
+        self.assertTrue(got["has_coordinates"])
+        self.assertFalse(got["sun_sets"])
+        self.assertEqual(got["source"], "none")
+
+    def test_a_polar_site_WITH_a_manual_window_says_manual(self):
+        org = {"geo": {"latitude": TROMSO[0], "longitude": TROMSO[1]}}
+        profile = {"sabbath": {"enabled": True,
+                               "manual": {"weekday": 4, "hour": 18, "minute": 0, "duration_hours": 24}}}
+        got = status(profile, org, timezone_name="Europe/Oslo",
+                     now=datetime.datetime(2026, 6, 19, 20, tzinfo=ZoneInfo("Europe/Oslo")))
+        self.assertEqual(got["source"], "manual")
+        self.assertTrue(got["closed_now"])
+
+    def test_disabled_still_reports_the_timezone(self):
+        """A tenant checks the zone BEFORE switching it on; reporting UTC there would invite them to
+        correct a zone that was already right."""
+        got = self._status({}, self.ORG, now=self._at(6, 20))
+        self.assertFalse(got["enabled"])
+        self.assertEqual(got["timezone"], "America/Denver")
+        self.assertFalse(got["closed_now"])
+
+    def test_it_never_raises_and_never_claims_a_closure_it_could_not_compute(self):
+        """A preview that threw would break the whole settings screen over a decoration, and one that
+        reported "closed" from a failure would tell a tenant their store is shut when it is selling."""
+        broken = (None, {}, {"sabbath": "yes"}, {"sabbath": {"enabled": True, "manual": "friday"}})
+        # No coordinates, so none of these has a second route to fall back on and every one of them must
+        # read as "open". With real coordinates a broken MANUAL window is correctly ignored -- the solar
+        # window still applies -- so testing it there would have asserted the opposite of the rule.
+        for profile in broken:
+            for zone in ("America/Denver", "Nowhere/Nothing"):
+                with self.subTest(profile=repr(profile), zone=zone):
+                    got = status(profile, {}, timezone_name=zone, now=self._at(6, 20))
+                    self.assertFalse(got["closed_now"])
+                    self.assertEqual(got["source"], "none")
+
+    def test_a_broken_manual_window_does_not_disturb_a_real_sundown(self):
+        """The reverse of the rule above, and the reason the case needed splitting: where the sun sets,
+        the solar window wins and an unusable manual block is simply never consulted."""
+        profile = {"sabbath": {"enabled": True, "manual": "friday"}}
+        self.assertTrue(self._status(profile, self.ORG, now=self._at(6, 20))["closed_now"])
+        self.assertEqual(self._status(profile, self.ORG, now=self._at(6, 20))["source"], "sundown")
+
+    def test_upcoming_span_is_None_when_nothing_can_produce_a_window(self):
+        setting = config(self.ON)
+        self.assertIsNone(upcoming_span(setting, {}, self._at(3, 10)))
+
+    def test_the_timezone_comes_from_the_site_before_the_account(self):
+        """One resolution of "which zone is this business in", shared with the shipping cutoff."""
+        self.assertEqual(timezone_for({"timezone": "America/Denver"},
+                                      {"business": {"address": {"country": "GB"}}}), "America/Denver")
+        self.assertEqual(timezone_for({}, {"business": {"address": {"country": "GB"}}}), "Europe/London")
+        self.assertEqual(timezone_for(None, None), "UTC")
+
+    def test_the_gate_asks_about_NOW_and_never_falls_forward(self):
+        """`assert_open` must use `_span`, not `upcoming_span`: a gate that fell forward to next week's
+        window would close the store on a Tuesday."""
+        assert_open(self.ON, self.ORG, timezone_name="America/Denver", now=self._at(3, 10))

@@ -310,6 +310,135 @@ def coordinates(organization: Any) -> tuple[float, float] | None:
     return (lat, lon)
 
 
+def _solar_span(setting: dict, organization: Any,
+                local_now: datetime.datetime) -> tuple[datetime.datetime, datetime.datetime] | None:
+    """The sundown window for this Site's coordinates, or None with no geo and None at a pole."""
+    here = coordinates(organization)
+    if here is None:
+        return None
+    return window(local_now, latitude=here[0], longitude=here[1],
+                  before_minutes=setting["before_minutes"], after_minutes=setting["after_minutes"])
+
+
+def _span(setting: dict, organization: Any,
+          local_now: datetime.datetime) -> tuple[datetime.datetime, datetime.datetime] | None:
+    """The window that applies to `local_now`, by whichever route can produce one.
+
+    **The one resolution path.** `assert_open` enforces it and `status` previews it, through here, so the
+    preview cannot drift from the gate -- and if it ever did, the tenant would believe the one that is
+    only drawing a picture.
+    """
+    span = _solar_span(setting, organization, local_now)
+    if span is not None:
+        return span
+    # The manual window is the fallback for a place where the maths cannot answer -- the sun does not
+    # set, or we were never told where the store is. It is NOT a second way to configure an ordinary
+    # store: a tenant in Denver who filled it in by accident is still closed by their real sundown,
+    # which is the thing they actually observe.
+    manual = validate_manual_window(setting["manual"])
+    return manual_window(local_now, **manual) if manual else None
+
+
+def upcoming_span(setting: dict, organization: Any,
+                  local_now: datetime.datetime) -> tuple[datetime.datetime, datetime.datetime] | None:
+    """The window containing `local_now`, or the NEXT one if that week's has already ended.
+
+    For the preview only. The gate asks about this moment and nothing else, but a tenant checking their
+    buffer on a Tuesday needs to be told when the store will next close -- and `window` anchors on the
+    Friday on or BEFORE now, so on a Tuesday it answers with a window that finished three days ago.
+
+    Shifting `local_now` by seven WALL-CLOCK days is right here: all that shift decides is which Friday
+    to anchor on, and +7 days lands on the same weekday whatever the clocks did in between. The window
+    itself is then recomputed from that week's own two sundowns, so a DST change inside it is handled by
+    the same code that handles it today.
+    """
+    span = _span(setting, organization, local_now)
+    if span is None:
+        return None
+    if local_now.astimezone(datetime.timezone.utc) > span[1].astimezone(datetime.timezone.utc):
+        return _span(setting, organization, local_now + datetime.timedelta(days=7))
+    return span
+
+
+def timezone_for(organization: Any, profile: Any) -> str:
+    """The zone the window is computed in, Site before account.
+
+    `working_day` already resolves exactly this pair for the shipping cutoff, so the Sabbath uses the
+    same answer: a tenant who told us their shop keeps Denver hours should not have to say it twice, and
+    two resolutions of "which timezone is this business in" would eventually disagree.
+
+    Here rather than in `sabbath_gate` because the settings screen needs it too, and `sabbath_gate`
+    reaches the Sites and Pages tables -- importing it for this one helper would have declared both
+    tables on a function that only ever reads a config row (`sender_identity`'s docstring, and
+    tests/test_env_var_grants.py, on why that propagation matters).
+    """
+    try:
+        from stripe_link.domain.store_timezone import working_day
+
+        zone, _cutoff = working_day(organization, (profile or {}).get("business")
+                                    if isinstance(profile, dict) else None)
+        return zone or "UTC"
+    except Exception:  # noqa: BLE001 - UTC is visibly a placeholder, not a plausible wrong answer
+        import logging
+
+        logging.getLogger(__name__).exception("sabbath: could not resolve a timezone; using UTC")
+        return "UTC"
+
+
+def status(profile: Any, organization: Any, *, timezone_name: str = "",
+           now: datetime.datetime | None = None) -> dict[str, Any]:
+    """What the gate would decide, and when the window runs. For the settings screen. NEVER raises.
+
+    **This exists because the toggle on its own would lie.** Everything here fails open, so a tenant who
+    switches the Sabbath on with no coordinates on their Site gets a store that never closes, no error,
+    and nothing anywhere saying why (`feedback_absence_reads_as_safety`). The preview is what turns that
+    silence into a sentence, so `has_coordinates` and `sun_sets` are reported even when they are the
+    boring answer.
+
+    Computed SERVER-SIDE, deliberately: a JavaScript copy of the solar routine would be a second
+    implementation of the one number this feature is about, free to disagree with the gate.
+    """
+    setting = config(profile)
+    here = coordinates(organization)
+    out: dict[str, Any] = {
+        "enabled": setting["enabled"],
+        "before_minutes": setting["before_minutes"],
+        "after_minutes": setting["after_minutes"],
+        "manual": setting["manual"],
+        "timezone": str(timezone_name or "UTC"),
+        "has_coordinates": here is not None,
+        # None means "not asked" -- with no coordinates there is no place to ask about. Distinct from
+        # False, which means a real place where the sun genuinely does not set this week.
+        "sun_sets": None,
+        "source": "none",
+        "closed_now": False,
+        "starts_at": None,
+        "ends_at": None,
+    }
+    if not setting["enabled"]:
+        return out
+    try:
+        from stripe_link.domain.store_timezone import load_zone
+
+        local_now = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
+            load_zone(out["timezone"]))
+        solar = _solar_span(setting, organization, local_now)
+        if here is not None:
+            out["sun_sets"] = solar is not None
+        span = upcoming_span(setting, organization, local_now)
+        if span is None:
+            return out
+        out["source"] = "sundown" if solar is not None else "manual"
+        out["closed_now"] = is_closed(local_now, span[0], span[1])
+        out["starts_at"] = span[0].astimezone(local_now.tzinfo).isoformat()
+        out["ends_at"] = span[1].astimezone(local_now.tzinfo).isoformat()
+    except Exception:  # noqa: BLE001 - a preview that raised would break a screen over a decoration
+        import logging
+
+        logging.getLogger(__name__).exception("sabbath: could not preview the window")
+    return out
+
+
 def assert_open(profile: Any, organization: Any, *, timezone_name: str = "",
                 now: datetime.datetime | None = None) -> None:
     """Raise `SabbathClosedError` if this tenant's store is closed right now. Otherwise return.
@@ -321,6 +450,9 @@ def assert_open(profile: Any, organization: Any, *, timezone_name: str = "",
 
     So: off by default, open when there are no coordinates, open when the sun does not set and no manual
     window was given, and open if anything at all goes wrong in the maths.
+
+    Asks `_span` for THIS moment only -- never `upcoming_span`, which is the preview's question. A gate
+    that fell forward to next week's window would close the store on a Tuesday.
     """
     setting = config(profile)
     if not setting["enabled"]:
@@ -330,19 +462,7 @@ def assert_open(profile: Any, organization: Any, *, timezone_name: str = "",
         from stripe_link.domain.store_timezone import load_zone
 
         local_now = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(load_zone(zone_name))
-        span = None
-        here = coordinates(organization)
-        if here is not None:
-            span = window(local_now, latitude=here[0], longitude=here[1],
-                          before_minutes=setting["before_minutes"],
-                          after_minutes=setting["after_minutes"])
-        if span is None:
-            # ONLY when the sun does not set. The manual window is the polar fallback, not a second way
-            # to configure an ordinary store -- a tenant in Denver who filled it in by accident should
-            # still be closed by their real sundown, which is the thing they actually observe.
-            manual = validate_manual_window(setting["manual"])
-            if manual:
-                span = manual_window(local_now, **manual)
+        span = _span(setting, organization, local_now)
         if span is None:
             return
         start, end = span

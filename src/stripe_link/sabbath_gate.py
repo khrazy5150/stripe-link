@@ -15,9 +15,9 @@ is worse than taking one during a window we could not compute.
 from typing import Any
 
 from stripe_link.common import error_response
-from stripe_link.domain.sabbath import SabbathClosedError, assert_open
+from stripe_link.domain.sabbath import SabbathClosedError, assert_open, timezone_for
 
-__all__ = ["SabbathClosedError", "assert_store_open", "closed_response"]
+__all__ = ["SabbathClosedError", "assert_store_open", "closed_response", "timezone_for"]
 
 
 def site_organization_for(tenant_id: str, page_id: str, mode: str) -> dict[str, Any]:
@@ -39,25 +39,6 @@ def site_organization_for(tenant_id: str, page_id: str, mode: str) -> dict[str, 
         logging.getLogger(__name__).exception("sabbath: could not resolve the Site for %s/%s",
                                               tenant_id, page_id)
         return {}
-
-
-def timezone_for(organization: dict, profile: dict) -> str:
-    """The zone the window is computed in, Site before account.
-
-    `working_day` already resolves exactly this pair for the shipping cutoff, so the Sabbath uses the
-    same answer: a tenant who told us their shop keeps Denver hours should not have to say it twice, and
-    two resolutions of "which timezone is this business in" would eventually disagree.
-    """
-    try:
-        from stripe_link.domain.store_timezone import working_day
-
-        zone, _cutoff = working_day(organization, (profile or {}).get("business"))
-        return zone or "UTC"
-    except Exception:  # noqa: BLE001 - UTC is visibly a placeholder, not a plausible wrong answer
-        import logging
-
-        logging.getLogger(__name__).exception("sabbath: could not resolve a timezone; using UTC")
-        return "UTC"
 
 
 def tenant_settings(tenant_id: str) -> dict[str, Any]:

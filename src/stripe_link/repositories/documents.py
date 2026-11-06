@@ -884,6 +884,51 @@ class SimpleKeyRepository:
         response = self.table.get_item(Key={self.key_field: key_value})
         return response.get("Item")
 
+    def set_attribute(self, key_value: str, name: str, value: Any,
+                      seed: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Write ONE top-level attribute, leaving every other attribute alone. Returns what was written.
+
+        For a screen that owns one section of a document it does not own
+        (`feedback_shared_document_read_modify_write`). `TenantConfig` is written whole by
+        `PUT /config` from the Configuration screen; a SECOND screen doing load-mutate-put on the same
+        document would restore its own stale copy of refund policies, legal links and page defaults over
+        whatever the first one had just saved -- and the save would look like it worked, because the
+        response is built from the copy in memory.
+
+        **UPSERT, by design.** The config table starts empty and most tenants have never saved
+        Configuration at all, so a conditional update would refuse the setting of the tenant most likely
+        to be changing one. `seed` carries the identity fields a created row needs to be readable
+        (`document_type`, `schema_version`), each applied with `if_not_exists` so an EXISTING document
+        keeps its own -- a seed that overwrote them would quietly restamp a document's schema version on
+        every unrelated save.
+        """
+        key_value = str(key_value or "").strip()
+        name = str(name or "").strip()
+        if not key_value:
+            raise RepositoryError(f"Document {self.key_field} is required.")
+        if not name:
+            raise RepositoryError("An attribute name is required.")
+        names = {"#a": name}
+        values = {":v": dynamodb_safe_document(value)}
+        clauses = ["#a = :v"]
+        # THE KEY IS NEVER IN THE EXPRESSION. DynamoDB refuses it outright -- *"Cannot update attribute
+        # tenant_id. This attribute is part of the key"* -- and `update_item` writes it from `Key=` on a
+        # create anyway, so a caller naming it in `seed` is describing the row correctly and would be
+        # punished for it. Dropped here rather than at each call site: a fake table records the
+        # expression happily, so this only ever surfaces against the real one (found 2026-11-05, in dev).
+        for index, field in enumerate(sorted(f for f in (seed or {}) if f != self.key_field)):
+            token, placeholder = f"#s{index}", f":s{index}"
+            names[token] = field
+            values[placeholder] = dynamodb_safe_document((seed or {})[field])
+            clauses.append(f"{token} = if_not_exists({token}, {placeholder})")
+        self.table.update_item(
+            Key={self.key_field: key_value},
+            UpdateExpression="SET " + ", ".join(clauses),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        return value
+
     def set_nested(self, key_value: str, container: str, member: str, value: Any, *,
                    container_exists: bool = False) -> bool:
         """Write ONE member of a map attribute, leaving the rest of the document alone.

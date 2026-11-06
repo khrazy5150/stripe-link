@@ -143,6 +143,120 @@
       </div>
     </section>
 
+    <section class="dashboard-card">
+      <header class="dashboard-card-header">
+        <h2>Sabbath Mode</h2>
+        <!-- Said here for the same reason the two cards above say it: this screen is headed "personal
+             dashboard settings", and this one is not personal. Observing the Sabbath is a fact about the
+             person who runs the shops, so it closes every Site on the account and every login sees it. -->
+        <p>
+          Closes your store from Friday sundown to Saturday sundown. This belongs to the <strong>store</strong>,
+          not to your login — it applies to every Site on this account, for everyone who signs in.
+        </p>
+      </header>
+      <div class="dashboard-card-body">
+        <label class="checkbox-row">
+          <input v-model="sabbath.enabled" type="checkbox" />
+          <span>Close my store for the Sabbath</span>
+        </label>
+        <p class="field-note">
+          Checkout, the cart, upsells and bookings all stop taking money during the window, and the shopper is
+          told when you reopen. Sundown is worked out from each Site's own location, so it moves with the season
+          instead of sitting at a fixed hour.
+        </p>
+
+        <template v-if="sabbath.enabled">
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Close this many minutes <strong>before</strong> Friday sundown</span>
+              <input v-model.number="sabbath.before_minutes" type="number"
+                     :min="sabbathLimits.min_minutes" :max="sabbathLimits.max_minutes" step="1" />
+            </label>
+            <label class="offer-field">
+              <span>Reopen this many minutes <strong>after</strong> Saturday sundown</span>
+              <input v-model.number="sabbath.after_minutes" type="number"
+                     :min="sabbathLimits.min_minutes" :max="sabbathLimits.max_minutes" step="1" />
+            </label>
+          </div>
+          <p class="field-note">
+            {{ sabbathLimits.min_minutes }}–{{ sabbathLimits.max_minutes }} minutes each, and they need not
+            match: {{ sabbathLimits.before_minutes }} and {{ sabbathLimits.after_minutes }} are the common
+            choices (candle-lighting, and nightfall). Zero on both closes exactly at sundown and reopens
+            exactly at sundown.
+          </p>
+        </template>
+
+        <!-- THE PART THAT KEEPS THE TOGGLE HONEST. The gate fails open at every missing input, so a tenant
+             who switches this on without coordinates on their Site gets a store that never closes, no error,
+             and nothing to say why. The server resolves the real window per Site and this reports it. -->
+        <div v-if="sabbathLoaded">
+          <div v-if="sabbath.enabled && !sabbathStatus.effective" class="keys-status-banner error">
+            This is switched on, but <strong>no store will close</strong> yet — see each Site below.
+          </div>
+          <ul v-if="sabbathStatus.sites.length" class="sabbath-sites">
+            <li v-for="site in sabbathStatus.sites" :key="site.site_id">
+              <span class="sabbath-site-name">
+                <strong>{{ site.name }}</strong>
+                <small>{{ site.timezone }}</small>
+              </span>
+              <span :class="['sabbath-chip', siteState(site).tone]">{{ siteState(site).label }}</span>
+              <small class="sabbath-detail">{{ siteState(site).detail }}</small>
+            </li>
+          </ul>
+          <p v-else>
+            <small>
+              No Sites yet. A Sabbath closure needs one, because a Site is what says where your store is.
+            </small>
+          </p>
+        </div>
+
+        <!-- Open on its own when a Site actually needs it. Above the Arctic circle the sun does not set for
+             weeks, so there is no sundown to compute and a manual window is the only thing that can close the
+             store. It is NOT a second way to configure an ordinary store: where the sun does set, the real
+             sundown wins, because that is the thing being observed. -->
+        <details v-if="sabbathLoaded && sabbath.enabled" :open="needsManualWindow">
+          <summary>Manual window — for a store where the sun does not set</summary>
+          <p class="field-note">
+            Used only when sundown cannot be computed for a Site. Everywhere else your real sundown applies and
+            this is ignored.
+          </p>
+          <label class="checkbox-row">
+            <input v-model="manual.enabled" type="checkbox" />
+            <span>Use a manual window where there is no sundown</span>
+          </label>
+          <div v-if="manual.enabled" class="offer-two-column">
+            <label class="offer-field">
+              <span>Starts on</span>
+              <select v-model.number="manual.weekday">
+                <option v-for="(day, index) in WEEKDAYS" :key="index" :value="index">{{ day }}</option>
+              </select>
+            </label>
+            <label class="offer-field">
+              <span>At</span>
+              <input v-model="manual.at" type="time" step="60" />
+            </label>
+            <label class="offer-field">
+              <span>For this many hours</span>
+              <input v-model.number="manual.duration_hours" type="number"
+                     :min="sabbathLimits.min_manual_hours" :max="sabbathLimits.max_manual_hours" step="0.25" />
+            </label>
+          </div>
+          <p v-if="manual.enabled" class="field-note">
+            {{ sabbathLimits.min_manual_hours }}–{{ sabbathLimits.max_manual_hours }} hours — the Sabbath it
+            stands in for is about a day, sundown to sundown.
+          </p>
+        </details>
+
+        <p v-if="sabbathError" class="field-error">{{ sabbathError }}</p>
+        <p v-else-if="sabbathMessage"><small>{{ sabbathMessage }}</small></p>
+        <div class="button-row">
+          <button class="secondary-action" type="button" :disabled="sabbathSaving" @click="saveSabbath">
+            {{ sabbathSaving ? "Saving…" : "Save Sabbath setting" }}
+          </button>
+        </div>
+      </div>
+    </section>
+
     <div v-if="fontToRemove" class="modal-backdrop" @click.self="fontToRemove = null">
       <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="removeFontTitle">
         <header class="modal-card-header">
@@ -307,6 +421,143 @@ async function importFont(event) {
     importing.value = false;
   }
 }
+// --- Sabbath mode -----------------------------------------------------------------------------------
+// Its OWN endpoint, not the Save Preferences button. The setting lives on the tenant config document,
+// which the Configuration screen saves WHOLE — so a load-mutate-put from this screen would restore its
+// own stale copy of the refund policies and legal links over whatever Configuration had just saved, and
+// would look like it worked. `PUT /sabbath` writes one attribute (plans/TODO.md "Sabbath mode").
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const SABBATH_LIMITS = {
+  before_minutes: 18, after_minutes: 40, min_minutes: 0, max_minutes: 60,
+  min_manual_hours: 24, max_manual_hours: 25,
+};
+const sabbath = reactive({ enabled: false, before_minutes: 18, after_minutes: 40 });
+// From the server, so the bounds the inputs enforce are the bounds the server keeps. A hardcoded 60 here
+// is how a screen comes to refuse a value the API accepts, or accept one it silently clamps.
+const sabbathLimits = ref({ ...SABBATH_LIMITS });
+const sabbathStatus = reactive({ sites: [], effective: false, closed_now: false });
+const manual = reactive({ enabled: false, weekday: 4, at: "18:00", duration_hours: 24 });
+const sabbathLoaded = ref(false);
+const sabbathSaving = ref(false);
+const sabbathError = ref("");
+const sabbathMessage = ref("");
+
+const needsManualWindow = computed(
+  // Only where it is the ONLY thing that can work: a Site whose sun does not set. `sun_sets` is null when
+  // there were no coordinates to ask about, which is a different problem with a different fix.
+  () => sabbathStatus.sites.some((site) => site.sun_sets === false) || manual.enabled,
+);
+
+function applySabbath(body) {
+  const stored = body.sabbath || {};
+  sabbath.enabled = Boolean(stored.enabled);
+  sabbath.before_minutes = Number(stored.before_minutes ?? SABBATH_LIMITS.before_minutes);
+  sabbath.after_minutes = Number(stored.after_minutes ?? SABBATH_LIMITS.after_minutes);
+  manual.enabled = Boolean(stored.manual);
+  if (stored.manual) {
+    manual.weekday = Number(stored.manual.weekday ?? 4);
+    manual.at = `${String(stored.manual.hour ?? 18).padStart(2, "0")}:${String(stored.manual.minute ?? 0).padStart(2, "0")}`;
+    manual.duration_hours = Number(stored.manual.duration_hours ?? 24);
+  }
+  sabbathLimits.value = body.limits || sabbathLimits.value;
+  sabbathStatus.sites = body.sites || [];
+  sabbathStatus.effective = Boolean(body.effective);
+  sabbathStatus.closed_now = Boolean(body.closed_now);
+  sabbathLoaded.value = true;
+}
+
+function sabbathMoment(iso, zone) {
+  // Rendered in the STORE's zone, not the viewer's, and with the abbreviation. A tenant checking a Site in
+  // another country must read the time their shoppers will experience, not the one their laptop is in.
+  if (!iso) return "";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+      timeZone: zone || undefined, timeZoneName: "short",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+function siteState(site) {
+  // Every branch here is a state the server actually reports, and the two warnings name the fix. A Site
+  // that cannot close is the thing this preview exists to say out loud.
+  if (!sabbath.enabled) return { tone: "off", label: "Off", detail: "" };
+  if (site.source === "none") {
+    if (!site.has_coordinates) {
+      return {
+        tone: "warn",
+        label: "No location",
+        detail: "This Site has no latitude or longitude, so sundown cannot be worked out and the store stays"
+          + " open. Add them in Sites → edit this Site → Business identity.",
+      };
+    }
+    if (site.sun_sets === false) {
+      return {
+        tone: "warn",
+        label: "No sundown",
+        detail: "The sun does not set here at this time of year. Set a manual window below, or this Site"
+          + " stays open.",
+      };
+    }
+    return { tone: "warn", label: "Not closing", detail: "No window could be worked out for this Site." };
+  }
+  const via = site.source === "manual" ? " (manual window)" : "";
+  if (site.closed_now) {
+    return { tone: "closed", label: "Closed now", detail: `Reopens ${sabbathMoment(site.ends_at, site.timezone)}${via}` };
+  }
+  return {
+    tone: "open",
+    label: "Open",
+    detail: `Next closes ${sabbathMoment(site.starts_at, site.timezone)}, reopens `
+      + `${sabbathMoment(site.ends_at, site.timezone)}${via}`,
+  };
+}
+
+async function loadSabbath() {
+  // Independent of the preferences call, like the fonts and the avatar: a tenant who has never saved
+  // preferences must still be able to read and change this one.
+  try {
+    applySabbath(await apiRequest("/sabbath"));
+  } catch (err) {
+    sabbathError.value = err?.message || "Could not read the Sabbath setting.";
+  }
+}
+
+async function saveSabbath() {
+  sabbathError.value = "";
+  sabbathMessage.value = "";
+  sabbathSaving.value = true;
+  try {
+    const [hour, minute] = String(manual.at || "18:00").split(":");
+    const payload = {
+      enabled: sabbath.enabled,
+      before_minutes: sabbath.before_minutes,
+      after_minutes: sabbath.after_minutes,
+      // `null` CLEARS it. Sending the window while the checkbox is off would store a setting the tenant
+      // just switched off, and it would fire the moment they moved somewhere the sun stops setting.
+      manual: manual.enabled
+        ? {
+          weekday: manual.weekday,
+          hour: Number(hour),
+          minute: Number(minute || 0),
+          duration_hours: manual.duration_hours,
+        }
+        : null,
+    };
+    // Answered with the resolved preview, so the confirmation is the window itself rather than "saved".
+    applySabbath(await apiRequest("/sabbath", { method: "PUT", body: payload }));
+    sabbathMessage.value = sabbath.enabled
+      ? "Saved. The window above is what your stores will do."
+      : "Saved. Your stores stay open.";
+  } catch (err) {
+    sabbathError.value = err?.message || "Could not save the Sabbath setting.";
+  } finally {
+    sabbathSaving.value = false;
+  }
+}
+
 const form = reactive(defaultForm());
 
 function defaultForm() {
@@ -334,6 +585,7 @@ async function load() {
   // it, and the font list silently stayed empty — reading "No fonts imported" for fonts that existed.
   loadFonts();
   loadStoreAvatar();
+  loadSabbath();
   try {
     const body = await apiRequest("/preferences", { params: { user_id: userId } });
     applyPreferences(body.preferences || {});
@@ -402,4 +654,31 @@ load();
 .font-list li { display: flex; align-items: center; gap: 0.75rem; }
 .font-list li span:first-child { font-size: 1.1rem; }
 .font-list li small { color: #64748b; flex: 1; }
+.sabbath-sites { list-style: none; margin: 0.75rem 0 1rem; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.sabbath-sites li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+  border-left: 3px solid #e2e8f0;
+  padding-left: 0.75rem;
+}
+.sabbath-site-name { display: flex; flex-direction: column; min-width: 0; }
+.sabbath-site-name small { color: #64748b; }
+/* The detail spans both columns so a two-line explanation never squeezes the chip off the row. */
+.sabbath-detail { grid-column: 1 / -1; color: #475569; }
+.sabbath-chip {
+  justify-self: end;
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sabbath-chip.off { background: #f1f5f9; color: #64748b; }
+.sabbath-chip.open { background: #dcfce7; color: #166534; }
+.sabbath-chip.closed { background: #e0e7ff; color: #3730a3; }
+/* Amber, not red: nothing is broken — the tenant has asked for something we cannot do yet, and the
+   detail beside it names the one field that fixes it. */
+.sabbath-chip.warn { background: #fef3c7; color: #92400e; }
 </style>

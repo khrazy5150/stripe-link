@@ -3705,6 +3705,44 @@ Resources:
             Path: /config
             Method: PUT
 
+  SabbathFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Environment:
+        Variables:
+          # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
+          # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
+          # A missing name here is a RUNTIME failure, not a deploy failure.
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
+          SITES_TABLE: !Ref SitesTable
+          TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+      FunctionName: !Sub "${ProjectPrefix}-sabbath-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.sabbath.handler
+      Description: The tenant's Sabbath closure setting, and the resolved window per Site -- separate from /config because that document is written WHOLE by the Configuration screen and a second writer would lose its siblings (plans/TODO.md "Sabbath mode").
+      Policies:
+        # The setting is written as ONE attribute of the tenant's config document, never a whole put.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlatformConfigTable
+        # READ, not Crud, on both: this endpoint only asks where each Site is and which zone it keeps.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+      Events:
+        GetSabbath:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sabbath
+            Method: GET
+        SaveSabbath:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sabbath
+            Method: PUT
+
   CustomDomainsFunction:
     Type: AWS::Serverless::Function
     Properties:
