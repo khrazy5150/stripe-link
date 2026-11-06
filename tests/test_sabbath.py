@@ -433,3 +433,53 @@ class ATimezoneIsAPoliticalChoiceNotALongitudeTests(unittest.TestCase):
                                     latitude=lat, longitude=lon)
                 self.assertEqual(start.astimezone(tz).strftime("%a"), "Fri")
                 self.assertEqual(end.astimezone(tz).strftime("%a"), "Sat")
+
+
+class EveryPlaceThatTakesMoneyIsGatedTests(unittest.TestCase):
+    """A closure enforced at three of four transaction points is worse than one enforced nowhere: the
+    tenant believes their shop is shut while an upsell link quietly keeps selling."""
+
+    PAYING_HANDLERS = ("checkout", "cart_checkout", "upsell", "booking")
+
+    def test_all_four_call_the_shared_gate(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+        for name in self.PAYING_HANDLERS:
+            with self.subTest(handler=name):
+                source = (root / f"{name}.py").read_text()
+                self.assertIn("assert_store_open", source,
+                              f"handlers/{name}.py takes money but does not consult the Sabbath gate")
+
+    def test_they_all_return_the_SAME_refusal(self):
+        """One module decides the status and the error code, so a buyer who meets this at checkout and
+        again on an upsell is not told two different things."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+        for name in self.PAYING_HANDLERS:
+            with self.subTest(handler=name):
+                source = (root / f"{name}.py").read_text()
+                self.assertIn("sabbath_closed_response", source)
+
+    def test_the_refusal_is_503_and_carries_the_resume_moment(self):
+        import json
+        from stripe_link.sabbath_gate import closed_response
+        from stripe_link.domain.sabbath import SabbathClosedError
+        resume = datetime.datetime(2026, 11, 7, 17, 26, tzinfo=ZoneInfo("America/Denver"))
+        response = closed_response(SabbathClosedError(resume, "America/Denver"))
+        self.assertEqual(response["statusCode"], 503)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "store_closed_sabbath")
+        self.assertEqual(body["timezone"], "America/Denver")
+        self.assertTrue(body["resume_at"].startswith("2026-11-07T17:26"))
+
+    def test_the_gate_runs_AFTER_the_platforms_own_refusals(self):
+        """A suspended store reported as merely observing the Sabbath would tell a shopper to come back
+        on Sunday to a shop we closed. Checked by source order, because the ordering IS the contract."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+        for name in ("checkout", "cart_checkout", "upsell"):
+            with self.subTest(handler=name):
+                source = (root / f"{name}.py").read_text()
+                self.assertLess(source.index("assert_not_suspended(_profile)"),
+                                source.index("assert_store_open(_profile"),
+                                f"{name}: the platform's refusals must come first")

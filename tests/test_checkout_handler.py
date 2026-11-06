@@ -437,10 +437,22 @@ class SabbathClosureTests(CheckoutHandlerTests):
 
     ST_GEORGE_ORG = {"geo": {"latitude": 37.0965, "longitude": -113.5684}, "timezone": "America/Denver"}
 
-    def _checkout(self, tenant, *, organization):
+    def _checkout(self, tenant, *, organization, now=None):
+        """Two patches, two different jobs.
+
+        `sabbath_gate.site_organization_for` is looked up as a module global INSIDE `assert_store_open`,
+        so patching it there works. `checkout.assert_store_open` is bound by name at import, so a clock
+        has to be injected by wrapping the handler's own reference -- patching the gate module's
+        attribute would rebind nothing the handler reads, and the test would pass while asserting
+        nothing (the trap from test_lead_download).
+        """
         from unittest.mock import patch
         from handlers import checkout as checkout_handler
-        with patch.object(checkout_handler, "_sabbath_site_organization", return_value=organization):
+        from stripe_link import sabbath_gate
+        real = sabbath_gate.assert_store_open
+        with patch.object(sabbath_gate, "site_organization_for", return_value=organization), \
+             patch.object(checkout_handler, "assert_store_open",
+                          lambda p, **kw: real(p, **{**kw, "now": now})):
             return handler(
                 {"httpMethod": "GET", "queryStringParameters": {
                     "clientID": "tenant_demo", "offer": "offer_simple_coffee",
@@ -465,22 +477,12 @@ class SabbathClosureTests(CheckoutHandlerTests):
         """503, not 403: this is temporary and the shopper SHOULD come back. "Closed" without "until
         when" is the difference between a pause and a dead link."""
         import datetime, json
-        from unittest.mock import patch
         from zoneinfo import ZoneInfo
-        from handlers import checkout as checkout_handler
-        from stripe_link.domain.sabbath import assert_open as real_assert
-
-        # Patched on the HANDLER, not on the domain module. `checkout` binds the function by name at
-        # import (`from ... import assert_open as assert_not_sabbath`), so patching the domain's
-        # attribute rebinds nothing the handler will ever look at -- the test passes while asserting
-        # nothing. Same trap as the two-patches-of-one-target collision in test_lead_download.
         friday_evening = datetime.datetime(2026, 11, 6, 20, tzinfo=ZoneInfo("America/Denver"))
-        with patch.object(checkout_handler, "assert_not_sabbath",
-                          lambda p, o, **kw: real_assert(p, o, **{**kw, "now": friday_evening})):
-            response = self._checkout({"tenant_id": "tenant_demo",
-                                       "sabbath": {"enabled": True, "before_minutes": 18,
-                                                   "after_minutes": 40}},
-                                      organization=self.ST_GEORGE_ORG)
+        response = self._checkout(
+            {"tenant_id": "tenant_demo",
+             "sabbath": {"enabled": True, "before_minutes": 18, "after_minutes": 40}},
+            organization=self.ST_GEORGE_ORG, now=friday_evening)
         self.assertEqual(response["statusCode"], 503)
         body = json.loads(response["body"])
         self.assertEqual(body["error"], "store_closed_sabbath")

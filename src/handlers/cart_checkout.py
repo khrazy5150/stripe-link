@@ -19,6 +19,8 @@ from handlers.checkout import (
 from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
+from stripe_link.sabbath_gate import (SabbathClosedError, assert_store_open,
+                                      closed_response as sabbath_closed_response)
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.tax_status import calculates as tax_calculates
@@ -105,6 +107,10 @@ def handler(
         _profile = tenant_repo.get(tenant_id, tenant_id)
         assert_billing_in_good_standing(_profile)
         assert_not_suspended(_profile)
+        # And the closure the TENANT chose (plans/TODO.md "Sabbath mode"). AFTER the platform's own
+        # refusals: a suspended store reported as merely observing the Sabbath would tell a shopper to
+        # come back on Sunday to a shop we closed. Off unless switched on; fails OPEN.
+        assert_store_open(_profile, tenant_id=tenant_id, page_id=page_id, mode=mode)
 
         # Transactions are only allowed from a published page (same guard as the single-offer checkout): a draft
         # or unknown page_id cannot start a cart checkout even if the API is called directly.
@@ -214,6 +220,8 @@ def handler(
         return error_response(str(exc), code="invalid_cart")
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SabbathClosedError as exc:
+        return sabbath_closed_response(exc)
     except SuspendedError as exc:
         # 403, not 402: this is not a bill the merchant can settle, and a shopper must not be invited to
         # retry. The message is the reason the platform recorded, so support is not guessing either.

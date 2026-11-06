@@ -6,6 +6,8 @@ from stripe_link.common import error_response, json_response, parse_json_body, q
 from stripe_link.silo import current_silo
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
+from stripe_link.sabbath_gate import (SabbathClosedError, assert_store_open,
+                                      closed_response as sabbath_closed_response)
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.pricing import (
@@ -511,6 +513,15 @@ def process_upsell(
         _profile = tenant_repo.get(tenant_id, tenant_id)
         assert_billing_in_good_standing(_profile)
         assert_not_suspended(_profile)
+        # And the closure the TENANT chose (plans/TODO.md "Sabbath mode"). AFTER the platform's own
+        # refusals: a suspended store reported as merely observing the Sabbath would tell a shopper to
+        # come back on Sunday to a shop we closed. Off unless switched on; fails OPEN.
+        # NO page_id, and that is not an omission: an upsell is charged off-session after checkout and
+        # records `attribution.page_id = ""` deliberately. `site_organization` has an honest answer for
+        # that case -- a tenant with exactly ONE Site has only one business, so it resolves; a tenant
+        # with several returns {} and the store stays open, because picking "the first Site" would close
+        # a shop against another shop's sundown.
+        assert_store_open(_profile, tenant_id=tenant_id, mode=mode)
 
         offer = offers_repo.get(tenant_id, offer_id)
         if not offer:
@@ -567,6 +578,8 @@ def process_upsell(
         )
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SabbathClosedError as exc:
+        return sabbath_closed_response(exc)
     except SuspendedError as exc:
         # 403, not 402: this is not a bill the merchant can settle, and a shopper must not be invited to
         # retry. The message is the reason the platform recorded, so support is not guessing either.

@@ -24,6 +24,8 @@ from stripe_link.domain.booking import (
 )
 from stripe_link.domain.booking_credits import EntitlementError, restore, spend
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
+from stripe_link.sabbath_gate import (SabbathClosedError, assert_store_open,
+                                      closed_response as sabbath_closed_response)
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.calendar_routing import candidate_fulfiller_ids, fulfiller_busy_connection, service_busy_connection
 from stripe_link.domain.reminders import cancel_reminders, plan_reminders
@@ -331,7 +333,20 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
     if not api_key:
         return error_response(f"{mode} Stripe keys are not configured.", status_code=400, code="stripe_not_configured")
 
-    tenant_plan = normalize_tier_id((tenant_repo.get(tenant_id, tenant_id) or {}).get("tier_id"))
+    _profile = tenant_repo.get(tenant_id, tenant_id) or {}
+    # The closure the TENANT chose (plans/TODO.md "Sabbath mode"). A booking that takes payment is a sale
+    # like any other, so it closes with the rest of the shop.
+    #
+    # NOTE, and it is not this feature's to fix: this route has no `assert_not_suspended` or
+    # `assert_billing_in_good_standing`, unlike the other three places that charge. So a store suspended
+    # for abuse can still take paid bookings. Flagged 2026-11-05; widening that gate is a separate
+    # decision with its own blast radius, and quietly adding it here would bury it.
+    try:
+        assert_store_open(_profile, tenant_id=tenant_id, mode=mode)
+    except SabbathClosedError as exc:
+        return sabbath_closed_response(exc)
+
+    tenant_plan = normalize_tier_id(_profile.get("tier_id"))
     price = appointment_price(appointment)
     # Honor the resolved price's fee handling: net_guaranteed grosses up the charged amount so the
     # tenant nets the sticker; standard charges the sticker and deducts fees (STORY-5.5 / STORY-4.1).
