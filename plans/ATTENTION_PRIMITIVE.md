@@ -983,11 +983,17 @@ in chat once already and could not be found again.
 
 | Field | Value |
 |---|---|
-| Username | `bluewhalegoods` (fallbacks: `blue.whale.goods`, `bluewhalegoodsco`, `bluewhalesupplyco`) |
-| Name | Blue Whale Goods |
+| Username | **`bluewhalegooddies`** — REGISTERED 2026-11-06. Note the **double d**: it is not "goodies". `bluewhalegoods` was taken. |
+| Name | Blue Whale Goodies |
 | Bio | Test account for a publishing integration. Sample posts only. |
 | Type | Professional → **Business**, category Shopping & retail |
 | Facebook Page | none — not required (§6.2f) |
+
+**Copy the handle, never retype it.** `bluewhalegooddies` has a doubled `d` that an English reader
+corrects to "goodies" without noticing. Outstand's `accounts` array accepts an exact username as
+well as an account id, so a silently "corrected" spelling would resolve to nothing and read as a
+vendor fault rather than a typo. Prefer the numeric account id from `GET /v1/social-accounts` in
+anything stored or committed.
 
 **A throwaway brand unrelated to Junior Bay, deliberately.** The spike publishes REAL public posts — a
 professional Instagram account cannot be private — so a brand-adjacent handle would leave test junk
