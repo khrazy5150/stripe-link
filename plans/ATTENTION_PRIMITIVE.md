@@ -500,6 +500,36 @@ or creator account (not personal accounts)" as a general prerequisite — matchi
 author on 2026-11-06 (§6.2f). Two independent sources now agree, so the onboarding copy can state it
 plainly.
 
+### 6.2i What else the vendor does — and two things the connect flow is missing (2026-11-06)
+
+Asked whether it covers Google Ads, Google Calendar and Google Business Profile. **Ads: no. Calendar: no.**
+Neither appears anywhere in the docs; this is a publisher, not an ad platform or a scheduler. The twelve
+networks are the whole surface: `x`, `linkedin`, `instagram`, `facebook`, `threads`, `tiktok`, `youtube`,
+`pinterest`, `google_business`, `vimeo`, `reddit`, `bluesky`.
+
+**Google Business Profile IS supported** (`google_business`, "location posting and metrics") — and it is
+the one network on this list that touches another plan: `BUSINESS_PROFILE_AND_GBP.md` wants a canonical
+NAP that pages derive from, and GBP posts are the same business's public surface. Worth knowing the
+option exists. **Not worth planning on yet**, for a reason stronger than §6.2g's BYOK note: Google does
+not simply hand out Google Business Profile API access. It is an application to Google with an approval
+process, on top of registering the app — so this is "available to a tenant who has already been approved
+by Google", which is close to nobody. Treat it as a later, possibly never, and never as a launch network.
+
+**⚠️ CONNECTING IS NOT ONE OAUTH HOP for three networks.** LinkedIn, Facebook and Google Business Profile
+each require a **finalize step** after OAuth, to choose which page or location the account posts to. §6.4's
+connect flow currently assumes authorise-then-done. A tenant who authorises and is then dropped back with
+no page selected has a connected account that publishes nowhere, which will read as our bug. The flow
+needs a second screen for exactly these three.
+
+**A "Conversations API" exists** — inbound direct messages, replies and delivery tracking, presented
+around an Instagram inbox. Entirely absent from this plan. It is not in A5's scope and should not be
+scope-crept into it, but it is worth knowing the vendor already covers the inbound half of social: if
+tenant DMs ever become a product question, the answer may already be bought and paid for.
+
+**No disconnect/delete endpoint is documented.** §6.4 makes reconnection a first-class state; if a token
+can be revoked but an account cannot be programmatically removed, "disconnect" in our UI may only be able
+to forget the account on our side. Added to §11a as a live-call question.
+
 ### 6.2h ⚠️ THE PUBLIC PAGE NOW CONTRADICTS THE GRANT IN BOTH DIRECTIONS (2026-11-06)
 
 §6.2e warned the marketing page was not the terms. Read today it disagrees with the vendor's email twice:
