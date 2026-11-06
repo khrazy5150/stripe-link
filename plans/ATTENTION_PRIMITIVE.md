@@ -414,6 +414,81 @@ contradicts the public page is one worth being able to produce on demand.
 permitted on Pay-as-you-go for this account. One sentence from them closes the only remaining ambiguity
 in the whole vendor question.
 
+### 6.2f ✅ CONFIRMED BY THE VENDOR, AND THE SHAPE OF THAT CONFIRMATION (2026-11-06)
+
+Outstand repeated by word what they had already put in email: **the key is approved for 100 accounts for
+resale purposes.** That answers §6.2b's open follow-up — resale is permitted on this account at this tier
+— and §11 Step 0 is closed. **Proceed** (author, 2026-11-06).
+
+**What it is NOT: a contract.** There is no formal documentation, no addendum, no signed term. The
+arrangement is, in the author's words, *"ask us and we'll approve you"* — a discretionary grant sitting on
+top of published terms that do not describe it (§6.2e). Two consequences worth stating once, not
+re-litigating:
+
+- **The email IS the artifact.** §6.2b called the letter load-bearing and asked that it be retrievable;
+  with no formal document behind it, that is now the whole paper trail. Keep it somewhere that survives an
+  inbox clear-out, and prefer a copy that names the **plan** as well as the 100 accounts.
+- **Discretionary means revocable.** Nothing here is breached if they change their mind; the grant simply
+  ends. §6.2a's exit table is the plan for that day and does not change. This is a known, accepted risk
+  taken knowingly — not an unexamined one.
+
+**Instagram: a PROFESSIONAL account is required; a linked Facebook Page is NOT (vendor, 2026-11-06).**
+A product requirement, not a vendor detail: it lands in onboarding copy. "Professional" is Instagram's own
+switch (Creator or Business) and is free, so the ask is a settings change rather than a new account — but
+a tenant on a personal account cannot connect at all, and discovering that at the connect step is the
+worst place to discover it. Say it **before** the OAuth hand-off, with the two words Instagram itself uses.
+This also narrows §11a #5: the IG path is one connection, with no Page connection implied.
+
+### 6.2g SPIKE ANSWERS FROM THE PUBLISHED DOCS (2026-11-06) — three closed, two new constraints
+
+Read from `outstand.so/docs` and `/docs/configurations`, now that the account is open. §11a numbering.
+
+**#2 — `publish()` does NOT return a live URL. §6.1's contract was wrong and must change shape.**
+`POST /v1/posts/` returns `post.id` plus, per connected account, `status` (`pending|published|failed|deleted`),
+`platformPostId`, `error` and `publishedAt`. So the external id is there and **the live URL is not**. The
+adapter contract cannot promise `live_url`; a permalink has to be composed per network from
+`platformPostId` + the account's `username`, or dropped. This is exactly the reason #2 was ranked second —
+it is cheaper to learn now than to find every caller assuming a URL that never arrives.
+
+**#4 — native scheduling EXISTS.** `scheduledAt` (ISO 8601) on the same endpoint, **capped at 30 days
+ahead**; omitted or in the past publishes immediately. §7's 15-minute sweep is therefore a choice, not a
+necessity — but the 30-day ceiling means the sweep still owns anything further out, so §7 stays.
+
+**#7 — media limits are NOT documented.** The only stated figure is that confirmed uploads are retained
+**60 days**. No size, length, codec or carousel limits on either page, so the ceiling
+`HIGGSFIELD_INTEGRATION.md` must generate within is still unknown and remains a live-call question.
+Upload is a three-step presigned flow: `POST /v1/media/upload` → `PUT` the bytes → `POST
+/v1/media/{id}/confirm`.
+
+**⚠️ NEW CONSTRAINT — Managed Keys cover only 8 of the 12 networks.** **X (Twitter), Google Business
+Profile, Vimeo and Reddit are BYOK-ONLY**: Outstand ships no managed OAuth app for them, so the TENANT
+must register their own developer application before connecting. That is not a settings change, it is a
+developer-portal application — far past what an SMB will do. Treat those four as **not available at
+launch** rather than as a connect button that strands people, and size the product on the eight that work:
+LinkedIn, Instagram, Facebook, Threads, Bluesky, YouTube, Pinterest, TikTok. Two more notes from the same
+page: **Bluesky uses an app password, not OAuth**, and **TikTok Direct Post requires passing TikTok's own
+Content Posting API audit** — a third-party review on the critical path for that one network.
+
+**✅ Instagram corroborated.** The docs say "Business and Creator accounts", and list "connected business
+or creator account (not personal accounts)" as a general prerequisite — matching what the vendor told the
+author on 2026-11-06 (§6.2f). Two independent sources now agree, so the onboarding copy can state it
+plainly.
+
+### 6.2h ⚠️ THE PUBLIC PAGE NOW CONTRADICTS THE GRANT IN BOTH DIRECTIONS (2026-11-06)
+
+§6.2e warned the marketing page was not the terms. Read today it disagrees with the vendor's email twice:
+
+| | Public pricing page (2026-11-06) | What the vendor granted |
+|---|---|---|
+| Reselling | listed as a **Business ($129/mo)** inclusion; **not** listed under Pay as you go | permitted on this key at **$19** |
+| Connected accounts | Pay as you go: **"No cap"**; Business: 1,000 slots to start | **100 accounts** |
+
+Both differences are survivable and neither is new in kind — but together they make §6.2b's ask concrete
+and raise its priority: **the email must name the plan.** "Approved for 100 accounts for resale" is
+ambiguous against a page that sells reselling one tier up; "approved for reselling on Pay as you go, 100
+accounts" is not. That is one sentence from them, and it is the difference between a grant that can be
+produced on demand and one that reads as a misunderstanding. Ask in the thread that already exists.
+
 ### 6.2c The account ladder, answered (2026-11-05) — ⚠️ SUPERSEDED BY §6.2d, kept as the record of a
 ### cliff that turned out not to exist
 
