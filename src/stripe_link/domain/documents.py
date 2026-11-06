@@ -2325,6 +2325,36 @@ def validate_tenant_config(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id"])
     if document.get("document_type") != "tenant_config":
         raise DocumentValidationError("Tenant config document_type must be 'tenant_config'.")
+    # Sabbath mode (plans/TODO.md). Validated here because this is the tenant's OWN settings document and
+    # a malformed window would otherwise reach the checkout gate, where everything fails OPEN -- so a bad
+    # value would read as "feature not working" rather than as the rejected input it is.
+    sabbath = document.get("sabbath")
+    if sabbath is not None:
+        if not isinstance(sabbath, dict):
+            raise DocumentValidationError("Tenant config sabbath must be an object.")
+        for field in ("before_minutes", "after_minutes"):
+            value = sabbath.get(field)
+            if value is not None and (whole_number(value) is None or not (0 <= int(value) <= 60)):
+                raise DocumentValidationError(f"Tenant config sabbath.{field} must be 0-60 minutes.")
+        manual = sabbath.get("manual")
+        if manual is not None:
+            if not isinstance(manual, dict):
+                raise DocumentValidationError("Tenant config sabbath.manual must be an object.")
+            bounds = {"weekday": (0, 6), "hour": (0, 23), "minute": (0, 59)}
+            for field, (low, high) in bounds.items():
+                value = manual.get(field)
+                if value is not None and (whole_number(value) is None or not (low <= int(value) <= high)):
+                    raise DocumentValidationError(
+                        f"Tenant config sabbath.manual.{field} must be {low}-{high}.")
+            hours = manual.get("duration_hours")
+            if hours is not None:
+                number = real_number(hours)
+                # 24-25h, because the Sabbath this stands in for is ~24 hours sundown to sundown. A
+                # polar tenant inventing a 3-hour "Sabbath" is configuring something else.
+                if number is None or not (24.0 <= number <= 25.0):
+                    raise DocumentValidationError(
+                        "Tenant config sabbath.manual.duration_hours must be between 24 and 25.")
+
     page_defaults = document.get("page_defaults")
     if page_defaults is not None:
         if not isinstance(page_defaults, dict):

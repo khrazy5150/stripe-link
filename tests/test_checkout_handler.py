@@ -437,7 +437,7 @@ class SabbathClosureTests(CheckoutHandlerTests):
 
     ST_GEORGE_ORG = {"geo": {"latitude": 37.0965, "longitude": -113.5684}, "timezone": "America/Denver"}
 
-    def _checkout(self, tenant, *, organization, now=None):
+    def _checkout(self, tenant, *, organization, now=None, settings=None):
         """Two patches, two different jobs.
 
         `sabbath_gate.site_organization_for` is looked up as a module global INSIDE `assert_store_open`,
@@ -452,7 +452,7 @@ class SabbathClosureTests(CheckoutHandlerTests):
         real = sabbath_gate.assert_store_open
         with patch.object(sabbath_gate, "site_organization_for", return_value=organization), \
              patch.object(checkout_handler, "assert_store_open",
-                          lambda p, **kw: real(p, **{**kw, "now": now})):
+                          lambda p, **kw: real(p, **{**kw, "now": now, "settings": settings or {}})):
             return handler(
                 {"httpMethod": "GET", "queryStringParameters": {
                     "clientID": "tenant_demo", "offer": "offer_simple_coffee",
@@ -480,9 +480,8 @@ class SabbathClosureTests(CheckoutHandlerTests):
         from zoneinfo import ZoneInfo
         friday_evening = datetime.datetime(2026, 11, 6, 20, tzinfo=ZoneInfo("America/Denver"))
         response = self._checkout(
-            {"tenant_id": "tenant_demo",
-             "sabbath": {"enabled": True, "before_minutes": 18, "after_minutes": 40}},
-            organization=self.ST_GEORGE_ORG, now=friday_evening)
+            {"tenant_id": "tenant_demo"}, organization=self.ST_GEORGE_ORG, now=friday_evening,
+            settings={"sabbath": {"enabled": True, "before_minutes": 18, "after_minutes": 40}})
         self.assertEqual(response["statusCode"], 503)
         body = json.loads(response["body"])
         self.assertEqual(body["error"], "store_closed_sabbath")
@@ -493,12 +492,12 @@ class SabbathClosureTests(CheckoutHandlerTests):
         """The platform's own refusals run first. A suspended store must not be reported as merely
         observing the Sabbath -- that would tell a shopper to come back on Sunday to a shop we closed."""
         import json
-        response = self._checkout({"tenant_id": "tenant_demo", "billing_status": "suspended",
-                                   "sabbath": {"enabled": True}},
-                                  organization=self.ST_GEORGE_ORG)
+        response = self._checkout({"tenant_id": "tenant_demo", "billing_status": "suspended"},
+                                  organization=self.ST_GEORGE_ORG,
+                                  settings={"sabbath": {"enabled": True}})
         self.assertNotEqual(json.loads(response["body"]).get("error"), "store_closed_sabbath")
 
     def test_no_coordinates_leaves_the_store_OPEN(self):
-        response = self._checkout({"tenant_id": "tenant_demo", "sabbath": {"enabled": True}},
-                                  organization={})
+        response = self._checkout({"tenant_id": "tenant_demo"}, organization={},
+                                  settings={"sabbath": {"enabled": True}})
         self.assertNotEqual(response["statusCode"], 503)

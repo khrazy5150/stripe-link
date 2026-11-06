@@ -60,16 +60,47 @@ def timezone_for(organization: dict, profile: dict) -> str:
         return "UTC"
 
 
+def tenant_settings(tenant_id: str) -> dict[str, Any]:
+    """The tenant's OWN settings document (`TenantConfig`), where the Sabbath choice is stored.
+
+    **Not the tenant PROFILE, deliberately, and it costs a read to say so.** The profile would have been
+    free -- every caller here already holds it for the billing and suspension checks -- but it is written
+    by the billing webhook as `tenant_repo.put({**tenant, **updates})`, a load-mutate-put. A tenant
+    saving this setting in the ~100ms between that read and that write would have it silently reverted,
+    which is the shared-document trap this codebase has already been bitten by. TenantConfig has exactly
+    one writer: the tenant.
+
+    The read is one keyed lookup against a Stripe round trip, so the trade is a few milliseconds for a
+    class of bug that is invisible when it happens.
+
+    Fails to `{}`, which leaves the store OPEN.
+    """
+    try:
+        from stripe_link.repositories.documents import platform_config_repository
+
+        return platform_config_repository().get(tenant_id) or {}
+    except Exception:  # noqa: BLE001 - see the docstring
+        import logging
+
+        logging.getLogger(__name__).exception("sabbath: could not read settings for %s", tenant_id)
+        return {}
+
+
 def assert_store_open(profile: Any, *, tenant_id: str, page_id: str = "", mode: str = "live",
-                      now: Any = None) -> None:
+                      now: Any = None, settings: Any = None) -> None:
     """Raise `SabbathClosedError` if this tenant has closed their store right now.
 
     Call it AFTER the platform's own refusals (billing hold, suspension). Those are the platform refusing
     on its own behalf; this is the merchant's choice about their own shop, and a suspended store reported
     as merely observing the Sabbath would tell a shopper to come back on Sunday to a shop we closed.
+
+    `profile` is still taken because the TIMEZONE falls back to the account's business address when the
+    Site has none -- the setting comes from `settings`, the place is resolved from both.
     """
+    if settings is None:
+        settings = tenant_settings(tenant_id)
     organization = site_organization_for(tenant_id, page_id, mode)
-    assert_open(profile, organization, timezone_name=timezone_for(organization, profile), now=now)
+    assert_open(settings, organization, timezone_name=timezone_for(organization, profile), now=now)
 
 
 def closed_response(exc: SabbathClosedError) -> dict[str, Any]:
