@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from stripe_link.domain.sabbath import (DEFAULT_AFTER_MINUTES, DEFAULT_BEFORE_MINUTES,
                                         MAX_BUFFER_MINUTES, SabbathClosedError, assert_open,
                                         clamp_buffer, config, coordinates, is_closed,
-                                        manual_window, sunset_utc, window)
+                                        manual_window, sunset_on_local_date, sunset_utc, window)
 
 ST_GEORGE = (37.0965, -113.5684)     # the tenant's own business address
 TROMSO = (69.6496, 18.9560)          # inside the Arctic circle
@@ -249,3 +249,79 @@ class AssertOpenTests(unittest.TestCase):
         """The whole module fails toward taking the money."""
         broken = {"sabbath": {"enabled": True, "manual": {"weekday": "friday"}}}
         assert_open(broken, {}, timezone_name="America/Denver", now=self._at(6, 20))
+
+
+class ATimezoneIsAPoliticalChoiceNotALongitudeTests(unittest.TestCase):
+    """Places whose clock is nowhere near their longitude.
+
+    `sunset_utc` answers for the solar day beginning at 00:00 UTC, which lands on the right LOCAL date
+    only where the offset roughly matches longitude/15. Kiritimati sits at 157 degrees WEST and keeps
+    UTC+14; the Chathams keep +12:45 at 176 west. Computing "Friday's sundown" from the raw date gave
+    Saturday's sundown locally, so the store closed Saturday evening and reopened Sunday — one whole day
+    late, every week.
+
+    Found 2026-11-05 by running the window in ten countries, NOT by a test: every northern-hemisphere and
+    European case was already correct, which is exactly why it survived the first review.
+    """
+
+    FAR_EAST = (
+        ("Pacific/Kiritimati", 1.8721, -157.4278),      # UTC+14 at 157W
+        ("Pacific/Chatham", -43.95, -176.55),           # UTC+12:45
+        ("Pacific/Apia", -13.8333, -171.7667),          # UTC+13
+    )
+
+    def test_the_window_still_runs_FRIDAY_to_SATURDAY(self):
+        for zone, lat, lon in self.FAR_EAST:
+            with self.subTest(zone=zone):
+                tz = ZoneInfo(zone)
+                start, end = window(datetime.datetime(2026, 11, 6, 12, tzinfo=tz),
+                                    latitude=lat, longitude=lon)
+                self.assertEqual(start.astimezone(tz).strftime("%a"), "Fri")
+                self.assertEqual(end.astimezone(tz).strftime("%a"), "Sat")
+
+    def test_sunset_on_local_date_returns_that_LOCAL_date(self):
+        for zone, lat, lon in self.FAR_EAST:
+            with self.subTest(zone=zone):
+                tz = ZoneInfo(zone)
+                day = datetime.date(2026, 11, 6)
+                got = sunset_on_local_date(day, lat, lon, tz)
+                self.assertIsNotNone(got)
+                self.assertEqual(got.astimezone(tz).date(), day)
+
+    def test_the_ordinary_cases_are_unchanged(self):
+        """The correction must not move a place whose clock already matches its longitude."""
+        tz = ZoneInfo("America/Denver")
+        self.assertEqual(sunset_on_local_date(datetime.date(2026, 11, 6), *ST_GEORGE, tz),
+                         sunset_utc(datetime.date(2026, 11, 6), *ST_GEORGE))
+
+    def test_half_and_quarter_hour_offsets_work(self):
+        """India +5:30, Nepal +5:45, Iran +3:30, Lord Howe's 30-MINUTE DST shift."""
+        for zone, lat, lon in (("Asia/Kolkata", 19.0760, 72.8777),
+                               ("Asia/Kathmandu", 27.7172, 85.3240),
+                               ("Asia/Tehran", 35.6892, 51.3890),
+                               ("Australia/Lord_Howe", -31.5553, 159.0821)):
+            with self.subTest(zone=zone):
+                tz = ZoneInfo(zone)
+                start, end = window(datetime.datetime(2026, 11, 6, 12, tzinfo=tz),
+                                    latitude=lat, longitude=lon)
+                self.assertEqual(start.astimezone(tz).strftime("%a"), "Fri")
+                self.assertEqual(end.astimezone(tz).strftime("%a"), "Sat")
+
+    def test_jerusalem_matches_published_candle_lighting(self):
+        """The most relevant city for this feature. Sundown 2026-11-06 is ~16:47 IST, so candle
+        lighting at the 18-minute default is ~16:29."""
+        tz = ZoneInfo("Asia/Jerusalem")
+        start, _ = window(datetime.datetime(2026, 11, 6, 12, tzinfo=tz),
+                          latitude=31.7683, longitude=35.2137, before_minutes=18, after_minutes=40)
+        self.assertEqual(start.astimezone(tz).strftime("%H:%M"), "16:29")
+
+    def test_southern_hemisphere_DST_does_not_shift_the_days(self):
+        """Santiago and Lord Howe both change clocks on the opposite half of the year."""
+        for zone, lat, lon in (("America/Santiago", -33.4489, -70.6693),
+                               ("Australia/Lord_Howe", -31.5553, 159.0821)):
+            with self.subTest(zone=zone):
+                tz = ZoneInfo(zone)
+                start, end = window(datetime.datetime(2026, 1, 9, 12, tzinfo=tz),  # a January Friday
+                                    latitude=lat, longitude=lon)
+                self.assertEqual(start.astimezone(tz).strftime("%a"), "Fri")
+                self.assertEqual(end.astimezone(tz).strftime("%a"), "Sat")

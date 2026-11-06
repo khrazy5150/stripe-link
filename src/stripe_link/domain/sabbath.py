@@ -117,6 +117,30 @@ def sunset_utc(date: datetime.date, latitude: float, longitude: float) -> dateti
     return datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
 
 
+def sunset_on_local_date(date: datetime.date, latitude: float, longitude: float,
+                         tzinfo: datetime.tzinfo) -> datetime.datetime | None:
+    """The sunset whose LOCAL calendar date is `date`, in `tzinfo`. None when the sun does not set.
+
+    **A timezone is a political choice, not a longitude.** `sunset_utc` answers for the solar day that
+    begins at 00:00 UTC, which lands on the right local date only where the offset roughly matches
+    longitude/15. Some places are nowhere near that: Kiritimati sits at 157 degrees WEST and keeps
+    UTC+14, a discrepancy of about a day, and the Chatham Islands keep +12:45 at 176 degrees west. For
+    both, "Friday's sundown" computed from the raw date is Saturday's sundown locally — so the store
+    closed on Saturday evening and reopened on Sunday, one whole day late, every week.
+
+    Found 2026-11-05 by running the window at ten international locations rather than by a test; the
+    northern-hemisphere and European cases were all correct, which is exactly why it survived.
+
+    Searches the neighbouring days rather than computing an offset, because the thing being matched is a
+    calendar date in a zone whose rules (including DST) only `tzinfo` knows.
+    """
+    for shift in (0, -1, 1):
+        candidate = sunset_utc(date + datetime.timedelta(days=shift), latitude, longitude)
+        if candidate is not None and candidate.astimezone(tzinfo).date() == date:
+            return candidate
+    return None
+
+
 def _friday_on_or_before(local_now: datetime.datetime) -> datetime.date:
     """The Friday of the Sabbath this moment could belong to.
 
@@ -138,8 +162,10 @@ def window(local_now: datetime.datetime, *, latitude: float, longitude: float,
     for every store west of Greenwich for part of each evening.
     """
     friday = _friday_on_or_before(local_now)
-    friday_sundown = sunset_utc(friday, latitude, longitude)
-    saturday_sundown = sunset_utc(friday + datetime.timedelta(days=1), latitude, longitude)
+    # Resolved against the STORE's zone, not the raw date: see `sunset_on_local_date`.
+    tz = local_now.tzinfo or datetime.timezone.utc
+    friday_sundown = sunset_on_local_date(friday, latitude, longitude, tz)
+    saturday_sundown = sunset_on_local_date(friday + datetime.timedelta(days=1), latitude, longitude, tz)
     if friday_sundown is None or saturday_sundown is None:
         return None
     start = friday_sundown - datetime.timedelta(minutes=clamp_buffer(before_minutes, DEFAULT_BEFORE_MINUTES))
