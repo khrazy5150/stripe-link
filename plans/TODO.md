@@ -3778,6 +3778,31 @@ choice.
     store it on the tenant profile/config, not per-user preferences, so every login sees the same state.
   - Future: additional holy days (Yom Kippur etc.) as a date list; a "closed now / reopens at" preview in the
     Preferences UI so the tenant can sanity-check their buffer.
+- **STATUS: P1 SHIPPED dev 2026-11-05 — the maths, the setting, and the checkout gate.**
+  - `domain/sabbath.py`: NOAA sundown in **pure stdlib**, not `astral`. `src/requirements.txt` is
+    intentionally empty and a dep there is bundled into ~49 function packages; fifty lines of trigonometry
+    is the cheaper side of that trade, and it honours the harder rule — no external sunset service, which
+    is what killed the 2020 version.
+  - Verified against real places and dates in both hemispheres (London 21:22 BST midsummer, Sydney 20:06
+    AEDT in December and 16:54 in June, St George 20:58 / 17:21). Tromso returns None in June AND December
+    but a real time at the equinox, so the polar case is seasonal rather than a refusal of high latitudes.
+  - **The bug worth remembering:** the first version was twelve hours out, because J2000.0 is NOON and the
+    Julian-day helper returns midnight. It produced sunrise times that looked plausible city by city. The
+    equator-at-equinox case is in the suite specifically to catch it.
+  - Two sundowns, never one plus 24h. The window looks BACK to the Friday on or before now, so a closure
+    whose end spills past midnight still contains the small hours — the high-latitude case.
+  - Setting on the TENANT (`profile.sabbath`), per this plan; coordinates per-SITE from
+    `organization.geo`; timezone from `store_timezone.working_day`, Site before account.
+  - **Fails OPEN at every missing input** — off by default, open with no coordinates, open at a pole with
+    no manual window, open if the maths raises. Refusing a sale the tenant did not ask to refuse is worse
+    than taking one during a window we could not compute.
+  - Checkout refuses with **503 `store_closed_sabbath`** carrying `resume_at` + `timezone`. 503 not 403:
+    this is temporary and the shopper should come back. It runs AFTER billing and suspension so a
+    platform refusal is never masked by the friendlier message.
+- **STILL TO BUILD (P2):** the branded closure page (artwork already exists at
+  `s3://www.juniorbay.net/images/frontpage/sabbath/`, 16 photos — pick one, do not source new art); the
+  Preferences UI with a "closed now / reopens at" preview; the manual-window editor for polar tenants;
+  gating cart/booking/upsell the same way checkout now is; the optional JS-island notice on cached pages.
 - **Why deferred:** feature idea captured for prioritization; no code.
 
 ### Age / identity verification gate (Stripe Identity)

@@ -430,3 +430,73 @@ class CheckoutHandlerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SabbathClosureTests(CheckoutHandlerTests):
+    """The tenant's OWN closure (plans/TODO.md "Sabbath mode"), at the checkout gate."""
+
+    ST_GEORGE_ORG = {"geo": {"latitude": 37.0965, "longitude": -113.5684}, "timezone": "America/Denver"}
+
+    def _checkout(self, tenant, *, organization):
+        from unittest.mock import patch
+        from handlers import checkout as checkout_handler
+        with patch.object(checkout_handler, "_sabbath_site_organization", return_value=organization):
+            return handler(
+                {"httpMethod": "GET", "queryStringParameters": {
+                    "clientID": "tenant_demo", "offer": "offer_simple_coffee",
+                    "product_id": "prod_simple_coffee", "price_id": "price_simple_coffee",
+                    "success_url": "https://pages.example.com/thanks",
+                    "cancel_url": "https://pages.example.com/buy"}},
+                None,
+                offers_repo=FakeRepository("offer_id", [self.offer]),
+                products_repo=FakeRepository("product_id", [self.product]),
+                stripe_repo=FakeStripeKeysRepository(),
+                tenant_repo=FakeRepository("tenant_id", [tenant]),
+                pages_repo=FakePublishedPagesRepository(),
+                secret_cipher=FakeCipher(),
+                opener=self.opener,
+            )
+
+    def test_a_tenant_who_never_enabled_it_checks_out_normally(self):
+        response = self._checkout({"tenant_id": "tenant_demo"}, organization=self.ST_GEORGE_ORG)
+        self.assertNotEqual(response["statusCode"], 503)
+
+    def test_it_refuses_with_503_and_says_WHEN_it_reopens(self):
+        """503, not 403: this is temporary and the shopper SHOULD come back. "Closed" without "until
+        when" is the difference between a pause and a dead link."""
+        import datetime, json
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+        from handlers import checkout as checkout_handler
+        from stripe_link.domain.sabbath import assert_open as real_assert
+
+        # Patched on the HANDLER, not on the domain module. `checkout` binds the function by name at
+        # import (`from ... import assert_open as assert_not_sabbath`), so patching the domain's
+        # attribute rebinds nothing the handler will ever look at -- the test passes while asserting
+        # nothing. Same trap as the two-patches-of-one-target collision in test_lead_download.
+        friday_evening = datetime.datetime(2026, 11, 6, 20, tzinfo=ZoneInfo("America/Denver"))
+        with patch.object(checkout_handler, "assert_not_sabbath",
+                          lambda p, o, **kw: real_assert(p, o, **{**kw, "now": friday_evening})):
+            response = self._checkout({"tenant_id": "tenant_demo",
+                                       "sabbath": {"enabled": True, "before_minutes": 18,
+                                                   "after_minutes": 40}},
+                                      organization=self.ST_GEORGE_ORG)
+        self.assertEqual(response["statusCode"], 503)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "store_closed_sabbath")
+        self.assertIn("resume_at", body)
+        self.assertEqual(body["timezone"], "America/Denver")
+
+    def test_a_SUSPENSION_is_not_masked_by_the_friendlier_message(self):
+        """The platform's own refusals run first. A suspended store must not be reported as merely
+        observing the Sabbath -- that would tell a shopper to come back on Sunday to a shop we closed."""
+        import json
+        response = self._checkout({"tenant_id": "tenant_demo", "billing_status": "suspended",
+                                   "sabbath": {"enabled": True}},
+                                  organization=self.ST_GEORGE_ORG)
+        self.assertNotEqual(json.loads(response["body"]).get("error"), "store_closed_sabbath")
+
+    def test_no_coordinates_leaves_the_store_OPEN(self):
+        response = self._checkout({"tenant_id": "tenant_demo", "sabbath": {"enabled": True}},
+                                  organization={})
+        self.assertNotEqual(response["statusCode"], 503)

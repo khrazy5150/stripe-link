@@ -168,3 +168,101 @@ def is_closed(local_now: datetime.datetime, start: datetime.datetime, end: datet
     at sundown should see the closure they asked for rather than slip through on a rounding.
     """
     return start <= local_now <= end
+
+
+# --- The stored setting, and the question a caller actually asks -------------------------------------
+
+
+class SabbathClosedError(Exception):
+    """The store is inside its own Sabbath window. Carries what the closure page has to say.
+
+    An exception rather than a boolean because the one caller that matters -- checkout -- already refuses
+    this way for suspension and billing (`assert_not_suspended`), and a third shape for "this store is not
+    taking orders right now" would be a third thing to remember at every new transaction point.
+    """
+
+    def __init__(self, resume_at: datetime.datetime, timezone_name: str) -> None:
+        super().__init__("This store is closed for the Sabbath.")
+        self.resume_at = resume_at
+        self.timezone_name = timezone_name
+
+
+def config(profile: Any) -> dict[str, Any]:
+    """The tenant's Sabbath setting, normalized. Always returns a usable dict; never raises.
+
+    **On the TENANT, not the Site** (plans/TODO.md: *"the closure is a store (tenant) property ... so
+    every login sees the same state"*). Observing the Sabbath is a fact about the person who runs the
+    shops, not about any one storefront, so a tenant with three Sites closes all three. The COORDINATES
+    are resolved separately and per-Site, because where a business is really can differ.
+
+    OFF unless explicitly on. Every other reading of a missing value would close someone's store for
+    them, which is the one direction this must never fail.
+    """
+    stored = (profile or {}).get("sabbath") if isinstance(profile, dict) else None
+    stored = stored if isinstance(stored, dict) else {}
+    manual = stored.get("manual") if isinstance(stored.get("manual"), dict) else None
+    return {
+        "enabled": bool(stored.get("enabled")),
+        "before_minutes": clamp_buffer(stored.get("before_minutes"), DEFAULT_BEFORE_MINUTES),
+        "after_minutes": clamp_buffer(stored.get("after_minutes"), DEFAULT_AFTER_MINUTES),
+        "manual": manual,
+    }
+
+
+def coordinates(organization: Any) -> tuple[float, float] | None:
+    """(lat, lon) from a Site's `organization.geo`, or None when it has none.
+
+    Both coordinates or neither: a geo carrying only a latitude is a half-filled form, and guessing the
+    other half would compute a sundown for a place nobody named.
+    """
+    geo = (organization or {}).get("geo") if isinstance(organization, dict) else None
+    if not isinstance(geo, dict):
+        return None
+    try:
+        lat, lon = float(geo.get("latitude")), float(geo.get("longitude"))
+    except (TypeError, ValueError):
+        return None
+    return (lat, lon)
+
+
+def assert_open(profile: Any, organization: Any, *, timezone_name: str = "",
+                now: datetime.datetime | None = None) -> None:
+    """Raise `SabbathClosedError` if this tenant's store is closed right now. Otherwise return.
+
+    **FAILS OPEN at every missing input**, and the asymmetry is deliberate: refusing a sale the tenant did
+    not ask to refuse is worse than taking one during a window we could not compute. A tenant who turns
+    this on and sees their store stay open will tell us; a tenant whose store closed because their Site
+    had no coordinates would lose sales silently and have nothing to look at.
+
+    So: off by default, open when there are no coordinates, open when the sun does not set and no manual
+    window was given, and open if anything at all goes wrong in the maths.
+    """
+    setting = config(profile)
+    if not setting["enabled"]:
+        return
+    zone_name = str(timezone_name or "UTC")
+    try:
+        from stripe_link.domain.store_timezone import load_zone
+
+        local_now = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(load_zone(zone_name))
+        span = None
+        here = coordinates(organization)
+        if here is not None:
+            span = window(local_now, latitude=here[0], longitude=here[1],
+                          before_minutes=setting["before_minutes"],
+                          after_minutes=setting["after_minutes"])
+        if span is None and setting["manual"]:
+            manual = setting["manual"]
+            span = manual_window(local_now, weekday=int(manual.get("weekday", _FRIDAY)),
+                                 hour=int(manual.get("hour", 18)), minute=int(manual.get("minute", 0)),
+                                 duration_hours=float(manual.get("duration_hours", MIN_MANUAL_HOURS)))
+        if span is None:
+            return
+        start, end = span
+    except Exception:  # noqa: BLE001 - see the docstring; a broken clock must not refuse a sale
+        import logging
+
+        logging.getLogger(__name__).exception("sabbath: could not resolve the window; leaving the store open")
+        return
+    if is_closed(local_now, start, end):
+        raise SabbathClosedError(end.astimezone(local_now.tzinfo), zone_name)

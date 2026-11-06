@@ -22,6 +22,7 @@ from stripe_link.common import error_response, json_response, query_params, reso
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.page_views import source_slug as attribution_source_slug
 from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
+from stripe_link.domain.sabbath import SabbathClosedError, assert_open as assert_not_sabbath
 from stripe_link.domain import commerce_eligibility
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.tax_status import calculates as tax_calculates
@@ -173,6 +174,41 @@ def resolve_platform_coupon(code, tenant_id, mode, coupons_repo=None, offer_id="
         return None
 
 
+def _sabbath_site_organization(tenant_id: str, page_id: str, mode: str) -> dict:
+    """The organization of the Site this checkout belongs to — for its COORDINATES.
+
+    Reuses `sender_identity.site_organization`, the one place that already answers *which of this
+    tenant's businesses is this?* rather than walking the page->Site edge a third time.
+
+    Fails to `{}`, which leaves the store OPEN: a Sabbath closure that fired because a Site lookup
+    hiccuped would refuse a sale the tenant never asked to refuse.
+    """
+    try:
+        from stripe_link.sender_identity import site_organization
+
+        return site_organization(tenant_id, page_id=page_id, mode=mode) or {}
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("sabbath: could not resolve the Site for %s/%s", tenant_id, page_id)
+        return {}
+
+
+def _sabbath_timezone(organization: dict, profile: dict) -> str:
+    """The zone the closure window is computed in, Site before account.
+
+    `working_day` already resolves exactly this pair for the shipping cutoff, so the Sabbath uses the
+    same answer: a tenant who told us their shop keeps Denver hours should not have to say it twice, and
+    two resolutions of "which timezone is this business in" would eventually disagree.
+    """
+    try:
+        from stripe_link.domain.store_timezone import working_day
+
+        zone, _cutoff = working_day(organization, (profile or {}).get("business"))
+        return zone or "UTC"
+    except Exception:  # noqa: BLE001 - UTC is visibly a placeholder, not a plausible wrong answer
+        logger.exception("sabbath: could not resolve a timezone; using UTC")
+        return "UTC"
+
+
 def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None, offer_id=""):
     """The Stripe promotion-code id for a campaign coupon. "" when no coupon was asked for at all.
 
@@ -319,6 +355,13 @@ def handler(
         _profile = tenant_repo.get(tenant_id, tenant_id)
         assert_billing_in_good_standing(_profile)
         assert_not_suspended(_profile)
+        # And a closure the TENANT chose (plans/TODO.md "Sabbath mode"). Third in the row deliberately:
+        # the two above are the platform refusing on its own behalf, this one is the merchant's own
+        # decision about their own shop, so it must not mask a billing hold or a suspension behind a
+        # friendlier message. Off unless switched on, and it fails OPEN at every missing input.
+        _sabbath_organization = _sabbath_site_organization(tenant_id, page_id, mode)
+        assert_not_sabbath(_profile, _sabbath_organization,
+                           timezone_name=_sabbath_timezone(_sabbath_organization, _profile))
 
         # A checkout initiated from a page may only transact when that page is published. The preview render
         # already shows a "DRAFT" screen instead of a working CTA, but this is the authoritative server-side
@@ -490,6 +533,13 @@ def handler(
         )
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
+    except SabbathClosedError as exc:
+        # 503, not 403: this is temporary and the shopper SHOULD come back. The resume moment travels in
+        # the body so the closure page can say when, in the store's own zone -- "closed" without "until
+        # when" is the difference between a pause and a dead link.
+        return error_response(
+            "This store is closed for the Sabbath.", status_code=503, code="store_closed_sabbath",
+            extra={"resume_at": exc.resume_at.isoformat(), "timezone": exc.timezone_name})
     except SuspendedError as exc:
         # 403, not 402: this is not a bill the merchant can settle, and a shopper must not be invited to
         # retry. The message is the reason the platform recorded, so support is not guessing either.

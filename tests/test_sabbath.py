@@ -9,8 +9,9 @@ import unittest
 from zoneinfo import ZoneInfo
 
 from stripe_link.domain.sabbath import (DEFAULT_AFTER_MINUTES, DEFAULT_BEFORE_MINUTES,
-                                        MAX_BUFFER_MINUTES, clamp_buffer, is_closed, manual_window,
-                                        sunset_utc, window)
+                                        MAX_BUFFER_MINUTES, SabbathClosedError, assert_open,
+                                        clamp_buffer, config, coordinates, is_closed,
+                                        manual_window, sunset_utc, window)
 
 ST_GEORGE = (37.0965, -113.5684)     # the tenant's own business address
 TROMSO = (69.6496, 18.9560)          # inside the Arctic circle
@@ -170,3 +171,81 @@ class TheManualWindowTests(unittest.TestCase):
         start, end = manual_window(now, weekday=4, hour=18, minute=0, duration_hours=24)
         self.assertTrue(is_closed(now, start, end))
         self.assertFalse(is_closed(datetime.datetime(2026, 11, 6, 17, tzinfo=tz), start, end))
+
+
+class TheStoredSettingTests(unittest.TestCase):
+    def test_it_is_OFF_unless_explicitly_on(self):
+        """Every other reading of a missing value closes someone's store for them."""
+        for profile in ({}, None, {"sabbath": {}}, {"sabbath": None}, {"sabbath": "yes"}):
+            self.assertFalse(config(profile)["enabled"], repr(profile))
+
+    def test_buffers_default_and_clamp(self):
+        got = config({"sabbath": {"enabled": True, "before_minutes": 999, "after_minutes": None}})
+        self.assertEqual(got["before_minutes"], MAX_BUFFER_MINUTES)
+        self.assertEqual(got["after_minutes"], DEFAULT_AFTER_MINUTES)
+
+    def test_zero_survives_normalization(self):
+        got = config({"sabbath": {"enabled": True, "before_minutes": 0, "after_minutes": 0}})
+        self.assertEqual((got["before_minutes"], got["after_minutes"]), (0, 0))
+
+
+class TheCoordinatesTests(unittest.TestCase):
+    def test_it_reads_the_sites_geo(self):
+        org = {"geo": {"latitude": 37.0965, "longitude": -113.5684}}
+        self.assertEqual(coordinates(org), ST_GEORGE)
+
+    def test_half_a_geo_is_no_geo(self):
+        """Guessing the missing half would compute a sundown for a place nobody named."""
+        self.assertIsNone(coordinates({"geo": {"latitude": 37.0}}))
+        self.assertIsNone(coordinates({"geo": {}}))
+        self.assertIsNone(coordinates({}))
+        self.assertIsNone(coordinates(None))
+
+    def test_a_decimal_from_dynamo_still_reads(self):
+        """`isinstance(x, float)` is False for Decimal, and these come back from a stored document."""
+        from decimal import Decimal
+        got = coordinates({"geo": {"latitude": Decimal("37.0965"), "longitude": Decimal("-113.5684")}})
+        self.assertEqual(got, ST_GEORGE)
+
+
+class AssertOpenTests(unittest.TestCase):
+    ORG = {"geo": {"latitude": ST_GEORGE[0], "longitude": ST_GEORGE[1]}}
+    ON = {"sabbath": {"enabled": True, "before_minutes": 18, "after_minutes": 40}}
+
+    def _at(self, day, hour):
+        return datetime.datetime(2026, 11, day, hour, tzinfo=ZoneInfo("America/Denver"))
+
+    def test_it_closes_during_the_window(self):
+        with self.assertRaises(SabbathClosedError) as caught:
+            assert_open(self.ON, self.ORG, timezone_name="America/Denver", now=self._at(6, 20))
+        self.assertEqual(caught.exception.timezone_name, "America/Denver")
+        self.assertGreater(caught.exception.resume_at, self._at(6, 20))
+
+    def test_it_stays_open_outside_it(self):
+        assert_open(self.ON, self.ORG, timezone_name="America/Denver", now=self._at(4, 12))
+
+    def test_a_tenant_who_never_enabled_it_is_never_closed(self):
+        assert_open({}, self.ORG, timezone_name="America/Denver", now=self._at(6, 20))
+
+    def test_NO_COORDINATES_leaves_the_store_open(self):
+        """Fails open on purpose. A store that closed because its Site had no geo would lose sales
+        silently; one that stays open when the tenant expected otherwise gets reported."""
+        assert_open(self.ON, {}, timezone_name="America/Denver", now=self._at(6, 20))
+
+    def test_a_polar_tenant_with_no_manual_window_stays_open(self):
+        org = {"geo": {"latitude": TROMSO[0], "longitude": TROMSO[1]}}
+        assert_open(self.ON, org, timezone_name="Europe/Oslo",
+                    now=datetime.datetime(2026, 6, 19, 20, tzinfo=ZoneInfo("Europe/Oslo")))
+
+    def test_a_polar_tenant_WITH_a_manual_window_is_closed_by_it(self):
+        org = {"geo": {"latitude": TROMSO[0], "longitude": TROMSO[1]}}
+        profile = {"sabbath": {"enabled": True,
+                               "manual": {"weekday": 4, "hour": 18, "minute": 0, "duration_hours": 24}}}
+        with self.assertRaises(SabbathClosedError):
+            assert_open(profile, org, timezone_name="Europe/Oslo",
+                        now=datetime.datetime(2026, 6, 19, 20, tzinfo=ZoneInfo("Europe/Oslo")))
+
+    def test_a_broken_setting_never_refuses_a_sale(self):
+        """The whole module fails toward taking the money."""
+        broken = {"sabbath": {"enabled": True, "manual": {"weekday": "friday"}}}
+        assert_open(broken, {}, timezone_name="America/Denver", now=self._at(6, 20))
