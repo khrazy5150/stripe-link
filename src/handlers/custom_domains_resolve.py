@@ -15,10 +15,31 @@ from stripe_link.repositories.documents import RepositoryError, custom_domains_i
 # it from publishing cost 383ms of cold start on the hot path of every custom domain (measured
 # 2026-10-25) to pull in a publish pipeline this handler never runs.
 from stripe_link.runtime.artifacts import artifact_paths, public_url
+from stripe_link.sabbath_site import closure_for_site
 
 # A root-level well-known file (robots.txt, sitemap.xml, or an IndexNow key) — served from a sibling artifact
 # under the homepage page_id. Single path segment only: no directories, no traversal.
 _WELL_KNOWN_PATH = re.compile(r"^/[A-Za-z0-9._-]+\.(txt|xml)$")
+
+
+def sabbath_closed_url(record, closure) -> str:
+    """The closed page's URL, carrying what it needs to SAY -- nothing it needs to decide.
+
+    Empty when there is no API base configured, which leaves the store serving normally: a tenant whose
+    shop stayed open through their Sabbath has a setting that did not work, while one whose shop went
+    blank has lost the week's trade.
+    """
+    base = os.environ.get("PUBLIC_API_BASE_URL", "").rstrip("/")
+    if not base:
+        return ""
+    from urllib.parse import urlencode
+
+    query = urlencode({
+        "until": closure.resume_at.isoformat(),
+        "tz": closure.timezone_name or "UTC",
+        "store": str(record.get("site_name") or record.get("domain") or ""),
+    })
+    return f"{base}/sabbath/closed?{query}"
 
 
 def _funnel_artifact_page_id(base_page_id, entry, funnel_step):
@@ -249,6 +270,20 @@ def handler(event, context, *, index_repo=None, pages_domain=None, experiments_r
     origin_url = public_url(pages_domain, artifact_key)
     if not origin_url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
+
+    # CLOSED FOR THE SABBATH -- decided here, on the one path every live store request already goes
+    # through, so the Worker needs no change: it proxies whatever `origin_url` names. Checked AFTER the
+    # artifact URL is resolved, so a Site whose page does not exist still 404s rather than reporting
+    # itself shut (plans/TODO.md "Sabbath mode" P3).
+    #
+    # `noindex` is deliberately NOT set. The closed page answers 503 with `Retry-After`, which tells a
+    # crawler the URL is fine and to come back; adding noindex on top is a contradictory signal that can
+    # cost the tenant the ranking of a page that is merely shut until sundown.
+    closure = closure_for_site(tenant_id, str(record.get("site_id") or ""), record_mode)
+    if closure is not None:
+        closed_url = sabbath_closed_url(record, closure)
+        if closed_url:
+            return json_response({"route": {"type": "origin_url", "origin_url": closed_url}})
 
     route = {"type": "origin_url", "origin_url": origin_url}
     # A/B: hand the edge the experiment DEFINITION and let it assign (plans/AB_TESTING.md A1). `origin_url`

@@ -16,6 +16,9 @@ from typing import Any
 
 from stripe_link.common import error_response
 from stripe_link.domain.sabbath import SabbathClosedError, assert_open, timezone_for
+# `tenant_settings` lives in `sabbath_site` so the LIVE PAGE RESOLVER can read the setting
+# without importing this module, which reaches `sender_identity` and therefore PAGES_TABLE.
+from stripe_link.sabbath_site import tenant_settings
 
 __all__ = ["SabbathClosedError", "assert_store_open", "closed_response", "timezone_for"]
 
@@ -38,32 +41,6 @@ def site_organization_for(tenant_id: str, page_id: str, mode: str) -> dict[str, 
 
         logging.getLogger(__name__).exception("sabbath: could not resolve the Site for %s/%s",
                                               tenant_id, page_id)
-        return {}
-
-
-def tenant_settings(tenant_id: str) -> dict[str, Any]:
-    """The tenant's OWN settings document (`TenantConfig`), where the Sabbath choice is stored.
-
-    **Not the tenant PROFILE, deliberately, and it costs a read to say so.** The profile would have been
-    free -- every caller here already holds it for the billing and suspension checks -- but it is written
-    by the billing webhook as `tenant_repo.put({**tenant, **updates})`, a load-mutate-put. A tenant
-    saving this setting in the ~100ms between that read and that write would have it silently reverted,
-    which is the shared-document trap this codebase has already been bitten by. TenantConfig has exactly
-    one writer: the tenant.
-
-    The read is one keyed lookup against a Stripe round trip, so the trade is a few milliseconds for a
-    class of bug that is invisible when it happens.
-
-    Fails to `{}`, which leaves the store OPEN.
-    """
-    try:
-        from stripe_link.repositories.documents import platform_config_repository
-
-        return platform_config_repository().get(tenant_id) or {}
-    except Exception:  # noqa: BLE001 - see the docstring
-        import logging
-
-        logging.getLogger(__name__).exception("sabbath: could not read settings for %s", tenant_id)
         return {}
 
 

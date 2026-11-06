@@ -3840,12 +3840,21 @@ Resources:
           APP_CONFIG_TABLE: !Ref AppConfigTable
           CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
           EXPERIMENTS_TABLE: !Ref ExperimentsTable
+          # Sabbath mode: this resolver decides whether a live store is shut right now, because it is the
+          # one Lambda every live request already passes through -- the Worker just proxies the URL it is
+          # given, so no edge change is needed (plans/TODO.md "Sabbath mode" P3).
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
+          SITES_TABLE: !Ref SitesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-custom-domains-resolve-${Environment}"
       CodeUri: src/
       Handler: handlers.custom_domains_resolve.handler
-      Description: Public, unauthenticated endpoint the Cloudflare Worker calls on every custom-domain request to resolve which page to reverse-proxy to. Read-only, no Offer/Product/Stripe/TenantConfig access.
+      # Lambda Description is capped at 256 characters and CloudFormation rejects the whole changeset
+      # over it, so the long version lives here: this also reads TenantConfig/Sites/profile, but ONLY
+      # to decide whether the store is shut for the Sabbath, and it short-circuits on the setting so a
+      # tenant who has not enabled it pays one keyed lookup and nothing else.
+      Description: Public, unauthenticated endpoint the Cloudflare Worker calls on every custom-domain request to resolve which page to reverse-proxy to. Read-only, no Offer/Product/Stripe access. Also decides Sabbath closure (see comment).
       Policies:
         # app_config read: APP_CONFIG_TABLE is set in Globals for every function, so a missing grant
         # fails SILENTLY -- platform_config swallows the AccessDenied and returns empties, which shows up
@@ -3858,6 +3867,14 @@ Resources:
         # variant. It never writes -- view counts are pinged separately by the Worker.
         - DynamoDBReadPolicy:
             TableName: !Ref ExperimentsTable
+        # Sabbath closure, READ only. The setting is the tenant's own document; the Site supplies the
+        # coordinates the sundown is computed from; the profile supplies the timezone fallback.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
       Events:
         CustomDomainsResolve:
           Type: Api
@@ -3867,6 +3884,25 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+  SabbathClosedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # NO table grants: this renders a page, it does not decide anything. The resolver decides and passes
+      # the reopening moment in the query string, so there is one implementation of the window.
+      FunctionName: !Sub "${ProjectPrefix}-sabbath-closed-${Environment}"
+      CodeUri: src/
+      Handler: handlers.sabbath_closed.handler
+      Description: The branded "closed for the Sabbath" page a shopper sees while a store is shut. Public and unauthenticated -- the Cloudflare Worker proxies it in place of the published page. Answers 503 with Retry-After so a crawler keeps the URL and comes back.
+      Events:
+        SabbathClosedPage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sabbath/closed
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
   RoutesFunction:
     Type: AWS::Serverless::Function
     Properties:
