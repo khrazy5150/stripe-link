@@ -500,6 +500,42 @@ or creator account (not personal accounts)" as a general prerequisite — matchi
 author on 2026-11-06 (§6.2f). Two independent sources now agree, so the onboarding copy can state it
 plainly.
 
+### 6.2j ❌ CORRECTION — BYOK IS THE PLATFORM'S APP, NOT THE TENANT'S (2026-11-06)
+
+**§6.2g got this backwards and the conclusion it reached was wrong.** It read "you must register your own
+application" as the TENANT registering one, and concluded that X, Google Business Profile, Vimeo and
+Reddit were unusable because an SMB will not visit a developer portal. Re-read with the right question
+asked: **"you" is the Outstand account holder — us.**
+
+Credentials are `client_key`/`client_secret` supplied **per Outstand organization**, either in their
+dashboard or by `POST /v1/social-networks`, and they are configured BEFORE any social account connects.
+Connecting an account is a separate, later step. Combined with their white-label claim that customers
+"never see Outstand or third-party branding during connection", the model is the ordinary one: **we
+register one app per network, once, and every tenant OAuths through it.**
+
+So the cost of those four networks is **one-time platform work**, not a per-tenant cliff:
+
+| Network | What it actually takes | Launch-viable? |
+|---|---|---|
+| Reddit, Vimeo | register one app each, free | yes |
+| X | register one app; note X's own API tiers now meter posting volume, which is a COST question, not an access one | yes, priced |
+| Google Business Profile | register one app **and** be approved by Google for Business Profile API access — once, for our project | yes **if** that approval exists |
+
+**⚠️ One thing the docs do not state outright**, and their own page says to confirm with support: that a
+single credential set serves many end-users' accounts. Everything about the white-label framing implies
+it, and nothing would make sense otherwise, but it is load-bearing enough to ask in the thread that
+already exists (§6.2b's) rather than assume. **If it turned out to be one app per connected account, the
+original §6.2g conclusion would be right after all** — so the question is worth one sentence.
+
+**And the distinction that decides GBP.** "Approved for Google Business Profile" means two different
+things and only one of them helps:
+
+- **A verified listing, with owner/manager roles** — what nearly every local business has. Common, free,
+  and grants NOTHING at the API layer.
+- **Business Profile API access approved by Google for a specific Google Cloud project** — an application
+  with a review, granted per project. This is the one that matters, and it is ours to hold, not the
+  tenant's.
+
 ### 6.2i What else the vendor does — and two things the connect flow is missing (2026-11-06)
 
 Asked whether it covers Google Ads, Google Calendar and Google Business Profile. **Ads: no. Calendar: no.**
