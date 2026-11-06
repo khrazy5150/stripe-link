@@ -358,7 +358,7 @@
                 class="secondary-action compact"
                 :disabled="geoBusy || !canCalculateGeo"
                 @click="calculateGeo"
-              >{{ geoBusy ? "Looking up\u2026" : "Calculate from address" }}</button>
+              >{{ geoBusy ? "Looking up…" : "Calculate from address" }}</button>
             </div>
             <div class="offer-two-column">
               <label class="offer-field"><span>Latitude</span><input v-model.trim="form.org.geo.latitude" type="number" step="any" placeholder="39.7392" /></label>
@@ -367,7 +367,7 @@
             <p v-if="geoNote" class="field-note" :class="{ 'geo-error': geoFailed }">{{ geoNote }}</p>
             <small v-else class="field-note">
               Used for your map listing and, if you switch on Sabbath Mode, to work out sundown at this
-              shop. Fill in the address above, then press Calculate \u2014 check the place it names before
+              shop. Fill in the address above, then press Calculate — check the place it names before
               you save.
             </small>
             <div class="offer-field">
@@ -1179,9 +1179,12 @@ const LOCAL_ENTITY_TYPES = ["LocalBusiness", "HomeAndConstructionBusiness", "Hea
 const derivedDestinationLabel = computed(() =>
   LOCAL_ENTITY_TYPES.includes(form.org.entity_type) ? "Google" : "Junior Bay");
 
+// Sunday first, Saturday last: the week as a US calendar prints it, which is how a tenant reads a row of
+// day chips. Display order ONLY -- days are stored by name, so re-ordering changes no stored document and
+// no structured data.
 const WEEK_DAYS = [
-  ["Monday", "Mon"], ["Tuesday", "Tue"], ["Wednesday", "Wed"], ["Thursday", "Thu"],
-  ["Friday", "Fri"], ["Saturday", "Sat"], ["Sunday", "Sun"],
+  ["Sunday", "Sun"], ["Monday", "Mon"], ["Tuesday", "Tue"], ["Wednesday", "Wed"],
+  ["Thursday", "Thu"], ["Friday", "Fri"], ["Saturday", "Sat"],
 ];
 // Mirrors SAME_AS_HOSTS and SAME_AS_MAX in src/stripe_link/domain/social_links.py. The dashboard cannot
 // import Python, so tests/test_social_link_picker.py pins the two together — adding a host on one side only
@@ -2031,6 +2034,30 @@ function openEdit(site) {
 
 async function saveEdit({ keepOpen = false } = {}) {
   formError.value = "";
+  let doc;
+  try {
+    doc = buildEditDocument();
+  } catch (error) {
+    // Everything below used to run OUTSIDE the try, so one bad value anywhere in the form threw before
+    // the request was made: no network call, no message, and a Save button that simply did nothing. A
+    // dead control with no explanation is the failure this dialog has now hit twice.
+    formError.value = `This Site could not be prepared for saving: ${error.message || error}`;
+    if (keepOpen) throw error;
+    return;
+  }
+  try {
+    const saved = await store.save(doc);
+    // keepOpen: the link check saves first so it runs against stored data, then keeps editing so the
+    // tenant sees the badges update in place rather than being thrown back to the list.
+    if (keepOpen) editing.value = saved || editing.value;
+    else editing.value = null;
+  } catch (error) {
+    formError.value = error.message || "Failed to save site.";
+    if (keepOpen) throw error;
+  }
+}
+
+function buildEditDocument() {
   const brands = [...new Set((form.org.brands || []).map((b) => String(b || "").trim()).filter(Boolean))];
   const organization = {
     ...editing.value.organization,
@@ -2079,27 +2106,21 @@ async function saveEdit({ keepOpen = false } = {}) {
     indexing: { ...editing.value.indexing, seo_enabled: form.seo_enabled },
   };
   if (!doc.seo) delete doc.seo;
-  try {
-    const saved = await store.save(doc);
-    // keepOpen: the link check saves first so it runs against stored data, then keeps editing so the
-    // tenant sees the badges update in place rather than being thrown back to the list.
-    if (keepOpen) editing.value = saved || editing.value;
-    else editing.value = null;
-  } catch (error) {
-    formError.value = error.message || "Failed to save site.";
-    if (keepOpen) throw error;
-  }
+  return doc;
 }
 
 function availabilityText(state) {
   if (!state.input) return "";
   if (state.checking) return "Checking availability…";
+  // Said out loud, and said as what it is. The check not running is not the address being taken, and the
+  // tenant can still save -- so this reads as a note, not a refusal.
+  if (state.failed) return `Could not check this address (${state.reason}). You can still save.`;
   if (!state.checked) return "";
   if (state.available) return `✓ ${state.hostname} is available`;
   return `✗ ${state.reason}`;
 }
 function availabilityClass(state) {
-  if (state.checking || !state.checked || !state.input) return "field-note";
+  if (state.checking || state.failed || !state.checked || !state.input) return "field-note";
   return state.available ? "subdomain-ok" : "subdomain-bad";
 }
 

@@ -289,14 +289,14 @@ class TheSitesScreenManagesThemTests(unittest.TestCase):
         self.assertIn("brands: Array.isArray(org.brands) ? [...org.brands] : []", block)
 
     def test_saving_TRIMS_and_DEDUPLICATES(self):
-        block = SITES_SCREEN.split("async function saveEdit(", 1)[1][:900]
+        block = SITES_SCREEN.split("function buildEditDocument(", 1)[1][:900]
         self.assertIn("new Set(", block)
         self.assertIn(".trim()", block)
 
     def test_clearing_every_brand_REMOVES_the_key(self):
         """Rather than storing an empty array on a Site nobody has given brands. `undefined` is dropped by
         the same filter that drops every other unset organization field."""
-        block = SITES_SCREEN.split("async function saveEdit(", 1)[1][:900]
+        block = SITES_SCREEN.split("function buildEditDocument(", 1)[1][:900]
         self.assertIn("brands.length ? brands : undefined", block)
 
 

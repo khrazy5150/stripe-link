@@ -15,6 +15,10 @@ export function useSubdomainCheck() {
     suggestions: [],
     checking: false,
     checked: false,
+    // A check that could not be MADE, as opposed to one that came back negative. They were the same
+    // state until 2026-11-06, and that is how a network blip disabled Save until the tenant happened to
+    // retype the address: an error was being stored as a verdict, and nothing downstream could tell.
+    failed: false,
   });
   let timer = null;
   let seq = 0;
@@ -22,7 +26,7 @@ export function useSubdomainCheck() {
   function clear() {
     if (timer) clearTimeout(timer);
     state.input = state.normalized = state.hostname = state.reason = "";
-    state.available = state.ownedByYou = state.checking = state.checked = false;
+    state.available = state.ownedByYou = state.checking = state.checked = state.failed = false;
     state.suggestions = [];
   }
 
@@ -31,13 +35,14 @@ export function useSubdomainCheck() {
     if (timer) clearTimeout(timer);
     const trimmed = String(name || "").trim();
     if (!trimmed) {
-      state.checking = state.checked = state.available = state.ownedByYou = false;
+      state.checking = state.checked = state.available = state.ownedByYou = state.failed = false;
       state.reason = "";
       state.suggestions = [];
       state.normalized = state.hostname = "";
       return;
     }
     state.checking = true;
+    state.failed = false;
     const mine = ++seq;
     timer = setTimeout(async () => {
       try {
@@ -50,12 +55,16 @@ export function useSubdomainCheck() {
         state.reason = res.reason || "";
         state.suggestions = Array.isArray(res.suggestions) ? res.suggestions : [];
         state.checked = true;
+        state.failed = false;
       } catch (error) {
         if (mine !== seq) return;
-        state.available = state.ownedByYou = false;
+        // NOT `checked`. We did not learn that the address is taken, we learned nothing -- and the
+        // caller gates Save on `checked && !available`, so claiming a verdict here locked the tenant out
+        // of saving an address that was never in question.
+        state.available = state.ownedByYou = state.checked = false;
         state.reason = error.message || "Could not check availability.";
         state.suggestions = [];
-        state.checked = true;
+        state.failed = true;
       } finally {
         if (mine === seq) state.checking = false;
       }

@@ -154,7 +154,7 @@ class TheSiteEditorCanSetThemTests(unittest.TestCase):
 
     def test_MIDNIGHT_survives_the_save(self):
         """`|| undefined` would eat hour 0. "" is the only "inherit"."""
-        block = self.SCREEN.split("async function saveEdit(", 1)[1][:1600]
+        block = self.SCREEN.split("function buildEditDocument(", 1)[1][:1600]
         self.assertIn('form.org.shipping_cutoff_hour === "" ? undefined', block)
 
     def test_a_stored_ZERO_reads_back_as_chosen_not_blank(self):
