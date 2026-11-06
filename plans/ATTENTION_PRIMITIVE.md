@@ -362,7 +362,60 @@ So §6.2's "first ~50 premium tenants inside the $19 base" survives — at two p
 almost exactly right, for a different reason than it gave. At 50 tenants × $69 that is $3,450/mo of
 revenue against ~$19 of publishing cost, and §6.2's "<1% of a $69 tier" holds.
 
-### 6.2c The account ladder, answered (2026-11-05)
+### 6.2d ⭐ THE REAL PRICING PAGE, read at last (2026-11-05) — §6.2c's cliff does not exist
+
+Everything before this section priced the vendor from email and marketing copy. The actual billing page
+says something different, and better:
+
+| | Pay as you go — $19/mo | Business — $129/mo |
+|---|---|---|
+| Posts included | **3,000 / month** | 50,000 / month |
+| Overage | $0.007 to 10,000, then $0.005 | $0.005 |
+| Account slots | **100 initial; _more free through support_** | 1,000 initial; more free through support |
+| Keys | Managed + BYOK | Managed + BYOK |
+| Reselling | *(not listed)* | **"Reselling explicitly permitted"** |
+
+**§6.2c's $19→$129 cliff at 101 accounts is WRONG and is withdrawn.** Accounts are not a hard ceiling:
+*"Additional accounts can be requested via support — no additional charge."* There is no step to plan
+around, so the dip, the recovery curves and the "four times sooner" warning all describe a wall that is
+not there.
+
+**The real constraint is POSTS, and it is gentle.** At 60 posts/tenant/month:
+
+| Tenants | Posts/mo | Publishing | % of $69 revenue |
+|---|---|---|---|
+| 50 | 3,000 | $19.00 | 0.55% |
+| 100 | 6,000 | $40.00 | 0.58% |
+| 200 | 12,000 | $78.00 | 0.57% |
+| **370** | **22,200** | **$129.00** | **0.51%** |
+
+Publishing sits near **half a percent of revenue at every scale**, and Pay-as-you-go stays cheaper than
+Business until about **370 tenants**. §6.2's original arithmetic — *"~$40/mo total at 100 tenants,
+publishing is <1% of a $69 tier"* — was right all along and is hereby un-struck.
+
+**What §6.2c got right and keeps.** The `connected_accounts` allowance is still worth having, but its
+JUSTIFICATION changes: not a cost cliff, a product promise. "3 accounts on this tier" is a tier
+difference a buyer understands, and a per-tenant bound still protects the post budget, which is the thing
+that actually costs money. The default of 3 (one per channel) stands.
+
+### ⚠️ 6.2e THE RESALE CLAUSE SITS ON THE £129 TIER, NOT THE $19 ONE
+
+**"Reselling explicitly permitted" is listed as a BUSINESS feature. Pay-as-you-go does not list it.**
+The author holds written permission to resell on the $19 plan (§6.2b), which reads as an exception to the
+published tiering rather than a restatement of it.
+
+That is not a reason to doubt the letter — a vendor may grant exactly this, and the page is marketing
+copy, which §6.2 already warns is not the terms. It IS a reason to treat the letter as the load-bearing
+document it is: **keep it retrievable, and have the reply name the plan explicitly.** §6.2a's finding
+stands unchanged — *"without that letter there is no Outstand path at all"* — and a permission that
+contradicts the public page is one worth being able to produce on demand.
+
+**Cheap follow-up, same thread as the enablement request:** ask them to confirm in writing that resale is
+permitted on Pay-as-you-go for this account. One sentence from them closes the only remaining ambiguity
+in the whole vendor question.
+
+### 6.2c The account ladder, answered (2026-11-05) — ⚠️ SUPERSEDED BY §6.2d, kept as the record of a
+### cliff that turned out not to exist
 
 **$19/mo up to 100 accounts; $129/mo ("Business") at 101 and above.** A hard step, not an overage — the
 101st account costs $110/mo, the 102nd through however-far-Business-reaches cost nothing.
