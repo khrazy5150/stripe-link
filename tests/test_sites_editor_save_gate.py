@@ -103,3 +103,40 @@ class TheHelpTextRendersTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheGeoSurvivesTheRoundTripTests(unittest.TestCase):
+    """The coordinates the Calculate button stores must still be there when a page is rendered.
+
+    `feedback_decimal_from_dynamo`, hit again: DynamoDB returns every number as a `Decimal`, and
+    `isinstance(x, (int, float))` is False for one. The guard passed on float fixtures and dropped the
+    geo node from every Site that had actually been saved.
+    """
+
+    def test_coordinates_read_back_from_dynamodb_are_emitted(self):
+        from decimal import Decimal
+
+        from stripe_link.runtime.html import organization_node
+
+        node = organization_node(
+            {"name": "Delight Finds",
+             "geo": {"latitude": Decimal("37.109877"), "longitude": Decimal("-113.583206")}},
+            "https://example.test")
+        self.assertEqual(node["geo"],
+                         {"@type": "GeoCoordinates", "latitude": 37.109877, "longitude": -113.583206})
+
+    def test_plain_floats_still_work(self):
+        from stripe_link.runtime.html import organization_node
+
+        node = organization_node({"name": "x", "geo": {"latitude": 1.5, "longitude": -2.5}},
+                                 "https://example.test")
+        self.assertEqual(node["geo"]["latitude"], 1.5)
+
+    def test_a_half_filled_geo_emits_nothing(self):
+        from stripe_link.runtime.html import organization_node
+
+        for geo in ({"latitude": 1.0}, {"longitude": 1.0}, {"latitude": "north", "longitude": 1.0},
+                    {"latitude": True, "longitude": 1.0}, {}):
+            with self.subTest(geo=geo):
+                node = organization_node({"name": "x", "geo": geo}, "https://example.test")
+                self.assertNotIn("geo", node)

@@ -17,7 +17,7 @@ from stripe_link.domain.composition import (
     compose_page, composition_key, default_cta_label, element_channel, expand_title_tokens,
     has_year_token, is_lead_composition, offerless_composition, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
-from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page
+from stripe_link.domain.documents import PRODUCT_CONDITIONS, is_offerless_page, real_number
 from stripe_link.domain.page_views import link_id as link_click_id
 from stripe_link.domain.social_links import display_entries as display_social_entries
 from stripe_link.domain.social_links import section_link_entries as social_section_entries
@@ -6112,8 +6112,13 @@ def organization_node(organization: dict[str, Any], origin: str, *, with_context
     # local listing; the GBP/Maps URL is the business's own map link (hasMap). All tenant-stated facts.
     geo = organization.get("geo")
     if isinstance(geo, dict):
-        lat, lng = geo.get("latitude"), geo.get("longitude")
-        if isinstance(lat, (int, float)) and not isinstance(lat, bool) and isinstance(lng, (int, float)) and not isinstance(lng, bool):
+        # `real_number`, NOT `isinstance(x, (int, float))`: DynamoDB hands every number back as a
+        # `Decimal`, which that check rejects. So the guard passed on a float test fixture and silently
+        # dropped the coordinates of every Site that had actually been saved -- the geo node simply never
+        # appeared in the markup, with nothing to see (`feedback_decimal_from_dynamo`, hit again here on
+        # 2026-11-06, the day the Calculate button made these coordinates common).
+        lat, lng = real_number(geo.get("latitude")), real_number(geo.get("longitude"))
+        if lat is not None and lng is not None:
             payload["geo"] = {"@type": "GeoCoordinates", "latitude": lat, "longitude": lng}
     opening_hours = _opening_hours_ld(organization.get("opening_hours"))
     if opening_hours:
