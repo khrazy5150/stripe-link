@@ -978,5 +978,26 @@ already open and paid for; every one of them becomes a second week if it is miss
 | 6 | **What does the 101st account actually do** — hard refuse, auto-upgrade, or silent overage? | §6.2c assumes a hard step at $129. An auto-upgrade that bills without asking is a different risk. |
 | 7 | **Media limits**: max video length/size, accepted codecs, carousel count. | Decides what `HIGGSFIELD_INTEGRATION.md` may generate. Generating a clip the publisher refuses is the worst ordering available. |
 
+**The test account the spike runs against (agreed 2026-11-06).** Written down here because it was agreed
+in chat once already and could not be found again.
+
+| Field | Value |
+|---|---|
+| Username | `bluewhalegoods` (fallbacks: `blue.whale.goods`, `bluewhalegoodsco`, `bluewhalesupplyco`) |
+| Name | Blue Whale Goods |
+| Bio | Test account for a publishing integration. Sample posts only. |
+| Type | Professional → **Business**, category Shopping & retail |
+| Facebook Page | none — not required (§6.2f) |
+
+**A throwaway brand unrelated to Junior Bay, deliberately.** The spike publishes REAL public posts — a
+professional Instagram account cannot be private — so a brand-adjacent handle would leave test junk
+sitting on something that reads as official. A neutral name keeps that off the platform's name entirely.
+The bio stays honest rather than marketing copy: the media checks do not care what it says, and a public
+account describing itself as a test cannot be mistaken for a shop.
+
+**Let it age before the API touches it.** Profile photo, one manual post, a day or two. A new account
+whose first activity is API publishing is the pattern Instagram restricts, and a spike that fails for
+account-age reasons has told us nothing about the vendor.
+
 **Record the answers in §6.2 and strike "not independently verified" from the claims that pass.** The
 figures there have already moved once by 30× (§6.2b); the point of a paid week is to stop guessing.
