@@ -2272,6 +2272,7 @@ Resources:
           SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
           SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-cart-checkout-api-${Environment}"
@@ -2358,6 +2359,7 @@ Resources:
           SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
           SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-checkout-api-${Environment}"
@@ -5031,6 +5033,7 @@ Resources:
           SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
           SITES_TABLE: !Ref SitesTable
           STRIPE_KEYS_TABLE: !Ref StripeKeysTable
+          PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
           USER_PROFILES_TABLE: !Ref UserProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-booking-api-${Environment}"
