@@ -352,10 +352,24 @@
               <label class="offer-field"><span>Google place ID</span><input v-model.trim="form.org.place_id" type="text" placeholder="ChIJ…" /></label>
               <div></div>
             </div>
+            <div class="button-row">
+              <button
+                type="button"
+                class="secondary-action compact"
+                :disabled="geoBusy || !canCalculateGeo"
+                @click="calculateGeo"
+              >{{ geoBusy ? "Looking up\u2026" : "Calculate from address" }}</button>
+            </div>
             <div class="offer-two-column">
               <label class="offer-field"><span>Latitude</span><input v-model.trim="form.org.geo.latitude" type="number" step="any" placeholder="39.7392" /></label>
               <label class="offer-field"><span>Longitude</span><input v-model.trim="form.org.geo.longitude" type="number" step="any" placeholder="-104.9903" /></label>
             </div>
+            <p v-if="geoNote" class="field-note" :class="{ 'geo-error': geoFailed }">{{ geoNote }}</p>
+            <small v-else class="field-note">
+              Used for your map listing and, if you switch on Sabbath Mode, to work out sundown at this
+              shop. Fill in the address above, then press Calculate \u2014 check the place it names before
+              you save.
+            </small>
             <div class="offer-field">
               <span>Opening hours</span>
               <div v-for="(row, i) in form.org.opening_hours" :key="i" class="hours-row">
@@ -1074,6 +1088,14 @@ const BUSINESS_TYPE_GROUPS = [
 const socialHostError = ref("");
 const socialBusy = ref(false);
 const socialCheckNote = ref("");
+const geoBusy = ref(false);
+const geoNote = ref("");
+const geoFailed = ref(false);
+
+// The same floor the server applies: a country or a region alone places the centroid of a country, which
+// is about an hour of sunset away from either US coast and arrives looking exactly like a real answer.
+const canCalculateGeo = computed(
+  () => Boolean(form.org.address.locality?.trim() || form.org.address.postal_code?.trim()));
 // Per-Site Reply-To verification (plans/SITE_AS_BUSINESS_IDENTITY.md P3). Deliberately NOT part of
 // `form`: it is a transient workflow, not a Site field, and mixing it in would post it to the save
 // endpoint — where the server discards it anyway, since the verified state is server-owned.
@@ -1231,6 +1253,36 @@ const unconfirmableNetworks = computed(() =>
 const anyCheckableSocial = computed(() =>
   form.org.same_as.some((r) => r.url && hostIn(sameAsHost(r.url), SAME_AS_HOSTS)
     && !hostIn(sameAsHost(r.url), UNVERIFIABLE_HOSTS) && !hostIn(sameAsHost(r.url), SELF_EDITABLE_HOSTS)));
+
+async function calculateGeo() {
+  // Sent from the FORM, not from the stored Site: the tenant has very likely just typed the address, and
+  // looking up the saved copy would place the shop where it used to be while the new address is on screen.
+  geoBusy.value = true;
+  geoNote.value = "";
+  geoFailed.value = false;
+  try {
+    const found = await apiRequest("/geocode", { method: "POST", body: { address: form.org.address } });
+    form.org.geo.latitude = found.latitude;
+    form.org.geo.longitude = found.longitude;
+    // The matched place is SHOWN, never just applied. A geocoder's characteristic failure is not an
+    // error, it is a confident coordinate in the wrong town, and the only person who can catch that is
+    // the one who knows the address.
+    // "area" means the street could not be matched and this is the town centre. Said out loud rather
+    // than left to look like the shop door -- it is accurate enough for sundown either way, but the
+    // tenant is the one who decides whether it is good enough for their map listing.
+    const where = found.label ? `Placed at ${found.label}.` : "Coordinates filled in.";
+    const how = found.matched === "area"
+      ? " That is the centre of the town, not the street \u2014 close enough for sundown, and you can"
+        + " fine-tune it by hand."
+      : "";
+    geoNote.value = `${where}${how} Check it, then save.`;
+  } catch (error) {
+    geoFailed.value = true;
+    geoNote.value = error.message || "Could not look that address up just now.";
+  } finally {
+    geoBusy.value = false;
+  }
+}
 
 async function checkSocialLinks() {
   // Save first: the check runs against what is STORED, so an unsaved row would be checked as it was
@@ -2489,6 +2541,9 @@ onMounted(async () => {
 .social-error {
   margin: 4px 0 8px;
   font-size: 0.85rem;
+  color: #a12a2a;
+}
+.geo-error {
   color: #a12a2a;
 }
 .hours-days {

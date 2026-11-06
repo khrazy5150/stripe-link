@@ -3743,6 +3743,24 @@ Resources:
             Path: /sabbath
             Method: PUT
 
+  GeocodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # NO Environment table grants and NO Policies: this function reads no table and writes nothing.
+      # It turns an address into coordinates for the Sites editor and hands them back to the form, which
+      # saves them the ordinary way (plans/TODO.md "Sundown math ... Business Address geocoded").
+      FunctionName: !Sub "${ProjectPrefix}-geocode-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.geocode.handler
+      Description: Address -> latitude/longitude via OpenStreetMap Nominatim, for the Sites editor's Calculate button. Called by a person editing a Site, never at runtime -- sundown itself is computed offline so no store's closing time depends on a third party.
+      Events:
+        Geocode:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /geocode
+            Method: POST
+
   CustomDomainsFunction:
     Type: AWS::Serverless::Function
     Properties:

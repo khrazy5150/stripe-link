@@ -490,7 +490,7 @@ function siteState(site) {
         tone: "warn",
         label: "No location",
         detail: "This Site has no latitude or longitude, so sundown cannot be worked out and the store stays"
-          + " open. Add them in Sites → edit this Site → Business identity.",
+          + " open. Add them in Sites → edit this Site → Local business (Google & local SEO).",
       };
     }
     if (site.sun_sets === false) {

@@ -3768,6 +3768,14 @@ choice.
     rendered in the tenant's local time with zone abbreviation.
 - **Design notes for the build:**
   - **Sundown math:** needs the tenant's coordinates + IANA timezone. Source: Business Address (Profile) geocoded
+    - **SHIPPED dev 2026-11-05.** `organization.geo` had only two hand-typed number inputs, so every Site that
+      had never been hand-edited reported "No location" to Sabbath mode while holding a complete postal address.
+      `POST /geocode` (`domain/geocoding.py`, Nominatim, no key) backs a **Calculate from address** button in the
+      Sites editor. Called by a person editing a Site, never at runtime -- sundown stays pure maths, so no store's
+      closing time depends on a third party being up. Two attempts only: the address as typed, then the same
+      query with `street` DROPPED (not cleaned -- "176 W 300 S" in St. George returns *Trailblazer Boulevard* in
+      another postcode). `matched: address|area` and the matched place name are both shown, because a geocoder
+      fails by answering confidently about somewhere else and only the tenant can see that.
     once, or explicit lat/long + timezone fields on the setting. Compute with a solar algorithm (e.g. the `astral`
     package or NOAA formula) — pure math, no external API, works offline in Lambda.
   - **Where to enforce:** at the **checkout/cart/booking/upsell handlers** (dynamic API — reliable), returning the
