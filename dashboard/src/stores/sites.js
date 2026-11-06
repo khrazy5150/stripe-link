@@ -9,7 +9,10 @@ function slugify(value) {
   return slug || "site";
 }
 
-function pruneEmpty(object) {
+// Exported because the Sites editor hand-rolled its own copy of this and got `null` wrong: `typeof null`
+// is `"object"`, so `Object.keys(null)` threw and the Save button died before it made a request. One
+// predicate, in one place (found 2026-11-06).
+export function pruneEmpty(object) {
   return Object.fromEntries(
     Object.entries(object).filter(([, v]) => v !== undefined && v !== null && v !== "" && !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length)),
   );

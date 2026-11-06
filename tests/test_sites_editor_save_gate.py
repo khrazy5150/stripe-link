@@ -140,3 +140,40 @@ class TheGeoSurvivesTheRoundTripTests(unittest.TestCase):
             with self.subTest(geo=geo):
                 node = organization_node({"name": "x", "geo": geo}, "https://example.test")
                 self.assertNotIn("geo", node)
+
+
+class TheNullValueThatKilledEverySaveTests(unittest.TestCase):
+    """`typeof null === "object"`, so `Object.keys(null)` throws.
+
+    The Sites editor hand-rolled its own "drop empty values" filter and left that case out. Any Site
+    carrying a null organization value therefore threw while the document was being built -- before any
+    request -- so Save did nothing at all and the dialog stayed open. `email_verification: null` is
+    written by the SERVER, so the Sites a tenant had verified an email on were exactly the broken ones
+    (Delight Finds and Quill were; Poliaxis Nutrition, with no such key, saved fine).
+    """
+
+    def test_the_editor_uses_the_shared_predicate_not_a_copy(self):
+        self.assertIn("organization: pruneEmpty(organization)", SITES_SCREEN)
+        self.assertIn("import { pruneEmpty, useSitesStore }", SITES_SCREEN)
+
+    def test_no_unguarded_object_keys_survives_in_the_editor(self):
+        """The exact shape of the bug: a `typeof === "object"` test with no null exclusion."""
+        for line in SITES_SCREEN.splitlines():
+            if "Object.keys(" in line and 'typeof' in line and '=== "object"' in line:
+                self.assertIn("!== null", line, f"unguarded Object.keys: {line.strip()}")
+
+    def test_the_shared_predicate_excludes_null_before_reading_keys(self):
+        store = (DASHBOARD / "stores" / "sites.js").read_text(encoding="utf-8")
+        predicate = store.split("export function pruneEmpty", 1)[1].split("}", 1)[0]
+        self.assertIn("v !== null", predicate)
+        self.assertLess(predicate.index("v !== null"), predicate.index("Object.keys(v)"))
+
+    def test_it_is_exported_so_there_is_one_copy(self):
+        store = (DASHBOARD / "stores" / "sites.js").read_text(encoding="utf-8")
+        self.assertIn("export function pruneEmpty", store)
+
+    def test_the_server_owns_email_verification_so_dropping_it_is_safe(self):
+        """The reason the editor may drop the null rather than having to preserve it."""
+        handler = (Path(__file__).resolve().parent.parent / "src" / "handlers"
+                   / "sites.py").read_text(encoding="utf-8")
+        self.assertIn("preserve_email_verification(organization", handler)

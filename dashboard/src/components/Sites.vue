@@ -931,7 +931,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
-import { useSitesStore } from "../stores/sites";
+import { pruneEmpty, useSitesStore } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { hourLabel, timeZoneOptions, zoneLabel } from "../utils/timezones";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
@@ -2099,7 +2099,12 @@ function buildEditDocument() {
       platform_subdomain: form.subdomain || undefined,
       creator_username: form.creatorUsername || undefined,
     },
-    organization: Object.fromEntries(Object.entries(organization).filter(([, v]) => v !== undefined && !(typeof v === "object" && !Object.keys(v).length))),
+    // `pruneEmpty`, not a copy of it. The copy that lived here tested `typeof v === "object"` without
+    // excluding `null` first, so `Object.keys(null)` threw on any Site carrying a null value -- and
+    // `email_verification: null` is written by the server itself. Every save of such a Site died here,
+    // before any request, silently. `email_verification` is server-owned anyway (sites.py restores it
+    // from the stored document), so dropping it on the way up changes nothing.
+    organization: pruneEmpty(organization),
     seo: Object.keys(seo).length ? seo : undefined,
     // Search visibility toggle (default on). Persisted on indexing alongside the computed eligibility; the
     // backend re-renders the pages when it flips (robots + storefront chrome are baked into each artifact).
