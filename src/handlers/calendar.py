@@ -13,6 +13,7 @@ Platform client_id/secret live in Secrets Manager; each tenant's refresh token i
 KMS-encrypted (reusing the Stripe-keys KMS key). resolve_tenant_calendar() runs the calendar
 client as any connected tenant; default_connection() picks the tenant's default calendar.
 """
+import logging
 import os
 import secrets
 import time
@@ -23,6 +24,8 @@ from stripe_link.domain.documents import DocumentValidationError, validate_calen
 from stripe_link.google_calendar import (
     GoogleCalendarClient,
     GoogleCalendarError,
+    GoogleCalendarNotConfigured,
+    GoogleCalendarReauthRequired,
     build_consent_url,
     exchange_code_for_tokens,
     load_google_oauth_secret,
@@ -38,7 +41,39 @@ from stripe_link.repositories.documents import (
 STATE_TTL_SECONDS = 600
 
 
+logger = logging.getLogger(__name__)
+
+
 def handler(event, context, connections_repo=None, states_repo=None, secret_cipher=None, google_secret=None, opener=None):
+    """Every calendar route, with the three Google failures told apart.
+
+    They were one failure until 2026-11-06, and the one that mattered most did not even reach here: a
+    missing credentials secret raised boto3's own exception, which is not a `GoogleCalendarError`, was
+    caught nowhere, and became an unhandled 500. Prod had never had that secret, so the feature had never
+    worked there and said nothing (`feedback_one_guess_hides_the_cause`).
+    """
+    try:
+        return _route(event, context, connections_repo, states_repo, secret_cipher, google_secret, opener)
+    except GoogleCalendarReauthRequired as exc:
+        # THE TENANT'S to fix, and the only one with an action attached. 409 and a stable code so the
+        # dashboard can offer a Reconnect button instead of printing an error.
+        logger.info("calendar: reconnect required (%s)", exc)
+        return error_response(
+            "This Google Calendar connection has expired or been revoked. Reconnect the calendar to"
+            " continue.", status_code=409, code="calendar_reconnect_required")
+    except GoogleCalendarNotConfigured as exc:
+        # OURS to fix, and no tenant can do anything about it. 503, logged with the secret name, because
+        # the thing someone needs in order to fix this is WHICH credential is missing.
+        logger.exception("calendar: not configured in this environment")
+        return error_response(
+            "Calendar connections are not available in this environment yet.", status_code=503,
+            code="calendar_not_configured", extra={"detail": str(exc)})
+    except GoogleCalendarError as exc:
+        logger.exception("calendar: Google call failed")
+        return error_response(str(exc), status_code=502, code="calendar_upstream_error")
+
+
+def _route(event, context, connections_repo=None, states_repo=None, secret_cipher=None, google_secret=None, opener=None):
     connections_repo = connections_repo or calendar_connections_repository()
     method = (event or {}).get("httpMethod", "").upper()
     path = (event or {}).get("path", "")
@@ -85,14 +120,14 @@ def _google_creds(google_secret):
         return google_secret
     name = os.environ.get("GOOGLE_OAUTH_SECRET_NAME", "")
     if not name:
-        raise GoogleCalendarError("GOOGLE_OAUTH_SECRET_NAME is not configured.")
+        raise GoogleCalendarNotConfigured("GOOGLE_OAUTH_SECRET_NAME is not configured.")
     return load_google_oauth_secret(name)
 
 
 def _redirect_uri():
     uri = os.environ.get("CALENDAR_REDIRECT_URI", "")
     if not uri:
-        raise GoogleCalendarError("CALENDAR_REDIRECT_URI is not configured.")
+        raise GoogleCalendarNotConfigured("CALENDAR_REDIRECT_URI is not configured.")
     return uri
 
 
@@ -104,7 +139,11 @@ def connect_route(event, states_repo, google_secret):
         creds = _google_creds(google_secret)
         redirect_uri = _redirect_uri()
     except GoogleCalendarError as exc:
-        return error_response(str(exc), status_code=500, code="calendar_not_configured")
+        # The subclasses carry a STATUS and an action; flattening them here is what made every cause look
+        # like "not configured". The wrapper tells them apart.
+        if isinstance(exc, (GoogleCalendarNotConfigured, GoogleCalendarReauthRequired)):
+            raise
+        return error_response(str(exc), status_code=502, code="calendar_upstream_error")
 
     now = int(time.time())
     state = secrets.token_urlsafe(24)
@@ -136,6 +175,13 @@ def callback_route(event, connections_repo, states_repo, secret_cipher, google_s
     try:
         creds = _google_creds(google_secret)
         tokens = exchange_code_for_tokens(creds.get("client_id", ""), creds.get("client_secret", ""), code, _redirect_uri(), opener=opener)
+    except GoogleCalendarReauthRequired:
+        return _html("That Google authorisation has already expired. Please start the connection again.",
+                     409)
+    except GoogleCalendarNotConfigured:
+        # The tenant is staring at a browser page and can do nothing about this one.
+        logger.exception("calendar: callback with no credentials configured")
+        return _html("Calendar connections are not available yet. Please contact support.", 503)
     except GoogleCalendarError as exc:
         return _html(f"Could not connect your calendar: {exc}", 502)
 

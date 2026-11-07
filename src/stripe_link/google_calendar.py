@@ -18,7 +18,29 @@ DEFAULT_SCOPES = [
 
 
 class GoogleCalendarError(RuntimeError):
-    pass
+    """Something went wrong talking to Google. The two subclasses below are the cases a CALLER can act
+    on differently, and collapsing them into this one is how both became a 500."""
+
+
+class GoogleCalendarNotConfigured(GoogleCalendarError):
+    """This ENVIRONMENT has no Google credentials. Nobody's calendar works here, and no tenant can fix it.
+
+    Found in prod on 2026-11-06: `template.yaml` points every environment at
+    `jb/google-oauth/${Environment}`, and only `jb/google-oauth/dev` was ever created. So prod asked
+    Secrets Manager for a secret that did not exist, boto3 raised `ResourceNotFoundException` -- which is
+    not a `GoogleCalendarError` and was caught nowhere -- and every tenant who pressed "Connect Google
+    Calendar" in production got an unhandled 500. The feature had never worked there, and nothing said so.
+    """
+
+
+class GoogleCalendarReauthRequired(GoogleCalendarError):
+    """This TENANT's refresh token is dead -- expired or revoked -- and only they can fix it, by
+    reconnecting. Distinct from every other failure because it is the one with a user action attached.
+
+    Google reports it as `invalid_grant`. It arrives routinely: a user revoking access in their Google
+    account, a password change, and -- while the OAuth app is in `Testing` publishing status -- every
+    refresh token simply expiring after seven days.
+    """
 
 
 def build_consent_url(client_id: str, redirect_uri: str, state: str, scopes: list[str] | None = None) -> str:
@@ -52,7 +74,14 @@ def exchange_code_for_tokens(client_id: str, client_secret: str, code: str, redi
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         payload = _error_payload(exc)
-        raise GoogleCalendarError(payload.get("error_description") or payload.get("error") or "authorization code exchange failed") from exc
+        code_ = str(payload.get("error") or "")
+        message = payload.get("error_description") or code_ or "authorization code exchange failed"
+        # Same `invalid_grant`, different cause: here the one-time AUTH CODE is stale (already used, or
+        # the tenant sat on the consent screen too long), not a refresh token. The remedy is the same --
+        # start the connection again -- so it carries the same type.
+        if code_ == "invalid_grant":
+            raise GoogleCalendarReauthRequired(message) from exc
+        raise GoogleCalendarError(message) from exc
 
 
 def fetch_access_token(client_id: str, client_secret: str, refresh_token: str, *, opener=None) -> str:
@@ -69,7 +98,13 @@ def fetch_access_token(client_id: str, client_secret: str, refresh_token: str, *
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         payload = _error_payload(exc)
-        raise GoogleCalendarError(payload.get("error_description") or payload.get("error") or "token exchange failed") from exc
+        code = str(payload.get("error") or "")
+        message = payload.get("error_description") or code or "token exchange failed"
+        # `invalid_grant` is the one failure a TENANT can resolve, so it must not arrive looking like the
+        # ones they cannot. Everything else here is ours or Google's.
+        if code == "invalid_grant":
+            raise GoogleCalendarReauthRequired(message) from exc
+        raise GoogleCalendarError(message) from exc
     token = payload.get("access_token")
     if not token:
         raise GoogleCalendarError("Google did not return an access token.")
@@ -132,5 +167,12 @@ def load_google_oauth_secret(secret_name: str, *, client=None) -> dict:
         import boto3
 
         client = boto3.client("secretsmanager", region_name=os.environ.get("AWS_REGION") or "us-west-2")
-    response = client.get_secret_value(SecretId=secret_name)
+    try:
+        response = client.get_secret_value(SecretId=secret_name)
+    except Exception as exc:  # noqa: BLE001 - absent, denied or unreadable all mean the same thing here
+        # NAMED, not raised raw. The boto3 exception is not a GoogleCalendarError, so it escaped every
+        # handler and became a 500 that said nothing about credentials.
+        raise GoogleCalendarNotConfigured(
+            f"No Google OAuth credentials are available in this environment (secret '{secret_name}')."
+        ) from exc
     return json.loads(response.get("SecretString") or "{}")
