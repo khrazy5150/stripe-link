@@ -144,3 +144,65 @@ class TheInnerRoutesDoNotFlattenThemTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnlyACalendarTheMerchantOwnsTests(unittest.TestCase):
+    """We request `calendar.events.owned`, which can only write to calendars the merchant OWNS.
+
+    A calendar merely shared with them would be accepted at selection time and then 403 at the first
+    booking -- weeks later, when a customer is waiting and nobody is watching the logs. So the refusal
+    happens at the moment of choosing (`feedback_absence_reads_as_safety`: a check that never runs lets
+    anything through).
+    """
+
+    CONN = {"schema_version": "2026-01-01", "document_type": "calendar_connection",
+            "connection_id": "c1", "tenant_id": "t1", "status": "connected",
+            "calendar_id": "primary", "account_email": "a@b.test", "provider": "google"}
+
+    def _patch(self, wanted, owned):
+        repo = mock.Mock()
+        repo.get.return_value = dict(self.CONN)
+        repo.list_for_tenant.return_value = []
+        repo.put.side_effect = lambda d: d
+        event = {"httpMethod": "PATCH", "path": "/calendar/connections/c1",
+                 "headers": {"X-Tenant-Id": "t1"}, "pathParameters": {"connection_id": "c1"},
+                 "body": json.dumps({"calendar_id": wanted})}
+        with mock.patch.object(calendar, "owned_calendar_ids", return_value=owned):
+            return calendar.handler(event, None, connections_repo=repo)
+
+    def test_a_calendar_they_own_is_accepted(self):
+        response = self._patch("mine@b.test", {"mine@b.test", "primary"})
+        self.assertEqual(response["statusCode"], 200)
+
+    def test_a_calendar_merely_SHARED_with_them_is_refused(self):
+        """THE ONE THAT MATTERS: this is the selection that would have failed at booking time."""
+        response = self._patch("boss@b.test", {"mine@b.test"})
+        self.assertEqual(response["statusCode"], 409)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "calendar_not_owned")
+        self.assertIn("you own", body["message"])
+
+    def test_a_FAILED_lookup_does_not_block_the_choice(self):
+        """None means we could not ask. Refusing on a hiccup would be a worse failure than allowing a
+        selection the merchant can still correct."""
+        self.assertEqual(self._patch("anything@b.test", None)["statusCode"], 200)
+
+    def test_the_scopes_and_the_check_agree(self):
+        """If the scope ever widens back to `calendar.events`, this check becomes dead weight -- and if
+        it is removed while the scope stays narrow, bookings 403. They move together."""
+        from stripe_link.google_calendar import DEFAULT_SCOPES
+
+        narrow = any(s.endswith("calendar.events.owned") for s in DEFAULT_SCOPES)
+        import inspect
+        checks = "calendar_not_owned" in inspect.getsource(calendar.update_connection_route)
+        self.assertEqual(narrow, checks)
+
+    def test_the_requested_scopes_are_one_per_method(self):
+        from stripe_link.google_calendar import DEFAULT_SCOPES
+
+        self.assertEqual(sorted(DEFAULT_SCOPES), [
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/calendar.events.owned",
+            "https://www.googleapis.com/auth/calendar.freebusy",
+        ])
+        self.assertFalse(any(s.endswith("/calendar.readonly") for s in DEFAULT_SCOPES))

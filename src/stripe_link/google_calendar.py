@@ -18,17 +18,24 @@ GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 #: a merchant connecting a booking tool is entitled to balk at that, and a reviewer is entitled to ask
 #: why a booking tool needs it. Google documents a purpose-built scope for each job:
 #:
-#:   calendar.events                 -> events.insert / events.update / events.delete
+#:   calendar.events.owned           -> events.insert / events.update / events.delete, on calendars
+#:                                      the merchant OWNS (not merely ones shared with them)
 #:   calendar.calendarlist.readonly  -> calendarList.list   (pick which calendar to write to, once)
 #:   calendar.freebusy               -> freebusy.query      (is this slot taken? not what is in it)
 #:
 #: `freebusy.query` does NOT accept `calendar.events` -- checked against the API reference rather than
 #: assumed, because assuming it was the obvious guess and it is wrong.
 #:
+#: `calendar.events.owned` rather than `calendar.events`, which reaches every calendar the merchant can
+#: SEE, shared ones included. Narrowing it is only safe because the connection may no longer point at a
+#: calendar they merely have access to -- `handlers/calendar.py` refuses a `calendar_id` whose
+#: `accessRole` is not `owner`. Without that check this scope would 403 at the first booking, long after
+#: the tenant chose the calendar.
+#:
 #: CHANGING THIS FORCES EVERY CONNECTED TENANT TO RE-CONSENT. It was done while prod had zero
 #: connections and dev had one test user; it will never be this cheap again.
 DEFAULT_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.events.owned",
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/calendar.freebusy",
 ]

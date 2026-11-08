@@ -24,6 +24,7 @@ from stripe_link.domain.documents import DocumentValidationError, validate_calen
 from stripe_link.google_calendar import (
     GoogleCalendarClient,
     GoogleCalendarError,
+    fetch_access_token,
     GoogleCalendarNotConfigured,
     GoogleCalendarReauthRequired,
     build_consent_url,
@@ -235,6 +236,31 @@ def list_connections_route(event, connections_repo):
     return json_response({"connections": connections, "count": len(connections)})
 
 
+def owned_calendar_ids(tenant_id, conn, *, secret_cipher=None, google_secret=None, opener=None):
+    """The ids of calendars this connection OWNS, or None when we could not ask.
+
+    `accessRole` comes back on every `calendarList.list` entry; `owner` is the only role
+    `calendar.events.owned` can write to. None (not an empty set) means the lookup failed, so the caller
+    can tell "they own nothing" from "we do not know" and decline to refuse on a hiccup.
+    """
+    from stripe_link.calendar_sync import resolve_tenant_calendar
+
+    try:
+        creds = resolve_tenant_calendar(tenant_id, connection=conn, secret_cipher=secret_cipher,
+                                        google_secret=google_secret)
+        if not creds:
+            return None
+        token = fetch_access_token(creds["client_id"], creds["client_secret"], creds["refresh_token"],
+                                   opener=opener)
+        items = GoogleCalendarClient(token, opener=opener).calendar_list().get("items", [])
+        return {str(c.get("id") or "") for c in items if c.get("accessRole") == "owner"}
+    except GoogleCalendarError:
+        raise
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("calendar: could not list owned calendars for %s", tenant_id)
+        return None
+
+
 def update_connection_route(event, connections_repo, connection_id):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
@@ -251,7 +277,18 @@ def update_connection_route(event, connections_repo, connection_id):
     if "display_name" in body:
         conn["display_name"] = str(body.get("display_name") or "").strip() or conn.get("account_email") or "Calendar"
     if "calendar_id" in body and str(body.get("calendar_id") or "").strip():
-        conn["calendar_id"] = str(body["calendar_id"]).strip()
+        wanted = str(body["calendar_id"]).strip()
+        # REFUSED HERE, not at the first booking. We request `calendar.events.owned`, which can only
+        # write to calendars the merchant OWNS -- so a calendar merely shared with them would be
+        # accepted happily now and 403 weeks later, when a customer books and nobody is watching.
+        # `None` means we could not ask, and a lookup that hiccuped must not block a legitimate choice.
+        owned = owned_calendar_ids(tenant_id, conn)
+        if owned is not None and wanted not in owned:
+            return error_response(
+                "Bookings can only be written to a calendar you own. Choose one of your own calendars,"
+                " or ask its owner to share ownership with you.",
+                status_code=409, code="calendar_not_owned")
+        conn["calendar_id"] = wanted
     if body.get("is_default") is True:
         for other in (connections_repo.list_for_tenant(tenant_id) or []):
             if other.get("connection_id") != connection_id and other.get("is_default"):

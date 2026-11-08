@@ -40,15 +40,21 @@ speculative Google Business Profile one.
 Keep these tied to the calls the code actually makes. Every claim below is checkable in
 `src/stripe_link/calendar_sync.py` and `src/handlers/calendar.py`.
 
-### `https://www.googleapis.com/auth/calendar.events`
+### `https://www.googleapis.com/auth/calendar.events.owned`
 
 > Junior Bay is a booking platform for small businesses. When a customer books an appointment, we create
 > a calendar event on the calendar the merchant selected when they connected their Google account. When
 > the customer reschedules, we update that event; when they cancel, we delete it. We only ever create,
-> update, or delete events that this application itself created. We do not read the contents of events
-> created by anyone else.
+> update, or delete events that this application itself created, and only on a calendar the merchant
+> owns — the application refuses to be pointed at a calendar that is merely shared with them. We do not
+> read the contents of events created by anyone else.
 
 API methods used: `events.insert`, `events.update`, `events.delete`.
+
+**Why `.owned` and not `calendar.events`.** `calendar.events` reaches every calendar the merchant can
+*see*, shared ones included; `.owned` reaches only calendars they own. The narrower scope is safe only
+because `handlers/calendar.py` now refuses a `calendar_id` whose `accessRole` is not `owner` — otherwise
+a merchant could select a shared calendar, be accepted, and 403 at the first real booking weeks later.
 
 ### `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 
@@ -78,6 +84,12 @@ Checked against the API reference rather than assumed:
 |---|---|---|
 | `freebusy.query` | `calendar.readonly`, `calendar`, `calendar.events.freebusy`, `calendar.freebusy` | `calendar.freebusy` |
 | `calendarList.list` | `calendar.readonly`, `calendar`, `calendar.calendarlist`, `calendar.calendarlist.readonly` | `calendar.calendarlist.readonly` |
+| `events.insert/update/delete` | `calendar`, `calendar.events`, `calendar.events.owned` | `calendar.events.owned` |
+
+**`calendar.app.created` was considered and not taken.** It is narrower still — the app creates its own
+secondary calendar and can never touch the merchant's existing events — but it changes the product: no
+"choose which of your calendars bookings go to", and new code to create and track that calendar. A
+product decision, not a scope tweak. Worth revisiting on its merits.
 
 **`freebusy.query` does NOT accept `calendar.events`** — that was the obvious guess and it is wrong, which
 is why it was looked up. Each scope now maps one-to-one onto a single method, so "minimum necessary" is
