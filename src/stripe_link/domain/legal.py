@@ -151,6 +151,18 @@ def default_pages(config: dict[str, str] | None = None) -> list[dict[str, Any]]:
                 </ul>
                 <h3>Information from Third Parties</h3>
                 <p>We may receive limited information from third parties, including fraud prevention and payment status information from Stripe, publicly available business verification information, and information from third-party services you choose to connect.</p>
+                <h2>Google User Data</h2>
+                <p>If you choose to connect a Google account so that bookings appear in your calendar, {company_name} accesses a narrow set of Google user data. Connecting is entirely optional, and the platform works without it.</p>
+                <p><strong>What we access, and why.</strong> Using the permissions you grant on Google&apos;s consent screen:</p>
+                <ul>
+                    <li><strong>The list of calendars on your account</strong> &mdash; read once when you connect, so you can choose which calendar bookings are written to.</li>
+                    <li><strong>Free/busy availability</strong> on that calendar &mdash; read when a customer views your booking times, so we do not offer a slot you are already busy for. We read whether a period is busy, not the contents of those events.</li>
+                    <li><strong>Events created by this platform</strong> &mdash; created, updated and deleted when a booking is made, changed or cancelled.</li>
+                </ul>
+                <p><strong>What we do not do.</strong> We do not read the contents of calendar events we did not create, do not use Google user data for advertising, do not sell it, do not transfer it to third parties except as needed to provide this feature or where required by law, and do not use it to train generalised artificial intelligence or machine learning models. No human reads your Google user data except where you have given explicit permission for a specific support request, where it is necessary for security purposes such as investigating abuse, or where required by law.</p>
+                <p><strong>How it is stored and for how long.</strong> We store the authorisation token for your connected account, encrypted, together with the identifier of the calendar you selected. We do not keep a copy of your calendar or its events. The token is retained until you disconnect the calendar, revoke access from your Google account, or close your {company_name} account &mdash; after which it is deleted.</p>
+                <p><strong>How to revoke access.</strong> Disconnect the calendar in your {company_name} dashboard at any time, or remove this application&apos;s access directly from your Google account at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">https://myaccount.google.com/permissions</a>. Either immediately ends our ability to access your calendar.</p>
+                <p><strong>Limited Use.</strong> {company_name}&apos;s use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
                 <h2>How We Use Your Information</h2>
                 <p>We use the information we collect to operate, improve, secure, and support the platform.</p>
                 <ul>
