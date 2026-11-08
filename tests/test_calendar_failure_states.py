@@ -272,3 +272,58 @@ class RevocationIsOBSERVEDNotAssumedTests(unittest.TestCase):
         body = next(v for v in [p for p in default_pages() if p["page_id"] == "privacy"][0].values()
                     if isinstance(v, str) and "<h2>" in v)
         self.assertIn("mark it revoked and delete the stored token", body)
+
+
+class APartialGrantIsNotAConnectionTests(unittest.TestCase):
+    """Google shows each scope as its OWN unticked checkbox — granular consent, mandatory for OAuth
+    clients created after 2019 and impossible to turn off. So a merchant can approve a subset and still
+    complete the flow.
+
+    Before 2026-11-08 the granted list was stored and never compared to what we asked for: the dashboard
+    showed a healthy connection, and the first availability check 403'd with a customer waiting.
+    """
+
+    def test_the_required_set_is_exactly_what_we_request(self):
+        """If DEFAULT_SCOPES changes and this does not, the check silently stops covering a scope."""
+        from handlers.calendar import REQUIRED_SCOPE_LABELS
+        from stripe_link.google_calendar import DEFAULT_SCOPES
+
+        self.assertEqual(set(REQUIRED_SCOPE_LABELS), set(DEFAULT_SCOPES))
+
+    def test_a_full_grant_passes(self):
+        from handlers.calendar import missing_scopes
+        from stripe_link.google_calendar import DEFAULT_SCOPES
+
+        self.assertEqual(missing_scopes(DEFAULT_SCOPES), [])
+
+    def test_a_partial_grant_names_what_is_missing(self):
+        from handlers.calendar import missing_scopes
+
+        absent = missing_scopes(["https://www.googleapis.com/auth/calendar.calendarlist.readonly"])
+        self.assertEqual(len(absent), 2)
+        self.assertIn("See, create, change, and delete events on Google calendars you own", absent)
+
+    def test_nothing_granted_reports_all_three(self):
+        from handlers.calendar import missing_scopes
+
+        self.assertEqual(len(missing_scopes([])), 3)
+
+    def test_the_labels_are_GOOGLES_words_not_ours(self):
+        """The merchant is going back to a screen carrying these exact sentences. 'calendar.freebusy was
+        not granted' is not findable there."""
+        from handlers.calendar import REQUIRED_SCOPE_LABELS
+
+        for label in REQUIRED_SCOPE_LABELS.values():
+            self.assertNotIn("googleapis.com", label)
+            self.assertNotIn("calendar.", label)
+
+    def test_the_callback_refuses_before_storing(self):
+        """The refusal must come before the connection is written, or a broken connection outlives it."""
+        import inspect
+
+        from handlers import calendar
+
+        source = inspect.getsource(calendar.callback_route)
+        refusal = source.index("missing_scopes")
+        store = source.index("refresh_token_ref")
+        self.assertLess(refusal, store, "scope check must precede storing the connection")

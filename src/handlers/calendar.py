@@ -15,6 +15,7 @@ client as any connected tenant; default_connection() picks the tenant's default 
 """
 import logging
 import os
+from html import escape as _escape
 import secrets
 import time
 import uuid
@@ -155,6 +156,31 @@ def connect_route(event, states_repo, google_secret):
     return json_response({"authorize_url": build_consent_url(creds.get("client_id", ""), redirect_uri, state)})
 
 
+#: What a usable calendar connection needs. Google presents each of these as its OWN CHECKBOX, unticked
+#: by default, with a "Select all" above them -- granular consent, which is mandatory for OAuth clients
+#: created after 2019 and cannot be turned off. So a merchant can tick one, two, or none and still
+#: complete the flow, and before 2026-11-08 we stored whatever came back as a working connection: green
+#: badge in the dashboard, then 403 at the first availability check with a customer waiting.
+REQUIRED_SCOPE_LABELS = {
+    "https://www.googleapis.com/auth/calendar.events.owned":
+        "See, create, change, and delete events on Google calendars you own",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly":
+        "See the list of Google calendars you're subscribed to",
+    "https://www.googleapis.com/auth/calendar.freebusy":
+        "View your availability in your calendars",
+}
+
+
+def missing_scopes(granted) -> list[str]:
+    """The scopes we asked for and did not get, as the LABELS Google showed the merchant.
+
+    Named in Google's words, not ours: the merchant is about to go back to a screen with those exact
+    sentences on it, and "calendar.freebusy was not granted" is not findable on that screen.
+    """
+    have = set(granted or [])
+    return [label for scope, label in REQUIRED_SCOPE_LABELS.items() if scope not in have]
+
+
 def callback_route(event, connections_repo, states_repo, secret_cipher, google_secret, opener):
     params = query_params(event)
     if params.get("error"):
@@ -185,6 +211,16 @@ def callback_route(event, connections_repo, states_repo, secret_cipher, google_s
         return _html("Calendar connections are not available yet. Please contact support.", 503)
     except GoogleCalendarError as exc:
         return _html(f"Could not connect your calendar: {exc}", 502)
+
+    # REFUSED BEFORE IT IS STORED. A connection missing a permission is not a connection -- it looks
+    # healthy in the dashboard and fails at the moment a customer is booking.
+    absent = missing_scopes((tokens.get("scope") or "").split())
+    if absent:
+        items = "".join(f"<li>{_escape(label)}</li>" for label in absent)
+        return _html(
+            "<p>Junior Bay needs all three calendar permissions to manage bookings, and these were not "
+            f"approved:</p><ul>{items}</ul><p>Start the connection again from your dashboard and tick "
+            "every box (or use <strong>Select all</strong>) on the Google screen.</p>", 400)
 
     refresh_token = tokens.get("refresh_token")
     if not refresh_token:

@@ -66,7 +66,7 @@ class CalendarConnectTests(unittest.TestCase):
         connections = FakeDocumentRepository("connection_id")
         states.put({"tenant_id": "t1", "state_id": "S1", "document_type": "oauth_state", "expires_at": int(time.time()) + 600})
         opener = _FakeOpener(
-            {"refresh_token": "tenant-rt", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.events"},
+            {"refresh_token": "tenant-rt", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.freebusy"},
             {"items": [{"id": "me@gmail.com", "primary": True}]},
         )
         resp = handler(event("GET", "/calendar/callback", tenant_id=None, params={"code": "AUTH", "state": "S1"}), None,
@@ -126,7 +126,7 @@ def _connect(connections, account_email):
     states = FakeDocumentRepository("state_id")
     states.put({"tenant_id": "t1", "state_id": "S", "document_type": "oauth_state", "expires_at": int(time.time()) + 600})
     opener = _FakeOpener(
-        {"refresh_token": f"rt-{account_email}", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.events"},
+        {"refresh_token": f"rt-{account_email}", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.freebusy"},
         {"items": [{"id": account_email, "primary": True}]},
     )
     handler(event("GET", "/calendar/callback", tenant_id=None, params={"code": "AUTH", "state": "S"}), None,
