@@ -50,21 +50,41 @@ Keep these tied to the calls the code actually makes. Every claim below is check
 
 API methods used: `events.insert`, `events.update`, `events.delete`.
 
-### `https://www.googleapis.com/auth/calendar.readonly`
+### `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 
-> Two uses, both narrow. First, at the moment the merchant connects their account we read the list of
-> their calendars once, so they can choose which calendar bookings are written to. Second, when a
-> customer is choosing an appointment time we query free/busy for that one calendar, so the platform does
-> not offer a slot the merchant is already busy for. The free/busy query returns only whether a period is
-> busy — we do not read event titles, descriptions, attendees or locations.
+> When a merchant first connects their Google account we read the list of their calendars once, so they
+> can choose which calendar their bookings are written to. We do not read the contents of any calendar.
 
-API methods used: `calendarList.list`, `freebusy.query`.
+API method used: `calendarList.list`.
 
-**Narrowing opportunity, untested.** `calendar.readonly` grants more than the above: it permits reading
-every event on every calendar. `calendar.calendarlist.readonly` would cover `calendarList.list` alone.
-Whether `freebusy.query` is authorised by `calendar.events` is **not verified** — test it in the sandbox
-before narrowing. Changing scopes forces every connected tenant to re-consent, so the cheapest moment is
-now, while prod has zero connections and dev has one test user.
+### `https://www.googleapis.com/auth/calendar.freebusy`
+
+> When a customer is choosing an appointment time, we query free/busy for the one calendar the merchant
+> selected, so the platform does not offer a slot the merchant is already busy for. This returns only
+> whether a period is busy — not event titles, descriptions, attendees or locations.
+
+API method used: `freebusy.query`.
+
+### Why these three and not `calendar.readonly` (narrowed 2026-11-08)
+
+The original pair was `calendar.events` + `calendar.readonly`, where `calendar.readonly` served both the
+calendar list and the free/busy query. Its consent text — *"See and download any calendar you can access
+using your Google Calendar"* — asks a merchant for far more than a booking tool needs, and invites the
+reviewer's obvious question.
+
+Checked against the API reference rather than assumed:
+
+| Method | Scopes Google accepts | Chosen |
+|---|---|---|
+| `freebusy.query` | `calendar.readonly`, `calendar`, `calendar.events.freebusy`, `calendar.freebusy` | `calendar.freebusy` |
+| `calendarList.list` | `calendar.readonly`, `calendar`, `calendar.calendarlist`, `calendar.calendarlist.readonly` | `calendar.calendarlist.readonly` |
+
+**`freebusy.query` does NOT accept `calendar.events`** — that was the obvious guess and it is wrong, which
+is why it was looked up. Each scope now maps one-to-one onto a single method, so "minimum necessary" is
+self-evident from the list rather than a claim to be taken on trust.
+
+Changing scopes forces every connected tenant to re-consent. Done while prod had zero connections and dev
+had one test user.
 
 ## Order of operations
 
