@@ -4,18 +4,23 @@ All functions are best-effort: a calendar failure must never break a booking. sy
 returns the new external_calendar_events list to persist (or None for "no change"); tenant_busy_intervals
 returns busy windows for the slot engine (or [] when not connected / on error).
 """
+import logging
 import os
+import time
 from typing import Any
 
 from stripe_link.domain.calendar import busy_intervals, google_event_body
 from stripe_link.google_calendar import (
     GoogleCalendarClient,
     GoogleCalendarError,
+    GoogleCalendarReauthRequired,
     fetch_access_token,
     load_google_oauth_secret,
 )
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import calendar_connections_repository
+
+logger = logging.getLogger(__name__)
 
 KMS_MODE = "calendar"
 KMS_FIELD = "google_refresh_token"
@@ -69,12 +74,51 @@ def resolve_tenant_calendar(tenant_id, *, connections_repo=None, secret_cipher=N
     }
 
 
+def mark_revoked(tenant_id: str, connection_id: str, connections_repo=None) -> bool:
+    """Record that Google has rejected this connection's refresh token, and DROP the token.
+
+    Google reports a revoked or expired grant as `invalid_grant`. Until 2026-11-08 nothing acted on it:
+    the call failed, the booking did not sync, and the dead credential stayed encrypted in our table
+    indefinitely -- so the privacy policy's claim that revoking access leads to deletion was simply not
+    true. Now revocation is observed the first time we try to use the connection, and the credential is
+    removed at that moment rather than waiting for the merchant to press disconnect.
+
+    `status: "revoked"` (the schema already allowed it) stops `resolve_tenant_calendar` resolving this
+    connection, so nothing keeps retrying a token Google has refused.
+
+    Idempotent, and best-effort: this runs inside an exception path that is about to re-raise, and
+    failing to record the revocation must not replace the error the caller needs to see.
+    """
+    try:
+        repo = connections_repo or calendar_connections_repository()
+        conn = repo.get(tenant_id, connection_id)
+        if not conn or conn.get("status") == "revoked":
+            return False
+        conn["status"] = "revoked"
+        # The token is the thing worth deleting. It is useless -- Google has refused it -- and keeping a
+        # credential we cannot use is exactly what the policy says we do not do.
+        conn["refresh_token_ref"] = ""
+        conn["revoked_at"] = int(time.time())
+        conn["updated_at"] = conn["revoked_at"]
+        repo.put(conn)
+        return True
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("calendar: could not mark %s/%s revoked", tenant_id, connection_id)
+        return False
+
+
 def _client_for(tenant_id, *, connections_repo, secret_cipher, google_secret, opener, connection=None):
     """Return (GoogleCalendarClient, connection_id) for the resolved calendar, or (None, None)."""
     creds = resolve_tenant_calendar(tenant_id, connections_repo=connections_repo, secret_cipher=secret_cipher, google_secret=google_secret, connection=connection)
     if not creds:
         return None, None
-    token = fetch_access_token(creds["client_id"], creds["client_secret"], creds["refresh_token"], opener=opener)
+    try:
+        token = fetch_access_token(creds["client_id"], creds["client_secret"], creds["refresh_token"], opener=opener)
+    except GoogleCalendarReauthRequired:
+        # The merchant revoked us, or the grant expired. Record it and drop the dead credential HERE --
+        # this is the only moment we learn of it, since Google does not tell us.
+        mark_revoked(tenant_id, creds["connection_id"], connections_repo)
+        raise
     return GoogleCalendarClient(token, calendar_id=creds["calendar_id"], opener=opener), creds["connection_id"]
 
 

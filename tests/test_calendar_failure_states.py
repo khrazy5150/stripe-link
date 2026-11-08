@@ -206,3 +206,69 @@ class OnlyACalendarTheMerchantOwnsTests(unittest.TestCase):
             "https://www.googleapis.com/auth/calendar.freebusy",
         ])
         self.assertFalse(any(s.endswith("/calendar.readonly") for s in DEFAULT_SCOPES))
+
+
+class RevocationIsOBSERVEDNotAssumedTests(unittest.TestCase):
+    """Google does not tell us when a merchant revokes access.
+
+    Until 2026-11-08 nothing acted on `invalid_grant`: the call failed, the booking did not sync, and the
+    dead credential stayed encrypted in our table indefinitely — which made the privacy policy's claim
+    that revoking leads to deletion untrue. We now learn of it on first use and delete the token then.
+    """
+
+    CONN = {"schema_version": "2026-05-29", "document_type": "calendar_connection", "tenant_id": "t1",
+            "connection_id": "c1", "provider": "google", "status": "connected",
+            "refresh_token_ref": "ENCRYPTED", "calendar_id": "primary"}
+
+    def test_it_marks_revoked_and_DROPS_the_token(self):
+        from stripe_link.calendar_sync import mark_revoked
+
+        repo = mock.Mock()
+        repo.get.return_value = dict(self.CONN)
+        repo.put.side_effect = lambda d: d
+        self.assertTrue(mark_revoked("t1", "c1", repo))
+        saved = repo.put.call_args[0][0]
+        self.assertEqual(saved["status"], "revoked")
+        self.assertFalse(saved["refresh_token_ref"], "a credential Google has refused must not be kept")
+        self.assertIn("revoked_at", saved)
+
+    def test_it_is_idempotent(self):
+        from stripe_link.calendar_sync import mark_revoked
+
+        repo = mock.Mock()
+        repo.get.return_value = {**self.CONN, "status": "revoked"}
+        self.assertFalse(mark_revoked("t1", "c1", repo))
+        repo.put.assert_not_called()
+
+    def test_a_failure_to_record_does_not_swallow_the_real_error(self):
+        """It runs inside an exception path that is about to re-raise. Losing the caller's error to
+        report a bookkeeping failure would be the worse trade."""
+        from stripe_link.calendar_sync import mark_revoked
+
+        repo = mock.Mock()
+        repo.get.side_effect = RuntimeError("table gone")
+        self.assertFalse(mark_revoked("t1", "c1", repo))
+
+    def test_a_revoked_connection_stops_resolving(self):
+        """So nothing keeps retrying a token Google has already refused."""
+        from stripe_link.calendar_sync import resolve_tenant_calendar
+
+        repo = mock.Mock()
+        repo.get.return_value = {**self.CONN, "status": "revoked"}
+        self.assertIsNone(resolve_tenant_calendar("t1", connections_repo=repo,
+                                                  connection={**self.CONN, "status": "revoked"}))
+
+    def test_the_policy_and_the_code_agree_about_revocation(self):
+        """The policy says we mark it revoked and delete the token on first use after revocation. If the
+        code stops doing that, the policy becomes a false statement rather than a stale one."""
+        import inspect
+
+        from stripe_link import calendar_sync
+        from stripe_link.domain.legal import default_pages
+
+        source = inspect.getsource(calendar_sync._client_for)
+        self.assertIn("GoogleCalendarReauthRequired", source)
+        self.assertIn("mark_revoked", source)
+        body = next(v for v in [p for p in default_pages() if p["page_id"] == "privacy"][0].values()
+                    if isinstance(v, str) and "<h2>" in v)
+        self.assertIn("mark it revoked and delete the stored token", body)

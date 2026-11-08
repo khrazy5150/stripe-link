@@ -115,6 +115,26 @@ refused. It now carries a **Google User Data** section: what is accessed and why
 token and the chosen calendar id, not a copy of the calendar) and until when, both ways to revoke, and
 the **Limited Use** statement naming the Google API Services User Data Policy.
 
+## What is stored (answered 2026-11-08)
+
+Asked directly: does Junior Bay keep Google event IDs, or only tokens and the calendar id? **Both.**
+`calendar_sync.py` persists an `external_calendar_events` entry on each appointment —
+`{provider, connection_id, calendar_id, event_id}` — where `event_id` is the identifier Google assigned
+to the event we created. It is what `update_event` and `delete_event` are called with when a booking is
+rescheduled or cancelled (`calendar_sync.py:106-116`).
+
+So the stored set is: an encrypted refresh token, the chosen `calendar_id`, and one Google event id per
+booking. **No event contents** — no titles, descriptions, attendees or locations — and no copy of the
+calendar.
+
+The privacy policy's storage paragraph originally named only the token and the calendar id. It was
+accurate about contents and silent about the event ids, which is the kind of omission a reviewer is
+entitled to pick up. Corrected.
+
+**It also strengthens the `calendar.events.owned` justification.** The claim "we only ever update or
+delete events this application created" is not a promise to be taken on trust — we can only address an
+event whose id we stored when we created it.
+
 ## Loose ends
 
 - Support contact is `support@juniorbay.net`, a different domain from the authorized `juniorbay.com`.
