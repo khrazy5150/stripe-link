@@ -139,7 +139,7 @@ PARAMETER_OVERRIDES+=("CloudflareAccountId=c7b1afadd7f220d780f4f742a12aef16")
 APEX_IPS_LIVE="$(aws cloudformation describe-stacks \
   --region "${REGION}" --stack-name "${STACK_NAME}" \
   --query "Stacks[0].Parameters[?ParameterKey=='CloudflareApexIpv4'].ParameterValue | [0]" \
-  --output text 2>/dev/null)"
+  --output text 2>/dev/null || true)"
 if [[ -n "${APEX_IPS_LIVE}" && "${APEX_IPS_LIVE}" != "None" ]]; then
   echo "ERROR: ${STACK_NAME} has CloudflareApexIpv4='${APEX_IPS_LIVE}'." >&2
   echo "       Apex A records only work with addresses Cloudflare allocated to this SaaS zone through" >&2
@@ -167,7 +167,7 @@ else
   CREATOR_SERVING="$(aws cloudformation describe-stacks \
     --region "${REGION}" --stack-name "${STACK_NAME}" \
     --query "Stacks[0].Parameters[?ParameterKey=='CreatorServingEnabled'].ParameterValue | [0]" \
-    --output text 2>/dev/null)"
+    --output text 2>/dev/null || true)"
   if [[ -z "${CREATOR_SERVING}" || "${CREATOR_SERVING}" == "None" ]]; then
     CREATOR_SERVING="false"
   fi
@@ -184,7 +184,7 @@ else
   PLATFORM_SERVING="$(aws cloudformation describe-stacks \
     --region "${REGION}" --stack-name "${STACK_NAME}" \
     --query "Stacks[0].Parameters[?ParameterKey=='PlatformServingEnabled'].ParameterValue | [0]" \
-    --output text 2>/dev/null)"
+    --output text 2>/dev/null || true)"
   if [[ -z "${PLATFORM_SERVING}" || "${PLATFORM_SERVING}" == "None" ]]; then
     PLATFORM_SERVING="false"
   fi
@@ -211,6 +211,26 @@ if [[ -z "${CALENDAR_REDIRECT_URI}" && -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
 fi
 if [[ -n "${CALENDAR_REDIRECT_URI}" ]]; then
   PARAMETER_OVERRIDES+=("CalendarRedirectUri=${CALENDAR_REDIRECT_URI}")
+else
+  # NOT a preserve-on-silence gap. Omitting the parameter already keeps the stack's previous value --
+  # unlike CreatorServingEnabled above, which is passed unconditionally and so must read its own value
+  # back or it would deploy a `false`. The real failure here was the opposite: prod NEVER had a value,
+  # from the first deploy to 2026-11-07, and nothing said so. Calendar connect asked Secrets Manager for
+  # a secret that did not exist and 500'd on first contact, so the feature had never worked in prod and
+  # no deploy, log or test mentioned it.
+  #
+  # So this says it. Non-fatal: plenty of environments legitimately never connect a calendar, and a
+  # deploy that refused over an unused feature would be worse than one that mentions it.
+  _live_redirect="$(aws cloudformation describe-stacks \
+    --region "${REGION}" --stack-name "${STACK_NAME}" \
+    --query "Stacks[0].Parameters[?ParameterKey=='CalendarRedirectUri'].ParameterValue | [0]" \
+    --output text 2>/dev/null || true)"
+  if [[ -z "${_live_redirect}" || "${_live_redirect}" == "None" ]]; then
+    echo "==> NOTE: CalendarRedirectUri is EMPTY on ${STACK_NAME}."
+    echo "    Google Calendar connections will answer 503 calendar_not_configured in this environment."
+    echo "    To set it:  CALENDAR_REDIRECT_URI=https://<api-host>/calendar/callback $0 ${ENVIRONMENT}"
+    echo "    It also needs the secret named by GOOGLE_OAUTH_SECRET_NAME to exist."
+  fi
 fi
 
 if [[ -n "${DASHBOARD_CUSTOM_DOMAIN_NAME}" ]]; then
