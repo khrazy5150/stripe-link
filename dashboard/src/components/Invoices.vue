@@ -271,7 +271,12 @@ async function saveInvoice() {
   saving.value = true;
   try {
     const invoice = buildInvoiceDocument(form);
-    const body = await apiRequest("/invoices", { method: "POST", body: invoice });
+    // PUT, not POST. The API exposes GET + PUT on /invoices (template.yaml: InvoicesList / InvoicesSave);
+    // there is no POST method on the collection. A POST matched no route, so API Gateway answered 403
+    // MissingAuthenticationToken -- which carries NO CORS header, so the browser blocked the response and
+    // fetch rejected with "Failed to fetch". The preflight passes either way (the CORS mock advertises
+    // POST), which is what made this look like a network or auth fault rather than a wrong verb.
+    const body = await apiRequest("/invoices", { method: "PUT", body: invoice });
     const saved = body.invoice || invoice;
     invoices.value.unshift(saved);
     showCreate.value = false;
