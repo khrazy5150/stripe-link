@@ -34,7 +34,7 @@ Platform billing is the exception: those are the platform's **own** account even
 
 ## Naming
 
-Chosen 2026-11-09, after the old names cost time twice in one day:
+Chosen and applied in Stripe 2026-11-09, after the old names cost time twice in one day:
 
     {environment}-{kind}-{modes}
 

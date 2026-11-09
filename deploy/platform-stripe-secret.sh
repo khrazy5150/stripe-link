@@ -119,16 +119,16 @@ print("yes" if doc.get(os.environ["KEY_LIVE"]) or doc.get(os.environ["KEY_TEST"]
 
 echo "Connect webhook -- the destination whose URL ends /webhook/stripe-preview"
 if [[ "${ENVIRONMENT}" == "prod" ]]; then
-  echo "  in Stripe: 'production-connect-live-test' (was 'stripe-connect-preview-prod')"
+  echo "  in Stripe: 'production-connect-live-test'"
 else
-  echo "  in Stripe: 'sandbox-connect-live-test' (was 'sandbox-preview-live')"
+  echo "  in Stripe: 'sandbox-connect-live-test'"
 fi
 echo "  It carries BOTH live and test events, so this one value fills both mode slots."
 ask_endpoint whsec_preview "whsec_... (Connect endpoint signing secret)"
 echo
 echo "Platform billing webhook -- the destination ending /webhook/platform-billing"
 if [[ "${ENVIRONMENT}" == "prod" ]]; then
-  echo "  in Stripe: 'production-billing-live' (was 'prod-junior-bay-billing'). Live-only."
+  echo "  in Stripe: 'production-billing-live'. Live-only."
 else
   echo "  only needed if tenant SaaS billing is in use in sandbox."
 fi
