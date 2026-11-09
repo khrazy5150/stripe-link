@@ -1,12 +1,20 @@
 # Bookings get their own calendar (app-created)
 
-Planned 2026-11-08. **BUILT 2026-11-08, not yet deployed.** Supersedes the `calendar.events.owned`
+Planned 2026-11-08. **BUILT and SHIPPED dev + PROD 2026-11-09** (commit `c21c0a3`). Supersedes the `calendar.events.owned`
 arrangement shipped the same day, and lands **before** the verification submission — otherwise Data
 Access, the justifications and the demo video are all redone.
 
-Still to do: deploy dev then prod, reconnect the author's test tenant, stand up a bookable service,
-brand verification. The prod console's Data Access scopes were updated and verified against the code on
-2026-11-08, and **no demo video or scope review is needed** — see the verification plan.
+Deployed and verified: the prod artifact was downloaded and grepped, and `DEFAULT_SCOPES` in it contains
+exactly `calendar.app.created` + `calendar.calendarlist.readonly` + `calendar.freebusy` — every remaining
+mention of `calendar.events.owned` is prose. Both legal pages are live on juniorbay.com carrying the new
+text and the November 8, 2026 revision date. The prod changeset was audited before executing: 96 changes,
+all `Modify`, **no replacements**, 80 Lambda `Code` updates plus derived re-evaluation of the API body,
+event rules and one IAM role whose policy text was diffed and is byte-identical.
+
+Still to do: reconnect the author's test tenant (re-consent is forced, and that connect is what creates
+the calendar), stand up a bookable service, then brand verification. The prod console's Data Access
+scopes were updated and verified against the code on 2026-11-08, and **no demo video or scope review is
+needed** — see the verification plan.
 
 ## Why
 
