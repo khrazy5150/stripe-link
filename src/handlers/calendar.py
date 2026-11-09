@@ -32,7 +32,14 @@ from stripe_link.google_calendar import (
     exchange_code_for_tokens,
     load_google_oauth_secret,
 )
-from stripe_link.calendar_sync import KMS_FIELD, KMS_MODE, default_connection, resolve_tenant_calendar  # noqa: F401 (re-exported)
+from stripe_link.calendar_sync import (  # noqa: F401 (default_connection/resolve_tenant_calendar re-exported)
+    BOOKINGS_CALENDAR_SUMMARY,
+    KMS_FIELD,
+    KMS_MODE,
+    default_connection,
+    resolve_bookings_calendar,
+    resolve_tenant_calendar,
+)
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -162,8 +169,8 @@ def connect_route(event, states_repo, google_secret):
 #: complete the flow, and before 2026-11-08 we stored whatever came back as a working connection: green
 #: badge in the dashboard, then 403 at the first availability check with a customer waiting.
 REQUIRED_SCOPE_LABELS = {
-    "https://www.googleapis.com/auth/calendar.events.owned":
-        "See, create, change, and delete events on Google calendars you own",
+    "https://www.googleapis.com/auth/calendar.app.created":
+        "Make secondary Google calendars, and see, create, change, and delete events on them",
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly":
         "See the list of Google calendars you're subscribed to",
     "https://www.googleapis.com/auth/calendar.freebusy":
@@ -226,9 +233,10 @@ def callback_route(event, connections_repo, states_repo, secret_cipher, google_s
     if not refresh_token:
         return _html("Google did not return a refresh token. Remove this app under your Google account permissions and reconnect.", 400)
 
+    client = GoogleCalendarClient(tokens.get("access_token", ""), opener=opener)
     account_email = "primary"
     try:
-        for cal in GoogleCalendarClient(tokens.get("access_token", ""), opener=opener).calendar_list().get("items", []):
+        for cal in client.calendar_list().get("items", []):
             if cal.get("primary"):
                 account_email = cal.get("id") or "primary"
                 break
@@ -244,6 +252,16 @@ def callback_route(event, connections_repo, states_repo, secret_cipher, google_s
     connection_id = match.get("connection_id") if match else f"cal_{uuid.uuid4().hex[:12]}"
     is_default = bool(match.get("is_default")) if match else (not has_default)
 
+    # Resolved HERE so the id lands in the same write as the rest of the connection -- a second write
+    # afterwards is a second chance to half-finish. Best-effort: a transient failure to create the
+    # calendar must not throw away a refresh token the merchant has just granted, and the first booking
+    # resolves it again.
+    bookings_calendar_id = ""
+    try:
+        bookings_calendar_id, _created = resolve_bookings_calendar(client, match or {})
+    except GoogleCalendarError:
+        logger.exception("calendar: connected %s but could not create its bookings calendar", tenant_id)
+
     connection = {
         **(match or {}),
         "schema_version": "2026-05-29", "document_type": "calendar_connection", "tenant_id": tenant_id,
@@ -255,12 +273,22 @@ def callback_route(event, connections_repo, states_repo, secret_cipher, google_s
         "refresh_token_ref": secret_cipher.encrypt(refresh_token, tenant_id=tenant_id, mode=KMS_MODE, field=KMS_FIELD),
         "status": "connected", "connected_at": (match or {}).get("connected_at") or now, "updated_at": now,
     }
+    if bookings_calendar_id:
+        connection["bookings_calendar_id"] = bookings_calendar_id
     try:
         validate_calendar_connection(connection)
         connections_repo.put(connection)
     except (DocumentValidationError, RepositoryError) as exc:
         return _html(f"Could not save the connection: {exc}", 500)
-    return _html("Your Google Calendar is connected. You can close this tab and return to the dashboard.")
+    # Said at the moment it becomes true, because the one real cost of a separate calendar is that a
+    # phone may not show a newly added one until it is switched on there -- and the merchant who learns
+    # that weeks later, from a booking that never appeared, concludes the integration is broken.
+    return _html(
+        f"<p>Your Google Calendar is connected. Bookings go to a new calendar called "
+        f"<strong>{_escape(BOOKINGS_CALENDAR_SUMMARY)}</strong> — Junior Bay can only see and change "
+        f"events it puts there, never the rest of your calendar.</p>"
+        "<p>If you do not see bookings on your phone, open the Google Calendar app and switch that "
+        "calendar on.</p><p>You can close this tab and return to the dashboard.</p>")
 
 
 def list_connections_route(event, connections_repo):
@@ -275,9 +303,13 @@ def list_connections_route(event, connections_repo):
 def owned_calendar_ids(tenant_id, conn, *, secret_cipher=None, google_secret=None, opener=None):
     """The ids of calendars this connection OWNS, or None when we could not ask.
 
-    `accessRole` comes back on every `calendarList.list` entry; `owner` is the only role
-    `calendar.events.owned` can write to. None (not an empty set) means the lookup failed, so the caller
-    can tell "they own nothing" from "we do not know" and decline to refuse on a hiccup.
+    `accessRole` comes back on every `calendarList.list` entry, and `owner` is the only role a
+    `calendar.events.owned` grant can write to. None (not an empty set) means the lookup failed, so the
+    caller can tell "they own nothing" from "we do not know" and decline to refuse on a hiccup.
+
+    Still here for LEGACY connections only -- the ones granted before bookings got their own calendar,
+    which still write to `calendar_id`. Nothing we request today can write to a calendar the merchant
+    already had, so a current connection has no calendar to pick and never reaches this.
     """
     from stripe_link.calendar_sync import resolve_tenant_calendar
 
@@ -314,10 +346,20 @@ def update_connection_route(event, connections_repo, connection_id):
         conn["display_name"] = str(body.get("display_name") or "").strip() or conn.get("account_email") or "Calendar"
     if "calendar_id" in body and str(body.get("calendar_id") or "").strip():
         wanted = str(body["calendar_id"]).strip()
-        # REFUSED HERE, not at the first booking. We request `calendar.events.owned`, which can only
-        # write to calendars the merchant OWNS -- so a calendar merely shared with them would be
-        # accepted happily now and 403 weeks later, when a customer books and nobody is watching.
-        # `None` means we could not ask, and a lookup that hiccuped must not block a legitimate choice.
+        if conn.get("bookings_calendar_id"):
+            # SAID, not silently ignored. Bookings go to the calendar this app created, which is the only
+            # one its scopes can write to; storing a `calendar_id` here would be a setting that reads
+            # back correctly and changes nothing.
+            return error_response(
+                "Bookings go to the Junior Bay Bookings calendar in your Google account and cannot be"
+                " redirected — Junior Bay has no access to your other calendars. To move them, delete"
+                " that calendar in Google and reconnect.",
+                status_code=409, code="calendar_not_selectable")
+        # A LEGACY connection, which still writes to `calendar_id`. Refused HERE, not at the first
+        # booking: `calendar.events.owned` can only write to calendars the merchant OWNS, so a calendar
+        # merely shared with them would be accepted happily now and 403 weeks later, when a customer
+        # books and nobody is watching. `None` means we could not ask, and a lookup that hiccuped must
+        # not block a legitimate choice.
         owned = owned_calendar_ids(tenant_id, conn)
         if owned is not None and wanted not in owned:
             return error_response(

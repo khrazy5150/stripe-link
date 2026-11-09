@@ -1,8 +1,11 @@
 # Bookings get their own calendar (app-created)
 
-Planned 2026-11-08. Not built. Supersedes the `calendar.events.owned` arrangement shipped the same day,
-and should land **before** the verification submission — otherwise Data Access, the justifications and the
-demo video are all redone.
+Planned 2026-11-08. **BUILT 2026-11-08, not yet deployed.** Supersedes the `calendar.events.owned`
+arrangement shipped the same day, and lands **before** the verification submission — otherwise Data
+Access, the justifications and the demo video are all redone.
+
+Still to do: update the Data Access scopes in the prod console to match `DEFAULT_SCOPES`, deploy dev then
+prod, reconnect the author's test tenant, stand up a bookable service, record the demo video, submit.
 
 ## Why
 
@@ -109,13 +112,37 @@ regardless, so:
 
 **This will never be cheaper.** The same argument applied to the last scope narrowing and was right.
 
-## Open questions — test before building
+## What building it turned up
 
-1. **Can `calendarList.list` see the app-created calendar under these scopes?** If not, the stored id is
-   not merely wise but mandatory, and a merchant who deletes the calendar can only be recovered through
-   the 404 path.
+Three things the plan did not anticipate, each a silent failure rather than an error:
+
+1. **`busy_intervals` read ONE calendar key.** Querying four calendars in one `freebusy.query` and then
+   reading a single key returns one calendar's busy windows and discards the rest — and the slot engine
+   cannot tell that from "nothing is busy". It now takes a list.
+
+2. **An existing event was addressed wherever the connection writes TODAY.** Moving the write target from
+   `primary` to the bookings calendar redirects every update and delete of an event created before the
+   move: the call reports success against a calendar the event was never in, and the real event sits in
+   the merchant's calendar forever. `update_event`/`delete_event` now take the calendar the event lives
+   in, which is what the stored `external_calendar_events.calendar_id` was always for.
+
+3. **A legacy connection cannot create a calendar.** It holds `calendar.events.owned`, not
+   `calendar.app.created`, so `calendars.insert` 403s — and `sync_appointment_event` swallows its own
+   failures, so its bookings would simply stop reaching any calendar with nothing anywhere saying so.
+   Creation is now gated on the connection's **stored** `scopes`, and absent scopes count as not granted.
+
+Also: the slot picker is a public page, so the read path must never create a calendar — two customers
+opening it at once with nothing stored yet would create two. Availability excludes calendars whose
+`accessRole` is `reader`/`freeBusyReader`, because a subscribed "Holidays in United States" would
+otherwise mark every public holiday fully busy and close the business by accident.
+
+## Open questions — still to confirm against the live API
+
+1. **Can `calendarList.list` see the app-created calendar under these scopes?** Not waited on: the
+   bookings calendar is appended to the availability query explicitly rather than trusted to appear in
+   the list, because finding out from a double booking is the wrong way to learn it.
 2. **Does `calendar.app.created` permit `calendars.delete` / `calendars.update`?** Relevant only if we
-   ever rename or remove it; not needed for the first cut.
+   ever rename or remove it; not needed, and nothing depends on it.
 3. **Sensitive or non-sensitive?** The console reports the classification once the scopes are saved. If
    `freebusy` or `calendarlist.readonly` land as non-sensitive, the review narrows further.
 

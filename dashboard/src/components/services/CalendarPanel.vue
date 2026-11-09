@@ -3,8 +3,10 @@
     <header v-if="!embedded" class="dashboard-card-header">
       <div>
         <h2>Calendar Sync</h2>
-        <p>Connect one or more Google Calendars. The default calendar receives bookings and its busy
-          times block open slots; you can add others to delegate services to different calendars.</p>
+        <p>Connect one or more Google Calendars. Bookings go to a <strong>Junior Bay Bookings</strong>
+          calendar we create in your Google account — we can see and change only the events we put there,
+          never the rest of your calendar. Your own busy times still block open slots. Add more accounts
+          to delegate services to different people.</p>
       </div>
       <button class="secondary-action" type="button" :disabled="store.loading" @click="store.load()">
         {{ store.loading ? "Checking..." : "Refresh" }}
@@ -43,6 +45,21 @@
       </div>
 
       <p v-if="waiting" class="calendar-waiting">Waiting for you to finish in the Google window…</p>
+
+      <!-- PERSISTENT, not a one-time notice at connect. The moment someone needs this is weeks later,
+           when a booking does not show up on a phone and they conclude the integration is broken. -->
+      <details v-if="store.connections.length" class="calendar-phone-help">
+        <summary>Show bookings on your phone</summary>
+        <p>A calendar added to your Google account after you set up your phone is sometimes switched off
+          on that device, so bookings appear on the web but not in the app.</p>
+        <ol>
+          <li>Open the <strong>Google Calendar</strong> app on your phone.</li>
+          <li>Tap the menu (☰), then scroll to your account.</li>
+          <li>Tick <strong>Junior Bay Bookings</strong>.</li>
+        </ol>
+        <p class="field-hint">On iPhone's built-in Calendar app, use <strong>Calendars</strong> at the
+          bottom of the screen and tick it there. Each device is separate.</p>
+      </details>
     </div>
 
     <PromptDialog

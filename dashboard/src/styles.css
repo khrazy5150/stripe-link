@@ -1059,6 +1059,30 @@ main {
   margin-top: 0.75rem;
 }
 
+.calendar-phone-help {
+  margin-top: 1.2rem;
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 1rem;
+  font-size: 1.35rem;
+  color: var(--muted, #6b7280);
+}
+
+.calendar-phone-help > summary {
+  cursor: pointer;
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+}
+
+.calendar-phone-help p,
+.calendar-phone-help ol {
+  margin: 0.6rem 0 0;
+}
+
+.calendar-phone-help ol {
+  padding-left: 2rem;
+  line-height: 1.6;
+}
+
 .product-card-price {
   display: flex;
   flex-wrap: wrap;

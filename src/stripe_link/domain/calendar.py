@@ -31,10 +31,22 @@ def google_event_body(appointment: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def busy_intervals(freebusy_response: dict[str, Any], calendar_id: str = "primary") -> list[dict[str, str]]:
-    calendar = (freebusy_response.get("calendars") or {}).get(calendar_id, {})
+def busy_intervals(freebusy_response: dict[str, Any], calendar_id="primary") -> list[dict[str, str]]:
+    """Busy windows from a `freebusy.query` response, for one calendar id or several.
+
+    `calendar_id` takes a list because bookings now live in a calendar of their own: availability has to
+    subtract the merchant's real commitments AND our own appointments, which is several calendars in one
+    response. Reading a single key would have quietly dropped all but one of them -- and the slot engine
+    cannot tell "nothing is busy" from "we only looked at one calendar".
+
+    The result is a plain concatenation, not a merge. Overlapping windows subtract identically, and the
+    slot engine already handles overlap; merging here would only add a way to get it wrong.
+    """
+    ids = [calendar_id] if isinstance(calendar_id, str) else [str(c) for c in (calendar_id or [])]
+    calendars = freebusy_response.get("calendars") or {}
     return [
         {"start": entry["start"], "end": entry["end"]}
-        for entry in calendar.get("busy", [])
+        for cid in ids
+        for entry in (calendars.get(cid) or {}).get("busy", [])
         if entry.get("start") and entry.get("end")
     ]

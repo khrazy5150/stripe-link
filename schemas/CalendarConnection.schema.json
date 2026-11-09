@@ -15,12 +15,14 @@
     "is_default": { "type": "boolean" },
     "owner_fulfiller_id": { "type": "string" },
     "calendar_id": { "type": "string" },
+    "bookings_calendar_id": { "type": "string" },
     "account_email": { "type": "string" },
     "scopes": { "type": "array", "items": { "type": "string" } },
     "refresh_token_ref": { "type": "string" },
     "provider_meta": { "type": "object" },
     "status": { "enum": ["connected", "revoked", "error"] },
     "connected_at": { "type": "integer" },
+    "revoked_at": { "type": "integer" },
     "updated_at": { "type": "integer" }
   }
 }

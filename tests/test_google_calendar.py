@@ -49,6 +49,23 @@ class CalendarDomainTests(unittest.TestCase):
         resp = {"calendars": {"primary": {"busy": [{"start": "2026-07-08T15:00:00Z", "end": "2026-07-08T16:00:00Z"}]}}}
         self.assertEqual(busy_intervals(resp), [{"start": "2026-07-08T15:00:00Z", "end": "2026-07-08T16:00:00Z"}])
 
+    def test_busy_intervals_across_several_calendars(self):
+        """Bookings live in their own calendar, so availability subtracts the merchant's commitments AND
+        our appointments -- several calendars in one response. Reading a single key dropped all but one,
+        and the slot engine cannot tell that from "nothing is busy"."""
+        resp = {"calendars": {
+            "me@gmail.com": {"busy": [{"start": "09:00", "end": "10:00"}]},
+            "cal-bookings": {"busy": [{"start": "14:00", "end": "15:00"}]},
+        }}
+        self.assertEqual(busy_intervals(resp, ["me@gmail.com", "cal-bookings"]),
+                         [{"start": "09:00", "end": "10:00"}, {"start": "14:00", "end": "15:00"}])
+
+    def test_a_calendar_the_query_could_not_read_contributes_nothing_rather_than_breaking(self):
+        resp = {"calendars": {"me@gmail.com": {"errors": [{"reason": "notFound"}]},
+                              "cal-bookings": {"busy": [{"start": "14:00", "end": "15:00"}]}}}
+        self.assertEqual(busy_intervals(resp, ["me@gmail.com", "cal-bookings", "never-asked"]),
+                         [{"start": "14:00", "end": "15:00"}])
+
 
 class GoogleCalendarClientTests(unittest.TestCase):
     def test_fetch_access_token(self):

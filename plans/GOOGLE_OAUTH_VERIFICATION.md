@@ -32,7 +32,7 @@ speculative Google Business Profile one.
   legal pages are rendered by `LegalFunction` and reach the marketing domain through a CloudFront
   behaviour (`PathPattern: /legal/*` → `HomepageLegalApiOrigin`), so they ship with `deploy.sh`, **not**
   `deploy-homepage.sh`.
-- **Scopes:** exactly `DEFAULT_SCOPES` from `src/stripe_link/google_calendar.py`. Both sensitive; the
+- **Scopes:** exactly `DEFAULT_SCOPES` from `src/stripe_link/google_calendar.py`. Sensitive; the
   restricted table is empty, so **no third-party security assessment is required**.
 
 ## Scope justifications — the text reviewers read
@@ -40,63 +40,82 @@ speculative Google Business Profile one.
 Keep these tied to the calls the code actually makes. Every claim below is checkable in
 `src/stripe_link/calendar_sync.py` and `src/handlers/calendar.py`.
 
-### `https://www.googleapis.com/auth/calendar.events.owned`
+### `https://www.googleapis.com/auth/calendar.app.created`
 
-> Junior Bay is a booking platform for small businesses. When a customer books an appointment, we create
-> a calendar event on the calendar the merchant selected when they connected their Google account. When
-> the customer reschedules, we update that event; when they cancel, we delete it. We only ever create,
-> update, or delete events that this application itself created, and only on a calendar the merchant
-> owns — the application refuses to be pointed at a calendar that is merely shared with them. We do not
-> read the contents of events created by anyone else.
+> Junior Bay is a booking platform for small businesses. When a merchant connects their Google account we
+> create one secondary calendar in it, named "Junior Bay Bookings", and every appointment a customer books
+> becomes an event on that calendar. When the customer reschedules we update that event; when they cancel
+> we delete it. This scope can only reach a calendar this application itself created, so the merchant's
+> existing calendars and events are outside our access entirely — we cannot read, change or delete any
+> event we did not create. We do not read event contents from anywhere.
 
-API methods used: `events.insert`, `events.update`, `events.delete`.
+API methods used: `calendars.insert`, `calendars.get`, `events.insert`, `events.update`, `events.delete`.
 
-**Why `.owned` and not `calendar.events`.** `calendar.events` reaches every calendar the merchant can
-*see*, shared ones included; `.owned` reaches only calendars they own. The narrower scope is safe only
-because `handlers/calendar.py` now refuses a `calendar_id` whose `accessRole` is not `owner` — otherwise
-a merchant could select a shared calendar, be accepted, and 403 at the first real booking weeks later.
-
-### `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
-
-> When a merchant first connects their Google account we read the list of their calendars once, so they
-> can choose which calendar their bookings are written to. We do not read the contents of any calendar.
-
-API method used: `calendarList.list`.
+`calendars.get` is how we detect that a merchant has deleted the bookings calendar themselves, so we can
+create a replacement instead of failing their next booking.
 
 ### `https://www.googleapis.com/auth/calendar.freebusy`
 
-> When a customer is choosing an appointment time, we query free/busy for the one calendar the merchant
-> selected, so the platform does not offer a slot the merchant is already busy for. This returns only
-> whether a period is busy — not event titles, descriptions, attendees or locations.
+> When a customer is choosing an appointment time, we query free/busy across the merchant's own calendars
+> and the bookings calendar, so the platform does not offer a slot the merchant is already committed for,
+> and two customers cannot take the same slot. This returns only whether a period is busy — not event
+> titles, descriptions, attendees or locations.
 
 API method used: `freebusy.query`.
 
-### Why these three and not `calendar.readonly` (narrowed 2026-11-08)
+### `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 
-The original pair was `calendar.events` + `calendar.readonly`, where `calendar.readonly` served both the
-calendar list and the free/busy query. Its consent text — *"See and download any calendar you can access
-using your Google Calendar"* — asks a merchant for far more than a booking tool needs, and invites the
-reviewer's obvious question.
+> We read the list of the merchant's calendars to know which ones count toward that availability check,
+> and to show them which Google account is connected. We read the list only — never the contents of any
+> calendar in it.
+
+API method used: `calendarList.list`.
+
+**Not optional, and must not be described as optional.** With bookings in a calendar of their own, a
+free/busy query against that calendar alone would see only our own appointments and none of the merchant's
+real commitments — the opposite of the point. The list is how we learn which calendars to include. We
+include only calendars whose `accessRole` is `owner` or `writer`, so a read-only subscription such as
+"Holidays in United States" cannot mark whole days busy and close the business by accident.
+
+### Why these three (narrowed twice, 2026-11-08)
+
+The original pair was `calendar.events` + `calendar.readonly`. `calendar.readonly` — *"See and download any
+calendar you can access using your Google Calendar"* — asks a merchant for far more than a booking tool
+needs. That became `calendar.events.owned` + `calendarlist.readonly` + `freebusy`, and then this.
 
 Checked against the API reference rather than assumed:
 
 | Method | Scopes Google accepts | Chosen |
 |---|---|---|
+| `calendars.insert` | `calendar`, `calendar.app.created`, `calendar.calendars` | `calendar.app.created` |
+| `events.insert/update/delete` | `calendar`, `calendar.events`, `calendar.app.created`, `calendar.events.owned` | `calendar.app.created` |
 | `freebusy.query` | `calendar.readonly`, `calendar`, `calendar.events.freebusy`, `calendar.freebusy` | `calendar.freebusy` |
 | `calendarList.list` | `calendar.readonly`, `calendar`, `calendar.calendarlist`, `calendar.calendarlist.readonly` | `calendar.calendarlist.readonly` |
-| `events.insert/update/delete` | `calendar`, `calendar.events`, `calendar.events.owned` | `calendar.events.owned` |
 
-**`calendar.app.created` was considered and not taken.** It is narrower still — the app creates its own
-secondary calendar and can never touch the merchant's existing events — but it changes the product: no
-"choose which of your calendars bookings go to", and new code to create and track that calendar. A
-product decision, not a scope tweak. Worth revisiting on its merits.
+**`calendar.events.owned` is dropped.** It reaches every calendar the merchant owns, and our defence was a
+promise — *we only touch events we created*. With bookings in a calendar the app itself created, that is a
+property of the API instead: `calendar.app.created` has no path to a calendar it did not create. The claim
+a reviewer has to accept on trust is gone, which is the single strongest thing this submission can say.
 
 **`freebusy.query` does NOT accept `calendar.events`** — that was the obvious guess and it is wrong, which
-is why it was looked up. Each scope now maps one-to-one onto a single method, so "minimum necessary" is
-self-evident from the list rather than a claim to be taken on trust.
+is why it was looked up. Each scope maps onto one job, so "minimum necessary" is self-evident from the
+list rather than a claim to be taken on trust.
 
 Changing scopes forces every connected tenant to re-consent. Done while prod had zero connections and dev
 had one test user.
+
+### What the merchant gives up, and is told
+
+Bookings no longer land in a calendar they pick — there is no picker, because nothing we request can write
+to a calendar they already had. The costs, and what covers each:
+
+| Cost | Covered by |
+|---|---|
+| A newly added calendar is sometimes switched off per device, so bookings show on the web but not on a phone | Said on the connect confirmation page, plus a persistent **"Show bookings on your phone"** disclosure in Calendar Sync |
+| `PATCH /calendar/connections/{id}` with a `calendar_id` can no longer redirect bookings | Refused with `calendar_not_selectable` and an explanation, rather than stored and silently ignored |
+
+In exchange the merchant gets separate colouring, separate notifications, sharing with staff, and
+one-action removal of every booking — and an app that cannot see the rest of their calendar.
 
 ## Order of operations
 
@@ -112,7 +131,7 @@ had one test user.
 third-party services you choose to connect" — the most common reason sensitive-scope verification is
 refused. It now carries a **Google User Data** section: what is accessed and why, what is not done
 (no advertising, no sale, no transfer, no AI/ML training, no human access), what is stored (an encrypted
-token and the chosen calendar id, not a copy of the calendar) and until when, both ways to revoke, and
+token and the id of the calendar we create, not a copy of the calendar) and until when, both ways to revoke, and
 the **Limited Use** statement naming the Google API Services User Data Policy.
 
 ## What is stored (answered 2026-11-08)
@@ -123,17 +142,18 @@ Asked directly: does Junior Bay keep Google event IDs, or only tokens and the ca
 to the event we created. It is what `update_event` and `delete_event` are called with when a booking is
 rescheduled or cancelled (`calendar_sync.py:106-116`).
 
-So the stored set is: an encrypted refresh token, the chosen `calendar_id`, and one Google event id per
-booking. **No event contents** — no titles, descriptions, attendees or locations — and no copy of the
-calendar.
+So the stored set is: an encrypted refresh token, the id of the bookings calendar we created
+(`bookings_calendar_id`), and one Google event id per booking. **No event contents** — no titles,
+descriptions, attendees or locations — and no copy of the calendar.
 
 The privacy policy's storage paragraph originally named only the token and the calendar id. It was
 accurate about contents and silent about the event ids, which is the kind of omission a reviewer is
 entitled to pick up. Corrected.
 
-**It also strengthens the `calendar.events.owned` justification.** The claim "we only ever update or
-delete events this application created" is not a promise to be taken on trust — we can only address an
-event whose id we stored when we created it.
+**The event ids are a second, independent reason the "only our own events" claim holds.** Even setting
+the scope aside, we can only address an event whose id we stored when we created it. With
+`calendar.app.created` the scope already makes it impossible to reach anything else, so the two arguments
+are belt and braces rather than one load-bearing promise.
 
 ## Loose ends
 

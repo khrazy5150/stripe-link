@@ -4,6 +4,7 @@ import time
 import unittest
 
 from handlers.calendar import handler, resolve_tenant_calendar
+from stripe_link.google_calendar import DEFAULT_SCOPES
 from tests.fakes import FakeDocumentRepository
 
 GOOGLE_SECRET = {"client_id": "cid", "client_secret": "sec", "refresh_token": "platform-rt"}
@@ -32,10 +33,24 @@ class _FakeResp:
 
 
 class _FakeOpener:
-    def __init__(self, *responses):
+    """Answers the token exchange and calendarList from a queue, and `calendars.insert` by URL.
+
+    Creating the bookings calendar is a POST to /calendars in the middle of the connect flow. A pure
+    positional queue handed it the calendarList response and every later call the wrong one -- order is
+    not what these tests are asserting, so the one call that is about to be added is routed by URL.
+    """
+
+    def __init__(self, *responses, calendar=None):
         self.responses = list(responses)
+        self.calendar = calendar if calendar is not None else {"id": "jb_bookings@group.calendar.google.com"}
+        self.seen = []
 
     def __call__(self, request, timeout=None):
+        self.seen.append((request.method, request.full_url))
+        if request.full_url.rsplit("?", 1)[0].rstrip("/").endswith("/calendars"):
+            return _FakeResp(self.calendar)          # calendars.insert
+        if "/calendars/" in request.full_url and request.method == "GET":
+            return _FakeResp(self.calendar)          # calendars.get -- the stored id still exists
         return _FakeResp(self.responses.pop(0))
 
 
@@ -66,7 +81,7 @@ class CalendarConnectTests(unittest.TestCase):
         connections = FakeDocumentRepository("connection_id")
         states.put({"tenant_id": "t1", "state_id": "S1", "document_type": "oauth_state", "expires_at": int(time.time()) + 600})
         opener = _FakeOpener(
-            {"refresh_token": "tenant-rt", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.freebusy"},
+            {"refresh_token": "tenant-rt", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.freebusy"},
             {"items": [{"id": "me@gmail.com", "primary": True}]},
         )
         resp = handler(event("GET", "/calendar/callback", tenant_id=None, params={"code": "AUTH", "state": "S1"}), None,
@@ -121,13 +136,14 @@ class CalendarConnectTests(unittest.TestCase):
         self.assertIsNone(resolve_tenant_calendar("t1", connections_repo=FakeDocumentRepository("connection_id"), secret_cipher=FakeCipher(), google_secret=GOOGLE_SECRET))
 
 
-def _connect(connections, account_email):
+def _connect(connections, account_email, calendar=None):
     """Run the OAuth callback for a given account, returning the stored connection."""
     states = FakeDocumentRepository("state_id")
     states.put({"tenant_id": "t1", "state_id": "S", "document_type": "oauth_state", "expires_at": int(time.time()) + 600})
     opener = _FakeOpener(
-        {"refresh_token": f"rt-{account_email}", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.freebusy"},
+        {"refresh_token": f"rt-{account_email}", "access_token": "ya29", "scope": "https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.freebusy"},
         {"items": [{"id": account_email, "primary": True}]},
+        calendar=calendar,
     )
     handler(event("GET", "/calendar/callback", tenant_id=None, params={"code": "AUTH", "state": "S"}), None,
             connections_repo=connections, states_repo=states, secret_cipher=FakeCipher(), google_secret=GOOGLE_SECRET, opener=opener)
@@ -153,6 +169,39 @@ class MultiConnectionTests(unittest.TestCase):
         again = _connect(connections, "a@gmail.com")
         self.assertEqual(first["connection_id"], again["connection_id"])
         self.assertEqual(len(connections.list_for_tenant("t1")), 1)
+
+    def test_connecting_stores_the_bookings_calendar_id(self):
+        """Resolved during the callback so it lands in the SAME write as the rest of the connection -- a
+        second write afterwards is a second chance to half-finish."""
+        connections = FakeDocumentRepository("connection_id")
+        conn = _connect(connections, "a@gmail.com")
+        self.assertEqual(conn["bookings_calendar_id"], "jb_bookings@group.calendar.google.com")
+
+    def test_reconnecting_reuses_the_calendar_instead_of_making_a_second_one(self):
+        """Keyed on the stored id, never the name: a merchant who renames it to "Appointments" would
+        otherwise get a second calendar and bookings split across two with no sign of it."""
+        connections = FakeDocumentRepository("connection_id")
+        first = _connect(connections, "a@gmail.com")
+        again = _connect(connections, "a@gmail.com", calendar={"id": "SHOULD-NOT-BE-USED"})
+        self.assertEqual(again["bookings_calendar_id"], first["bookings_calendar_id"])
+
+    def test_the_merchant_is_told_where_bookings_go(self):
+        """The one real cost of a separate calendar is that a phone may not show a newly added one until
+        it is switched on there. Said now, not learned weeks later from a booking that never appeared."""
+        states = FakeDocumentRepository("state_id")
+        states.put({"tenant_id": "t1", "state_id": "S", "document_type": "oauth_state",
+                    "expires_at": int(time.time()) + 600})
+        opener = _FakeOpener(
+            {"refresh_token": "rt", "access_token": "ya29", "scope": " ".join(DEFAULT_SCOPES)},
+            {"items": [{"id": "a@gmail.com", "primary": True}]},
+        )
+        resp = handler(event("GET", "/calendar/callback", tenant_id=None,
+                             params={"code": "AUTH", "state": "S"}), None,
+                       connections_repo=FakeDocumentRepository("connection_id"), states_repo=states,
+                       secret_cipher=FakeCipher(), google_secret=GOOGLE_SECRET, opener=opener)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertIn("Junior Bay Bookings", resp["body"])
+        self.assertIn("switch that calendar on", resp["body"])
 
     def test_list_returns_connections_without_token_ref(self):
         connections = FakeDocumentRepository("connection_id")

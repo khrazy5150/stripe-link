@@ -11,31 +11,32 @@ from urllib.request import Request, urlopen
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
-#: ONE SCOPE PER METHOD WE CALL, which is the narrowest set that works (narrowed 2026-11-08).
+#: ONE SCOPE PER METHOD WE CALL, and none that can reach a calendar the merchant already had
+#: (plans/GOOGLE_CALENDAR_APP_CREATED.md, 2026-11-08).
 #:
-#: This was `calendar.events` + `calendar.readonly`, and `calendar.readonly` was doing two jobs at once.
-#: Its consent text reads *"See and download any calendar you can access using your Google Calendar"* --
-#: a merchant connecting a booking tool is entitled to balk at that, and a reviewer is entitled to ask
-#: why a booking tool needs it. Google documents a purpose-built scope for each job:
+#:   calendar.app.created           -> calendars.insert/get + events.insert/update/delete, on calendars
+#:                                     THIS APP CREATED and no others
+#:   calendar.freebusy              -> freebusy.query, across the merchant's real calendars
+#:   calendar.calendarlist.readonly -> calendarList.list: WHICH calendars count toward availability, and
+#:                                     the account email we display
 #:
-#:   calendar.events.owned           -> events.insert / events.update / events.delete, on calendars
-#:                                      the merchant OWNS (not merely ones shared with them)
-#:   calendar.calendarlist.readonly  -> calendarList.list   (pick which calendar to write to, once)
-#:   calendar.freebusy               -> freebusy.query      (is this slot taken? not what is in it)
+#: `calendar.events.owned` is deliberately absent. Bookings live in a calendar the app creates, so no
+#: write ever needs to reach a calendar the merchant already had -- which turns "we only touch our own
+#: events" from a promise a reviewer must take on trust into a property of the API.
 #:
-#: `freebusy.query` does NOT accept `calendar.events` -- checked against the API reference rather than
-#: assumed, because assuming it was the obvious guess and it is wrong.
+#: calendarlist.readonly is NOT optional, however it reads: with bookings in their own calendar, a
+#: free/busy query against that calendar alone would see only our own appointments and none of the
+#: merchant's real commitments, which is the opposite of the point.
 #:
-#: `calendar.events.owned` rather than `calendar.events`, which reaches every calendar the merchant can
-#: SEE, shared ones included. Narrowing it is only safe because the connection may no longer point at a
-#: calendar they merely have access to -- `handlers/calendar.py` refuses a `calendar_id` whose
-#: `accessRole` is not `owner`. Without that check this scope would 403 at the first booking, long after
-#: the tenant chose the calendar.
-#:
-#: CHANGING THIS FORCES EVERY CONNECTED TENANT TO RE-CONSENT. It was done while prod had zero
-#: connections and dev had one test user; it will never be this cheap again.
+#: CHANGING THIS FORCES EVERY CONNECTED TENANT TO RE-CONSENT.
+
+#: The one scope that can make a calendar. Checked against a connection's STORED `scopes` before we try
+#: to create one, because a connection granted before this change holds `calendar.events.owned` instead
+#: and `calendars.insert` would 403 -- silently, since calendar sync swallows its own failures.
+APP_CREATED_SCOPE = "https://www.googleapis.com/auth/calendar.app.created"
+
 DEFAULT_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events.owned",
+    APP_CREATED_SCOPE,
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/calendar.freebusy",
 ]
@@ -54,6 +55,18 @@ class GoogleCalendarNotConfigured(GoogleCalendarError):
     Secrets Manager for a secret that did not exist, boto3 raised `ResourceNotFoundException` -- which is
     not a `GoogleCalendarError` and was caught nowhere -- and every tenant who pressed "Connect Google
     Calendar" in production got an unhandled 500. The feature had never worked there, and nothing said so.
+    """
+
+
+class GoogleCalendarNotFound(GoogleCalendarError):
+    """A 404 from Google. The CALLER decides what it means, because it has two meanings:
+
+      * the bookings CALENDAR is gone -- the merchant deleted it outside the software, and the answer is
+        to create another and store its id;
+      * an EVENT is gone -- for a cancellation that is success, since the goal was for it not to exist.
+
+    Both used to arrive as a bare `GoogleCalendarError`, so a cancellation that had already achieved what
+    it asked for was reported as a failure.
     """
 
 
@@ -153,26 +166,59 @@ class GoogleCalendarClient:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except HTTPError as exc:
+            if exc.code == 404:
+                raise GoogleCalendarNotFound(_error_payload(exc).get("error", {}).get("message")
+                                             or "not found") from exc
             payload = _error_payload(exc)
             error = payload.get("error")
             message = error.get("message") if isinstance(error, dict) else (error or f"HTTP {exc.code}")
             raise GoogleCalendarError(message) from exc
 
-    def _cal(self) -> str:
-        return quote(self.calendar_id, safe="")
+    def _cal(self, calendar_id: str = "") -> str:
+        """The calendar an operation addresses: an explicit id when given, else the connection's.
+
+        **An existing event is addressed where it LIVES, not where we write today.** Moving the write
+        target (as the app-created bookings calendar does) silently redirects every update and delete of
+        an event created before the move, so the real event is never touched and the call reports success
+        against a calendar it was never in.
+        """
+        return quote(calendar_id or self.calendar_id, safe="")
 
     def create_event(self, body: dict) -> dict:
         return self._request("POST", f"/calendars/{self._cal()}/events", body=body)
 
-    def update_event(self, event_id: str, body: dict) -> dict:
-        return self._request("PATCH", f"/calendars/{self._cal()}/events/{quote(event_id, safe='')}", body=body)
+    def update_event(self, event_id: str, body: dict, calendar_id: str = "") -> dict:
+        return self._request("PATCH", f"/calendars/{self._cal(calendar_id)}/events/{quote(event_id, safe='')}",
+                             body=body)
 
-    def delete_event(self, event_id: str) -> bool:
-        self._request("DELETE", f"/calendars/{self._cal()}/events/{quote(event_id, safe='')}")
+    def delete_event(self, event_id: str, calendar_id: str = "") -> bool:
+        self._request("DELETE", f"/calendars/{self._cal(calendar_id)}/events/{quote(event_id, safe='')}")
         return True
 
-    def free_busy(self, time_min: str, time_max: str) -> dict:
-        return self._request("POST", "/freeBusy", body={"timeMin": time_min, "timeMax": time_max, "items": [{"id": self.calendar_id}]})
+    def free_busy(self, time_min: str, time_max: str, calendar_ids=None) -> dict:
+        """Busy intervals for one or more calendars in a single query.
+
+        `calendar_ids` matters now that bookings live in their OWN calendar. Querying only that calendar
+        would see our appointments and none of the merchant's real commitments -- the opposite of the
+        point -- so the caller passes their real calendars AND the bookings calendar. `freebusy.query`
+        takes them all at once, so this stays one request.
+        """
+        ids = [c for c in (calendar_ids or [self.calendar_id]) if c]
+        return self._request("POST", "/freeBusy", body={
+            "timeMin": time_min, "timeMax": time_max, "items": [{"id": c} for c in ids]})
+
+    def get_calendar(self, calendar_id: str) -> dict:
+        """One calendar by id. Raises `GoogleCalendarNotFound` when it is gone -- which is how we learn
+        the merchant deleted the bookings calendar outside the software."""
+        return self._request("GET", f"/calendars/{quote(calendar_id, safe='')}")
+
+    def create_calendar(self, summary: str, time_zone: str = "") -> dict:
+        """A secondary calendar owned by the connected account. `calendar.app.created` can only ever
+        reach calendars created this way, which is the whole point of the scope."""
+        body = {"summary": summary}
+        if time_zone:
+            body["timeZone"] = time_zone
+        return self._request("POST", "/calendars", body=body)
 
     def calendar_list(self) -> dict:
         return self._request("GET", "/users/me/calendarList?maxResults=50")

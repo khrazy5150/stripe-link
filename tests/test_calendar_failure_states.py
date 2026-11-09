@@ -187,25 +187,28 @@ class OnlyACalendarTheMerchantOwnsTests(unittest.TestCase):
         selection the merchant can still correct."""
         self.assertEqual(self._patch("anything@b.test", None)["statusCode"], 200)
 
-    def test_the_scopes_and_the_check_agree(self):
-        """If the scope ever widens back to `calendar.events`, this check becomes dead weight -- and if
-        it is removed while the scope stays narrow, bookings 403. They move together."""
-        from stripe_link.google_calendar import DEFAULT_SCOPES
+    def test_the_ownership_check_survives_the_move_to_an_app_created_calendar(self):
+        """Kept, though it now guards less than it did.
 
-        narrow = any(s.endswith("calendar.events.owned") for s in DEFAULT_SCOPES)
+        While we requested `calendar.events.owned`, this check was what made that scope safe: a calendar
+        merely shared with the merchant would have been accepted and then 403'd at the first booking.
+        Bookings now go to a calendar the app creates, so no write reaches a merchant calendar at all and
+        the check is belt alongside braces. It stays because `calendar_id` is still settable through the
+        API, and a guard that costs nothing is not worth removing to tidy up.
+        """
         import inspect
-        checks = "calendar_not_owned" in inspect.getsource(calendar.update_connection_route)
-        self.assertEqual(narrow, checks)
 
-    def test_the_requested_scopes_are_one_per_method(self):
+        self.assertIn("calendar_not_owned", inspect.getsource(calendar.update_connection_route))
+
+    def test_no_requested_scope_reaches_a_calendar_we_did_not_create(self):
+        """The exact set is pinned in test_bookings_calendar.py, which owns that design. What matters
+        here is that nothing in it can write to a calendar the merchant already had."""
         from stripe_link.google_calendar import DEFAULT_SCOPES
 
-        self.assertEqual(sorted(DEFAULT_SCOPES), [
-            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-            "https://www.googleapis.com/auth/calendar.events.owned",
-            "https://www.googleapis.com/auth/calendar.freebusy",
-        ])
-        self.assertFalse(any(s.endswith("/calendar.readonly") for s in DEFAULT_SCOPES))
+        for scope in DEFAULT_SCOPES:
+            self.assertFalse(scope.endswith("/calendar.readonly"))
+            self.assertFalse(scope.endswith("/calendar.events"))
+            self.assertFalse(scope.endswith("/calendar.events.owned"))
 
 
 class RevocationIsOBSERVEDNotAssumedTests(unittest.TestCase):
@@ -301,7 +304,8 @@ class APartialGrantIsNotAConnectionTests(unittest.TestCase):
 
         absent = missing_scopes(["https://www.googleapis.com/auth/calendar.calendarlist.readonly"])
         self.assertEqual(len(absent), 2)
-        self.assertIn("See, create, change, and delete events on Google calendars you own", absent)
+        self.assertIn("Make secondary Google calendars, and see, create, change, and delete events on them",
+                      absent)
 
     def test_nothing_granted_reports_all_three(self):
         from handlers.calendar import missing_scopes
