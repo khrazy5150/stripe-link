@@ -4,8 +4,9 @@ Planned 2026-11-08. **BUILT 2026-11-08, not yet deployed.** Supersedes the `cale
 arrangement shipped the same day, and lands **before** the verification submission — otherwise Data
 Access, the justifications and the demo video are all redone.
 
-Still to do: update the Data Access scopes in the prod console to match `DEFAULT_SCOPES`, deploy dev then
-prod, reconnect the author's test tenant, stand up a bookable service, record the demo video, submit.
+Still to do: deploy dev then prod, reconnect the author's test tenant, stand up a bookable service,
+brand verification. The prod console's Data Access scopes were updated and verified against the code on
+2026-11-08, and **no demo video or scope review is needed** — see the verification plan.
 
 ## Why
 
@@ -143,8 +144,11 @@ otherwise mark every public holiday fully busy and close the business by acciden
    the list, because finding out from a double booking is the wrong way to learn it.
 2. **Does `calendar.app.created` permit `calendars.delete` / `calendars.update`?** Relevant only if we
    ever rename or remove it; not needed, and nothing depends on it.
-3. **Sensitive or non-sensitive?** The console reports the classification once the scopes are saved. If
-   `freebusy` or `calendarlist.readonly` land as non-sensitive, the review narrows further.
+3. ~~**Sensitive or non-sensitive?**~~ **ANSWERED 2026-11-08: all three are NON-SENSITIVE.** The prod
+   console puts every one of them in the non-sensitive table and leaves sensitive and restricted empty.
+   This is the largest consequence of the whole change and it was not anticipated: there is no
+   sensitive-scope review and no demo video, only brand verification. The previous scope set
+   (`calendar.events.owned`) was sensitive and would have required both.
 
 ## The escape hatch, if the UX proves wrong
 

@@ -32,8 +32,10 @@ speculative Google Business Profile one.
   legal pages are rendered by `LegalFunction` and reach the marketing domain through a CloudFront
   behaviour (`PathPattern: /legal/*` → `HomepageLegalApiOrigin`), so they ship with `deploy.sh`, **not**
   `deploy-homepage.sh`.
-- **Scopes:** exactly `DEFAULT_SCOPES` from `src/stripe_link/google_calendar.py`. Sensitive; the
-  restricted table is empty, so **no third-party security assessment is required**.
+- **Scopes:** exactly `DEFAULT_SCOPES` from `src/stripe_link/google_calendar.py` — scope strings and
+  user-facing labels both confirmed against the prod console 2026-11-08, matching `REQUIRED_SCOPE_LABELS`
+  in `handlers/calendar.py` exactly (those labels are what the partial-grant refusal shows a merchant).
+  **All three are NON-SENSITIVE.** The sensitive and restricted tables are empty.
 
 ## Scope justifications — the text reviewers read
 
@@ -117,13 +119,38 @@ to a calendar they already had. The costs, and what covers each:
 In exchange the merchant gets separate colouring, separate notifications, sharing with staff, and
 one-action removal of every booking — and an app that cannot see the rest of their calendar.
 
+## There is no sensitive-scope review (confirmed 2026-11-08)
+
+The console classifies all three scopes as **non-sensitive**, which was open question #3 and is the
+largest single consequence of moving to `calendar.app.created`. Google ties the Verification Center
+submission to sensitive or restricted scopes; with neither table populated there is no scope review, and
+therefore **no demo video** — it is named in Google's documentation only as additional evidence for
+sensitive or restricted scope verification.
+
+What remains is **brand verification**, which applies because the app is External, will be Published, and
+shows a name and logo on the consent screen. That is a branding check, not a scope review:
+
+- Branding page complete: app name, logo, developer contact, links
+- home page publicly reachable and plainly about the app — `https://juniorbay.com`
+- privacy policy **on the same domain as the home page** — `https://juniorbay.com/legal/privacy` ✓
+- authorized domains verified in **Google Search Console**
+- scopes declared under *Add or remove scopes* ✓
+- **Verify branding** → **Publish branding**. Results are valid for 7 days.
+
+The only item that still wants attention is the one already in Loose ends: the support contact is on
+`juniorbay.net`, a different domain from the authorized `juniorbay.com`.
+
 ## Order of operations
 
-1. Branding complete → **Publish app** on the Audience page. This ends the Testing-mode 7-day refresh
-   token expiry.
-2. Submit from the Verification Center **after** the deploy that carries the privacy policy — otherwise
-   the reviewer opens a policy with no mention of Google.
-3. Expect a demo video request: record the consent flow and show where each scope is used.
+1. Deploy dev → prod, so the privacy policy and terms describing the new scopes are live **before**
+   anything is reviewed or any merchant sees the consent screen.
+2. Reconnect the test tenant. The scope change forces re-consent, and that first connect is what creates
+   the bookings calendar.
+3. Branding complete → **Verify branding** → **Publish branding**, then **Publish app** on the Audience
+   page. Publishing ends the Testing-mode 7-day refresh token expiry.
+
+Testing-mode refresh tokens still expire after 7 days until the app is published, so step 3 is what makes
+a connection last.
 
 ## What the privacy policy had to say, and now does
 
