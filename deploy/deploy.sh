@@ -87,6 +87,27 @@ fi
 # not hypothetical: both stacks carried the jbay.uk zone and domains.jbay.uk until 2026-10-23, so a domain
 # connected on sandbox verified successfully and then served a 404 (shop.coderbay.net, found the hard way).
 #
+# The PLATFORM Stripe secret, resolved BY NAME so the ARN's random suffix never has to be hardcoded.
+#
+# Both stacks pointed at `stripe-cart/{env}/platform/stripe` until 2026-11-09 -- a secret deleted with
+# stripe-cart's deployment on 2026-11-03. Every Connect charge path resolves its key through it, so
+# checkout, invoice send, tips, upsells, refunds, Connect onboarding, platform billing and webhook
+# signature verification were all broken in BOTH environments, and it stayed invisible only because no
+# payment was attempted in between. Create/rotate the secret with ./deploy/platform-stripe-secret.sh.
+#
+# The override is added ONLY when the lookup returns a real ARN. A failed or empty lookup omits the
+# parameter entirely, so CloudFormation keeps the previous stack value -- a transient AWS hiccup must
+# never silently blank a working secret, and `|| true` plus an empty string would do exactly that.
+PLATFORM_STRIPE_SECRET_NAME="${PLATFORM_STRIPE_SECRET_NAME:-jb/platform-stripe/${ENVIRONMENT}}"
+RESOLVED_STRIPE_SECRET_ARN="${STRIPE_PLATFORM_SECRET_ARN:-$(aws secretsmanager describe-secret \
+  --secret-id "${PLATFORM_STRIPE_SECRET_NAME}" --region "${REGION}" --query ARN --output text 2>/dev/null || true)}"
+if [[ -n "${RESOLVED_STRIPE_SECRET_ARN}" && "${RESOLVED_STRIPE_SECRET_ARN}" != "None" ]]; then
+  PARAMETER_OVERRIDES+=("StripePlatformSecretArn=${RESOLVED_STRIPE_SECRET_ARN}")
+  echo "Platform Stripe secret: ${PLATFORM_STRIPE_SECRET_NAME}"
+else
+  echo "Platform Stripe secret '${PLATFORM_STRIPE_SECRET_NAME}' not found -- keeping the stack's current value." >&2
+fi
+
 # SET HERE AND NOT ONLY IN samconfig.toml. This script passes its own --parameter-overrides, so
 # CloudFormation keeps the PREVIOUS stack value for anything absent from the array below and samconfig's
 # copy is never read. Editing samconfig alone deploys nothing -- verified on this very change.

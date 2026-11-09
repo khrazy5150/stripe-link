@@ -12,8 +12,11 @@ Fallback sources:
 """
 
 import json
+import logging
 import os
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 _CACHE: Dict[str, Any] = {}
 
@@ -45,7 +48,28 @@ def _load_secret_payload(*, refresh: bool = False) -> Dict[str, Any]:
     import boto3
 
     client = boto3.client("secretsmanager", region_name=_get_region())
-    response = client.get_secret_value(SecretId=arn)
+    try:
+        response = client.get_secret_value(SecretId=arn)
+    except Exception as exc:  # noqa: BLE001 - see below; the type is botocore's and varies by failure
+        # A CONFIGURED BUT UNREADABLE SECRET IS A CONFIGURATION FAULT, NOT A CRASH.
+        #
+        # boto3 raises ResourceNotFoundException when the ARN names a secret that no longer exists, and
+        # that is not an exception any caller here catches: it escaped as an unhandled 500/502, which
+        # API Gateway answers WITHOUT CORS headers, so the browser reported the bare "Failed to fetch"
+        # and the dashboard could never show what was wrong. Every caller already handles an EMPTY key
+        # -- `invoices.py` answers "Stripe keys are not configured", `checkout.py` the same -- so the
+        # honest result is an empty payload and a loud log, which turns an opaque 502 into a sentence
+        # naming the problem. (2026-11-09: the prod ARN pointed at a stripe-cart secret deleted with
+        # that stack, and every Connect charge path in both environments resolved to this line.)
+        #
+        # DELIBERATELY NOT CACHED. `{}` is cached when no ARN is configured, because that cannot change
+        # without a redeploy; a read FAILURE can -- the secret may be created a minute from now, or the
+        # call may simply have been throttled. Caching the failure would keep a warm container answering
+        # "not configured" long after the secret existed, and these containers are held warm indefinitely
+        # by the sweeps that share them.
+        logger.error("platform stripe secret %s could not be read (%s); treating it as unconfigured",
+                     arn, type(exc).__name__)
+        return {}
     raw = response.get("SecretString") or "{}"
     try:
         payload = json.loads(raw)
