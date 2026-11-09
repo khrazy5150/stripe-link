@@ -109,13 +109,27 @@ def stripe_customer_params(customer: dict[str, Any]) -> dict[str, Any]:
     return params
 
 
-def stripe_invoiceitem_params(customer_id: str, item: dict[str, Any], currency: str) -> dict[str, Any]:
-    return {
+def stripe_invoiceitem_params(customer_id: str, item: dict[str, Any], currency: str,
+                              invoice_id: str = "") -> dict[str, Any]:
+    """One Stripe invoice item. `invoice_id` BINDS it to that draft rather than leaving it pending.
+
+    An item created with only `customer` is *pending*, and lands on an invoice only if that invoice asks
+    for pending items. Since API version 2022-08-01 `pending_invoice_items_behavior` defaults to
+    `exclude`, so a draft created without it is EMPTY -- which is how an invoice for $15.86 went out,
+    finalized at $0.00, and marked itself paid on the spot (2026-11-09).
+
+    Binding beats setting `include`, which would sweep in EVERY pending item on that customer -- orphans
+    from earlier failed attempts included -- and bill them again on the next invoice.
+    """
+    params: dict[str, Any] = {
         "customer": customer_id,
         "currency": currency,
         "amount": line_total(item),
         "description": str(item.get("description") or "Item"),
     }
+    if invoice_id:
+        params["invoice"] = invoice_id
+    return params
 
 
 def stripe_invoice_params(customer_id: str, *, days_until_due: int = DEFAULT_DAYS_UNTIL_DUE, application_fee: int = 0, metadata: dict | None = None, footer: str = "") -> dict[str, Any]:

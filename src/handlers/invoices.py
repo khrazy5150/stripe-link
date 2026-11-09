@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import uuid
@@ -29,6 +30,8 @@ from stripe_link.repositories.documents import (
 )
 from stripe_link.stripe_client import StripeApiError, stripe_request
 from stripe_link.stripe_platform_secrets import checkout_credentials
+
+logger = logging.getLogger(__name__)
 
 
 def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None, secret_cipher=None, opener=None, mailer_send=None, billing_config_loader=None, appointments_repo=None):
@@ -113,17 +116,39 @@ def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_ci
         if not customer_id:
             created = stripe_request("POST", "/customers", api_key=api_key, stripe_account=stripe_account, data=stripe_customer_params(customer), opener=opener)
             customer_id = created.get("id")
-        for item in line_items:
-            stripe_request("POST", "/invoiceitems", api_key=api_key, stripe_account=stripe_account, data=stripe_invoiceitem_params(customer_id, item, currency), opener=opener)
         metadata = {"tenant_id": tenant_id, "invoice_id": invoice_id, "product_type": "digital", "tenant_plan": tenant_plan}
+        # THE DRAFT FIRST, then its items bound to it by id. Items created before the invoice are merely
+        # *pending* on the customer, and a draft only takes those in if it asks: since API version
+        # 2022-08-01 `pending_invoice_items_behavior` defaults to `exclude`, and we are pinned well past
+        # it. The old order therefore finalized an EMPTY invoice -- $15.86 billed, $0.00 charged, marked
+        # paid on the spot because a zero invoice needs no payment (2026-11-09).
         stripe_invoice = stripe_request(
             "POST", "/invoices", api_key=api_key, stripe_account=stripe_account,
             data=stripe_invoice_params(customer_id, application_fee=application_fee, metadata=metadata, footer=str((invoice.get("presentation") or {}).get("footer") or "")),
             opener=opener, idempotency_key=f"invoice_{invoice_id}",
         )
-        finalized = stripe_request("POST", f"/invoices/{stripe_invoice['id']}/finalize", api_key=api_key, stripe_account=stripe_account, opener=opener)
+        stripe_invoice_id = str(stripe_invoice.get("id") or "")
+        for index, item in enumerate(line_items):
+            # Keyed per item, because the invoice create above is idempotent and a retry returns the SAME
+            # draft: without this, the second attempt would append a second copy of every line.
+            stripe_request("POST", "/invoiceitems", api_key=api_key, stripe_account=stripe_account,
+                           data=stripe_invoiceitem_params(customer_id, item, currency, stripe_invoice_id),
+                           opener=opener, idempotency_key=f"invoice_{invoice_id}_item_{index}")
+        finalized = stripe_request("POST", f"/invoices/{stripe_invoice_id}/finalize", api_key=api_key, stripe_account=stripe_account, opener=opener)
     except StripeApiError as exc:
         return error_response(str(exc), status_code=502, code="stripe_error")
+
+    # WHAT STRIPE FINALIZED, AGAINST WHAT WE MEANT TO BILL. A finalized invoice is immutable, and a zero
+    # one marks itself paid immediately -- so an empty invoice is not a failure anybody sees: the customer
+    # gets an email for the right amount and a payment page that asks for nothing. Refuse to send it.
+    expected_total = invoice_total(invoice)
+    stripe_total = finalized.get("total")
+    if expected_total > 0 and int(stripe_total or 0) != int(expected_total):
+        logger.error("invoice %s finalized at %s but should have been %s (stripe invoice %s)",
+                     invoice_id, stripe_total, expected_total, stripe_invoice_id)
+        return error_response(
+            "Stripe finalized this invoice for a different amount than its line items. It has not been "
+            "sent. Please contact support.", status_code=502, code="invoice_total_mismatch")
 
     hosted_url = finalized.get("hosted_invoice_url") or ""
     content = invoice_email_content(invoice, hosted_url, business_name=business_name, support_email=support_email)

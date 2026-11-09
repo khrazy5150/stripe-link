@@ -48,11 +48,38 @@ class _FakeResp:
 
 
 class _FakeOpener:
-    def __init__(self, *responses):
+    """Answers Stripe by URL, not by call order.
+
+    It used to pop a queue, so reordering the real calls silently handed each one the previous one's
+    response -- the invoice id became an invoice ITEM id and the finalize response went to the wrong
+    request. Order is not what these tests are asserting; which endpoint was called is.
+
+    Positional responses are still accepted and used for anything unmatched, so existing fixtures keep
+    working.
+    """
+
+    def __init__(self, *responses, customer=None, item=None, invoice=None, finalized=None):
         self.responses = list(responses)
+        self.customer = customer or {"id": "cus_1"}
+        self.item = item or {"id": "ii_1"}
+        self.invoice = invoice or {"id": "in_1"}
+        self.finalized = finalized if finalized is not None else {
+            "id": "in_1", "total": 15000,
+            "hosted_invoice_url": "https://pay.stripe.com/x", "invoice_pdf": "https://pdf"}
+        self.seen = []
 
     def __call__(self, request, timeout=None):
-        return _FakeResp(self.responses.pop(0))
+        url = request.full_url
+        self.seen.append((request.method, url))
+        if "/invoiceitems" in url:
+            return _FakeResp(self.item)
+        if url.endswith("/finalize"):
+            return _FakeResp(self.finalized)
+        if url.rstrip("/").endswith("/invoices"):
+            return _FakeResp(self.invoice)
+        if url.rstrip("/").endswith("/customers"):
+            return _FakeResp(self.customer)
+        return _FakeResp(self.responses.pop(0) if self.responses else {})
 
 
 class InvoicingDomainTests(unittest.TestCase):
