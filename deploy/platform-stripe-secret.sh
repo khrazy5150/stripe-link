@@ -15,6 +15,9 @@
 #
 # Usage:  ./deploy/platform-stripe-secret.sh [dev|prod]
 #
+# Which destination feeds which key: docs/STRIPE_WEBHOOK_ENDPOINTS.md (keyed on the URL, because the
+# dashboard NAMES are free text and have been the confusing part twice).
+#
 set -euo pipefail
 
 ENVIRONMENT="${1:-dev}"
@@ -116,16 +119,16 @@ print("yes" if doc.get(os.environ["KEY_LIVE"]) or doc.get(os.environ["KEY_TEST"]
 
 echo "Connect webhook -- the destination whose URL ends /webhook/stripe-preview"
 if [[ "${ENVIRONMENT}" == "prod" ]]; then
-  echo "  in Stripe this is 'stripe-connect-preview-prod' (https://prod.juniorbay.com/webhook/stripe-preview)"
+  echo "  in Stripe: 'production-connect-live-test' (was 'stripe-connect-preview-prod')"
 else
-  echo "  in Stripe this is 'sandbox-preview-live'  (https://dev.juniorbay.com/webhook/stripe-preview)"
+  echo "  in Stripe: 'sandbox-connect-live-test' (was 'sandbox-preview-live')"
 fi
 echo "  It carries BOTH live and test events, so this one value fills both mode slots."
 ask_endpoint whsec_preview "whsec_... (Connect endpoint signing secret)"
 echo
 echo "Platform billing webhook -- the destination ending /webhook/platform-billing"
 if [[ "${ENVIRONMENT}" == "prod" ]]; then
-  echo "  in Stripe this is 'prod-junior-bay-billing'. Only needed if tenant SaaS billing is in use."
+  echo "  in Stripe: 'production-billing-live' (was 'prod-junior-bay-billing'). Live-only."
 else
   echo "  only needed if tenant SaaS billing is in use in sandbox."
 fi
