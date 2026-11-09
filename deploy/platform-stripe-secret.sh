@@ -61,16 +61,31 @@ echo "Stripe API keys (platform account -- Developers > API keys):"
 ask sk_test "sk_test_... (test secret key)"
 ask sk_live "sk_live_... (live secret key)"
 echo
-echo "Connect webhook signing secrets (Developers > Webhooks > the CONNECT endpoint > signing secret)."
-echo "The signing secret belongs to the ENDPOINT, not the account -- one per endpoint, per mode:"
-ask whsec_stable_test "whsec_... (connect, stable, TEST)"
-ask whsec_stable_live "whsec_... (connect, stable, LIVE)"
+# WHICH ENDPOINT MAPS TO WHICH KEY. `kind` is decided by the URL PATH (stripe_webhook.py:113):
+#
+#   .../webhook/stripe-preview    -> kind "preview"           -> whsec_preview_{mode}
+#   .../webhook/stripe            -> kind "stable"            -> whsec_stable_{mode}
+#   .../webhook/platform-billing  -> kind "platform_billing"  -> whsec_platform_billing_{mode}
+#
+# A signing secret belongs to the ENDPOINT, not the account, so read each one off the destination whose
+# URL matches, in the Stripe dashboard mode that matches (LIVE view -> _live, sandbox/test -> _test).
+#
+# PREVIEW IS THE ONE IN USE. Nothing is pointed at /webhook/stripe, so "stable" is unused today -- leave
+# it blank rather than pasting a preview secret into it, or signature checks fail in a way that reads as
+# Stripe sending bad events.
+echo "Connect webhook signing secret -- the destination ending /webhook/stripe-preview"
+echo "  (prod: 'stripe-connect-preview-prod'   dev: 'sandbox-preview-live')"
+ask whsec_preview_test "whsec_... (connect/preview, TEST)"
+ask whsec_preview_live "whsec_... (connect/preview, LIVE)"
 echo
-echo "Optional -- press Enter to skip:"
-ask whsec_preview_test "whsec_... (connect, preview, TEST)"
-ask whsec_preview_live "whsec_... (connect, preview, LIVE)"
+echo "Platform billing signing secret -- the destination ending /webhook/platform-billing"
+echo "  (prod: 'prod-junior-bay-billing'). Only needed if tenant SaaS billing is in use."
 ask whsec_platform_billing_test "whsec_... (platform billing, TEST)"
 ask whsec_platform_billing_live "whsec_... (platform billing, LIVE)"
+echo
+echo "Legacy 'stable' Connect endpoint (/webhook/stripe). NOTHING points at it today -- press Enter to skip:"
+ask whsec_stable_test "whsec_... (connect/stable, TEST)"
+ask whsec_stable_live "whsec_... (connect/stable, LIVE)"
 
 if aws secretsmanager describe-secret --secret-id "${SECRET_NAME}" --region "${REGION}" >/dev/null 2>&1; then
   printf '%s' "${EXISTING}" | aws secretsmanager put-secret-value --secret-id "${SECRET_NAME}" \
