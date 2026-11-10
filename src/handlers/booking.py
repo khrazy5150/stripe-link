@@ -3,6 +3,7 @@
 Tenant is derived from the service, not an admin session. B.1 ships the availability endpoint;
 resolve / reserve / checkout / manage land in later Phase B steps.
 """
+import json
 import os
 import secrets
 import time
@@ -725,6 +726,19 @@ def _epoch_to_iso(epoch):
     return datetime.datetime.fromtimestamp(int(epoch), tz=datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _withheld_fulfiller_ids(tenant_id, fulfillers, connections_repo) -> list[str]:
+    """Fulfillers whose linked calendar is revoked, disconnected or gone. Best-effort: if the
+    connections cannot be read we withhold NOBODY, because a table hiccup must not close the shop."""
+    from stripe_link.domain.calendar_routing import fulfiller_calendar_is_broken
+
+    try:
+        connections = list((connections_repo.list_for_tenant(tenant_id)) or []) if connections_repo else []
+    except Exception:  # noqa: BLE001 - see the docstring
+        return []
+    return [str(f.get("fulfiller_id")) for f in (fulfillers or [])
+            if f.get("fulfiller_id") and fulfiller_calendar_is_broken(f, connections)]
+
+
 def _external_busy_by_fulfiller(tenant_id, service, fulfillers, fulfiller_id, time_min, time_max, connections_repo):
     """Busy windows per calendar for the slot engine. The service/default calendar blocks the
     whole service (None key); a fulfiller with their own calendar is blocked only by theirs
@@ -813,6 +827,11 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
     external_busy_by_fulfiller = _external_busy_by_fulfiller(
         tenant_id, service, fulfillers, fulfiller_id, _epoch_to_iso(range_start), _epoch_to_iso(range_end), connections_repo,
     )
+    # WITHHOLD anyone whose LINKED calendar has broken. A delegate with no calendar at all is untouched
+    # -- that is a supported setup, and their hours come from the tenant's availability. The danger is
+    # only the one who HAD a calendar: `tenant_busy_intervals` returns [] on failure, which the engine
+    # cannot tell from "free", so their time would keep selling after they are gone.
+    withheld_ids = _withheld_fulfiller_ids(tenant_id, fulfillers, connections_repo)
 
     slots = available_slots(
         slot_service,
@@ -825,14 +844,27 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
         range_end_epoch=range_end,
         fulfiller_id=fulfiller_id,
         external_busy_by_fulfiller=external_busy_by_fulfiller,
+        withheld_fulfiller_ids=withheld_ids,
     )
-    return json_response({
+    body = {
         "service_id": service_id,
         "timezone": tenant_availability.get("timezone") or "UTC",
         "duration_minutes": duration,
         "slots": slots,
         "count": len(slots),
-    })
+    }
+    # A NEUTRAL reason code, because THIS ROUTE IS PUBLIC (Authorizer: NONE -- customers browse it).
+    # The first draft returned the withheld fulfiller ids and "reconnect it, or assign someone else",
+    # which is staff identity and internal instruction handed to a buyer. The customer gets a code that
+    # means "not bookable right now"; the TENANT gets the explanation, by email and in the dashboard,
+    # from the revocation notice that fires the moment the connection dies.
+    if not slots and withheld_ids:
+        body["unavailable"] = {"reason": "no_available_fulfiller"}
+        print(json.dumps({"slots_withheld": {
+            "tenant_id": tenant_id, "service_id": service_id,
+            "fulfiller_ids": sorted(withheld_ids),
+            "reason": "linked calendar revoked or disconnected"}}))
+    return json_response(body)
 
 
 def _epoch(value, *, default: int) -> int:

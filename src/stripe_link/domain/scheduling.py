@@ -75,9 +75,21 @@ def _to_windows(intervals):
     return windows
 
 
-def _resolve_scope(service: dict[str, Any], fulfillers: list[dict[str, Any]], fulfiller_id: str | None):
+def _resolve_scope(service: dict[str, Any], fulfillers: list[dict[str, Any]], fulfiller_id: str | None,
+                   withheld: frozenset[str] = frozenset()):
     """Return a list of (fulfiller_id_or_None, weekly_hours_map_or_None) to consider. When a
-    fulfiller has its own weekly hours they override the tenant default (None means 'use tenant')."""
+    fulfiller has its own weekly hours they override the tenant default (None means 'use tenant').
+
+    `withheld` names fulfillers who must not be offered -- today, those whose linked calendar is revoked
+    or disconnected, because their busy time silently stops blocking and the platform would keep selling
+    hours they will not keep.
+
+    **Emptying the list is not the same as never having had one.** The candidates come from the SERVICE
+    (`allowed_fulfillers` / `default_fulfiller_id`), so filtering the `fulfillers` argument would not
+    remove anybody -- it would only drop their custom hours and leave them bookable on the tenant's. And
+    a service whose every candidate is withheld must yield NO slots rather than falling through to
+    `[None]`, which would quietly sell the tenant's own time for work only a delegate does.
+    """
     by_id = {str(f.get("fulfiller_id")): f for f in fulfillers if f.get("fulfiller_id")}
     allowed = [
         str(entry.get("fulfiller_id"))
@@ -93,6 +105,12 @@ def _resolve_scope(service: dict[str, Any], fulfillers: list[dict[str, Any]], fu
         candidate_ids = [str(service["default_fulfiller_id"])]
     else:
         candidate_ids = [None]
+
+    if withheld and candidate_ids != [None]:
+        kept = [fid for fid in candidate_ids if str(fid) not in withheld]
+        if candidate_ids and not kept:
+            return []  # everyone who could do this work is unreachable
+        candidate_ids = kept
 
     scope = []
     for fid in candidate_ids:
@@ -163,6 +181,7 @@ def available_slots(
     fulfiller_id: str | None = None,
     external_busy: list[dict[str, str]] | None = None,
     external_busy_by_fulfiller: dict[Any, list[dict[str, str]]] | None = None,
+    withheld_fulfiller_ids: Any = None,
 ) -> list[dict[str, Any]]:
     tenant_availability = tenant_availability or {}
     tz = _zone(str(tenant_availability.get("timezone") or "UTC"))
@@ -181,7 +200,8 @@ def available_slots(
         return []
     range_end = min(range_end, range_start + timedelta(days=MAX_RANGE_DAYS))
 
-    scope = _resolve_scope(service, fulfillers, fulfiller_id)
+    scope = _resolve_scope(service, fulfillers, fulfiller_id,
+                           frozenset(str(f) for f in (withheld_fulfiller_ids or ()) if f))
 
     # External busy from connected calendars. `external_busy` (legacy) and the None key of
     # `external_busy_by_fulfiller` apply globally (the shared service/default calendar); a
