@@ -150,8 +150,9 @@ otherwise mark every public holiday fully busy and close the business by acciden
 1. **Can `calendarList.list` see the app-created calendar under these scopes?** Not waited on: the
    bookings calendar is appended to the availability query explicitly rather than trusted to appear in
    the list, because finding out from a double booking is the wrong way to learn it.
-2. **Does `calendar.app.created` permit `calendars.delete` / `calendars.update`?** Relevant only if we
-   ever rename or remove it; not needed, and nothing depends on it.
+2. ~~**Does `calendar.app.created` permit `calendars.delete`?**~~ **ANSWERED 2026-11-09: yes.** The
+   method accepts `calendar`, `calendar.app.created` or `calendar.calendars`. We still do not call it,
+   and should not start lightly -- see below.
 3. ~~**Sensitive or non-sensitive?**~~ **ANSWERED 2026-11-08: all three are NON-SENSITIVE.** The prod
    console puts every one of them in the non-sensitive table and leaves sensitive and restricted empty.
    This is the largest consequence of the whole change and it was not anticipated: there is no
@@ -164,3 +165,18 @@ Granular consent makes this reversible per merchant rather than per product: def
 calendar on two narrow scopes, and offer *"put bookings in my main calendar instead"* as an opt-in that
 **incrementally** requests `calendar.events.owned` only for merchants who ask. Two code paths, so not
 worth building now — but the decision is not one-way, which is why it can be taken quickly.
+
+## Orphaned calendars after a revoke (seen 2026-11-09)
+
+Revoking the app at Google and reconnecting produces a NEW connection document, which has no stored
+`bookings_calendar_id` and therefore creates a second "Junior Bay Bookings" calendar. The previous one is
+left behind, identically named, distinguishable only by its id.
+
+This is correct behaviour, not a bug -- an ordinary reconnect reuses the stored id, which was verified
+against a live account the same day. It happens only on a full revoke.
+
+**We do not delete it, and should not start lightly.** `calendars.delete` would be permitted by the
+scope, but deleting a merchant's calendar is destructive and irreversible, and one that looks orphaned
+from our side may hold booking history they want. If this recurs often enough to matter, keep the
+previous id on the connection and ASK -- "an older bookings calendar exists, remove it?" -- rather than
+acting. A tidy-up that happens once is a UI job, not a code path that can delete the wrong thing at 3am.
