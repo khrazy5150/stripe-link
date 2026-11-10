@@ -31,7 +31,9 @@ export function organizationFromBusiness(business = {}) {
     // would open the brand picker on a new Site and find it empty.
     brands: Array.isArray(business.brands) ? business.brands.filter(Boolean) : [],
     sources: business.sources && typeof business.sources === "object" ? { ...business.sources } : {},
-    entity_type: "OnlineStore",
+    // NOT defaulted. This field gates every local-SEO signal, and a tenant with premises who never
+    // touched it silently got none of them (found 2026-11-10 on a real local business).
+    entity_type: "",
     telephone: isE164(business.phone) ? normalizeE164(business.phone) : "",
     email: business.email || "",
     address: pruneEmpty({

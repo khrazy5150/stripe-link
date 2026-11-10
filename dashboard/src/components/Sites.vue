@@ -188,8 +188,18 @@
               <label class="offer-field">
                 <span>Business type</span>
                 <select v-model="form.org.entity_type">
+                  <!-- No default. This one field decides whether the Site is a LOCAL business at all,
+                       and every local-SEO signal is gated on it -- so a tenant who never touched it got
+                       no locality in image alt, no NAP figcaption, and an @type saying they do not have
+                       premises. Nothing said so; the only symptom was not ranking. -->
+                  <option value="">Select one…</option>
                   <option v-for="t in entityTypes" :key="t" :value="t">{{ t }}</option>
                 </select>
+                <small v-if="localTypeMismatch" class="field-hint warning">
+                  This Site has a street address{{ form.org.telephone ? " and a phone number" : "" }},
+                  but its type says it has no premises. Customers who come to you won't see local
+                  signals, and your structured data won't say you're a local business.
+                </small>
               </label>
               <label class="offer-field" v-if="specificTypes.length">
                 <span>Specific type <small class="field-note">(sharper local SEO)</small></span>
@@ -1166,7 +1176,7 @@ function cancelSiteEmailVerification() {
   emailVerify.error = "";
 }
 
-const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", brands: [], timezone: "", shipping_cutoff_hour: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
+const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", brands: [], timezone: "", shipping_cutoff_hour: "", legal_name: "", entity_type: "", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -1910,7 +1920,21 @@ const canCreate = computed(() => !store.saving && createAvailable.value && !capI
 // async round trip, and stays false forever when the field is empty -- so the whole Site was unsavable
 // until a check the tenant never asked for happened to succeed. Only a check that actually came back
 // NEGATIVE blocks now, which is the thing worth refusing over (reported 2026-11-05).
+// A Site with premises typed as something that has none. Derived from the CURRENT form rather than
+// stored as a notification, so it withdraws itself the moment the type is corrected -- a stored notice
+// would outlive its cause (`feedback_a_notice_must_mirror_its_predicate`).
+const NON_LOCAL_TYPES = ["OnlineStore", "Organization"];
+const localTypeMismatch = computed(() => {
+  const org = form.org || {};
+  if (!NON_LOCAL_TYPES.includes(org.entity_type)) return false;
+  return !!String((org.address || {}).street || "").trim();
+});
+
 const saveEditBlockedReason = computed(() => {
+  // Required, not defaulted. An unanswered question is better than a wrong answer nobody was asked.
+  if (!String((form.org || {}).entity_type || "").trim()) {
+    return "Choose a business type — it decides whether your pages carry local-business signals.";
+  }
   if (orgPhoneError.value) return orgPhoneError.value;
   if (editCheck.state.checking) return "Checking that store address…";
   if (editCheck.state.checked && !editCheck.state.available) {
@@ -2008,7 +2032,10 @@ function openEdit(site) {
   creatorAvailable.value = true;
   creatorNormalized.value = form.creatorUsername;
   form.org = {
-    name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
+    // Deliberately NOT defaulted on load either. An existing Site with no type is exactly the case that
+    // was silently non-local; re-applying "OnlineStore" here would hide it again on the one screen where
+    // the tenant could fix it.
+    name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "",
     brands: Array.isArray(org.brands) ? [...org.brands] : [],
     // Strings in the form, because a <select> option value is a string and `null` and 0 would both be
     // falsy — "" is "inherit" and "0" is midnight, which are different answers.
