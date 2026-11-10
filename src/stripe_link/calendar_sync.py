@@ -20,7 +20,8 @@ from stripe_link.google_calendar import (
     load_google_oauth_secret,
 )
 from stripe_link.kms_secrets import KmsSecretCipher
-from stripe_link.repositories.documents import calendar_connections_repository
+from stripe_link.repositories.documents import (calendar_connections_repository,
+                                                 notifications_repository)
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,54 @@ def availability_calendar_ids(client, bookings_calendar_id: str = "") -> list[st
     return ids
 
 
-def mark_revoked(tenant_id: str, connection_id: str, connections_repo=None) -> bool:
+def _announce_revocation(tenant_id: str, conn: dict, now: int, notifications_repo=None,
+                         mailer_send=None) -> None:
+    """Tell the tenant, in the dashboard AND by email. Never raises.
+
+    The bell alone is not enough here. This failure is invisible by construction -- nothing errors,
+    bookings simply stop reaching a calendar and a delegate's busy times stop blocking slots -- so a
+    merchant who is not already looking at the dashboard finds out when two customers arrive at once.
+    """
+    from stripe_link.domain.notifications_content import (calendar_revoked_email,
+                                                          calendar_revoked_notification)
+
+    try:
+        repo = notifications_repo or (notifications_repository(mode=resolve_mode_for(conn))
+                                      if os.environ.get("NOTIFICATIONS_TABLE") else None)
+        if repo is not None:
+            repo.put(calendar_revoked_notification(tenant_id, conn, now))
+    except Exception:  # noqa: BLE001 - the email below is the other half, and must still be tried
+        logger.exception("calendar: could not record the revocation notice for %s", tenant_id)
+
+    try:
+        from stripe_link.mailer import send_email
+        from stripe_link.sender_identity import sending_identity
+
+        identity = sending_identity(tenant_id, mode=resolve_mode_for(conn))
+        recipient = str(identity.get("reply_to") or "").strip()
+        if not recipient:
+            logger.warning("calendar: %s lost a calendar connection but has no verified address",
+                           tenant_id)
+            return
+        base = str(os.environ.get("DASHBOARD_URL") or "").rstrip("/")
+        content = calendar_revoked_email(conn, business_name=str(identity.get("business_name") or ""),
+                                         dashboard_url=f"{base}/services" if base else "")
+        (mailer_send or send_email)(to=recipient, subject=content["subject"], html=content["html"],
+                                    text=content["text"],
+                                    from_name=str(identity.get("business_name") or ""),
+                                    reply_to=recipient, tenant_id=tenant_id)
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("calendar: could not email %s about the lost connection", tenant_id)
+
+
+def resolve_mode_for(conn: dict) -> str:
+    """The Stripe mode a connection belongs to. Connections are not mode-scoped, so this is the
+    deployment's own default -- enough to address the right notifications table."""
+    return str((conn or {}).get("stripe_mode") or os.environ.get("DEFAULT_STRIPE_MODE") or "live")
+
+
+def mark_revoked(tenant_id: str, connection_id: str, connections_repo=None, notifications_repo=None,
+                 mailer_send=None) -> bool:
     """Record that Google has rejected this connection's refresh token, and DROP the token.
 
     Google reports a revoked or expired grant as `invalid_grant`. Until 2026-11-08 nothing acted on it:
@@ -179,6 +227,9 @@ def mark_revoked(tenant_id: str, connection_id: str, connections_repo=None) -> b
         conn["revoked_at"] = int(time.time())
         conn["updated_at"] = conn["revoked_at"]
         repo.put(conn)
+        # SAID OUT LOUD, after the state is safely recorded. Marking it revoked stops us retrying a dead
+        # token; telling the tenant is what lets them do something about it.
+        _announce_revocation(tenant_id, conn, conn["revoked_at"], notifications_repo, mailer_send)
         return True
     except Exception:  # noqa: BLE001 - see the docstring
         logger.exception("calendar: could not mark %s/%s revoked", tenant_id, connection_id)

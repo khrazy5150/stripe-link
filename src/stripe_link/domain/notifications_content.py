@@ -95,3 +95,64 @@ def delegate_booking_email(
         preheader=verb,
     )
     return {"subject": subject, "html": html, "text": text}
+
+
+def calendar_revoked_notification(tenant_id: str, connection: dict[str, Any], now: int) -> dict[str, Any]:
+    """The dashboard record that a calendar connection has stopped working.
+
+    Google does not tell us when a merchant or a delegate removes the app; we learn of it the first time
+    we try to use the connection. Until 2026-11-10 that moment produced a status change and a log line
+    and nothing else -- so the only way to notice was that bookings had quietly stopped appearing in a
+    calendar. This notice has an action attached (reconnect, or reassign the work), which is the test a
+    notification has to pass.
+    """
+    who = str(connection.get("display_name") or connection.get("account_email") or "A calendar")
+    return {
+        "schema_version": "2026-05-29",
+        "document_type": "notification",
+        "tenant_id": tenant_id,
+        # Keyed on the connection so a repeating failure cannot repeat the alarm.
+        "notification_id": f"notif_calrevoked_{connection.get('connection_id', '')}",
+        "type": "calendar_revoked",
+        "severity": "warning",
+        "title": "A calendar connection stopped working",
+        "message": (f"{who} no longer has access to Google Calendar, so bookings are not being written "
+                    "to it and its busy times no longer block slots. Reconnect it, or reassign anyone "
+                    "who relies on it."),
+        "status": "unread",
+        "sort_priority": 200,
+        "related": {"connection_id": connection.get("connection_id", "")},
+        "action": {"label": "Open Calendar Sync", "route": "services"},
+        "created_at": int(now),
+        "read_at": None,
+        "archived_at": None,
+    }
+
+
+def calendar_revoked_email(connection: dict[str, Any], *, business_name: str = "",
+                           dashboard_url: str = "") -> dict[str, str]:
+    """The same news by EMAIL, because the dashboard bell is only seen by someone already looking.
+
+    The failure this reports is invisible by construction: nothing breaks loudly, bookings simply stop
+    reaching a calendar and a delegate's commitments stop blocking slots. A merchant who is not watching
+    the dashboard finds out when two customers arrive at once.
+    """
+    who = str(connection.get("display_name") or connection.get("account_email") or "A calendar")
+    body = paragraph(f"{escape(who)} no longer has access to Google Calendar.")
+    body += paragraph("Until it is reconnected, bookings are not written to that calendar, and the busy "
+                      "times on it no longer block slots on your booking page.", muted=True)
+    body += paragraph("This usually means the account removed Junior Bay from its Google permissions.",
+                      muted=True)
+    if dashboard_url:
+        body += button("Reconnect the calendar", dashboard_url)
+    return {
+        "subject": f"Action needed: {who} lost access to Google Calendar",
+        "html": render_email(business_name=business_name or "Junior Bay",
+                             title="A calendar connection stopped working",
+                             preheader=f"{who} lost access to Google Calendar",
+                             body=body),
+        "text": (f"{who} no longer has access to Google Calendar.\n\n"
+                 "Until it is reconnected, bookings are not written to that calendar and its busy times "
+                 "no longer block slots on your booking page.\n"
+                 + (f"\n{dashboard_url}\n" if dashboard_url else "")),
+    }

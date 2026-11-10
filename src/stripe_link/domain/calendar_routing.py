@@ -46,6 +46,33 @@ def fulfiller_busy_connection(fulfiller, connections):
     return _by_id(_connected(connections)).get(fulfiller.get("calendar_connection_id"))
 
 
+def fulfiller_calendar_is_broken(fulfiller, connections) -> bool:
+    """Whether this fulfiller is LINKED to a calendar that no longer works.
+
+    The distinction this draws is the whole point, and getting it backwards would break a supported
+    setup. A fulfiller with NO calendar at all is perfectly bookable -- their events go to the service
+    or tenant calendar and their hours come from the tenant's availability, which is how a delegate
+    without a Google account works (`fulfiller_busy_connection` says so). Nothing here must exclude them.
+
+    The dangerous state is narrower: a fulfiller who HAD a working calendar whose connection is now
+    revoked or disconnected. Their busy times silently stop blocking -- `tenant_busy_intervals` returns
+    [] on failure, which the slot engine cannot tell from "free" -- so the platform keeps selling their
+    time after they have gone. Withholding them is the only reading that does not sell an appointment
+    nobody will keep.
+    """
+    linked = str((fulfiller or {}).get("calendar_connection_id") or "").strip()
+    if not linked:
+        return False  # never had one: supported, and not broken
+    return not _by_id(_connected(connections)).get(linked)
+
+
+def bookable_fulfiller_ids(fulfiller_ids, fulfillers, connections) -> list[str]:
+    """`fulfiller_ids` minus anyone whose linked calendar is broken, order preserved."""
+    by_id = {str(f.get("fulfiller_id")): f for f in (fulfillers or []) if f.get("fulfiller_id")}
+    return [fid for fid in (fulfiller_ids or [])
+            if not fulfiller_calendar_is_broken(by_id.get(str(fid)), connections)]
+
+
 def resolve_write_connection(appointment, service, fulfiller, connections):
     """Where to write the appointment's calendar event: assigned fulfiller's own calendar
     (delegation) → service calendar → tenant default. Returns a connection dict or None when the

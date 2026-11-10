@@ -5038,10 +5038,32 @@ Resources:
           # A missing name here is a RUNTIME failure, not a deploy failure.
           CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+          # Losing a calendar connection is announced in the dashboard AND by email, and the sender's
+          # name comes from the Site via `sending_identity` -- hence sites/pages here.
+          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          SITES_TABLE: !Ref SitesTable
+          PAGES_TABLE: !Ref PagesTable
+          # `send_email` reads it to decide the platform sign-off on free tenants' outbound mail.
+          USER_PROFILES_TABLE: !Ref UserProfilesTable
           CALENDAR_REDIRECT_URI: !Ref CalendarRedirectUri
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CalendarConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
         - Statement:
             Effect: Allow
             Action:
@@ -5147,8 +5169,21 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
-        - DynamoDBReadPolicy:
+        # CRUD, not Read. `mark_revoked` runs HERE -- it is `_client_for` that discovers a dead token,
+        # on a booking sync or an availability read -- and writes the revoked status back. With read-only
+        # access that write failed with AccessDenied into a best-effort except, so a revoked connection
+        # was never recorded from the path that actually notices it (found 2026-11-10).
+        - DynamoDBCrudPolicy:
             TableName: !Ref CalendarConnectionsTable
+        # Delegation emails the assigned fulfiller, and the revocation notice emails the tenant. Neither
+        # could send: there was no SES grant at all, and both callers swallow their own failures.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
         - DynamoDBCrudPolicy:
             TableName: !Ref BookingCreditsTable
         - Statement:
