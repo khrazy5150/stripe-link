@@ -150,6 +150,21 @@ otherwise mark every public holiday fully busy and close the business by acciden
 1. **Can `calendarList.list` see the app-created calendar under these scopes?** Not waited on: the
    bookings calendar is appended to the availability query explicitly rather than trusted to appear in
    the list, because finding out from a double booking is the wrong way to learn it.
+
+**ANSWERED 2026-11-10 against the live account: app-created access survives a full revoke.** The app
+was revoked at myaccount.google.com and reconnected. The connection row kept its id
+(`cal_f47ce4fd77fd`), `updated_at` moved — so the token really was reminted — and
+`bookings_calendar_id` came back unchanged, with no 404 or 403 in the logs. `calendars.get` therefore
+succeeded on the FIRST try with a token from an entirely new grant.
+
+So the "app created this" association belongs to the **OAuth client**, not to a grant. Revoking destroys
+the credential and leaves the app's relationship to its own calendars intact. A merchant who revokes and
+reconnects keeps their bookings calendar and its history.
+
+The outcome worth having ruled out was a **403**: `resolve_bookings_calendar` treats only a 404 as "gone,
+make another", so a 403 would have been swallowed by `sync_appointment_event`'s catch-all and bookings
+would have stopped syncing with nothing said. It did not happen, and there is now no known path that
+produces one.
 2. ~~**Does `calendar.app.created` permit `calendars.delete`?**~~ **ANSWERED 2026-11-09: yes.** The
    method accepts `calendar`, `calendar.app.created` or `calendar.calendars`. We still do not call it,
    and should not start lightly -- see below.
