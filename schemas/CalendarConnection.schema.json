@@ -20,9 +20,10 @@
     "scopes": { "type": "array", "items": { "type": "string" } },
     "refresh_token_ref": { "type": "string" },
     "provider_meta": { "type": "object" },
-    "status": { "enum": ["connected", "revoked", "error"] },
+    "status": { "enum": ["connected", "disconnected", "revoked", "error"] },
     "connected_at": { "type": "integer" },
     "revoked_at": { "type": "integer" },
+    "disconnected_at": { "type": "integer" },
     "updated_at": { "type": "integer" }
   }
 }

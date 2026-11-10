@@ -424,3 +424,63 @@ class TheTokenCarriesONLYWhatWeAskForTests(unittest.TestCase):
         url = self._url()
         self.assertIn("prompt=consent", url)
         self.assertIn("access_type=offline", url)
+
+
+class ADisconnectIsRecoverableTests(unittest.TestCase):
+    """Disconnect used to delete the whole connection, which cost two things at once: an accidental
+    disconnect could not be undone, and the stored `bookings_calendar_id` went with it -- so reconnecting
+    had nothing to match on and built a SECOND "Junior Bay Bookings" calendar beside the first,
+    identically named and distinguishable only by id (observed on a live account 2026-11-09).
+    """
+
+    def _connect(self, connections, calendar):
+        from tests.test_calendar import _connect as connect_once
+
+        return connect_once(connections, "a@gmail.com", calendar=calendar)
+
+    def _disconnect(self, connections, connection_id):
+        from handlers.calendar import handler
+
+        return handler({"httpMethod": "DELETE", "path": "/calendar/connections/x",
+                        "queryStringParameters": {"tenant_id": "t1"},
+                        "pathParameters": {"connection_id": connection_id}},
+                       None, connections_repo=connections)
+
+    def test_reconnecting_after_a_disconnect_reuses_the_SAME_calendar(self):
+        import os
+
+        from tests.fakes import FakeDocumentRepository
+
+        os.environ["CALENDAR_REDIRECT_URI"] = "https://dev.example.com/calendar/callback"
+        connections = FakeDocumentRepository("connection_id")
+        first = self._connect(connections, {"id": "cal_original@group.calendar.google.com"})
+        self.assertEqual(first["bookings_calendar_id"], "cal_original@group.calendar.google.com")
+
+        self._disconnect(connections, first["connection_id"])
+        # A second calendar is offered; it must NOT be taken, because the stored one still resolves.
+        again = self._connect(connections, {"id": "cal_SHOULD_NOT_BE_USED@group.calendar.google.com"})
+
+        self.assertEqual(again["bookings_calendar_id"], "cal_original@group.calendar.google.com")
+        self.assertEqual(again["connection_id"], first["connection_id"],
+                         "the same Google account must reuse its row, not mint a new one")
+        self.assertEqual(again["status"], "connected")
+        self.assertEqual(len(connections.list_for_tenant("t1")), 1, "no duplicate connection")
+
+    def test_the_credential_really_is_gone_while_disconnected(self):
+        """Recoverable must not mean 'still usable'. The token is what grants access, and it is
+        destroyed at the moment of disconnect."""
+        import os
+
+        from stripe_link.calendar_sync import resolve_tenant_calendar
+        from tests.fakes import FakeDocumentRepository
+        from tests.test_calendar import FakeCipher, GOOGLE_SECRET
+
+        os.environ["CALENDAR_REDIRECT_URI"] = "https://dev.example.com/calendar/callback"
+        connections = FakeDocumentRepository("connection_id")
+        conn = self._connect(connections, {"id": "cal_x@group.calendar.google.com"})
+        self._disconnect(connections, conn["connection_id"])
+
+        stored = connections.get("t1", conn["connection_id"])
+        self.assertEqual(stored["refresh_token_ref"], "")
+        self.assertIsNone(resolve_tenant_calendar("t1", connections_repo=connections,
+                                                  secret_cipher=FakeCipher(), google_secret=GOOGLE_SECRET))

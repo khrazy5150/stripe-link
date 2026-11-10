@@ -2933,7 +2933,10 @@ def validate_calendar_connection(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Calendar connection document_type must be 'calendar_connection'.")
     if document.get("provider") not in {"google"}:
         raise DocumentValidationError("Calendar connection provider is invalid.")
-    if document.get("status") not in {"connected", "revoked", "error"}:
+    # "disconnected" is the tenant's own doing and is RECOVERABLE: the row survives so a reconnect finds
+    # its bookings calendar instead of making a second one. "revoked" is Google's doing. Both keep the
+    # row and drop the token; only the reason differs.
+    if document.get("status") not in {"connected", "disconnected", "revoked", "error"}:
         raise DocumentValidationError("Calendar connection status is invalid.")
 
 

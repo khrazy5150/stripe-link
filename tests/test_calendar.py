@@ -121,7 +121,18 @@ class CalendarConnectTests(unittest.TestCase):
         self.assertTrue(json.loads(status["body"])["connected"])
         disc = handler(event("DELETE", "/calendar/connection"), None, connections_repo=connections)
         self.assertTrue(json.loads(disc["body"])["disconnected"])
-        self.assertIsNone(connections.get("t1", "google"))
+        # THE ROW SURVIVES, the credential does not. Deleting it made an accidental disconnect
+        # unrecoverable and threw away the bookings calendar id, so reconnecting built a second calendar
+        # beside the first (2026-11-09).
+        after = connections.get("t1", "google")
+        self.assertIsNotNone(after)
+        self.assertEqual(after["status"], "disconnected")
+        self.assertEqual(after["refresh_token_ref"], "")
+        self.assertFalse(after["is_default"])
+        self.assertTrue(after.get("disconnected_at"))
+        # Still not resolvable for use: only `connected` rows are.
+        self.assertIsNone(resolve_tenant_calendar("t1", connections_repo=connections,
+                                                  secret_cipher=FakeCipher(), google_secret=GOOGLE_SECRET))
 
     def test_resolve_tenant_calendar_decrypts(self):
         connections = FakeDocumentRepository("connection_id")
@@ -229,7 +240,11 @@ class MultiConnectionTests(unittest.TestCase):
         second = _connect(connections, "b@gmail.com")
         handler({**event("DELETE", "/calendar/connections/x"), "pathParameters": {"connection_id": first["connection_id"]}},
                 None, connections_repo=connections)
-        self.assertIsNone(connections.get("t1", first["connection_id"]))
+        gone = connections.get("t1", first["connection_id"])
+        self.assertEqual(gone["status"], "disconnected")
+        self.assertEqual(gone["refresh_token_ref"], "")
+        # THE WHOLE POINT: the calendar id is kept, so reconnecting reuses that calendar.
+        self.assertTrue(gone["bookings_calendar_id"])
         self.assertTrue(connections.get("t1", second["connection_id"])["is_default"])  # promoted
 
     def test_resolve_prefers_is_default(self):

@@ -382,15 +382,45 @@ def update_connection_route(event, connections_repo, connection_id):
 
 
 def delete_connection_route(event, connections_repo, connection_id):
+    """Disconnect: drop the CREDENTIAL, keep the record.
+
+    This used to delete the whole document, which quietly cost two things. A disconnect done by mistake
+    was unrecoverable. And the stored `bookings_calendar_id` went with it, so reconnecting found nothing
+    to match on and created a SECOND "Junior Bay Bookings" calendar beside the first -- identically
+    named, distinguishable only by id (2026-11-09).
+
+    Keeping the row makes reconnecting the reuse it already knows how to do: `callback_route` matches on
+    `account_email`, and `resolve_bookings_calendar` then finds the stored calendar and keeps it.
+
+    The refresh token is still destroyed at this moment -- that is the part that grants access, and the
+    part the privacy policy promises to delete. What remains is which Google account was connected and
+    which calendar holds the bookings: identifiers, not credentials, and not calendar contents.
+
+    Shaped like `mark_revoked`, which already keeps the row and blanks the token when GOOGLE ends the
+    grant. The only difference is who ended it.
+    """
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    removed = connections_repo.delete(tenant_id, connection_id)
-    # If the default was removed, promote the next connected calendar so a default always exists.
-    if removed and removed.get("is_default"):
+    now = int(time.time())
+    conn = connections_repo.get(tenant_id, connection_id)
+    if not conn:
+        return json_response({"disconnected": True, "connection_id": connection_id})
+    was_default = bool(conn.get("is_default"))
+    connections_repo.put({
+        **conn,
+        "status": "disconnected",
+        "refresh_token_ref": "",
+        "is_default": False,
+        "disconnected_at": now,
+        "updated_at": now,
+    })
+    # A disconnected calendar must not stay the default -- `default_connection` only considers connected
+    # ones, so leaving the flag set would make the tenant's default resolve to nothing.
+    if was_default:
         promote = default_connection(connections_repo, tenant_id)
         if promote and not promote.get("is_default"):
-            connections_repo.put({**promote, "is_default": True, "updated_at": int(time.time())})
+            connections_repo.put({**promote, "is_default": True, "updated_at": now})
     return json_response({"disconnected": True, "connection_id": connection_id})
 
 
