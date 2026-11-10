@@ -188,3 +188,27 @@ are belt and braces rather than one load-bearing promise.
   Not a blocker; a reviewer comparing the two may pause.
 - The legal text was drafted against what the code does. It is accurate to the implementation; it has not
   been reviewed by a lawyer.
+
+## `include_granted_scopes` was undoing the narrowing (found 2026-11-09)
+
+The consent URL carried `include_granted_scopes=true`, which makes Google issue a token covering **every
+scope the account ever granted this app**, not merely the ones in the request. A merchant who connected
+before the narrowing therefore kept handing us `calendar.events.owned` on every reconnect — the author's
+own connection stored four scopes while the console declared three.
+
+Two reasons that matters, beyond tidiness:
+
+* **It undid the design.** "This app cannot reach a calendar it did not create" is meant to be a property
+  of the API. While a token still carries `events.owned`, it is back to being a promise about our code —
+  which is precisely the claim the app-created calendar exists to stop having to make.
+* **The request included a scope the app is not approved for.** Google's own documentation warns that
+  enabling the parameter "automatically adds previously granted scopes to the request, and a warning or
+  error page may appear if your app isn't approved to request all of them."
+
+Removed. We never authorise incrementally — all three scopes go in one request and a partial grant is
+refused before anything is stored — so the parameter bought nothing.
+
+**Existing grants are not revoked by removing it.** The account keeps whatever it granted until the
+merchant removes the app at <https://myaccount.google.com/permissions>. Before submitting, reconnect from
+a revoked state so the stored connection holds exactly the three declared scopes; a reviewer checking a
+test account would otherwise see one that is not in Data Access.

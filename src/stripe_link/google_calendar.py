@@ -90,7 +90,15 @@ def build_consent_url(client_id: str, redirect_uri: str, state: str, scopes: lis
         "scope": " ".join(scopes or DEFAULT_SCOPES),
         "access_type": "offline",
         "prompt": "consent",
-        "include_granted_scopes": "true",
+        # `include_granted_scopes` is DELIBERATELY ABSENT. It makes the issued token cover every scope
+        # the account ever granted this app, not merely the ones asked for here -- so a merchant who
+        # connected before 2026-11-08 kept handing us `calendar.events.owned` on every reconnect, a scope
+        # we no longer request and the console no longer declares. That turns "this app cannot reach a
+        # calendar it did not create" back from a property of the API into a promise about our code,
+        # which is the single thing the app-created design exists to avoid. It also means the request
+        # carries a scope the app is not approved for, which Google warns can itself produce a warning
+        # screen. We never ask incrementally -- all three scopes go in one request and a partial grant is
+        # refused -- so the parameter buys nothing and costs the guarantee.
         "state": state,
     }
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"

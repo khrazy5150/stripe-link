@@ -393,3 +393,34 @@ class ARescheduleAcrossTheMigrationTests(unittest.TestCase):
         client, result = self._reschedule("cal-bookings", GoogleCalendarError("500"))
         client.create_event.assert_not_called()
         self.assertIsNone(result)
+
+
+class TheTokenCarriesONLYWhatWeAskForTests(unittest.TestCase):
+    """`include_granted_scopes=true` makes Google issue a token covering every scope the account ever
+    granted this app. A merchant who connected before the narrowing kept handing us
+    `calendar.events.owned` on every reconnect -- a scope we do not request and the console does not
+    declare -- so the API-level guarantee quietly became a promise about our code again."""
+
+    def _url(self):
+        from stripe_link.google_calendar import build_consent_url
+
+        return build_consent_url("cid", "https://example.com/cb", "state123")
+
+    def test_include_granted_scopes_is_not_requested(self):
+        self.assertNotIn("include_granted_scopes", self._url())
+
+    def test_the_url_asks_for_exactly_the_three(self):
+        from urllib.parse import parse_qs, urlparse
+
+        from stripe_link.google_calendar import DEFAULT_SCOPES
+
+        asked = parse_qs(urlparse(self._url()).query)["scope"][0].split()
+        self.assertEqual(sorted(asked), sorted(DEFAULT_SCOPES))
+        self.assertNotIn("https://www.googleapis.com/auth/calendar.events.owned", asked)
+
+    def test_consent_is_still_forced_so_a_refresh_token_comes_back(self):
+        """Removing one parameter must not take `prompt=consent` with it: without it Google withholds
+        the refresh token on a repeat authorisation and the connection dies at the first renewal."""
+        url = self._url()
+        self.assertIn("prompt=consent", url)
+        self.assertIn("access_type=offline", url)
