@@ -148,6 +148,47 @@ def stripe_invoice_params(customer_id: str, *, days_until_due: int = DEFAULT_DAY
     return params
 
 
+def invoice_paid_tenant_email(invoice: dict[str, Any], *, business_name: str = "",
+                              dashboard_url: str = "") -> dict[str, str]:
+    """"You have been paid" -- to the TENANT, not the customer.
+
+    A dashboard notification is only seen by someone who opens the dashboard, and the tenant who raised
+    an invoice is waiting on the money rather than watching a screen. On 2026-11-09 a real payment
+    produced no dashboard revenue and one CRITICAL alarm saying the opposite, and the tenant had no other
+    way to learn they had been paid.
+
+    Amounts come from what STRIPE actually collected (`amounts.amount_paid`), falling back to the
+    invoice total only when that is absent -- telling a tenant they received the full amount when a
+    partial payment landed would be a worse failure than saying nothing.
+    """
+    amounts = invoice.get("amounts") or {}
+    currency = invoice_currency(invoice)
+    collected = int(amounts.get("amount_paid") or 0) or invoice_total(invoice)
+    customer = invoice.get("customer") or {}
+    who = str(customer.get("name") or customer.get("email") or "A customer").strip()
+    invoice_id = str(invoice.get("invoice_id") or "")
+    paid = format_money(collected, currency)
+
+    body = paragraph(f"{escape(who)} paid {escape(paid)}.")
+    body += rows_table(
+        [(str(i.get("description") or "Item"), format_money(line_total(i), currency))
+         for i in invoice.get("line_items") or []],
+        total=("Paid", paid),
+    )
+    if dashboard_url:
+        body += button("View invoice", dashboard_url)
+    return {
+        "subject": f"{who} paid {paid}",
+        "html": render_email(business_name=business_name or "Junior Bay",
+                             title="You have been paid",
+                             preheader=f"{who} paid {paid}",
+                             body=body),
+        "text": (f"You have been paid.\n\n{who} paid {paid}"
+                 + (f" for invoice {invoice_id}" if invoice_id else "") + ".\n"
+                 + (f"\n{dashboard_url}\n" if dashboard_url else "")),
+    }
+
+
 def invoice_email_content(invoice: dict[str, Any], hosted_url: str, *, business_name: str = "", support_email: str = "") -> dict[str, str]:
     currency = invoice_currency(invoice)
     total = format_money(invoice_total(invoice), currency)

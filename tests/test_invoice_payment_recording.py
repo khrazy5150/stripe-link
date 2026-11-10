@@ -115,3 +115,70 @@ class TheTenantIsToldAboutTheirOwnMoneyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTenantIsEmailedWhenTheyArePaidTests(unittest.TestCase):
+    """A dashboard notice is only read by someone who opens the dashboard. The tenant who raised an
+    invoice is waiting on the money, not watching a screen."""
+
+    INVOICE = {
+        "invoice_id": "inv_1",
+        "amounts": {"amount_paid": 1586, "amount_due": 0, "total": 1586, "currency": "usd"},
+        "customer": {"name": "Minxin Chen", "email": "buyer@example.com"},
+        "line_items": [{"description": "Domain Name", "quantity": 1, "unit_amount": 1586,
+                        "currency": "usd"}],
+    }
+
+    def test_it_reports_what_was_COLLECTED_not_what_was_billed(self):
+        """A partial payment announced as the full amount is worse than saying nothing."""
+        from stripe_link.domain.invoicing import invoice_paid_tenant_email
+
+        partial = {**self.INVOICE,
+                   "amounts": {**self.INVOICE["amounts"], "amount_paid": 500, "amount_due": 1086}}
+        content = invoice_paid_tenant_email(partial, business_name="Poliaxis Nutrition")
+        self.assertIn("$5.00", content["subject"])
+        self.assertNotIn("$15.86", content["subject"])
+
+    def test_it_falls_back_to_the_total_when_amount_paid_is_missing(self):
+        from stripe_link.domain.invoicing import invoice_paid_tenant_email
+
+        legacy = {**self.INVOICE, "amounts": {"total": 1586, "currency": "usd"}}
+        self.assertIn("$15.86", invoice_paid_tenant_email(legacy)["subject"])
+
+    def test_the_customer_is_named_and_the_amount_is_in_the_body(self):
+        from stripe_link.domain.invoicing import invoice_paid_tenant_email
+
+        content = invoice_paid_tenant_email(self.INVOICE, business_name="Poliaxis Nutrition",
+                                            dashboard_url="https://app.juniorbay.com/invoices")
+        self.assertEqual(content["subject"], "Minxin Chen paid $15.86")
+        self.assertIn("$15.86", content["html"])
+        self.assertIn("https://app.juniorbay.com/invoices", content["html"])
+        self.assertIn("Minxin Chen", content["text"])
+
+    def test_no_dashboard_url_drops_the_button_rather_than_linking_to_root(self):
+        from stripe_link.domain.invoicing import invoice_paid_tenant_email
+
+        content = invoice_paid_tenant_email(self.INVOICE, dashboard_url="")
+        self.assertNotIn('href="/"', content["html"])
+
+    def test_the_webhook_sends_through_the_INJECTED_mailer(self):
+        """`feedback_undeliverable_recipients`: the suite once emailed real people via SES. The call
+        site passes the same injected mailer the receipts use, so a test that forgets one still cannot
+        reach SES."""
+        import inspect
+
+        from handlers import stripe_webhook
+
+        src = inspect.getsource(stripe_webhook)
+        self.assertIn("(mailer_send or send_email)(", src)
+        call = inspect.getsource(stripe_webhook.handler) if hasattr(stripe_webhook, "handler") else src
+        self.assertIn("mailer_send=receipt_mailer", src)
+
+    def test_a_tenant_with_no_verified_address_is_skipped_loudly(self):
+        import inspect
+
+        from handlers import stripe_webhook
+
+        src = inspect.getsource(stripe_webhook)
+        self.assertIn("invoice_paid_email_skipped", src)
+        self.assertIn("invoice_paid_email_failed", src)

@@ -52,6 +52,7 @@ from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
+from stripe_link.domain.invoicing import invoice_paid_tenant_email
 from stripe_link.sender_identity import sending_identity, site_organization
 from stripe_link.domain.coupon_grants import is_grant_code
 from stripe_link.domain.coupon_redemptions import amounts_from_session, redemption_document
@@ -525,6 +526,9 @@ def handler(
         persistence = persist_invoice_event(
             stripe_event, tenant_id=tenant_id, event_type=event_type, mode=mode,
             invoices_repo=invoices_repo, notifications_repo=notifications_repo,
+            # The same injected mailer the receipts use, so a test that forgets to pass one still cannot
+            # reach SES -- the suite has emailed real people before.
+            mailer_send=receipt_mailer,
             now_fn=now_fn, billing_config_loader=billing_config_loader,
         )
         # A recurring SERVICE renews here too, and this is the moment its booking credits come back
@@ -1453,6 +1457,7 @@ def persist_invoice_event(
     notifications_repo=None,
     appointments_repo=None,
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    mailer_send: Callable[..., Any] | None = None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
     """Sync a Stripe invoice.* event onto our Invoice doc; on paid, append a sale ledger entry and
@@ -1479,10 +1484,16 @@ def persist_invoice_event(
         payment["hosted_invoice_url"] = stripe_invoice["hosted_invoice_url"]
     if stripe_invoice.get("invoice_pdf"):
         payment["invoice_pdf_url"] = stripe_invoice["invoice_pdf"]
-    # `invoice.payment_intent` WAS REMOVED in API version 2025-03-31.basil, which split one invoice into
-    # possibly several payments; we are pinned well past it, so this is always absent now and the ledger
-    # write below used to be gated on it. That gate simply never fired: a paid invoice recorded no
-    # revenue, raised no error, and showed nothing on the dashboard (2026-11-09).
+    # `invoice.payment_intent` WAS REMOVED in API version 2025-03-31.basil, which allowed an invoice to
+    # be settled by several payments.
+    #
+    # WE DO NOT SEND THAT VERSION -- outbound calls pin `2024-06-20`, deliberately pre-Basil, because
+    # FEE_READ_API_VERSION needs `invoice.charge`, which Basil also removed. But an EVENT payload is
+    # rendered at the ACCOUNT's version, not at the version we send, and this account is on
+    # `2026-05-27.preview` (plans/TODO.md). So we request pre-Basil and receive post-Basil, and the field
+    # is simply absent here. The ledger write below used to be gated on it, so the gate never fired: a
+    # paid invoice recorded no revenue, raised no error, and showed nothing on the dashboard
+    # (2026-11-09).
     payment_intent = str(stripe_invoice.get("payment_intent") or "").strip() or _invoice_payment_intent(stripe_invoice)
     if payment_intent:
         payment["payment_intent_id"] = payment_intent
@@ -1555,6 +1566,30 @@ def persist_invoice_event(
         except Exception:  # noqa: BLE001
             print(json.dumps({"invoice_paid_notify_failed": {"invoice_id": invoice_id}}))
 
+    # AND BY EMAIL, because a dashboard notice is only read by someone who opens the dashboard, and a
+    # tenant who raised an invoice is waiting on the money rather than watching a screen. Sent to their
+    # own verified address through the one identity resolver, so it carries the same business name as
+    # everything else they send. Best-effort and last: the money is already recorded, and a mail failure
+    # must not cost us that.
+    if new_status == "paid":
+        try:
+            identity = sending_identity(tenant_id, mode=mode)
+            recipient = str(identity.get("reply_to") or "").strip()
+            if recipient:
+                content = invoice_paid_tenant_email(
+                    updated, business_name=str(identity.get("business_name") or ""),
+                    dashboard_url=_invoice_dashboard_url())
+                (mailer_send or send_email)(
+                    to=recipient, subject=content["subject"], html=content["html"],
+                    text=content["text"], from_name=str(identity.get("business_name") or ""),
+                    reply_to=recipient, tenant_id=tenant_id)
+            else:
+                print(json.dumps({"invoice_paid_email_skipped": {
+                    "invoice_id": invoice_id, "reason": "tenant has no verified address"}}))
+        except Exception as exc:  # noqa: BLE001 - see above
+            print(json.dumps({"invoice_paid_email_failed": {
+                "invoice_id": invoice_id, "error": f"{type(exc).__name__}: {exc}"}}))
+
     return {"status": new_status, "invoice_id": invoice_id, "ledger_entry": ledger_written}
 
 
@@ -1577,6 +1612,13 @@ def _invoice_payment_intent(stripe_invoice: dict[str, Any]) -> str:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
     return ""
+
+
+def _invoice_dashboard_url() -> str:
+    """Where the tenant goes to see the invoice. Empty when DASHBOARD_URL is unset, which drops the
+    button rather than emitting a link to "/"."""
+    base = str(os.environ.get("DASHBOARD_URL") or "").rstrip("/")
+    return f"{base}/invoices" if base else ""
 
 
 def invoice_paid_notification(invoice: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:

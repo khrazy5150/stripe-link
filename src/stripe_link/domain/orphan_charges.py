@@ -137,9 +137,11 @@ def _has_ledger_sale(entry_for_id, invoice_id: str, charge: dict[str, Any]) -> b
     """Whether the ledger already holds the sale for this invoice.
 
     Checked under BOTH keys the writer may have used: the Stripe invoice id, and the PaymentIntent when
-    one exists. `invoice.payment_intent` was removed in API version 2025-03-31.basil, so entries written
-    since are keyed on the invoice -- but older ones are keyed on the PI, and an audit that knows only
-    the current convention declares the past missing.
+    one exists. `invoice.payment_intent` was removed in API version 2025-03-31.basil, and webhook
+    payloads are rendered at the ACCOUNT's version rather than the one we send on outbound calls -- this
+    account being post-Basil, the field stopped arriving and entries written since are keyed on the
+    invoice. Older ones are keyed on the PI, and an audit that knows only the current convention declares
+    the past missing.
     """
     payment_intent = str(charge.get("payment_intent") or "").strip()
     for key in (invoice_id, payment_intent):
