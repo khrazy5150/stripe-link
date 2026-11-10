@@ -379,6 +379,22 @@
             <div><dt>Location</dt><dd>{{ locationLabel(selectedService.location_mode) }}</dd></div>
             <div><dt>Status</dt><dd>{{ serviceIsActive(selectedService) ? "Active" : "Archived" }}</dd></div>
           </dl>
+          <!-- The page a customer actually books on. It existed and was reachable, but nothing in the
+               dashboard ever told the tenant its address, so the feature was effectively invisible. -->
+          <div v-if="bookingUrl(selectedService)" class="service-booking-url">
+            <dt>Booking page</dt>
+            <div class="service-booking-url-row">
+              <input :value="bookingUrl(selectedService)" readonly class="service-booking-url-input"
+                     aria-label="Booking page URL" @focus="$event.target.select()" />
+              <button type="button" class="secondary-action compact" @click="copyBookingUrl(selectedService)">
+                {{ copiedUrl === selectedService.service_id ? "Copied" : "Copy" }}
+              </button>
+              <a class="secondary-action compact" :href="bookingUrl(selectedService)"
+                 target="_blank" rel="noopener noreferrer">Open</a>
+            </div>
+            <small class="field-hint">Share this link with customers. It carries the
+              {{ currentMode }} mode, which the page needs to find this service.</small>
+          </div>
           <details class="product-json-details">
             <summary>Raw JSON</summary>
             <pre>{{ JSON.stringify(selectedService, null, 2) }}</pre>
@@ -426,6 +442,7 @@ import { useCalendarStore } from "../stores/calendar";
 import { applyTitleCaseInput } from "../utils/titleCase.js";
 import { priceFormFromDocument } from "../utils/priceForm";
 import PricingCard from "./shared/PricingCard.vue";
+import { getApiBase, getStripeMode } from "../api/client";
 import ServiceWizard from "./services/ServiceWizard.vue";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
@@ -481,6 +498,30 @@ const deletingService = ref(false);
 const formError = ref("");
 const form = ref(defaultServiceForm());
 const wizardOpen = ref(false);
+const copiedUrl = ref("");
+const currentMode = computed(() => getStripeMode());
+
+// A no_booking service has no booking page, so offering a link to one would be a dead end.
+// `mode` is on the query string because `resolve_stripe_mode` defaults to TEST when it is absent --
+// a safety default that makes the bare URL 404 for a live service.
+function bookingUrl(service) {
+  if (!service || service.fulfillment_mode === "no_booking") return "";
+  const id = String(service.service_id || "");
+  if (!id) return "";
+  return `${String(getApiBase() || "").replace(/\/$/, "")}/book/${encodeURIComponent(id)}?mode=${getStripeMode()}`;
+}
+
+async function copyBookingUrl(service) {
+  const url = bookingUrl(service);
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    copiedUrl.value = service.service_id;
+    setTimeout(() => { if (copiedUrl.value === service.service_id) copiedUrl.value = ""; }, 2000);
+  } catch {
+    /* clipboard blocked: the input is selectable, which is the fallback */
+  }
+}
 // Any price recurring makes this a PLAN, which is what gives "bookings per cycle" a meaning.
 const hasRecurringPrice = computed(() =>
   (form.value.prices || []).some((price) => price.pricing_model === "recurring"));
