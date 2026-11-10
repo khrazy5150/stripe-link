@@ -133,8 +133,24 @@ def is_ours(charge: dict[str, Any], *, this_silo: str, mode: str = "") -> bool:
     return not owner or owner == mine
 
 
+def _has_ledger_sale(entry_for_id, invoice_id: str, charge: dict[str, Any]) -> bool:
+    """Whether the ledger already holds the sale for this invoice.
+
+    Checked under BOTH keys the writer may have used: the Stripe invoice id, and the PaymentIntent when
+    one exists. `invoice.payment_intent` was removed in API version 2025-03-31.basil, so entries written
+    since are keyed on the invoice -- but older ones are keyed on the PI, and an audit that knows only
+    the current convention declares the past missing.
+    """
+    payment_intent = str(charge.get("payment_intent") or "").strip()
+    for key in (invoice_id, payment_intent):
+        if key and entry_for_id(f"le_sale_{key}"):
+            return True
+    return False
+
+
 def orphans(charges: Iterable[dict[str, Any]], *, order_for_payment_intent: Callable[[str], Any],
-            order_for_id: Callable[[str], Any] | None = None, this_silo: str = "",
+            order_for_id: Callable[[str], Any] | None = None,
+            ledger_entry_for_id: Callable[[str], Any] | None = None, this_silo: str = "",
             mode: str = "") -> list[dict[str, Any]]:
     """The charges THIS silo should hold an order for and does not, as reportable facts.
 
@@ -161,12 +177,20 @@ def orphans(charges: Iterable[dict[str, Any]], *, order_for_payment_intent: Call
         # An invoice charge FIRST, because such a charge also has a PaymentIntent — one we never store,
         # so asking the index about it returns nothing and looks exactly like a lost sale.
         invoice_id = invoice_id_of(charge)
-        if invoice_id and order_for_id is not None:
+        if invoice_id and (order_for_id is not None or ledger_entry_for_id is not None):
             try:
-                order = order_for_id(order_id_for_invoice(invoice_id))
+                order = order_for_id(order_id_for_invoice(invoice_id)) if order_for_id is not None else None
+                # A SUBSCRIPTION renewal writes an order; a TENANT-RAISED invoice never does -- it
+                # records a ledger sale entry and nothing else. Asking only the order question reported
+                # every paid invoice as money with no record, at severity "critical", while the invoice
+                # sat in the dashboard marked paid (2026-11-09). The ledger is where that money lives,
+                # so ask there too before raising the alarm.
+                recorded = bool(order) or (
+                    _has_ledger_sale(ledger_entry_for_id, invoice_id, charge)
+                    if ledger_entry_for_id is not None else False)
             except Exception:  # noqa: BLE001 - see docstring: a broken read is not missing money
                 continue
-            if not order:
+            if not recorded:
                 found.append(_fact(charge, reason="no_order_for_invoice"))
             continue
 

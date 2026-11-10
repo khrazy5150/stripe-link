@@ -1479,7 +1479,11 @@ def persist_invoice_event(
         payment["hosted_invoice_url"] = stripe_invoice["hosted_invoice_url"]
     if stripe_invoice.get("invoice_pdf"):
         payment["invoice_pdf_url"] = stripe_invoice["invoice_pdf"]
-    payment_intent = str(stripe_invoice.get("payment_intent") or "").strip()
+    # `invoice.payment_intent` WAS REMOVED in API version 2025-03-31.basil, which split one invoice into
+    # possibly several payments; we are pinned well past it, so this is always absent now and the ledger
+    # write below used to be gated on it. That gate simply never fired: a paid invoice recorded no
+    # revenue, raised no error, and showed nothing on the dashboard (2026-11-09).
+    payment_intent = str(stripe_invoice.get("payment_intent") or "").strip() or _invoice_payment_intent(stripe_invoice)
     if payment_intent:
         payment["payment_intent_id"] = payment_intent
 
@@ -1488,22 +1492,39 @@ def persist_invoice_event(
         payment["paid_at"] = now
         amount_paid = int(stripe_invoice.get("amount_paid") or 0)
         currency = str(stripe_invoice.get("currency") or (invoice.get("amounts") or {}).get("currency") or "usd")
+        payment["amount_paid"] = amount_paid
         ledger_repo = ledger_repo or (ledger_repository(mode=mode) if os.environ.get("LEDGER_TABLE") else None)
-        if ledger_repo and amount_paid and payment_intent:
+        # KEYED ON THE STRIPE INVOICE when there is no PaymentIntent to key on. The entry needs a stable
+        # unique id, not specifically a PaymentIntent, and one invoice is paid once -- so the invoice id
+        # is as idempotent as the PI was, and it still exists.
+        ledger_key = payment_intent or str(stripe_invoice.get("id") or "").strip() or invoice_id
+        if ledger_repo and amount_paid and ledger_key:
             try:
                 fees = fee_breakdown_from_session({"amount_total": amount_paid, "currency": currency, "metadata": metadata}, billing_config_loader)
                 ledger_repo.append(sale_entry(
-                    tenant_id=tenant_id, entry_id=f"le_sale_{payment_intent}", occurred_at=now, mode=mode, currency=currency,
+                    tenant_id=tenant_id, entry_id=f"le_sale_{ledger_key}", occurred_at=now, mode=mode, currency=currency,
                     gross=amount_paid, stripe_fee=int(fees.get("stripe_fee") or 0), platform_fee=int(fees.get("platform_fee") or 0),
-                    idempotency_key=f"sale:{payment_intent}", order_id=invoice_id,
+                    idempotency_key=f"sale:{ledger_key}", order_id=invoice_id,
                     customer=invoice.get("customer") if isinstance(invoice.get("customer"), dict) else None,
-                    stripe={"payment_intent_id": payment_intent}, source="webhook", description=f"Invoice {invoice_id}", now_epoch=now,
+                    stripe={"payment_intent_id": payment_intent, "invoice_id": str(stripe_invoice.get("id") or "")},
+                    source="webhook", description=f"Invoice {invoice_id}", now_epoch=now,
                 ))
                 ledger_written = True
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:  # noqa: BLE001 - the invoice must still be marked paid
+                print(json.dumps({"invoice_ledger_write_failed": {
+                    "invoice_id": invoice_id, "stripe_invoice_id": str(stripe_invoice.get("id") or ""),
+                    "amount_paid": amount_paid}}))
 
-    updated = {**invoice, "status": new_status, "payment": payment, "updated_at": now}
+    amounts = dict(invoice.get("amounts") or {})
+    if new_status == "paid":
+        # WHAT WAS ACTUALLY COLLECTED. This was never written, so a paid invoice read `amount_paid: 0`
+        # beside a `total` of the full amount -- books that disagree with themselves on one record.
+        collected = int(stripe_invoice.get("amount_paid") or 0)
+        if collected:
+            amounts["amount_paid"] = collected
+            amounts["amount_due"] = max(0, int(amounts.get("total") or 0) - collected)
+
+    updated = {**invoice, "status": new_status, "payment": payment, "amounts": amounts, "updated_at": now}
     if new_status in {"void"}:
         updated["voided_at"] = now
     invoices_repo.put(updated)
@@ -1522,13 +1543,40 @@ def persist_invoice_event(
             except Exception:  # noqa: BLE001 - appointment sync must not fail the webhook
                 pass
 
+    # RESOLVED HERE, not merely accepted. Two other paths in this module resolve it lazily and this one
+    # did not, so the caller's default of None travelled all the way down and a paid invoice told the
+    # tenant nothing -- while the orphan sweep, which does resolve its own, shouted that the same payment
+    # was unaccounted for. The only notification about this money was the alarming, wrong one.
+    notifications_repo = notifications_repo or (
+        notifications_repository(mode=mode) if os.environ.get("NOTIFICATIONS_TABLE") else None)
     if new_status == "paid" and notifications_repo:
         try:
             notifications_repo.put(invoice_paid_notification(updated, tenant_id, now))
         except Exception:  # noqa: BLE001
-            pass
+            print(json.dumps({"invoice_paid_notify_failed": {"invoice_id": invoice_id}}))
 
     return {"status": new_status, "invoice_id": invoice_id, "ledger_entry": ledger_written}
+
+
+def _invoice_payment_intent(stripe_invoice: dict[str, Any]) -> str:
+    """The PaymentIntent behind an invoice, read from `payments` rather than the removed top-level field.
+
+    API version 2025-03-31.basil deleted `invoice.payment_intent`, because an invoice may now be settled
+    by SEVERAL payments. The replacement is `invoice.payments[].payment.payment_intent`, which arrives
+    only when expanded -- so this returns "" on an ordinary webhook payload, and callers must not depend
+    on getting one. It exists so that a payload which DOES carry it is still understood, rather than
+    silently treated as unpaid the way the old field now always is.
+    """
+    payments = (stripe_invoice.get("payments") or {})
+    rows = payments.get("data") if isinstance(payments, dict) else payments
+    for row in (rows if isinstance(rows, list) else []):
+        payment = (row or {}).get("payment") or {}
+        candidate = payment.get("payment_intent")
+        if isinstance(candidate, dict):
+            candidate = candidate.get("id")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return ""
 
 
 def invoice_paid_notification(invoice: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:

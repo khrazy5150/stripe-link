@@ -161,6 +161,12 @@ def _report_orphan_charges(mode, now, *, orders_repo, stripe_repo, secret_cipher
             found = orphans(charges,
                             order_for_payment_intent=orders_repo.find_by_payment_intent,
                             order_for_id=lambda order_id, _t=tenant_id: orders_repo.get(_t, order_id),
+                            # The same repo the audit pass beside this one already reads, for the same
+                            # tenant: a tenant-raised invoice records its money as a LEDGER entry and
+                            # never as an order, so without this every paid invoice reads as missing.
+                            ledger_entry_for_id=(
+                                (lambda entry_id, _t=tenant_id: ledger_repo.get(_t, entry_id))
+                                if ledger_repo is not None else None),
                             this_silo=silo, mode=mode)
             if not found:
                 continue
