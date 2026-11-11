@@ -3,7 +3,8 @@ external/booking). render_checkout_cta must branch on it, not always emit a Stri
 import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
-from stripe_link.runtime.html import offer_cta, render_checkout_cta, render_email_cta
+from stripe_link.runtime.html import (
+    UNIVERSAL_BUNDLE_TEMPLATE_STYLES, offer_cta, render_checkout_cta, render_email_cta)
 
 
 def _offer(cta=None):
@@ -129,6 +130,44 @@ class OfferCtaValidationTests(unittest.TestCase):
         doc["presentation"] = {"cta": {"type": "sms"}}
         with self.assertRaises(DocumentValidationError):
             validate_offer_document(doc)
+
+
+class TheBookingCtaIsNotAFixedBottomBar(unittest.TestCase):
+    """`.sl-checkout-cta` is `position:fixed;bottom:0` -- correct for a buy bar, wrong for this one.
+
+    The booking CTA is not one button: it OPENS, into a slot grid two weeks deep plus three fields and a
+    consent line. Pinned to the viewport the panel grew upward past the top of the screen, and scrolling
+    moved the page behind it rather than the bar -- so the earliest times could not be clicked at all, and
+    on the way past, the bar covered the price card and the trust badges (reported 2026-11-11).
+
+    Email, call and external already opt out of the fixed rule. Booking was simply left off that list,
+    which is the same shape of bug as the lead form "abomination" the comment beside it records: a copy
+    defined by what it leaves out.
+    """
+
+    def _stylesheet(self):
+        return "\n".join(UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+
+    def test_booking_opts_out_of_the_fixed_bar(self):
+        rule = next((line for line in UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                     if "position:static" in line and ".sl-email-cta" in line), "")
+        self.assertTrue(rule, "the static opt-out rule for inline CTAs is gone")
+        self.assertIn(".sl-checkout-cta.sl-booking-cta", rule,
+                      "a CTA that expands into a panel cannot be pinned to the viewport")
+
+    def test_the_fixed_rule_still_applies_to_the_buy_bar(self):
+        """The opt-out is a list of exceptions, not a removal: an ordinary buy CTA stays pinned."""
+        base = next((line for line in UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                     if line.strip().startswith(".sl-checkout-cta{")), "")
+        self.assertIn("position:fixed", base)
+        self.assertIn("bottom:0", base)
+
+    def test_the_reserved_strip_goes_with_it(self):
+        """`body` reserves 8rem for the fixed bar. With nothing pinned that is 8rem of nothing under a
+        page that already ends in a form -- the same pairing the email CTA makes two lines above."""
+        sheet = self._stylesheet()
+        self.assertIn("body:has(.sl-booking-cta){padding-bottom:0}", sheet)
+        self.assertIn("body:has(.sl-booking-cta) main{padding-bottom:4rem}", sheet)
 
 
 if __name__ == "__main__":

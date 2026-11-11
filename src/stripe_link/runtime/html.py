@@ -942,9 +942,19 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # the same gutter every other section gets. Without it the card sat flush against both edges on a
     # phone -- invisible at 52rem on a desktop, obvious the moment the closed notice went red (reported
     # 2026-10-15). Same specificity as that rule, so this has to stay BELOW it.
-    "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{position:static;z-index:auto;background:none;padding:0;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
+    # The BOOKING cta joins them for the same reason, found the same way (author, 2026-11-11). A buy bar is
+    # one button and stays one button; this one OPENS, into a slot grid two weeks deep plus three fields.
+    # Fixed, that panel grows upward out of the viewport and the part above the fold cannot be reached --
+    # scrolling moves the page behind it, never the bar -- so the earliest times were unclickable, and the
+    # bar covered the price card and trust badges on the way past. The widget is the page's main event
+    # here, not a floating shortcut to it.
+    "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta,.sl-checkout-cta.sl-booking-cta{position:static;z-index:auto;background:none;padding:0;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
     "    body:has(.sl-email-cta){padding-bottom:0}",
     "    body:has(.sl-email-cta) main{padding-bottom:4rem}",
+    # The 8rem strip on `body` is reserved for the fixed bar. Nothing is pinned any more, so it is 8rem of
+    # nothing under a page that already ends in a form.
+    "    body:has(.sl-booking-cta){padding-bottom:0}",
+    "    body:has(.sl-booking-cta) main{padding-bottom:4rem}",
     # THE CTA PANEL -- one implementation for call, external and download (see render_cta_panel). They differ
     # only in what the big line says: a phone number, a hostname, a filename.
     "    .sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{display:block;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
