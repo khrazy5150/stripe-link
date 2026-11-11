@@ -16,7 +16,9 @@ import subprocess
 import unittest
 
 from handlers.services import handler
+from stripe_link.domain.documents import DocumentValidationError, validate_service
 from stripe_link.domain.service_index import service_index_entry
+from tests.test_service_offer_catalog import strip_js_comments
 from tests.fakes import FakeDocumentRepository
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -193,6 +195,49 @@ class SharedMachineryTests(unittest.TestCase):
         """)
         self.assertEqual(out[0], "3 of 12 services shown.")
         self.assertEqual(out[1], "1 of 1 offer shown.")
+
+
+class ArchiveWritesTheDocumentNotTheRow(unittest.TestCase):
+    """Archive/Restore flips `active` through the collection PUT, which REPLACES the whole document.
+
+    The button was handed a list ROW, so it sent the slim projection back as the service. The API refused
+    it -- "Missing required field(s): schema_version, document_type, tenant_id" -- which is the only
+    reason nothing was lost: had those three survived the projection, the write would have gone through
+    and taken booking_rules, image_dims, created_at and the Stripe ids with it. Broken since the slim
+    index landed (cdcd53a, 2026-09-02) and reported from production.
+
+    Products and Offers never had the bug because they archive through a dedicated status PATCH. Services
+    upsert through PUT /services, so the fix is to refetch the document and flip the flag on that.
+    """
+
+    STORE = ROOT / "dashboard" / "src" / "stores" / "services.js"
+
+    def test_a_list_row_is_not_a_valid_service_document(self):
+        """The premise. If this ever stops holding, the guard below is the only thing left."""
+        row = service_index_entry(dict(FULL_SERVICE, schema_version="2026-05-29", document_type="service"))
+        for field in ("schema_version", "document_type", "tenant_id"):
+            self.assertNotIn(field, row, "the projection is what made the write invalid")
+        with self.assertRaises(DocumentValidationError):
+            validate_service(dict(row, active=False))
+
+    def test_set_active_refetches_the_document_before_writing(self):
+        source = strip_js_comments(self.STORE.read_text())
+        start = source.index("async setActive(")
+        body = source[start:source.index("async deleteService(")]
+        self.assertIn("fetchFullDocument(", body,
+                      "setActive must load the stored document; a list row is not one")
+        self.assertNotIn("...service,", body,
+                         "spreading the list ROW is the bug: PUT replaces the whole document")
+        self.assertIn("...full,", body, "the flag belongs on the fetched document")
+
+    def test_a_failed_read_does_not_become_a_destructive_write(self):
+        """fetchFullService() falls back to the ROW on a network error, which is right for opening an
+        editor and wrong here: the fallback would be what gets stored."""
+        source = strip_js_comments(self.STORE.read_text())
+        start = source.index("async setActive(")
+        body = source[start:source.index("async deleteService(")]
+        self.assertNotIn("fetchFullService(", body, "that helper falls back to the row")
+        self.assertIn("if (!full) throw", body, "a service that could not be read must not be written")
 
 
 if __name__ == "__main__":

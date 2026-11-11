@@ -146,11 +146,27 @@ export const useServicesStore = defineStore("services", {
 
     // Archive (soft) / restore: flip the active flag. References (offers, appointments) are
     // preserved, unlike a hard delete — so this is the safe, reversible default.
+    //
+    // `service` here is a list ROW: the slim ?view=index projection (domain/service_index.py), which
+    // carries neither schema_version, document_type nor tenant_id. PUT /services replaces the WHOLE
+    // document, so spreading the row wrote the projection over the service and lost every field the list
+    // does not display — booking_rules, image_dims, the Stripe ids. The validator refusing it ("Missing
+    // required field(s): schema_version, document_type, tenant_id") was the only thing standing between
+    // Archive and that loss, and it has refused since the slim index landed (cdcd53a, 2026-09-02).
+    //
+    // So refetch the document and flip the flag on THAT. Products and Offers avoid the problem a second
+    // way, with a dedicated status PATCH; services upsert through the collection PUT, so the fetch is
+    // what makes the write whole.
     async setActive(service, active) {
       this.saving = true;
       this.error = "";
       try {
-        const updated = { ...service, active, updated_at: Math.floor(Date.now() / 1000) };
+        // Deliberately NOT fetchFullService(): that falls back to the row, which is right for opening an
+        // editor (a partly-filled form beats a dead button) and wrong here, where the fallback is what
+        // gets STORED. A failed read must not become a destructive write.
+        const full = await fetchFullDocument("services", service?.service_id, { key: "service" });
+        if (!full) throw new Error("Could not load this service — nothing was changed. Try again.");
+        const updated = { ...full, active, updated_at: Math.floor(Date.now() / 1000) };
         const body = await apiRequest("/services", { method: "PUT", body: updated });
         this.upsertService(body.service || updated);
         this.message = `${service.name || "Service"} was ${active ? "restored" : "archived"}.`;
