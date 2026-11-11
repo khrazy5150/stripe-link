@@ -258,5 +258,33 @@ def strip_js_comments(source: str) -> str:
     return "\n".join(re.sub(r"//.*$", "", line) for line in source.splitlines())
 
 
+class TheListCanShowWhatItDisplays(unittest.TestCase):
+    """The Details pane reads a list ROW, not the document.
+
+    Only the editor refetches the whole service (`openEditModal` -> `fetchFullService`), so a field the
+    list DISPLAYS has to survive the slim projection. It did not, and the pane read "Not set" for every
+    service — including one whose category was stored and already being emitted into the page's JSON-LD.
+    """
+
+    def test_the_projection_carries_the_category(self):
+        from stripe_link.domain.service_index import service_index_entry
+
+        row = service_index_entry({
+            "service_id": "svc_1", "name": "60-Minute Massage",
+            "product_category": "massage_therapy",
+            "price": {"currency": "usd", "unit_amount": 7800},
+        })
+        self.assertEqual("massage_therapy", row.get("product_category"))
+
+    def test_a_service_with_no_category_simply_omits_it(self):
+        from stripe_link.domain.service_index import service_index_entry
+
+        row = service_index_entry({"service_id": "svc_1", "name": "Sauna", "product_category": ""})
+        self.assertNotIn("product_category", row)
+
+    def test_the_details_pane_reads_the_field_the_projection_now_carries(self):
+        pane = strip_js_comments((ROOT / "dashboard" / "src" / "components" / "Services.vue").read_text())
+        self.assertIn("humanizeCategory(selectedService.product_category)", pane)
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,11 @@ _FIELDS = (
     "service_id", "name", "description", "location_mode", "fulfillment_mode",
     "booking_flow", "default_price_id", "allowed_fulfillers", "active", "status",
     "presentation", "price", "duration_minutes",
+    # Read by the service list's Details pane. Added 2026-11-10 WITH that pane: the row showed
+    # "Not set" for every service, including ones that had a category, because Details reads a list
+    # ROW while only the editor refetches the whole document. A projection is a promise about what the
+    # list can show, so a field the list displays belongs in it.
+    "product_category",
 )
 
 # A service's prices are needed for the same reason a product's are: the Offers screen prices a service
