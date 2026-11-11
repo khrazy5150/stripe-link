@@ -228,7 +228,7 @@
             <label class="offer-field">
               <span>Starts on</span>
               <select v-model.number="manual.weekday">
-                <option v-for="(day, index) in WEEKDAYS" :key="index" :value="index">{{ day }}</option>
+                <option v-for="day in WEEKDAYS" :key="day.value" :value="day.value">{{ day.label }}</option>
               </select>
             </label>
             <label class="offer-field">
@@ -426,7 +426,20 @@ async function importFont(event) {
 // which the Configuration screen saves WHOLE — so a load-mutate-put from this screen would restore its
 // own stale copy of the refund policies and legal links over whatever Configuration had just saved, and
 // would look like it worked. `PUT /sabbath` writes one attribute (plans/TODO.md "Sabbath mode").
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// Listed Sunday-first to read like a calendar, but each option carries its OWN value: the stored
+// `manual.weekday` is a Python `datetime.weekday()` number (Monday is 0, Sunday is 6, see
+// domain/sabbath.py), so the position in this list must never be what gets saved. It was `:value="index"`
+// on a Monday-first array, where the two happened to agree -- reordering alone would have silently moved
+// every tenant's Sabbath by a day.
+const WEEKDAYS = [
+  { value: 6, label: "Sunday" },
+  { value: 0, label: "Monday" },
+  { value: 1, label: "Tuesday" },
+  { value: 2, label: "Wednesday" },
+  { value: 3, label: "Thursday" },
+  { value: 4, label: "Friday" },
+  { value: 5, label: "Saturday" },
+];
 const SABBATH_LIMITS = {
   before_minutes: 18, after_minutes: 40, min_minutes: 0, max_minutes: 60,
   min_manual_hours: 24, max_manual_hours: 25,
