@@ -221,6 +221,11 @@ export async function buildServiceDocument(form, base = {}) {
     service_id: serviceId,
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
+    // The shared category taxonomy, scoped to product_type="service". PUBLIC: it becomes the schema.org
+    // Service.serviceType and groups the Organization's hasOfferCatalog, which is the only place a trade
+    // schema.org has no @type for ("Massage Therapy") can be stated accurately. The create wizard has asked
+    // for this since 2026-09-15 and this builder dropped it on the floor, so nothing was ever stored.
+    product_category: String(form.product_category || "").trim(),
     fulfillment_mode: form.fulfillment_mode === "no_booking" ? "no_booking" : "scheduled",
     duration_minutes: Math.max(1, Math.round(Number(form.duration_minutes || 0))),
     prices,
@@ -288,6 +293,7 @@ export function defaultServiceForm() {
     service_id: "",
     name: "",
     description: "",
+    product_category: "",
     prices: [defaultPriceForm()],
     default_price_index: 0,
     fulfillment_mode: "scheduled",

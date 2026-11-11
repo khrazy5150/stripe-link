@@ -3636,6 +3636,10 @@ def validate_service(document: dict[str, Any]) -> None:
     if not no_booking and int(document.get("duration_minutes") or 0) <= 0:
         raise DocumentValidationError("Service duration_minutes must be positive.")
     optional_image_dims(document, "Service image_dims")
+    # Optional, unlike a product's: a service sells fine without one, and the only thing it feeds is the
+    # Organization's hasOfferCatalog grouping (runtime/html.py). Required here would reject every service
+    # that already exists. Same key space as products (domain/categories.py, product_type="service").
+    optional_string(document, "product_category", "Service product_category")
     price = document.get("price")
     if not isinstance(price, dict):
         raise DocumentValidationError("Service price must be an object.")

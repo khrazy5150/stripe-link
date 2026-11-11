@@ -3,7 +3,7 @@
        Suggestions are scoped to the product type; typing something new is allowed and becomes the tenant's
        category immediately (only shared with others once enough tenants use it). -->
   <label class="category-autocomplete">
-    Product Category <span v-if="required" class="required">*</span>
+    {{ label }} <span v-if="required" class="required">*</span>
     <input
       v-model="query"
       type="text"
@@ -46,6 +46,9 @@ const props = defineProps({
   modelValue: { type: String, default: "" },
   productType: { type: String, default: "physical" },
   required: { type: Boolean, default: true },
+  // Services use the same taxonomy (product_type="service") but are not products, so the heading is the
+  // caller's to set. Defaulted to the product wording so every existing caller renders unchanged.
+  label: { type: String, default: "Product Category" },
 });
 const emit = defineEmits(["update:modelValue"]);
 

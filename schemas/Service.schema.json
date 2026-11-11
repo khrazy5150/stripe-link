@@ -12,6 +12,10 @@
     "service_id": { "type": "string" },
     "name": { "type": "string" },
     "description": { "type": "string" },
+    "product_category": {
+      "type": "string",
+      "description": "Normalized key into the SHARED category taxonomy (domain/categories.py), scoped to product_type=service — the same key space products use, so a category promotes across both. Public: it becomes the schema.org Service.serviceType and groups the Organization's hasOfferCatalog."
+    },
     "fulfillment_mode": {
       "enum": ["scheduled", "no_booking"],
       "description": "scheduled (default) needs a time slot; no_booking is pay-only (no appointment), taxed as a service. duration_minutes is required only when scheduled."

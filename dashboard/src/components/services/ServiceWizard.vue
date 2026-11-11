@@ -32,7 +32,7 @@
             <p>How you'd file it, and where the work happens.</p>
           </div>
         </header>
-        <ProductCategoryField v-model="form.product_category" product-type="service" />
+        <ProductCategoryField v-model="form.product_category" product-type="service" label="Service Category" />
         <label class="offer-field">
           <span>Where does it happen?</span>
           <select v-model="form.location_mode">

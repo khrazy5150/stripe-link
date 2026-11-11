@@ -4702,6 +4702,7 @@ Resources:
           # Tables this function reaches, transitively (plans/TRANSFORM_BUDGET.md Phase 2).
           # GENERATED -- tests/test_env_var_grants.py fails when code reaches one not listed.
           # A missing name here is a RUNTIME failure, not a deploy failure.
+          PRODUCT_CATEGORIES_TABLE: !Ref ProductCategoriesTable
           SERVICES_TABLE: !Ref ServicesTable
           TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
       FunctionName: !Sub "${ProjectPrefix}-services-api-${Environment}"
@@ -4711,6 +4712,11 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
+        # Records a service category's usage on save, exactly as ProductsFunction does — services share the
+        # product-category taxonomy, scoped to product_type="service". Needed because the recorder swallows
+        # its own failures by design, so an AccessDenied here would surface only as a log line.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductCategoriesTable
         # Reads the tenant's denormalized entitlements to gate creating a service on the `booking` plan capability.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable

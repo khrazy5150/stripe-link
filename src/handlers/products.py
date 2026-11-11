@@ -1,10 +1,9 @@
 import logging
 import os
-import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.product_index import product_index_entry
-from stripe_link.domain.categories import CURATED_CATEGORIES, category_label, normalize_category
+from stripe_link.category_usage import record_category_usage
 from stripe_link.domain.documents import (
     DocumentValidationError,
     order_product_document,
@@ -15,7 +14,6 @@ from stripe_link.domain.refund_policy import apply_to_product
 from stripe_link.repositories.documents import (
     RepositoryError,
     platform_config_repository,
-    product_categories_repository,
     products_repository,
 )
 
@@ -118,31 +116,6 @@ def _default_sync_invoker(tenant_id, product_id, mode="test"):
             "mode": mode,  # the sync Lambda needs it: mode is part of the product's sort key
         }).encode("utf-8"),
     )
-
-
-def record_category_usage(product, categories_repo=None):
-    """Register this tenant's use of the product's category, so a non-curated one can accrue toward the
-    promotion threshold (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md). Curated categories are skipped — they are
-    already promoted and don't need counting. Best-effort: a failure here must never fail the product save,
-    and it no-ops when the table isn't configured (unit tests)."""
-    key = normalize_category(str(product.get("product_category") or ""))
-    tenant_id = str(product.get("tenant_id") or "")
-    if not key or not tenant_id or key in CURATED_CATEGORIES:
-        return
-    if categories_repo is None:
-        if not os.environ.get("PRODUCT_CATEGORIES_TABLE"):
-            return
-        categories_repo = product_categories_repository()
-    try:
-        categories_repo.record_usage(
-            key,
-            category_label(key),
-            str(product.get("product_type") or ""),
-            tenant_id,
-            int(time.time()),
-        )
-    except Exception:  # noqa: BLE001 - recording usage is best-effort, never blocks a save
-        logger.warning("Failed to record category usage for %s", key, exc_info=True)
 
 
 def get_product(event, repository, product_id: str):

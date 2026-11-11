@@ -1655,6 +1655,17 @@ def publish_page_document(
         except Exception:  # noqa: BLE001 - a page must publish even when the shipping config is unreadable
             logger.exception("shipping config unreadable for %s; leaving the element in place", tenant_id)
 
+    # The tenant's services SITE-WIDE, for the Organization's hasOfferCatalog. A separate read from
+    # `services_by_id` on purpose: that map holds only the services this page's offers reference, so a
+    # catalog built from it would claim a different set of services on every page of the same Site.
+    # Best-effort — the catalog is a bonus signal, and a page must still publish without it.
+    service_catalog: list[dict[str, Any]] = []
+    if services_repository is not None:
+        try:
+            service_catalog = services_repository.list_for_tenant(tenant_id)
+        except Exception:  # noqa: BLE001 - never block a publish on an optional structured-data signal
+            logger.exception("service catalog unreadable for %s; publishing without hasOfferCatalog", tenant_id)
+
     def _render(robots: str, kind: str = "") -> str:
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
@@ -1662,6 +1673,7 @@ def publish_page_document(
             robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
             bnpl_messaging=bnpl_messaging, preferences=tenant_preferences,
             events_by_id=events_by_id, kind=kind, shipping_quotable=shipping_quotable,
+            service_catalog=service_catalog,
         )
 
     artifacts = []
@@ -1719,7 +1731,7 @@ def publish_page_document(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=NOINDEX_ROBOTS, site=site, page_type=page_type, reviews=page_reviews, price_context=ctx,
-            home_url=page_home_url, bnpl_messaging=bnpl_messaging,
+            home_url=page_home_url, bnpl_messaging=bnpl_messaging, service_catalog=service_catalog,
         )
         if preview_bucket:
             pv_key = artifact_paths(tenant_id, page_id, context=ctx, mode=page_mode)["preview"]

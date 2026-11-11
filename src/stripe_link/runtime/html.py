@@ -2431,6 +2431,12 @@ _RENDER_NAV: dict[str, list[dict[str, str]]] = {"primary": [], "footer": []}
 # The Site's category pages this render can link to (SEO-11/13): {category_key: {"slug", "label"}}. Lets a
 # landing page's breadcrumb insert its category level (Home → Category → Product). Render-scoped.
 _RENDER_CATEGORY_PAGES: dict[str, dict[str, str]] = {}
+# The tenant's ACTIVE services, SITE-WIDE, for the Organization's hasOfferCatalog. Deliberately not
+# `services_by_id`: that map holds only the services this page's offers reference, so deriving the catalog
+# from it would make the same `#organization` node claim a different set of services on every page. The
+# business offers what it offers regardless of which page you landed on. Render-scoped; empty when the
+# caller passes none, which is every caller that has no service catalog to declare.
+_RENDER_SERVICE_CATALOG: list[dict[str, Any]] = []
 # product_id -> its markup-eligible reviews for this render (plans/REVIEWS.md). Feeds the Product
 # aggregateRating/review JSON-LD AND the visible reviews block (Google requires the review text on-page).
 _RENDER_REVIEWS: dict[str, list[dict[str, Any]]] = {}
@@ -2623,6 +2629,9 @@ def render_page(
     # the publisher loads them otherwise. Defaults True so every caller that has no opinion -- and every
     # test that renders a page in isolation -- composes exactly as it did before.
     shipping_quotable: bool = True,
+    # The tenant's services site-wide, for the Organization's hasOfferCatalog (see _RENDER_SERVICE_CATALOG).
+    # Optional: omitting it emits no service catalog, which is exactly what every page did before.
+    service_catalog: list[dict[str, Any]] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -2732,6 +2741,14 @@ def render_page(
     for cat_slug, cat_entry in ((site or {}).get("pages") or {}).items():
         if isinstance(cat_entry, dict) and cat_entry.get("page_type") == "category" and cat_entry.get("category"):
             _RENDER_CATEGORY_PAGES[str(cat_entry["category"])] = {"slug": str(cat_slug), "label": str(cat_entry.get("label") or "")}
+    # ARCHIVED services are filtered here, not at the emitter: a catalog is a public claim about what the
+    # business sells, and an archived service is one it has stopped selling. `active is not False` matches
+    # how the rest of the codebase reads the flag (absent means active).
+    _RENDER_SERVICE_CATALOG.clear()
+    _RENDER_SERVICE_CATALOG.extend(
+        service for service in (service_catalog or [])
+        if isinstance(service, dict) and service.get("active") is not False
+    )
     _RENDER_REVIEWS.clear()
     _RENDER_LEAD_DIALOG.clear()
     _RENDER_BUSINESS_REVIEWS.clear()
@@ -2763,6 +2780,7 @@ def render_page(
         _RENDER_BNPL.clear()
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_CATEGORY_PAGES.clear()
+        _RENDER_SERVICE_CATALOG.clear()
         _RENDER_REVIEWS.clear()
         _RENDER_LEAD_DIALOG.clear()
         _RENDER_BUSINESS_REVIEWS.clear()
@@ -6039,6 +6057,63 @@ def _postal_address_ld(address: Any) -> dict[str, Any]:
     return node if len(node) > 1 else {}
 
 
+def _service_offer(service: dict[str, Any], service_type: str = "") -> dict[str, Any]:
+    """One `Offer` wrapping a `Service` node, or {} for a service with no usable name.
+
+    No price. A service's price depends on which price context the page is rendering (standard / sale /
+    flash_sale) and may recur, so a single number here would contradict the page it sits on for some
+    renders. The Offer is still valid without one, and a wrong price is worse than an absent one.
+    """
+    service_name = str(service.get("name") or "").strip()
+    if not service_name:
+        return {}
+    node: dict[str, Any] = {"@type": "Service", "name": service_name}
+    if service_type:
+        node["serviceType"] = service_type
+    description = str(service.get("description") or "").strip()
+    if description:
+        node["description"] = description
+    return {"@type": "Offer", "itemOffered": node}
+
+
+def _service_catalog_items() -> list[dict[str, Any]]:
+    """The service half of hasOfferCatalog: one nested OfferCatalog per category, plus bare Offers for the
+    services that have no category yet.
+
+    A category group earns the extra nesting level because it carries information — it is the tenant's own
+    category, and it is what each Service's `serviceType` says. An uncategorised service is NOT dropped and
+    is NOT given a guessed type: it appears as a plain Offer, so the catalog stays complete while only
+    claiming what is known. Sorted throughout, so republishing an unchanged Site yields identical markup.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    ungrouped: list[dict[str, Any]] = []
+    for service in _RENDER_SERVICE_CATALOG:
+        key = str(service.get("product_category") or "").strip()
+        if key:
+            grouped.setdefault(key, []).append(service)
+        else:
+            ungrouped.append(service)
+
+    items: list[dict[str, Any]] = []
+    for key in sorted(grouped, key=lambda k: humanize_category(k).lower()):
+        label = humanize_category(key)
+        offers = [
+            offer for offer in (
+                _service_offer(service, label)
+                for service in sorted(grouped[key], key=lambda s: str(s.get("name") or "").lower())
+            ) if offer
+        ]
+        if offers:
+            items.append({"@type": "OfferCatalog", "name": label, "itemListElement": offers})
+    items.extend(
+        offer for offer in (
+            _service_offer(service)
+            for service in sorted(ungrouped, key=lambda s: str(s.get("name") or "").lower())
+        ) if offer
+    )
+    return items
+
+
 def organization_json_ld(organization: dict[str, Any], origin: str) -> str:
     """The Site's Organization node as a standalone <script> payload (SEO-12). "" without an origin/name."""
     node = organization_node(organization, origin)
@@ -6126,17 +6201,30 @@ def organization_node(organization: dict[str, Any], origin: str, *, with_context
     gbp_url = str(organization.get("gbp_url") or "").strip()
     if gbp_url:
         payload["hasMap"] = gbp_url
-    # hasOfferCatalog = the categories the store carries (TENANT_PROFILE_REQUIREMENTS §4.4: "brands I carry",
-    # not brands I OWN). Derived from the Site's category pages — accurate + verifiable, never hand-asserted.
-    catalog_names = sorted({
-        (info.get("label") or "").strip() or humanize_category(key)
-        for key, info in _RENDER_CATEGORY_PAGES.items() if key
-    })
-    if catalog_names:
+    # hasOfferCatalog = what the business offers (TENANT_PROFILE_REQUIREMENTS §4.4: "brands I carry",
+    # not brands I OWN). Derived — accurate + verifiable, never hand-asserted — from two sources:
+    #
+    #   * the Site's category pages, as name-only OfferCatalogs. A category page is a promise that a
+    #     category exists; it says nothing about the individual products, so neither does the markup.
+    #   * the tenant's services, as real `Service` leaves grouped by their category.
+    #
+    # The service branch is where a local business states what it actually does. `@type` cannot: schema.org
+    # is a closed vocabulary with no massage/most-trades type, so a massage therapist is stuck at
+    # HealthAndBeautyBusiness (plans/BUSINESS_TYPE_VOCABULARY.md). `Service.serviceType` is free Text, so
+    # "Massage Therapy" is sayable here, accurately, where it is not sayable as a type.
+    catalog_items: list[dict[str, Any]] = [
+        {"@type": "OfferCatalog", "name": label}
+        for label in sorted({
+            (info.get("label") or "").strip() or humanize_category(key)
+            for key, info in _RENDER_CATEGORY_PAGES.items() if key
+        })
+    ]
+    catalog_items.extend(_service_catalog_items())
+    if catalog_items:
         payload["hasOfferCatalog"] = {
             "@type": "OfferCatalog",
             "name": f"{name} catalog",
-            "itemListElement": [{"@type": "OfferCatalog", "name": c} for c in catalog_names],
+            "itemListElement": catalog_items,
         }
     # Only OWNERSHIP-VERIFIED profiles emit into sameAs (TENANT_PROFILE_REQUIREMENTS §4.4). An unverified
     # sameAs is an impersonation vector — a tenant could assert any brand's real social profile on our domain.

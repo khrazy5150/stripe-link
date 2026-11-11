@@ -1,5 +1,6 @@
 import time
 
+from stripe_link.category_usage import record_category_usage
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.service_pricing import normalize_service_pricing
@@ -32,6 +33,7 @@ def handler(
     exceptions_repo=None,
     appointments_repo=None,
     tenant_repo=None,
+    categories_repo=None,
 ):
     # services + appointments carry per-mode Stripe state / are mode-specific transactions, so they are
     # mode-scoped; scheduling config (fulfillers/availability/exceptions) is mode-agnostic.
@@ -62,7 +64,15 @@ def handler(
         gate = require_capability(event, "booking", tenant_repo)
         if gate is not None:
             return gate
-    return document_route(event, method, services_repo, "service", validate_service, "services", id_param="service_id", normalizer=normalize_service_pricing)
+    # A service's category feeds the SHARED taxonomy, scoped to product_type="service" — the same key space
+    # products use, so one tenant's "Massage Therapy" can promote for everyone. Without this the category
+    # the wizard already asks for would stay unrecorded, so it would never come back as a suggestion to the
+    # tenant who typed it, let alone to anyone else.
+    return document_route(
+        event, method, services_repo, "service", validate_service, "services",
+        id_param="service_id", normalizer=normalize_service_pricing,
+        on_saved=lambda saved: record_category_usage(saved, categories_repo, product_type="service"),
+    )
 
 
 def appointment_action_route(event, repository, action):

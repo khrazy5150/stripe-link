@@ -138,6 +138,13 @@
               <span>Description</span>
               <textarea v-model.trim="form.description" rows="3" placeholder="What the customer gets"></textarea>
             </label>
+            <!-- Not required: a service sells fine without one. What it buys is the schema.org
+                 Service.serviceType on your pages — the one place a trade with no schema.org type of its
+                 own ("Massage Therapy") can be named accurately. -->
+            <div class="offer-field">
+              <ProductCategoryField v-model="form.product_category" product-type="service" :required="false" label="Service Category" />
+              <small>Groups this service in your site's structured data, and names what it is for search engines.</small>
+            </div>
           </section>
 
           <section class="offer-form-section">
@@ -377,6 +384,7 @@
             <div v-if="selectedService.fulfillment_mode !== 'no_booking'"><dt>Duration</dt><dd>{{ formatServiceDuration(selectedService) }}</dd></div>
             <div v-else><dt>Fulfillment</dt><dd>No booking</dd></div>
             <div><dt>Location</dt><dd>{{ locationLabel(selectedService.location_mode) }}</dd></div>
+            <div><dt>Category</dt><dd>{{ humanizeCategory(selectedService.product_category) || "Not set" }}</dd></div>
             <div><dt>Status</dt><dd>{{ serviceIsActive(selectedService) ? "Active" : "Archived" }}</dd></div>
           </dl>
           <!-- The page a customer actually books on. It existed and was reachable, but nothing in the
@@ -444,6 +452,8 @@ import { priceFormFromDocument } from "../utils/priceForm";
 import PricingCard from "./shared/PricingCard.vue";
 import { getApiBase, getStripeMode } from "../api/client";
 import ServiceWizard from "./services/ServiceWizard.vue";
+import ProductCategoryField from "./products/ProductCategoryField.vue";
+import { humanizeCategory } from "../utils/categories";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import FulfillersPanel from "./services/FulfillersPanel.vue";
@@ -714,6 +724,9 @@ function formFromService(service) {
     service_id: service.service_id || "",
     name: service.name || "",
     description: service.description || "",
+    // Carried on edit, or saving an existing service would blank the category it already has — the edit
+    // form replaces the whole document.
+    product_category: service.product_category || "",
     prices,
     default_price_index: defaultIndex >= 0 ? defaultIndex : 0,
     fulfillment_mode: service.fulfillment_mode === "no_booking" ? "no_booking" : "scheduled",

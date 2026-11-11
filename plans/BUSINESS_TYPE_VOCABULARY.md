@@ -100,3 +100,61 @@ schema.org parent. If the tenant picks `Physiotherapy`, we know the bucket. Aski
 mismatch that prompted this plan — the author picked `ProfessionalService` for a spa and so never saw
 `DaySpa`. A single searchable list of specific types, with the broad bucket derived and the broad types
 offered only as "none of these fits", may be the better interface.
+
+---
+
+## Built 2026-11-10: `hasOfferCatalog` says what `@type` cannot
+
+The plan above says a GBP category like "Massage Therapist" cannot go in `entity_type`, and that remains
+true — schema.org is closed and the markup would be invalid. What it did not say is where the claim CAN
+live, and the answer turned out to be already half-present in the codebase.
+
+**`Service.serviceType` is free Text.** So "Massage Therapy" is sayable, accurately, as the type of a
+service — exactly the claim `@type` has to refuse. A business picks the broad bucket honestly
+(`HealthAndBeautyBusiness`, specific type left blank), and the catalog carries the specificity:
+
+```
+"@type": "HealthAndBeautyBusiness"           <- closed vocabulary, honest at the broad level
+"hasOfferCatalog": {
+  "@type": "OfferCatalog",
+  "name": "Luxe Wellness Spa catalog",
+  "itemListElement": [
+    { "@type": "OfferCatalog", "name": "Massage Therapy",      <- Service.product_category
+      "itemListElement": [
+        { "@type": "Offer",
+          "itemOffered": { "@type": "Service", "name": "90-Minute Deep Tissue",
+                           "serviceType": "Massage Therapy" } } ] } ] }
+```
+
+### What it is derived from
+
+`hasOfferCatalog` already existed, built from the Site's category PAGES as name-only entries. It now also
+carries the tenant's services, grouped by `Service.product_category` — a new optional field on the Service
+document, keyed into the **shared category taxonomy** (`domain/categories.py`) scoped to
+`product_type="service"`. Same key space as products, so one tenant's "Massage Therapy" promotes to a
+suggestion for everyone at the usual threshold. Still derived, never hand-asserted.
+
+The create wizard had rendered that picker since 2026-09-15 and `buildServiceDocument` dropped the field,
+so it had never stored anything. Both forms now carry it, and the edit form carries it on load as well —
+the document is replaced wholesale on save, so omitting it there would blank a category on every edit.
+
+### Decisions worth not relitigating
+
+* **Site-wide, not per page.** The catalog is built from a separate `list_for_tenant` read, not from
+  `services_by_id` — that map holds only the services the page's offers reference, so the same
+  `#organization` node would have claimed a different set of services on every page of one Site.
+* **Archived services are excluded.** A catalog is a public claim about what is sold now.
+* **No price.** A service's price depends on the render's price context (standard / sale / flash_sale) and
+  may recur, so one number here would contradict the page it sits on for some renders.
+* **An uncategorised service is listed, not typed.** It appears as a bare `Offer`, so the catalog stays
+  complete without inventing a `serviceType`.
+* **Still not a rich result.** Google documents no rich result for `hasOfferCatalog` and does not treat it
+  as a ranking signal. It is accurate entity data that answer engines read; the ranking work for
+  "massage therapist in St. George" is the GBP primary category and the page's own copy, starting with the
+  Site `description`.
+
+### Open, unchanged
+
+The three hand-maintained type lists, and the vertical gaps (medical, automotive, lodging, sport,
+entertainment, financial). Nothing above touches `@type`, so the "pick the most specific type that is
+TRUE" rule and the broad-bucket fallback still stand as written.

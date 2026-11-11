@@ -7,15 +7,21 @@ borrowed one route would inherit every table the other handler reaches.
 
 Nothing here knows what it is storing: the caller supplies the repository, the validator and the names.
 """
+import logging
+
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError
 from stripe_link.domain.service_index import service_index_entry
 from stripe_link.repositories.documents import RepositoryError
 
+logger = logging.getLogger(__name__)
 
-def document_route(event, method, repository, singular, validator, plural, id_param=None, normalizer=None):
+
+def document_route(event, method, repository, singular, validator, plural, id_param=None, normalizer=None,
+                   on_saved=None):
     if method in {"POST", "PUT"}:
-        return save_document(event, repository, validator, singular, f"invalid_{singular}", normalizer=normalizer)
+        return save_document(event, repository, validator, singular, f"invalid_{singular}",
+                             normalizer=normalizer, on_saved=on_saved)
     if method == "GET":
         document_id = path_params(event).get(id_param or f"{singular}_id")
         if document_id:
@@ -30,13 +36,23 @@ def document_route(event, method, repository, singular, validator, plural, id_pa
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def save_document(event, repository, validator, response_key, error_code, normalizer=None):
+def save_document(event, repository, validator, response_key, error_code, normalizer=None, on_saved=None):
+    """`on_saved(saved)` runs after a successful put, for side effects that must not change the response.
+
+    Best-effort by construction: it is called inside its own try, because a bookkeeping failure (recording a
+    category's usage, say) must never turn a save the tenant can see into an error they cannot act on.
+    """
     try:
         document = parse_json_body(event)
         if normalizer:
             document = normalizer(document)
         validator(document)
         saved = repository.put(document)
+        if on_saved:
+            try:
+                on_saved(saved)
+            except Exception:  # noqa: BLE001 - the document IS saved; a side effect must not unsay that
+                logger.warning("on_saved hook failed for %s", response_key, exc_info=True)
         return json_response({response_key: saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code=error_code)
