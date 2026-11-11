@@ -179,7 +179,9 @@
             <div v-if="form.fulfillment_mode !== 'no_booking'" class="offer-two-column">
               <label class="offer-field">
                 <span>Duration (minutes) <strong>*</strong></span>
-                <input v-model.number="form.duration_minutes" min="1" step="5" type="number" required />
+                <!-- min sits ON the step grid. `min="1" step="5"` made the valid values 1, 6, ... 56, 61 -- the
+                     browser refused 60 and offered 61, which is how a 60-minute massage was stored as 61. -->
+                <input v-model.number="form.duration_minutes" min="5" step="5" type="number" required />
               </label>
               <label class="offer-field">
                 <span>Booking flow</span>

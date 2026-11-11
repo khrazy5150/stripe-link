@@ -19,7 +19,9 @@
               <option v-for="tz in timezones" :key="tz" :value="tz">{{ tz }}</option>
             </select>
           </label>
-          <label class="offer-field"><span>Slot Interval (minutes)</span><input v-model.number="form.slot_interval_minutes" type="number" min="1" step="5" /></label>
+          <!-- min on the step grid: `min="1" step="5"` made 60 invalid and 61 the nearest offer. The three
+               fields below already start at 0, which IS on the grid, so they never showed the error. -->
+          <label class="offer-field"><span>Slot Interval (minutes)</span><input v-model.number="form.slot_interval_minutes" type="number" min="5" step="5" /></label>
         </div>
         <div class="offer-three-column">
           <label class="offer-field"><span>Lead Time (minutes)</span><input v-model.number="form.lead_time_minutes" type="number" min="0" step="5" /></label>
