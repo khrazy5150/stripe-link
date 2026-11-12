@@ -169,8 +169,12 @@ const selectedDayAppointments = computed(() =>
     .sort((x, y) => String(x.starts_at).localeCompare(String(y.starts_at))),
 );
 
+// CHRONOLOGICAL, like the day list above it. This sorted newest-first, the way an orders table does --
+// but an order is a thing that HAPPENED and an appointment is a thing that is going to, so "most recent
+// first" put the end of the day at the top and the 8am at the bottom. Same direction as
+// `selectedDayAppointments`, which was already ascending: the two disagreed on the same screen.
 const sortedAppointments = computed(() =>
-  [...store.appointments].sort((x, y) => String(y.starts_at || "").localeCompare(String(x.starts_at || ""))),
+  [...store.appointments].sort((x, y) => String(x.starts_at || "").localeCompare(String(y.starts_at || ""))),
 );
 
 const periodLabel = computed(() => {
