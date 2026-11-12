@@ -69,17 +69,11 @@ _TEMPLATE = """<!doctype html>
   .price { font-weight:700; color:var(--accent); }
   label { display:block; font-size:.85rem; font-weight:600; margin:.75rem 0 .3rem; }
   input { width:100%; padding:.6rem .7rem; border:1px solid var(--line); border-radius:8px; font-size:1rem; }
-  .days { display:grid; gap:1rem; }
-  .day h3 { margin:0 0 .5rem; font-size:1rem; }
-  .slots { display:flex; flex-wrap:wrap; gap:.5rem; }
-  .slot { border:1px solid var(--line); background:#fff; border-radius:8px; padding:.5rem .8rem; cursor:pointer; font-size:.95rem; }
-  .slot.selected { background:var(--accent); color:#fff; border-color:var(--accent); }
   button.book { width:100%; margin-top:1.25rem; padding:.85rem; background:var(--accent); color:#fff; border:0; border-radius:10px; font-size:1.05rem; font-weight:700; cursor:pointer; }
   button.book:disabled { opacity:.5; cursor:not-allowed; }
   .msg { padding:.9rem 1rem; border-radius:10px; margin-bottom:1rem; }
   .msg.error { background:#fef2f2; color:#b91c1c; }
   .msg.ok { background:#ecfdf5; color:#047857; }
-  .empty { color:var(--muted); padding:1rem 0; }
   .consent { color:var(--muted); font-size:.78rem; line-height:1.4; margin:.4rem 0 0; }
 __PICKER_CSS__
 </style>

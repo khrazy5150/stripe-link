@@ -117,11 +117,6 @@ _TEMPLATE = """<!doctype html>
   h1 { margin:0 0 .5rem; font-size:1.5rem; }
   .when { margin:0 0 .25rem; font-size:1.15rem; font-weight:700; }
   .meta { color:var(--muted); margin:.25rem 0; }
-  .days { display:grid; gap:1rem; }
-  .day h3 { margin:0 0 .5rem; font-size:1rem; }
-  .slots { display:flex; flex-wrap:wrap; gap:.5rem; }
-  .slot { border:1px solid var(--line); background:#fff; border-radius:8px; padding:.5rem .8rem; cursor:pointer; font-size:.95rem; }
-  .slot.selected { background:var(--accent); color:#fff; border-color:var(--accent); }
   button.act { width:100%; margin-top:.75rem; padding:.8rem; border:0; border-radius:10px; font-size:1rem; font-weight:700; cursor:pointer; }
   button.primary { background:var(--accent); color:#fff; }
   button.quiet { background:#fff; color:var(--danger); border:1px solid var(--line); }
@@ -130,7 +125,6 @@ _TEMPLATE = """<!doctype html>
 __PICKER_CSS__
   .msg.error { background:#fef2f2; color:var(--danger); }
   .msg.ok { background:#ecfdf5; color:#047857; }
-  .empty { color:var(--muted); padding:1rem 0; }
 </style>
 </head>
 <body>
