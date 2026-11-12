@@ -3025,7 +3025,7 @@ def _render_page_body(
         # before any content painted, costing LCP and Total Blocking Time on every page. Everything it does
         # is already wrapped in DOMContentLoaded, so running it here changes no behaviour, and it now sits
         # with the other page scripts instead of being the one exception.
-        render_page_interactions_script(page),
+        render_page_interactions_script(page, body_html=body),
         render_price_context_script(),
         conversion_data,
         *render_bnpl_messaging_scripts(),
@@ -10029,17 +10029,23 @@ def render_favicon_tags(seo: dict[str, Any], default_url: str = "", small_defaul
     ])
 
 
-def render_page_interactions_script(page: dict[str, Any]) -> str:
+def render_page_interactions_script(page: dict[str, Any], body_html: str | None = None) -> str:
     has_countdown = any(section.get("type") == "countdown_timer" for section in page.get("sections", []))
     has_price_selector = any(section.get("type") == "offer_price_selector" for section in page.get("sections", []))
     has_checkout_cta = any(section.get("type") == "checkout_cta" for section in page.get("sections", []))
-    # Only a page that actually books needs the calendar. The island markup is emitted by the CTA
-    # renderer; this is the same condition read from the page, so the two cannot disagree.
-    has_booking_cta = any(
-        section.get("type") == "checkout_cta"
-        and str((section.get("cta") or {}).get("type") or "").strip().lower() in ("booking", "appointment")
-        for section in page.get("sections", [])
-    )
+    # Only a page that actually books needs the calendar -- so ask the RENDERED BODY whether it has a
+    # booking island, rather than predicting from the page document that it will.
+    #
+    # The first version of this predicted, reading `section["cta"]["type"]` for "booking". A stored
+    # checkout_cta section carries no `cta` key at all -- it is `{"id", "label", "show_destination"}` and
+    # the type is DERIVED from the offer at render time -- so the test always found nothing, the picker
+    # was omitted from every real booking page, and all four live pages answered "Could not load times."
+    # A gate built from a field's absence passes nothing, and absence reads as safety right up until it
+    # ships. The marker below is written by `render_booking_cta` itself, so the two cannot disagree.
+    #
+    # body_html=None means the caller did not say: include it. Unknown must fail TOWARDS shipping 10KB,
+    # never towards a booking page that cannot book.
+    has_booking_cta = has_checkout_cta if body_html is None else ("data-booking-widget" in body_html)
     has_current_year = any(
         section.get("type") == "legal_footer" and CURRENT_YEAR_TOKEN in str(section.get("copyright") or "")
         for section in page.get("sections", [])

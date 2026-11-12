@@ -18,7 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from stripe_link.domain.scheduling import MAX_RANGE_DAYS
 from stripe_link.runtime.booking_page import render_booking_page
-from stripe_link.runtime.html import render_page_interactions_script
+from stripe_link.runtime.html import render_page, render_page_interactions_script
 from stripe_link.runtime.manage_page import render_manage_page
 from stripe_link.runtime.slot_picker import HORIZON_DAYS, PICKER_JS
 
@@ -239,7 +239,7 @@ class EverySurfaceUsesIt(unittest.TestCase):
         self._assert_wired(page, "manage page")
 
     def test_the_landing_page_island(self):
-        self._assert_wired(render_page_interactions_script(BOOKING_PAGE), "landing island")
+        self._assert_wired(_render_booking_landing_page(), "landing island")
 
     def _assert_wired(self, doc, name):
         self.assertIn("window.slpMount", doc, f"{name}: does not mount the shared picker")
@@ -249,12 +249,88 @@ class EverySurfaceUsesIt(unittest.TestCase):
         self.assertNotIn("__PICKER", doc, f"{name}: unreplaced template token")
 
     def test_a_page_that_does_not_book_does_not_carry_a_calendar(self):
-        buy = {"page_id": "p2", "sections": [
-            {"type": "checkout_cta", "cta": {"type": "buy", "target": "prod_1", "label": "Buy"}}]}
-        self.assertNotIn("window.slpMount = function", render_page_interactions_script(buy))
-        # ...but the island's call site still ships, so it must degrade rather than throw: this handler
+        """Page weight, and the only direction this gate may ever be wrong in is the other one."""
+        buy = _render_landing_page(cta={"type": "buy", "target": "prod_1", "label": "Buy"})
+        self.assertNotIn("data-booking-widget data-service-id", buy, "no island on a buy page")
+        self.assertNotIn("window.slpMount = function", buy, "a buy page is carrying the calendar")
+        # ...but the island's call site still ships, so it must degrade rather than throw: that handler
         # is shared with the countdown, the carousels and the cart.
-        self.assertIn("if (!window.slpMount)", render_page_interactions_script(buy))
+        self.assertIn("if (!window.slpMount)", buy)
+
+
+class ThePickerShipsWhereverTheIslandDoes(unittest.TestCase):
+    """Shipped broken to prod 2026-11-12: all four live booking pages said "Could not load times."
+
+    The gate PREDICTED a booking page by reading `section["cta"]["type"]` from the page document. A stored
+    checkout_cta section has no `cta` key at all -- it is `{"id", "label", "show_destination"}` -- because
+    the CTA type is derived from `offer.presentation.cta` at render time. So the prediction was always
+    False, the picker was omitted from every real booking page, and the runtime guard did exactly what it
+    was written for: it showed a message instead of throwing, which is why nothing else on the page broke.
+
+    The gate now reads the RENDERED BODY for the marker `render_booking_cta` itself writes, so the two
+    cannot disagree. These tests use the production page shape -- no `cta` key on the section -- because
+    the shape the first version was tested against does not exist in the database.
+    """
+
+    def test_the_island_and_its_definition_ship_together(self):
+        html = _render_booking_landing_page()
+        self.assertIn("data-booking-widget data-service-id", html, "no island rendered: test is vacuous")
+        self.assertIn("window.slpMount = function", html,
+                      "the island shipped without the picker it calls -- 'Could not load times.'")
+
+    def test_the_page_section_carries_no_cta_key_at_all(self):
+        """Pins the shape the bug turned on. If sections ever DO carry cta.type, this fails and whoever
+        changed it can decide what the gate should read -- rather than it silently starting to work."""
+        page = _booking_page_doc()
+        section = next(s for s in page["sections"] if s.get("type") == "checkout_cta")
+        self.assertNotIn("cta", section,
+                         "a stored checkout_cta now has a cta key; the old prediction would have worked")
+
+    def test_an_unknown_body_includes_the_picker_rather_than_omitting_it(self):
+        """body_html=None means the caller did not say. 10KB of unused script is survivable; a booking
+        page that cannot book is not."""
+        page = _booking_page_doc()
+        self.assertIn("window.slpMount = function", render_page_interactions_script(page))
+
+    def test_the_marker_is_the_one_the_cta_renderer_writes(self):
+        from stripe_link.runtime.html import render_booking_cta
+        markup = render_booking_cta({"type": "booking", "target": "svc_1", "label": "Book"},
+                                    "https://api.example.com", {"stripe_mode": "live"})
+        self.assertIn("data-booking-widget", markup,
+                      "the gate reads a marker the CTA renderer no longer writes")
+
+
+def _booking_page_doc():
+    """A real published page shell. Its checkout_cta section carries a label and NO cta key -- exactly
+    what the database holds, and the shape the gate bug turned on."""
+    import copy
+    import json
+    with (ROOT / "schemas" / "examples" / "page-creatine-standard.json").open() as handle:
+        page = copy.deepcopy(json.load(handle))
+    page["tenant_id"] = "t1"
+    page["offer_id"] = "off_1"
+    return page
+
+
+def _render_landing_page(*, cta):
+    """Render a landing page end to end with the CTA the OFFER derives -- the only place it lives."""
+    service = {"schema_version": "2026-05-29", "document_type": "service", "tenant_id": "t1",
+               "service_id": "svc_1", "name": "60-Minute Sports Massage", "fulfillment_mode": "scheduled",
+               "duration_minutes": 60, "price": {"currency": "usd", "unit_amount": 8000},
+               "prices": [{"price_id": "p1", "currency": "usd", "unit_amount": 8000, "context": "standard"}],
+               "default_price_id": "p1"}
+    offer = {"schema_version": "2026-05-29", "document_type": "offer", "tenant_id": "t1",
+             "offer_id": "off_1", "name": "60-Minute Sports Massage", "product_intent": "transaction",
+             "stripe_mode": "test", "status": "active",
+             "items": [{"service_id": "svc_1", "price_id": "p1", "quantity": 1}],
+             "discount": {"mode": "none"}, "checkout": {"mode": "payment"},
+             "presentation": {"cta": cta}}
+    return render_page(_booking_page_doc(), offer, {}, services_by_id={"svc_1": service},
+                       api_base_url="https://api.example.com")
+
+
+def _render_booking_landing_page():
+    return _render_landing_page(cta={"type": "booking", "target": "svc_1", "label": "Book Now"})
 
 
 def _slots_at_utc_hour(hour):
