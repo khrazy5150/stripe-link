@@ -23,6 +23,7 @@ from stripe_link.domain.booking import (
     service_lines,
 )
 from stripe_link.runtime.booking_page import _duration_label, _price_label
+from stripe_link.runtime.slot_picker import HORIZON_DAYS, PICKER_CSS, PICKER_JS, THEME_STANDALONE
 
 # Mirrors handlers/booking.py. Duplicated deliberately rather than imported: runtime/ must not import
 # handlers/ (tests/envreach.py follows imports transitively, and a renderer that reaches into a handler
@@ -87,6 +88,9 @@ def render_manage_page(
             if terminal else ""
         ),
         "__ACTIONS_HIDDEN__": " hidden" if terminal else "",
+        "__PICKER_CSS__": PICKER_CSS + THEME_STANDALONE,
+        "__PICKER_JS__": PICKER_JS,
+        "__HORIZON_DAYS__": str(HORIZON_DAYS),
         "__CAN_RESCHEDULE__": "1" if status in RESCHEDULABLE_STATUSES else "",
     }
     page = _TEMPLATE
@@ -123,6 +127,7 @@ _TEMPLATE = """<!doctype html>
   button.quiet { background:#fff; color:var(--danger); border:1px solid var(--line); }
   button.act:disabled { opacity:.5; cursor:not-allowed; }
   .msg { padding:.9rem 1rem; border-radius:10px; margin-bottom:1rem; }
+__PICKER_CSS__
   .msg.error { background:#fef2f2; color:var(--danger); }
   .msg.ok { background:#ecfdf5; color:#047857; }
   .empty { color:var(--muted); padding:1rem 0; }
@@ -144,7 +149,7 @@ _TEMPLATE = """<!doctype html>
   <div class="card" id="actions"__ACTIONS_HIDDEN__>
     <div id="picker" hidden>
       <h3>Pick a new time</h3>
-      <div id="slots" class="empty">Loading available times&hellip;</div>
+      <div id="slotgrid"></div>
       <button id="confirm" class="act primary" disabled>Select a time</button>
     </div>
     <button id="reschedule" class="act primary">Reschedule</button>
@@ -152,6 +157,7 @@ _TEMPLATE = """<!doctype html>
   </div>
 </div>
 <script>
+__PICKER_JS__
 (function () {
   var appointmentId = "__APPOINTMENT_ID__";
   var manageToken = "__MANAGE_TOKEN__";
@@ -162,19 +168,18 @@ _TEMPLATE = """<!doctype html>
   var banner = document.getElementById("banner");
   var actions = document.getElementById("actions");
   var picker = document.getElementById("picker");
-  var slotsHost = document.getElementById("slots");
+  var slotPicker = null;
   var rescheduleBtn = document.getElementById("reschedule");
   var cancelBtn = document.getElementById("cancel");
   var confirmBtn = document.getElementById("confirm");
   var selected = null;
-  var slotsLoaded = false;
+  var selectedTimeLabel = "";
+  var selectedDayLabel = "";
 
   if (!canReschedule && rescheduleBtn) { rescheduleBtn.hidden = true; }
 
   function showError(text) { banner.innerHTML = '<div class="msg error">' + text + '</div>'; }
   function showOk(text) { banner.innerHTML = '<div class="msg ok">' + text + '</div>'; }
-  function fmtTime(iso) { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
-  function fmtDay(iso) { return new Date(iso).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }); }
 
   function post(path, body) {
     return fetch(apiBase + path, {
@@ -183,52 +188,29 @@ _TEMPLATE = """<!doctype html>
     }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); });
   }
 
-  function renderSlots(slots) {
-    if (!slots.length) { slotsHost.className = "empty"; slotsHost.textContent = "No available times in the next two weeks."; return; }
-    var byDay = {};
-    slots.forEach(function (s) { var k = new Date(s.start).toDateString(); (byDay[k] = byDay[k] || []).push(s); });
-    slotsHost.className = "days";
-    slotsHost.innerHTML = "";
-    Object.keys(byDay).forEach(function (k) {
-      var group = byDay[k];
-      var wrap = document.createElement("div");
-      wrap.className = "day";
-      var h = document.createElement("h3");
-      h.textContent = fmtDay(group[0].start);
-      wrap.appendChild(h);
-      var row = document.createElement("div");
-      row.className = "slots";
-      group.forEach(function (s) {
-        var b = document.createElement("button");
-        b.className = "slot"; b.type = "button"; b.textContent = fmtTime(s.start);
-        b.addEventListener("click", function () {
-          selected = s.start;
-          Array.prototype.forEach.call(document.querySelectorAll(".slot"), function (el) { el.classList.remove("selected"); });
-          b.classList.add("selected");
-          confirmBtn.disabled = false;
-          confirmBtn.textContent = "Move to " + fmtTime(s.start);
-        });
-        row.appendChild(b);
-      });
-      wrap.appendChild(row);
-      slotsHost.appendChild(wrap);
+  function mountPicker() {
+    if (slotPicker) { return; }
+    slotPicker = window.slpMount({
+      host: document.getElementById("slotgrid"),
+      apiBase: apiBase,
+      serviceId: serviceId,
+      mode: stripeMode,
+      horizonDays: __HORIZON_DAYS__,
+      onSelect: function (slot, timeLabel, dayLabel) {
+        selected = slot ? slot.start : null;
+        selectedTimeLabel = timeLabel || "";
+        selectedDayLabel = dayLabel || "";
+        confirmBtn.disabled = !slot;
+        confirmBtn.textContent = slot ? ("Move to " + timeLabel) : "Select a time";
+      }
     });
-  }
-
-  function loadSlots() {
-    var from = Math.floor(Date.now() / 1000);
-    var to = from + 14 * 86400;
-    fetch(apiBase + "/services/" + serviceId + "/availability?from=" + from + "&to=" + to + "&mode=" + encodeURIComponent(stripeMode))
-      .then(function (r) { return r.json(); })
-      .then(function (d) { slotsLoaded = true; renderSlots(d.slots || []); })
-      .catch(function () { slotsHost.className = "empty"; slotsHost.textContent = "Could not load times."; });
   }
 
   if (rescheduleBtn) {
     rescheduleBtn.addEventListener("click", function () {
       picker.hidden = false;
       rescheduleBtn.hidden = true;
-      if (!slotsLoaded) { loadSlots(); }
+      mountPicker();
     });
   }
 
@@ -238,7 +220,7 @@ _TEMPLATE = """<!doctype html>
     post("/services/appointments/manage/reschedule", { slot_start: selected })
       .then(function (res) {
         if (!res.ok) { throw new Error(res.j.message || "That time is no longer available."); }
-        document.getElementById("when").textContent = fmtDay(selected) + " at " + fmtTime(selected);
+        document.getElementById("when").textContent = selectedDayLabel + " at " + selectedTimeLabel;
         picker.hidden = true;
         rescheduleBtn.hidden = false;
         selected = null;
@@ -246,8 +228,8 @@ _TEMPLATE = """<!doctype html>
       })
       .catch(function (e) {
         showError(e.message);
-        confirmBtn.disabled = false; confirmBtn.textContent = "Select a time";
-        loadSlots();
+        confirmBtn.disabled = true; confirmBtn.textContent = "Select a time";
+        if (slotPicker) slotPicker.refresh();
       });
   });
 

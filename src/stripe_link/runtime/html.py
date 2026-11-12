@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
 from stripe_link.platform_config import default_favicon_small_url, default_favicon_url
+from stripe_link.runtime.slot_picker import HORIZON_DAYS, PICKER_CSS, PICKER_JS, THEME_LANDING
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.coupon_grants import grant_prefix
@@ -1021,11 +1022,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-booking-panel{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem;margin-top:1.2rem;text-align:left}",
     "    .sl-booking-heading{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;color:var(--sl-price-title)}",
     "    .sl-booking-slots.is-empty{color:var(--sl-price-description);font-size:1.4rem}",
-    "    .sl-booking-day{margin-bottom:1rem}",
-    "    .sl-booking-day h4{font-size:1.4rem;font-weight:700;color:var(--sl-price-title);margin-bottom:0.6rem}",
-    "    .sl-booking-times{display:flex;flex-wrap:wrap;gap:0.6rem}",
-    "    .sl-booking-slot{border:1px solid var(--sl-price-card-border);background:var(--sl-background);color:var(--sl-text);border-radius:0.8rem;padding:0.6rem 1rem;font-size:1.4rem;cursor:pointer}",
-    "    .sl-booking-slot.selected{background:var(--sl-brand);color:#fff;border-color:var(--sl-brand)}",
+    f"    {PICKER_CSS}",
+    THEME_LANDING,
     "    .sl-booking-consent{font-size:1.2rem;color:var(--sl-price-description)}",
     "    .sl-booking-banner{font-size:1.4rem;color:var(--sl-price-description)}",
     "    .sl-booking-banner.is-error{color:#dc2626}",
@@ -10035,6 +10033,13 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
     has_countdown = any(section.get("type") == "countdown_timer" for section in page.get("sections", []))
     has_price_selector = any(section.get("type") == "offer_price_selector" for section in page.get("sections", []))
     has_checkout_cta = any(section.get("type") == "checkout_cta" for section in page.get("sections", []))
+    # Only a page that actually books needs the calendar. The island markup is emitted by the CTA
+    # renderer; this is the same condition read from the page, so the two cannot disagree.
+    has_booking_cta = any(
+        section.get("type") == "checkout_cta"
+        and str((section.get("cta") or {}).get("type") or "").strip().lower() in ("booking", "appointment")
+        for section in page.get("sections", [])
+    )
     has_current_year = any(
         section.get("type") == "legal_footer" and CURRENT_YEAR_TOKEN in str(section.get("copyright") or "")
         for section in page.get("sections", [])
@@ -10073,6 +10078,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
     return "\n".join([
         "  <script>",
         "    document.addEventListener('DOMContentLoaded', () => {",
+        *([PICKER_JS] if has_booking_cta else []),
         "      document.querySelectorAll('[data-sl-current-year]').forEach((node) => {",
         "        node.textContent = String(new Date().getFullYear());",
         "      });",
@@ -10298,41 +10304,24 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const slotsHost = bookingWidget.querySelector('[data-booking-slots]');",
         "        const confirmBtn = bookingWidget.querySelector('[data-booking-confirm]');",
         "        const bookingBanner = bookingWidget.querySelector('[data-booking-banner]');",
-        "        let selectedSlot = null; let selectedFulfiller = null; let slotsLoaded = false;",
+        "        let selectedSlot = null; let selectedFulfiller = null; let picker = null;",
         "        const bookingError = (text) => { bookingBanner.className = 'sl-booking-banner is-error'; bookingBanner.textContent = text; };",
-        "        const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });",
-        "        const fmtDay = (iso) => new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });",
-        "        const renderSlots = (slots) => {",
-        "          if (!slots.length) { slotsHost.className = 'sl-booking-slots is-empty'; slotsHost.textContent = 'No available times in the next two weeks.'; return; }",
-        "          const byDay = {};",
-        "          slots.forEach((s) => { const k = new Date(s.start).toDateString(); (byDay[k] = byDay[k] || []).push(s); });",
-        "          slotsHost.className = 'sl-booking-slots'; slotsHost.innerHTML = '';",
-        "          Object.keys(byDay).forEach((k) => {",
-        "            const group = byDay[k];",
-        "            const day = document.createElement('div'); day.className = 'sl-booking-day';",
-        "            const h = document.createElement('h4'); h.textContent = fmtDay(group[0].start); day.appendChild(h);",
-        "            const row = document.createElement('div'); row.className = 'sl-booking-times';",
-        "            group.forEach((s) => {",
-        "              const b = document.createElement('button'); b.type = 'button'; b.className = 'sl-booking-slot'; b.textContent = fmtTime(s.start);",
-        "              b.addEventListener('click', () => {",
-        "                selectedSlot = s.start; selectedFulfiller = s.fulfiller_id || null;",
-        "                bookingWidget.querySelectorAll('.sl-booking-slot').forEach((el) => el.classList.remove('selected'));",
-        "                b.classList.add('selected'); confirmBtn.disabled = false; confirmBtn.textContent = 'Book ' + fmtTime(s.start);",
-        "              });",
-        "              row.appendChild(b);",
-        "            });",
-        "            day.appendChild(row); slotsHost.appendChild(day);",
+        "        const mountPicker = () => {",
+        "          if (picker) return;",
+        "          if (!window.slpMount) { slotsHost.textContent = 'Could not load times.'; return; }",
+        "          picker = window.slpMount({",
+        "            host: slotsHost, apiBase, serviceId, mode: bookingMode, horizonDays: 62,",
+        "            onSelect: (slot, timeLabel) => {",
+        "              selectedSlot = slot ? slot.start : null;",
+        "              selectedFulfiller = (slot && slot.fulfiller_id) || null;",
+        "              confirmBtn.disabled = !slot;",
+        "              confirmBtn.textContent = slot ? ('Book ' + timeLabel) : 'Select a time';",
+        "            },",
         "          });",
-        "        };",
-        "        const loadSlots = () => {",
-        "          const from = Math.floor(Date.now() / 1000); const to = from + 14 * 86400;",
-        "          fetch(`${apiBase}/services/${encodeURIComponent(serviceId)}/availability?from=${from}&to=${to}&mode=${encodeURIComponent(bookingMode)}`)",
-        "            .then((r) => r.json()).then((d) => renderSlots(d.slots || []))",
-        "            .catch(() => { slotsHost.textContent = 'Could not load times.'; });",
         "        };",
         "        revealBtn.addEventListener('click', () => {",
         "          panel.hidden = false; revealBtn.style.display = 'none';",
-        "          if (!slotsLoaded) { slotsLoaded = true; loadSlots(); }",
+        "          mountPicker();",
         "        });",
         "        confirmBtn.addEventListener('click', () => {",
         "          bookingBanner.textContent = '';",
@@ -10359,7 +10348,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              else if (checkout.status === 'booked') { panel.innerHTML = '<div class=\"sl-booking-banner\">Your booking is confirmed — check your email for details.</div>'; }",
         "              else { throw new Error(checkout.message || 'Could not complete booking.'); }",
         "            })",
-        "            .catch((e) => { bookingError(e.message); confirmBtn.disabled = false; confirmBtn.textContent = 'Book'; loadSlots(); });",
+        "            .catch((e) => { bookingError(e.message); confirmBtn.disabled = true; confirmBtn.textContent = 'Select a time'; if (picker) picker.refresh(); });",
         "        });",
         "        if (new URLSearchParams(window.location.search).get('booking') === 'success') {",
         "          panel.hidden = false; revealBtn.style.display = 'none';",

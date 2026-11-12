@@ -6,6 +6,8 @@ public booking API (availability -> reserve -> checkout) on the same origin. No 
 from html import escape
 from typing import Any
 
+from .slot_picker import HORIZON_DAYS, PICKER_CSS, PICKER_JS, THEME_STANDALONE
+
 CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£"}
 
 
@@ -39,6 +41,9 @@ def render_booking_page(service: dict[str, Any]) -> str:
         "__DURATION_LABEL__": escape(_duration_label(duration)),
         "__DURATION_MIN__": str(duration),
         "__HERO__": hero_html,
+        "__PICKER_CSS__": PICKER_CSS + THEME_STANDALONE,
+        "__PICKER_JS__": PICKER_JS,
+        "__HORIZON_DAYS__": str(HORIZON_DAYS),
     }
     page = _TEMPLATE
     for token, value in replacements.items():
@@ -76,6 +81,7 @@ _TEMPLATE = """<!doctype html>
   .msg.ok { background:#ecfdf5; color:#047857; }
   .empty { color:var(--muted); padding:1rem 0; }
   .consent { color:var(--muted); font-size:.78rem; line-height:1.4; margin:.4rem 0 0; }
+__PICKER_CSS__
 </style>
 </head>
 <body>
@@ -90,7 +96,7 @@ _TEMPLATE = """<!doctype html>
 
   <div id="booking" class="card">
     <h3>Choose a time</h3>
-    <div id="slots" class="empty">Loading available times&hellip;</div>
+    <div id="picker"></div>
 
     <label for="name">Name</label>
     <input id="name" type="text" autocomplete="name">
@@ -104,6 +110,7 @@ _TEMPLATE = """<!doctype html>
   </div>
 </div>
 <script>
+__PICKER_JS__
 (function () {
   var serviceId = "__SERVICE_ID__";
   var stripeMode = "__STRIPE_MODE__";
@@ -125,60 +132,19 @@ _TEMPLATE = """<!doctype html>
 
   function showError(text) { banner.innerHTML = '<div class="msg error">' + text + '</div>'; }
 
-  function fmtTime(iso) {
-    var d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  function fmtDay(iso) {
-    var d = new Date(iso);
-    return d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-  }
-
-  function renderSlots(slots) {
-    var host = document.getElementById("slots");
-    if (!slots.length) { host.className = "empty"; host.textContent = "No available times in the next two weeks."; return; }
-    var byDay = {};
-    slots.forEach(function (s) {
-      var key = new Date(s.start).toDateString();
-      (byDay[key] = byDay[key] || []).push(s);
-    });
-    host.className = "days";
-    host.innerHTML = "";
-    Object.keys(byDay).forEach(function (key) {
-      var group = byDay[key];
-      var wrap = document.createElement("div");
-      wrap.className = "day";
-      var h = document.createElement("h3");
-      h.textContent = fmtDay(group[0].start);
-      wrap.appendChild(h);
-      var row = document.createElement("div");
-      row.className = "slots";
-      group.forEach(function (s) {
-        var b = document.createElement("button");
-        b.className = "slot";
-        b.type = "button";
-        b.textContent = fmtTime(s.start);
-        b.addEventListener("click", function () {
-          selected = s.start; selectedFulfiller = s.fulfiller_id || null;
-          Array.prototype.forEach.call(document.querySelectorAll(".slot"), function (el) { el.classList.remove("selected"); });
-          b.classList.add("selected");
-          bookBtn.disabled = false; bookBtn.textContent = "Book " + fmtTime(s.start);
-        });
-        row.appendChild(b);
-      });
-      wrap.appendChild(row);
-      host.appendChild(wrap);
-    });
-  }
-
-  function loadSlots() {
-    var from = Math.floor(Date.now() / 1000);
-    var to = from + 14 * 86400;
-    fetch(apiBase + "/services/" + serviceId + "/availability?from=" + from + "&to=" + to + "&mode=" + encodeURIComponent(stripeMode))
-      .then(function (r) { return r.json(); })
-      .then(function (d) { renderSlots(d.slots || []); })
-      .catch(function () { document.getElementById("slots").textContent = "Could not load times."; });
-  }
+  var picker = window.slpMount({
+    host: document.getElementById("picker"),
+    apiBase: apiBase,
+    serviceId: serviceId,
+    mode: stripeMode,
+    horizonDays: __HORIZON_DAYS__,
+    onSelect: function (slot, label) {
+      selected = slot ? slot.start : null;
+      selectedFulfiller = (slot && slot.fulfiller_id) || null;
+      bookBtn.disabled = !slot;
+      bookBtn.textContent = slot ? ("Book " + label) : "Select a time";
+    }
+  });
 
   bookBtn.addEventListener("click", function () {
     banner.innerHTML = "";
@@ -206,10 +172,9 @@ _TEMPLATE = """<!doctype html>
           banner.innerHTML = '<div class="msg ok">Your booking is confirmed. A confirmation has been sent to your email.</div>';
         } else { throw new Error(checkout.message || "Could not complete booking."); }
       })
-      .catch(function (e) { showError(e.message); bookBtn.disabled = false; bookBtn.textContent = "Book"; loadSlots(); });
+      .catch(function (e) { showError(e.message); bookBtn.disabled = true; bookBtn.textContent = "Select a time"; if (picker) picker.refresh(); });
   });
 
-  loadSlots();
 })();
 </script>
 </body>
