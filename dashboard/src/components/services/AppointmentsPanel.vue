@@ -51,7 +51,7 @@
           <p v-if="!selectedDayAppointments.length" class="product-empty-state">No appointments this day.</p>
           <ul v-else class="appt-day-list">
             <li v-for="a in selectedDayAppointments" :key="a.appointment_id">
-              <strong>{{ formatTime(a.starts_at) }}</strong> · {{ a.service_name || a.service_id }}
+              <strong>{{ formatTime(a.starts_at) }}</strong> · {{ appointmentServiceLabel(a) }}
               <span class="product-status" :class="a.status">{{ statusLabel(a.status) }}</span>
             </li>
           </ul>
@@ -62,7 +62,7 @@
         <thead><tr><th>Service</th><th>Start</th><th>Customer</th><th>Fulfiller</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           <tr v-for="a in sortedAppointments" :key="a.appointment_id">
-            <td>{{ a.service_name || a.service_id }}</td>
+            <td>{{ appointmentServiceLabel(a) }}</td>
             <td>{{ formatDateTime(a.starts_at) }}</td>
             <td>{{ a.customer?.name || a.customer?.email || "—" }}</td>
             <td>{{ fulfillerName(a.assigned_fulfiller_id) }}</td>
@@ -101,6 +101,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { actionLabel, availableActions, useAppointmentsStore } from "../../stores/appointments";
+import { appointmentServiceLabel } from "../../utils/appointmentLabel";
 import { fulfillerDisplayName, useFulfillersStore } from "../../stores/fulfillers";
 
 const store = useAppointmentsStore();
