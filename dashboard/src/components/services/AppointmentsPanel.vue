@@ -5,9 +5,15 @@
         <h2>Appointments</h2>
         <p>Booked appointments and their lifecycle.</p>
       </div>
-      <button class="secondary-action" type="button" :disabled="store.loading" @click="store.load()">
-        {{ store.loading ? "Loading..." : "Refresh" }}
-      </button>
+      <div class="button-row">
+        <label class="appt-show-cancelled">
+          <input type="checkbox" v-model="showCancelled" />
+          Show cancelled<span v-if="cancelledCount"> ({{ cancelledCount }})</span>
+        </label>
+        <button class="secondary-action" type="button" :disabled="store.loading" @click="store.load()">
+          {{ store.loading ? "Loading..." : "Refresh" }}
+        </button>
+      </div>
     </header>
 
     <div class="dashboard-card-body">
@@ -58,7 +64,7 @@
         </div>
       </div>
 
-      <table v-if="store.appointments.length" class="dashboard-table services-table">
+      <table v-if="sortedAppointments.length" class="dashboard-table services-table">
         <thead><tr><th>Service</th><th>Start</th><th>Customer</th><th>Fulfiller</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           <tr v-for="a in sortedAppointments" :key="a.appointment_id">
@@ -93,6 +99,9 @@
           </tr>
         </tbody>
       </table>
+      <p v-else-if="store.loaded && store.appointments.length" class="product-empty-state">
+        Every appointment here is cancelled. Tick &ldquo;Show cancelled&rdquo; to see them.
+      </p>
       <p v-else-if="store.loaded" class="product-empty-state">No appointments yet.</p>
     </div>
   </section>
@@ -107,6 +116,10 @@ import { fulfillerDisplayName, useFulfillersStore } from "../../stores/fulfiller
 const store = useAppointmentsStore();
 const fulfillers = useFulfillersStore();
 
+// Cancelled appointments are HISTORY, not schedule. They were pushed into every count and list on this
+// screen, so a day the tenant had cleared still read as busy and the table showed work nobody is doing.
+// Off by default, kept one click away: a cancellation is still a thing a tenant needs to look up.
+const showCancelled = ref(false);
 const viewMode = ref("month");
 const cursor = ref(new Date());
 const selectedDay = ref(dateKey(new Date()));
@@ -130,6 +143,17 @@ function startOfWeek(date) {
 function isTerminal(status) {
   return ["completed", "canceled", "no_show"].includes(status);
 }
+
+// THE one source the calendar, the day list and the table all read. Filtering in three places instead
+// would let the count badge disagree with the list it labels -- which is how the blank Service column got
+// missed, each surface reading its own thing.
+const visibleAppointments = computed(() =>
+  showCancelled.value
+    ? store.appointments
+    : store.appointments.filter((a) => a.status !== "canceled"),
+);
+
+const cancelledCount = computed(() => store.appointments.filter((a) => a.status === "canceled").length);
 
 const cells = computed(() => {
   const out = [];
@@ -156,7 +180,7 @@ const isViewingToday = computed(() => selectedDay.value === todayKey && cells.va
 
 const countByDay = computed(() => {
   const map = {};
-  for (const a of store.appointments) {
+  for (const a of visibleAppointments.value) {
     if (!a.starts_at) continue;
     const key = dateKey(new Date(a.starts_at));
     map[key] = (map[key] || 0) + 1;
@@ -165,7 +189,7 @@ const countByDay = computed(() => {
 });
 
 const selectedDayAppointments = computed(() =>
-  store.appointments
+  visibleAppointments.value
     .filter((a) => a.starts_at && dateKey(new Date(a.starts_at)) === selectedDay.value)
     .sort((x, y) => String(x.starts_at).localeCompare(String(y.starts_at))),
 );
@@ -175,7 +199,7 @@ const selectedDayAppointments = computed(() =>
 // first" put the end of the day at the top and the 8am at the bottom. Same direction as
 // `selectedDayAppointments`, which was already ascending: the two disagreed on the same screen.
 const sortedAppointments = computed(() =>
-  [...store.appointments].sort((x, y) => String(x.starts_at || "").localeCompare(String(y.starts_at || ""))),
+  [...visibleAppointments.value].sort((x, y) => String(x.starts_at || "").localeCompare(String(y.starts_at || ""))),
 );
 
 const periodLabel = computed(() => {
