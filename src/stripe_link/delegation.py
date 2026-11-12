@@ -7,7 +7,9 @@ is the one function every path to `status: "booked"` already calls, so a notice 
 forgotten by the next path that is written. The alternative was three call sites that must agree, which is
 the shape of bug this codebase keeps producing.
 """
+import os
 from typing import Any
+from urllib.parse import urlencode
 
 from stripe_link.calendar_sync import sync_appointment_event
 from stripe_link.domain.booking import appointment_service_id
@@ -57,6 +59,25 @@ def notify_delegate(appointment, service, fulfiller, *, change, business_name=""
         return False
 
 
+def appointment_manage_url(appointment) -> str:
+    """The customer's self-service link, or "" when it cannot be built.
+
+    Empty is a real answer, not a failure: `booking_confirmation` swaps in "reply to this email" when there
+    is no link, so a deploy with no PUBLIC_API_BASE_URL -- a test, a local run -- sends a message that
+    still tells the customer how to change their booking. A dead button would not.
+
+    The token IS the authorisation (see `_authorized_appointment`), so this URL is a bearer credential: the
+    page it opens is noindex, no-store and no-referrer for that reason.
+    """
+    base = os.environ.get("PUBLIC_API_BASE_URL", "").rstrip("/")
+    appointment_id = str((appointment or {}).get("appointment_id") or "")
+    token = str((appointment or {}).get("customer_manage_token") or "")
+    if not base or not appointment_id or not token:
+        return ""
+    return f"{base}/booking/manage?" + urlencode(
+        {"appointment_id": appointment_id, "manage_token": token})
+
+
 def notify_customer_booked(appointment, service, *, business_name="", reply_to="", organization=None,
                            tenant_id="", mailer_send=None):
     """Email the customer that their appointment is confirmed. Returns True if an email was sent.
@@ -73,7 +94,8 @@ def notify_customer_booked(appointment, service, *, business_name="", reply_to="
     if not email:
         return False
     content = booking_confirmation(appointment, service, business_name=business_name,
-                                   organization=organization)
+                                   organization=organization,
+                                   manage_url=appointment_manage_url(appointment))
     # An empty subject is the content module refusing to send -- see booking_confirmation. Honour it: a
     # confirmation with no time in it leaves the customer unable to turn up.
     if not content["subject"]:

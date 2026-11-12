@@ -77,6 +77,7 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/purchase/manage"): "buyer self-service, reached from a link in their receipt",
     ("POST", "/purchase/manage"): "buyer self-service",
     ("GET", "/tips/manage"): "supporter cancelling a recurring tip",
+    ("GET", "/booking/manage"): "the customer's own appointment page, linked from their confirmation",
     ("GET", "/services/appointments/manage"): "buyer managing their own appointment",
     ("POST", "/services/appointments/manage/cancel"): "buyer cancelling it",
     ("POST", "/services/appointments/manage/reschedule"): "buyer rescheduling it",

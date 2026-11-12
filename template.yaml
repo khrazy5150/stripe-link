@@ -5236,6 +5236,17 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # The customer's self-service page, linked from their confirmation email. Public by necessity --
+        # they arrive from a mail client with no session -- and authorised by the opaque
+        # customer_manage_token in the query string, the same control the manage API below uses.
+        BookingManagePage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /booking/manage
+            Method: GET
+            Auth:
+              Authorizer: NONE
         ManageView:
           Type: Api
           Properties:

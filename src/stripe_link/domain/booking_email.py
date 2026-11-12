@@ -12,10 +12,10 @@ The time is given in the APPOINTMENT's zone, which is the business's. A massage 
 is 8:00 AM when you turn up; converting it to the reader's device zone would be a different, wronger
 sentence for anyone who booked while travelling.
 
-There is deliberately NO cancel/reschedule link. The routes exist (`/services/appointments/manage`) but
-nothing renders a page for them, so a link here would be an invented URL. Instead the message says to
-reply — Reply-To is the tenant's verified address, so that reaches a human who can act. When a manage
-page exists, this is where its button goes.
+The cancel/reschedule link is the point of the message as much as the time is. `manage_url` is optional
+and the copy follows it: with a link the customer is told they can change it themselves, and without one
+they are told to reply, which reaches a human because Reply-To is the tenant's verified address. Never a
+dead "manage your booking" button — an instruction that does not work is worse than the plainer one.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from stripe_link.domain.booking import (
     appointment_service_name,
     appointment_total_amount,
 )
-from stripe_link.domain.email_layout import paragraph, render_email, rows_table
+from stripe_link.domain.email_layout import button, paragraph, render_email, rows_table
 from stripe_link.domain.receipts import format_money
 
 
@@ -53,8 +53,11 @@ def appointment_when(appointment: dict[str, Any]) -> str:
                              with_time=True)
 
 
-def _place(organization: dict[str, Any] | None) -> str:
-    """The street address, as a person would write it on an envelope. Empty when the Site has none."""
+def place_line(organization: dict[str, Any] | None) -> str:
+    """The street address, as a person would write it on an envelope. Empty when the Site has none.
+
+    Public because the manage page prints the same line: the email and the page it links to describing the
+    same appointment differently is how a customer ends up at the wrong address."""
     address = (organization or {}).get("address") or {}
     if not isinstance(address, dict):
         return ""
@@ -89,6 +92,7 @@ def booking_confirmation(
     *,
     business_name: str = "",
     organization: dict[str, Any] | None = None,
+    manage_url: str = "",
 ) -> dict[str, str]:
     """`{subject, html, text}` for one confirmed appointment.
 
@@ -108,7 +112,7 @@ def booking_confirmation(
     customer_name = str((appointment.get("customer") or {}).get("name") or "").strip()
     greeting = f"Hi {customer_name}," if customer_name else "Hi,"
     minutes = int(appointment_duration_minutes(appointment) or 0)
-    place = _place(organization)
+    place = place_line(organization)
     payment = _payment_line(appointment)
 
     # The WHEN in the subject, because a phone shows the subject and nothing else. The business name comes
@@ -130,7 +134,9 @@ def booking_confirmation(
         lines.append(f"Where: {place}")
     if payment:
         lines += ["", payment]
-    lines += ["", "Need to change or cancel? Just reply to this email."]
+    manage = str(manage_url or "").strip()
+    lines += ["", f"Change or cancel this appointment: {manage}"] if manage else \
+             ["", "Need to change or cancel? Just reply to this email."]
     if business:
         lines += ["", f"— {business}"]
     text = "\n".join(lines)
@@ -142,7 +148,8 @@ def booking_confirmation(
             paragraph(f"{greeting} your booking for {service_name} is confirmed.")
             + rows_table(rows)
             + (paragraph(payment) if payment else "")
-            + paragraph("Need to change or cancel? Just reply to this email.", muted=True)
+            + (button("Change or cancel this appointment", manage) if manage
+               else paragraph("Need to change or cancel? Just reply to this email.", muted=True))
         ),
         preheader=f"{service_name} — {when}",
     )

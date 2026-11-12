@@ -36,7 +36,10 @@ from stripe_link.domain.scheduling import available_slots
 from stripe_link.calendar_sync import tenant_busy_intervals
 from stripe_link.delegation import apply_delegation
 from stripe_link.kms_secrets import KmsSecretCipher
+from stripe_link.domain.booking_email import appointment_when, place_line
 from stripe_link.runtime.booking_page import render_booking_page
+from stripe_link.runtime.manage_page import render_manage_page
+from stripe_link.sender_identity import sending_identity
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
@@ -99,6 +102,12 @@ def handler(
         return json_response({})
     if path.startswith("/book/") and method == "GET":
         return booking_page_route(event, services_repo)
+    # Its own path rather than an HTML view of /services/appointments/manage: that route answers JSON and
+    # the dispatch below matches it by substring, so one path serving both would turn on a header. A
+    # customer-facing URL that renders differently depending on what their mail client sends is the kind of
+    # thing that works everywhere except in the inbox it was built for. Mirrors /purchase/manage.
+    if path.endswith("/booking/manage") and method == "GET":
+        return manage_page_route(event, appointments_repo)
     if "/appointments/reserve" in path and method == "POST":
         # Booking credits are looked up only when the request claims a plan; a tenant with no recurring
         # services never touches the table.
@@ -773,6 +782,49 @@ def _delegate(appointments_repo, appointment, *, action, change, delegation, ten
         connections_repo=bundle.get("connections_repo"), tenant_repo=bundle.get("tenant_repo"),
         mailer_send=bundle.get("mailer_send"),
     )
+
+
+def manage_page_route(event, appointments_repo):
+    """The customer's self-service page, reached from the link in their confirmation email.
+
+    Resolved server-side: a request with no token, or the wrong one, gets the API's own 404/403 before any
+    HTML exists, so the page never has to ask who it is about and a stranger probing the path learns
+    nothing. Identity and address are best-effort -- a booking is still manageable from a Site that has
+    not filled in its business name.
+    """
+    params = query_params(event)
+    appointment, err = _authorized_appointment(
+        appointments_repo,
+        str(params.get("appointment_id") or "").strip(),
+        str(params.get("manage_token") or "").strip(),
+    )
+    if err:
+        # HTML, not the API's JSON: this URL is opened by a person in a browser, and a raw error document
+        # tells them nothing about what to do next.
+        return _html_response(
+            "<!doctype html><meta charset=utf-8><meta name=robots content=noindex>"
+            "<title>Appointment not found</title>"
+            "<p style=\"font-family:sans-serif;padding:2rem\">We could not find that appointment. "
+            "The link may have expired, or it may have been changed. Reply to your confirmation email "
+            "and we will sort it out.</p>",
+            status_code=404,
+        )
+
+    business_name, place = "", ""
+    try:
+        identity = sending_identity(
+            str(appointment.get("tenant_id") or ""),
+            page_id=str(appointment.get("page_id") or ""),
+            mode=str(appointment.get("stripe_mode") or "live"))
+        business_name = str(identity.get("business_name") or "")
+        place = place_line(identity.get("organization"))
+    except Exception:  # noqa: BLE001 - a nameless page still manages the booking
+        pass
+
+    return _html_response(render_manage_page(
+        appointment, None, business_name=business_name,
+        when=appointment_when(appointment), place=place,
+    ))
 
 
 def booking_page_route(event, services_repo):
