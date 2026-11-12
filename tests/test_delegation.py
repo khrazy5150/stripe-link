@@ -147,10 +147,12 @@ class ApplyDelegationTests(unittest.TestCase):
 
     def test_delegated_write_and_email(self):
         appt, appointments, services, fulfillers, tenants, conns = self._env()
-        sent = {}
+        # A LIST, not a dict: two people are told about a booking now, and a dict kept only the last of
+        # them -- which is how this assertion came to read "c@e.com" when the customer notice was added.
+        sent = []
 
         def fake_mail(*, to, subject, html, text, from_name, reply_to, **_kw):
-            sent.update({"to": to, "subject": subject})
+            sent.append({"to": to, "subject": subject})
 
         apply_delegation(appt, action="upsert", change="booked", appointments_repo=appointments,
                          services_repo=services, fulfillers_repo=fulfillers, connections_repo=conns, tenant_repo=tenants,
@@ -158,24 +160,25 @@ class ApplyDelegationTests(unittest.TestCase):
                          opener=_FakeOpener({"access_token": "ya29"}, {"id": "evt_1"}))
         self.assertEqual(appt["delegation_calendar"], "written")
         self.assertEqual(appt["external_calendar_events"][0]["connection_id"], "cal_jane")
-        self.assertEqual(sent["to"], "jane@x.com")
-        self.assertIn("Consult", sent["subject"])
+        to_delegate = next(m for m in sent if m["to"] == "jane@x.com")
+        self.assertIn("Consult", to_delegate["subject"])
+        self.assertIn("c@e.com", [m["to"] for m in sent], "the customer is told too")
 
     def test_delegate_without_calendar_falls_back_unavailable(self):
         # Jane names a calendar that isn't connected; only a tenant default exists.
         appt, appointments, services, fulfillers, tenants, conns = self._env(
             fulfiller_cal="cal_missing", connections=[conn("cal_default", default=True)])
-        sent = {}
+        sent = []
 
         def fake_mail(*, to, subject, html, text, from_name, reply_to, **_kw):
-            sent.update({"to": to})
+            sent.append(to)
 
         apply_delegation(appt, action="upsert", change="booked", appointments_repo=appointments,
                          services_repo=services, fulfillers_repo=fulfillers, connections_repo=conns, tenant_repo=tenants,
                          mailer_send=fake_mail, secret_cipher=FakeCipher(), google_secret=GOOGLE_SECRET,
                          opener=_FakeOpener({"access_token": "ya29"}, {"id": "evt_2"}))
         self.assertEqual(appt["delegation_calendar"], "unavailable")  # wrote to default, not Jane's
-        self.assertEqual(sent["to"], "jane@x.com")  # still notified
+        self.assertIn("jane@x.com", sent)  # still notified
 
 
 if __name__ == "__main__":

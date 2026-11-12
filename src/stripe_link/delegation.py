@@ -1,12 +1,18 @@
-"""Delegation side-effects for a booking: route its calendar event to the right calendar and
-notify the assigned staff person. Both are best-effort — a calendar or email failure must never
-break a booking. Shared by the booking handler and the Stripe webhook.
+"""Side-effects for a booking transition: route its calendar event to the right calendar, and tell the
+people who need to know — the assigned staff person, and the CUSTOMER.
+
+All of it is best-effort — a calendar or email failure must never break a booking. Shared by the booking
+handler and the Stripe webhook, which is the reason it lives here rather than in either: `apply_delegation`
+is the one function every path to `status: "booked"` already calls, so a notice added here cannot be
+forgotten by the next path that is written. The alternative was three call sites that must agree, which is
+the shape of bug this codebase keeps producing.
 """
 from typing import Any
 
 from stripe_link.calendar_sync import sync_appointment_event
 from stripe_link.domain.booking import appointment_service_id
 from stripe_link.domain.calendar_routing import delegation_status, resolve_write_connection
+from stripe_link.domain.booking_email import booking_confirmation
 from stripe_link.domain.notifications_content import delegate_booking_email
 from stripe_link.mailer import send_email
 from stripe_link.sender_identity import sending_identity
@@ -51,6 +57,36 @@ def notify_delegate(appointment, service, fulfiller, *, change, business_name=""
         return False
 
 
+def notify_customer_booked(appointment, service, *, business_name="", reply_to="", organization=None,
+                           tenant_id="", mailer_send=None):
+    """Email the customer that their appointment is confirmed. Returns True if an email was sent.
+
+    No-op when the booking carries no email address. It normally does -- `reserve_route` refuses a booking
+    without one -- but an appointment created any other way must not take the booking down with it.
+
+    Until 2026-11-12 nothing sent this at all, while the booking widget's own success message read "Your
+    booking is confirmed — check your email for details". The customer got a calendar invite only if the
+    tenant had connected a calendar, and even then only the tenant's own; the person who had just given up
+    a Saturday morning was told nothing.
+    """
+    email = str((appointment.get("customer") or {}).get("email") or "").strip()
+    if not email:
+        return False
+    content = booking_confirmation(appointment, service, business_name=business_name,
+                                   organization=organization)
+    # An empty subject is the content module refusing to send -- see booking_confirmation. Honour it: a
+    # confirmation with no time in it leaves the customer unable to turn up.
+    if not content["subject"]:
+        return False
+    send = mailer_send or send_email
+    try:
+        send(to=email, subject=content["subject"], html=content["html"], text=content["text"],
+             from_name=business_name, reply_to=reply_to, tenant_id=tenant_id)
+        return True
+    except Exception:  # noqa: BLE001 - a delivery failure must not break the booking
+        return False
+
+
 def apply_delegation(appointment: dict[str, Any], *, action, change, services_repo, fulfillers_repo, connections_repo, tenant_repo, appointments_repo=None, persist=True, mailer_send=None, secret_cipher=None, google_secret=None, opener=None):
     """Full delegation flow for a completed booking transition: resolve the write calendar, sync
     the event, stamp delegation_calendar, optionally persist, and email the delegate. Best-effort
@@ -85,18 +121,33 @@ def apply_delegation(appointment: dict[str, Any], *, action, change, services_re
             except Exception:  # noqa: BLE001
                 pass
 
+        # WHO these messages are from, through the one resolver (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
+        # This read `TenantProfile.business_name` / `support_email` -- empty on every tenant and in every
+        # environment -- so the person being assigned work was told about it by nobody in particular. A
+        # booking taken through checkout records its page, which names the business; one taken any other
+        # way falls back.
+        #
+        # Hoisted out of `if fulfiller:` on 2026-11-12, when the customer confirmation started needing the
+        # same answer: a booking with nobody assigned yet still has a customer waiting to be told, and the
+        # `organization` it carries is where the email gets the address to print.
+        identity = sending_identity(
+            tenant_id, page_id=str(appointment.get("page_id") or ""),
+            mode=str(appointment.get("stripe_mode") or "live"))
+
         if fulfiller:
-            # WHO the staff notice is from, through the one resolver
-            # (plans/SITE_AS_BUSINESS_IDENTITY.md §4). This read `TenantProfile.business_name` /
-            # `support_email` -- empty on every tenant and in every environment -- so the person being
-            # assigned work was told about it by nobody in particular. A booking taken through checkout
-            # records its page, which names the business; one taken any other way falls back.
-            identity = sending_identity(
-                tenant_id, page_id=str(appointment.get("page_id") or ""),
-                mode=str(appointment.get("stripe_mode") or "live"))
             notify_delegate(
                 appointment, service, fulfiller, change=change,
                 business_name=identity["business_name"], support_email=identity["reply_to"],
+                tenant_id=tenant_id, mailer_send=mailer_send,
+            )
+
+        # Only on "booked". A reschedule or a cancellation deserves a customer email too, and neither is
+        # written yet -- stated here rather than silently covered by a confirmation that would tell someone
+        # their cancelled appointment is confirmed.
+        if change == "booked":
+            notify_customer_booked(
+                appointment, service, business_name=identity["business_name"],
+                reply_to=identity["reply_to"], organization=identity.get("organization"),
                 tenant_id=tenant_id, mailer_send=mailer_send,
             )
     except Exception:  # noqa: BLE001 - delegation must never break a booking
