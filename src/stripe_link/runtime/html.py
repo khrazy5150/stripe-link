@@ -1438,13 +1438,49 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # MASONRY — CSS multi-column, ported from the old dot-net front page. No JS, no library.
     # The aspect-ratio above is explicitly dropped: variable tile heights ARE the layout, and forcing
     # every image square would produce a uniform grid with extra steps.
-    "    .sl-catalog-cards.sl-catalog-masonry{display:block;column-count:5;column-gap:1.4rem}",
-    "    .sl-catalog-masonry .sl-catalog-card{break-inside:avoid;margin:0 0 1.4rem;width:100%}",
-    "    .sl-catalog-masonry .sl-catalog-card > img{aspect-ratio:auto}",
-    "    @media (max-width:1180px){.sl-catalog-cards.sl-catalog-masonry{column-count:4}}",
-    "    @media (max-width:900px){.sl-catalog-cards.sl-catalog-masonry{column-count:3}}",
-    "    @media (max-width:650px){.sl-catalog-cards.sl-catalog-masonry{column-count:2;column-gap:1rem}}",
-    "    @media (max-width:420px){.sl-catalog-cards.sl-catalog-masonry{column-count:1}}",
+    #
+    # A BROWSING GALLERY IS NOT A READING COLUMN, so it opts out of the 52rem cap the way the checkout
+    # bar does. `main > .sl-catalog-grid...` matches the cap rule's specificity exactly (one element, two
+    # compound selectors) and sits later in the sheet, which is what lets it win without !important.
+    "    main > .sl-catalog-grid.sl-layout-masonry{width:min(120rem,calc(100% - 3.2rem))}",
+    # The section becomes the query container so the narrow rule below can measure the same box
+    # `column-width` does. An element cannot query itself, which is why this sits on the section and
+    # not on the card list.
+    "    .sl-catalog-grid.sl-layout-masonry{container-type:inline-size}",
+    # COLUMN-WIDTH, NOT COLUMN-COUNT. `column-count:5` with @media breakpoints measured the VIEWPORT and
+    # then divided the CONTAINER, and those are different numbers: inside the 52rem section above, a wide
+    # desktop still cut five columns out of 520px and handed each tile ~80px. Three services rendered as
+    # slivers reading "60- / Minute / Foot / Massage" down four lines (reported 2026-11-12). A width lets
+    # the browser derive the count from the space actually available, which is the question being asked.
+    "    .sl-catalog-cards.sl-catalog-masonry{display:block;column-width:20rem;column-gap:1.4rem}",
+    # NARROWER COLUMNS IN A NARROW BOX -- @container, not @media, for the same reason the count is no
+    # longer fixed. One 20rem column in a 358px phone box is a single tile per row; two 14rem columns
+    # is a gallery. A viewport breakpoint would get that right on a phone and wrong in any narrow
+    # container on a wide screen, which is exactly the class of bug being fixed here. Browsers without
+    # @container ignore the block and fall back to the wider column, which is a layout, not a break.
+    # 42rem is where two 20rem columns plus the gap stop fitting -- measured, after 34rem left a 358px
+    # section (a 390px phone) on one column, which is the thing the rule exists to prevent.
+    "    @container (max-width:42rem){.sl-catalog-cards.sl-catalog-masonry{column-width:14rem;column-gap:1rem}}",
+    # THE IMAGE IS THE TILE. Masonry's whole proposition is a picture you browse, so the card drops its
+    # padding, border and background and the words move ON TO the image over a scrim.
+    "    .sl-catalog-masonry .sl-catalog-card{break-inside:avoid;margin:0 0 1.4rem;width:100%;"
+    "position:relative;padding:0;border:0;background:none;overflow:hidden;border-radius:1.2rem}",
+    "    .sl-catalog-masonry .sl-catalog-card > img{aspect-ratio:auto;border-radius:1.2rem}",
+    # In flow by default -- this is the NO-IMAGE card, which still needs its own surface to sit on.
+    "    .sl-catalog-masonry .sl-catalog-body{padding:1.2rem;background:var(--sl-price-card-bg);"
+    "border-radius:1.2rem}",
+    # ...and overlaid when, and only when, an image precedes it. The adjacent sibling is doing the work a
+    # `:has()` would, without needing it: every card puts its own image at the top level, so `img + body`
+    # is exactly "this card has a picture" and a card without one is untouched.
+    "    .sl-catalog-masonry .sl-catalog-card > img + .sl-catalog-body{position:absolute;left:0;right:0;"
+    "bottom:0;gap:0.2rem;padding:2.8rem 1.2rem 1.2rem;border-radius:0;"
+    "background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,0.78))}",
+    # The scrim carries the contrast; the shadow is for the pale-photo case where it does not.
+    "    .sl-catalog-masonry .sl-catalog-card > img + .sl-catalog-body .sl-catalog-title{color:#fff;"
+    "text-shadow:0 1px 3px rgba(0,0,0,0.6);display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;"
+    "-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
+    "    .sl-catalog-masonry .sl-catalog-card > img + .sl-catalog-body .sl-catalog-price{color:#fff;"
+    "margin:0;text-shadow:0 1px 3px rgba(0,0,0,0.6)}",
     # LISTICLE — one ordered row per member, image beside the text. A CSS counter draws the number so it
     # carries no content of its own; the <ol> already says the position to anything that reads markup.
     "    .sl-catalog-list{list-style:none;counter-reset:sl-catalog;display:flex;flex-direction:column;gap:1.2rem;margin:0;padding:0}",

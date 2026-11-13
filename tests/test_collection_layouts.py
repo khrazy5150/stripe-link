@@ -931,7 +931,18 @@ class TheCountTickTests(unittest.TestCase):
 
 
 class MasonryCssTests(unittest.TestCase):
-    """Ported from the old dot-net front page: pure CSS multi-column, no JS."""
+    """Ported from the old dot-net front page: pure CSS multi-column, no JS.
+
+    Reported 2026-11-12 against a three-service storefront: the tiles came out as slivers, each title
+    broken over four lines ("60- / Minute / Foot / Massage"), the thumbnail smaller than the words.
+
+    TWO causes, and they compound. Every section is capped at 52rem by `main > :not(...)` -- right for a
+    reading column, wrong for a browsing gallery -- and masonry then asked for `column-count:5` with
+    @media breakpoints that measure the VIEWPORT. A wide desktop therefore cut five columns out of 520px
+    and gave each tile ~80px. The three tests that pinned `column-count:5` and the four viewport
+    breakpoints were asserting the bug: they are replaced rather than relaxed, because a count chosen
+    against the window can only ever be right by coincidence about a container it does not measure.
+    """
 
     CSS = ""
 
@@ -939,20 +950,65 @@ class MasonryCssTests(unittest.TestCase):
     def setUpClass(cls):
         cls.CSS = "".join(html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
 
-    def test_it_is_multi_column_at_five_across(self):
-        self.assertIn("column-count:5", self.CSS)
+    def test_the_column_count_comes_from_the_container_not_the_window(self):
+        self.assertIn(".sl-catalog-cards.sl-catalog-masonry{display:block;column-width:", self.CSS)
+        self.assertNotIn("column-count", self.CSS,
+                         "a fixed count divides a container it never measured")
+
+    def test_a_browsing_gallery_is_not_capped_to_the_reading_column(self):
+        """52rem is a measure for prose. The cap rule is `main > :not(.sl-countdown):not(.sl-checkout-cta)`
+        -- one element plus two compounds -- so the opt-out has to match that specificity exactly and come
+        later in the sheet, or it loses silently and the gallery stays 520px wide."""
+        self.assertIn("main > .sl-catalog-grid.sl-layout-masonry{width:min(", self.CSS)
 
     def test_tiles_do_not_split_across_columns(self):
         self.assertIn("break-inside:avoid", self.CSS)
 
-    def test_it_steps_down_to_a_single_column_on_a_phone(self):
-        for width in ("1180px", "900px", "650px", "420px"):
-            self.assertIn(f"max-width:{width}", self.CSS, width)
+    def test_it_narrows_its_columns_in_a_narrow_box_not_a_narrow_window(self):
+        """Measured: a 390px container on a 1200px viewport gave ONE column, because the surviving
+        breakpoint was still a @media. That is the same bug one level down -- right on a phone, wrong in
+        any narrow container on a wide screen -- so the narrow rule is a @container, keyed to the same
+        box `column-width` divides. The section carries `container-type` because an element cannot query
+        itself."""
+        self.assertIn("@container (max-width:42rem){.sl-catalog-cards.sl-catalog-masonry{column-width:",
+                      self.CSS)
+        self.assertIn(".sl-catalog-grid.sl-layout-masonry{container-type:inline-size}", self.CSS)
+        masonry = [line for line in html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES if "sl-catalog-masonry" in line]
+        self.assertFalse([line for line in masonry if "@media" in line],
+                         "a masonry rule is measuring the window again")
 
     def test_the_square_crop_is_dropped_so_heights_can_vary(self):
         """Variable tile heights ARE the layout. Forcing every image square would produce a uniform grid
         with extra steps."""
-        self.assertIn(".sl-catalog-masonry .sl-catalog-card > img{aspect-ratio:auto}", self.CSS)
+        self.assertIn(".sl-catalog-masonry .sl-catalog-card > img{aspect-ratio:auto", self.CSS)
+
+    def test_the_image_is_the_tile(self):
+        """The point of masonry is a picture you browse. A card that keeps its padding, border and
+        background turns the photo into a thumbnail with a caption, which is the grid layout already."""
+        card = next(line for line in html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if line.strip().startswith(".sl-catalog-masonry .sl-catalog-card{"))
+        for prop in ("padding:0", "border:0", "background:none", "position:relative"):
+            self.assertIn(prop, card, prop)
+
+    def test_the_words_sit_on_the_image_over_a_scrim(self):
+        overlay = next(line for line in html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                       if ".sl-catalog-masonry .sl-catalog-card > img + .sl-catalog-body{" in line)
+        self.assertIn("position:absolute", overlay)
+        self.assertIn("linear-gradient", overlay, "white text needs a scrim to stay legible on a photo")
+
+    def test_a_card_with_no_image_is_left_alone(self):
+        """`img + body` is doing the work a `:has()` would. Every card puts its own image at the top
+        level, so the adjacent sibling IS "this card has a picture" -- and a card without one keeps a
+        surface to sit on instead of white text over nothing."""
+        self.assertIn(".sl-catalog-masonry .sl-catalog-body{padding:", self.CSS)
+        body = next(line for line in html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if line.strip().startswith(".sl-catalog-masonry .sl-catalog-body{"))
+        self.assertIn("background:var(--sl-price-card-bg)", body)
+
+    def test_the_overlay_targets_the_cards_own_picture(self):
+        """`>` not a descendant: the editorial entry nests a page ribbon, and a descendant selector here
+        has already leaked into it once."""
+        self.assertIn(".sl-catalog-masonry .sl-catalog-card > img + .sl-catalog-body", self.CSS)
 
     def test_the_hover_lift_respects_reduced_motion(self):
         self.assertIn("prefers-reduced-motion:reduce", self.CSS)
