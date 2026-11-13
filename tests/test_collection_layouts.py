@@ -930,6 +930,52 @@ class TheCountTickTests(unittest.TestCase):
         self.assertIn('presentation: { layout: "editorial" }', self.BUILDER)
 
 
+class MasonryItemCountTests(unittest.TestCase):
+    """The card count travels to CSS as `--sl-masonry-items`, because the width rule needs a number the
+    stylesheet cannot count for itself. It is written from `len(cards)` -- the cards actually EMITTED --
+    and not from `len(items)`: an item whose offer is missing renders nothing, and sizing the box for a
+    tile that was dropped reopens the empty-column gap this exists to close."""
+
+    def _section(self, layout, n):
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        offers = {f"o{i}": {"offer_id": f"o{i}", "name": f"Service {i}",
+                            "presentation": {"headline": f"Service {i}",
+                                             "hero_image_url": f"https://img/{i}.jpg"}}
+                  for i in range(n)}
+        items = [{"offer_id": f"o{i}", "slug": f"/svc-{i}"} for i in range(n)]
+        return html.render_catalog_grid(
+            {"type": "catalog_grid", "id": "s1", "heading": "Book", "layout": layout, "items": items},
+            offers, {}, {})
+
+    def test_the_section_carries_the_number_of_cards_it_rendered(self):
+        for n in (1, 2, 3, 7):
+            with self.subTest(n=n):
+                self.assertIn(f'style="--sl-masonry-items:{n}"', self._section("masonry", n))
+
+    def test_only_masonry_carries_it(self):
+        """grid and listicle set their own track count, so a card count tells them nothing. A property
+        that appears everywhere invites a rule that reads it where it means something else."""
+        for layout in ("grid", "listicle", "editorial"):
+            with self.subTest(layout=layout):
+                self.assertNotIn("--sl-masonry-items", self._section(layout, 3))
+
+    def test_it_counts_the_cards_rendered_not_the_items_asked_for(self):
+        """Two of the three items point at offers that do not exist. Sizing the box for three tiles
+        would leave exactly the empty column the width cap is there to remove."""
+        html._RENDER_STATE["home_url"] = "https://shop.example.com"
+        markup = html.render_catalog_grid(
+            {"type": "catalog_grid", "id": "s1", "layout": "masonry",
+             "items": [{"offer_id": "o1", "slug": "/a"},
+                       {"offer_id": "ghost1", "slug": "/b"},
+                       {"offer_id": "ghost2", "slug": "/c"}]},
+            {"o1": OFFERS["o1"]}, {}, {})
+        self.assertEqual(markup.count('class="sl-catalog-card"'), 1)  # not "sl-catalog-cards", the list
+        self.assertIn('style="--sl-masonry-items:1"', markup)
+
+    def test_an_empty_grid_still_renders_nothing(self):
+        self.assertEqual(self._section("masonry", 0), "")
+
+
 class MasonryCssTests(unittest.TestCase):
     """Ported from the old dot-net front page: pure CSS multi-column, no JS.
 
@@ -963,6 +1009,42 @@ class MasonryCssTests(unittest.TestCase):
 
     def test_tiles_do_not_split_across_columns(self):
         self.assertIn("break-inside:avoid", self.CSS)
+
+    def test_the_gallery_is_never_wider_than_its_items_can_fill(self):
+        """A centred BOX is not a centred LAYOUT. Three services in the 120rem box got five 20rem columns,
+        filled the left three and left two empty, so the block sat 243px left of the hero above it
+        (measured in Chrome at a 1440px viewport, reported 2026-11-13). `margin:auto` was already doing
+        its job -- there was simply nothing in the right 40% of the box to balance it."""
+        rule = next(line for line in html.UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+                    if line.strip().startswith("main > .sl-catalog-grid.sl-layout-masonry{"))
+        self.assertEqual(
+            rule.strip(),
+            "main > .sl-catalog-grid.sl-layout-masonry{width:min(120rem,"
+            "calc(var(--sl-masonry-items,999) * 21.4rem - 1.4rem),calc(100% - 3.2rem))}",
+        )
+
+    def test_the_width_cap_is_exactly_n_columns_and_n_minus_one_gaps(self):
+        """The browser derives the count as floor((W + gap) / (col + gap)). The cap has to land on
+        W = n*col + (n-1)*gap EXACTLY: a rem too wide and an empty column reappears, a rem too narrow and
+        the last tile wraps to a second row on its own. Pinned as arithmetic so a change to the column
+        width or the gap cannot silently drift away from the term that pairs with it."""
+        col, gap = 20.0, 1.4  # must match the column-width and column-gap rules below
+        self.assertIn(f"column-width:{col:g}rem;column-gap:{gap:g}rem", self.CSS)
+        step = col + gap
+        self.assertAlmostEqual(step, 21.4, places=6)
+        for n in range(1, 13):
+            width = n * step - gap
+            self.assertAlmostEqual(width, n * col + (n - 1) * gap, places=6, msg=f"n={n}")
+            # ...and that width yields exactly n columns, never n+1. The epsilon is this test's,
+            # not the layout's: 3*21.4 - 1.4 + 1.4 over 21.4 is 2.999... in binary float, while the
+            # browser lays out in exact units and was measured giving 3 columns at that width.
+            self.assertEqual(int((width + gap) / step + 1e-9), n, f"n={n}")
+
+    def test_markup_written_before_the_property_existed_keeps_its_box(self):
+        """The fallback is 999, not 1. A published page still serving last week's markup has no
+        `--sl-masonry-items`, and a fallback of 1 would collapse it to a single 20rem column."""
+        self.assertIn("var(--sl-masonry-items,999)", self.CSS)
+        self.assertEqual(999 * 21.4 - 1.4 > 120, True, "the fallback must lose to the 120rem cap")
 
     def test_it_narrows_its_columns_in_a_narrow_box_not_a_narrow_window(self):
         """Measured: a 390px container on a 1200px viewport gave ONE column, because the surviving

@@ -1442,7 +1442,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # A BROWSING GALLERY IS NOT A READING COLUMN, so it opts out of the 52rem cap the way the checkout
     # bar does. `main > .sl-catalog-grid...` matches the cap rule's specificity exactly (one element, two
     # compound selectors) and sits later in the sheet, which is what lets it win without !important.
-    "    main > .sl-catalog-grid.sl-layout-masonry{width:min(120rem,calc(100% - 3.2rem))}",
+    #
+    # ...AND NEVER WIDER THAN ITS ITEMS CAN FILL. A box is only centred if something fills it. Three
+    # services in a 120rem box got five 20rem columns, occupied the left three and left two empty, so a
+    # centred BOX read as a layout shoved 243px to the left of the hero above it (reported 2026-11-13).
+    # `--sl-masonry-items` is the card count, written on the section by the renderer. The browser derives
+    # the count as floor((W + gap) / (col + gap)), so at W = n*col + (n-1)*gap that is exactly n: n full
+    # columns, no empty ones, and `margin:auto` from the cap rule then centres something solid. The
+    # fallback is deliberately huge -- markup written before this property existed keeps the 120rem box
+    # rather than collapsing to one column.
+    "    main > .sl-catalog-grid.sl-layout-masonry{width:min(120rem,"
+    "calc(var(--sl-masonry-items,999) * 21.4rem - 1.4rem),calc(100% - 3.2rem))}",
     # The section becomes the query container so the narrow rule below can measure the same box
     # `column-width` does. An element cannot query itself, which is why this sits on the section and
     # not on the card list.
@@ -8708,8 +8718,12 @@ def render_catalog_grid(
     # styling off that rather than adding a second class saying the same thing in another place.
     open_tag, close_tag = (('<ol class="sl-catalog-list">', "</ol>") if ordered
                            else (f'<div class="sl-catalog-cards sl-catalog-{layout}">', "</div>"))
+    # MASONRY ONLY, and only because its width is the one the browser divides into columns. The other
+    # layouts set their own track count, so a card count tells them nothing. See the width rule in the
+    # stylesheet for what this number buys.
+    span = f' style="--sl-masonry-items:{len(cards)}"' if layout == "masonry" else ""
     return "\n".join(line for line in [
-        f'    <section class="sl-catalog-grid sl-layout-{layout}" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="{section_type}" data-layout="{layout}">',
+        f'    <section class="sl-catalog-grid sl-layout-{layout}" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="{section_type}" data-layout="{layout}"{span}>',
         heading_html,
         f"      {open_tag}",
         *cards,
