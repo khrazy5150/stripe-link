@@ -8460,10 +8460,13 @@ def render_catalog_grid(
     drift into rendering different data:
 
       grid      uniform cards. The default, and what every collection rendered before this existed.
-      masonry   CSS multi-column, variable heights. For UNORDERED browsing only: `column-count` fills
-                each column top-to-bottom, so ten items in five columns read 1,3,5,7,9 across the top.
-                The DOM order stays correct -- crawlers and screen readers get the real sequence -- which
-                is why this is easy to miss in review: the markup is right and the layout misleads.
+      masonry   CSS multi-column, variable heights, the image carrying the tile and the title and price
+                sitting ON it over a scrim. The column count comes from `column-width` against the
+                SECTION's own width, not the window, so a narrow section narrows its columns.
+                For UNORDERED browsing only: multi-column fills each column top-to-bottom, so ten items
+                in five columns read 1,3,5,7,9 across the top. The DOM order stays correct -- crawlers
+                and screen readers get the real sequence -- which is why this is easy to miss in review:
+                the markup is right and the layout misleads.
       listicle  one row per member, in a real <ol>. The sequence is in the MARKUP, not just the styling,
                 for the same reason `render_numbered_list` uses one: assistive technology announces the
                 position and the visible number is a CSS counter carrying no content of its own.
