@@ -3583,11 +3583,22 @@ def _validate_service_price(price: dict[str, Any], *, where: str) -> None:
 
 def validate_event(document: dict[str, Any]) -> None:
     """A scheduled event and its occurrences (plans/WEBINAR.md P1)."""
-    from .events import OCCURRENCE_STATUSES, PROVIDERS
+    from .events import DELIVERY_MODES, OCCURRENCE_STATUSES, PROVIDERS
 
     require_document_fields(document, "event", "event_id")
     require_string(document, "title", "Event title")
     optional_string(document, "description", "Event description")
+    # auto (a recording that starts on a schedule) or live (a join link to somebody else's room).
+    # Validated but never defaulted here: `events.delivery()` owns the default, so one function decides it
+    # and an event saved before the field existed reads the same as one saved after.
+    if document.get("delivery") is not None:
+        require_enum(document, "delivery", set(DELIVERY_MODES), "Event delivery")
+    # Optional for the same reason join_url is: a tenant names the session before the recording is cut.
+    # An auto event with no video degrades to the same honest "no link yet" block a live one does.
+    if document.get("video_url"):
+        video_url = require_string(document, "video_url", "Event video_url")
+        if not video_url.lower().startswith(("http://", "https://")):
+            raise DocumentValidationError("Event video_url must start with http:// or https://.")
     if document.get("provider") is not None:
         require_enum(document, "provider", set(PROVIDERS), "Event provider")
     # Optional: a tenant creates the event before the meeting is scheduled with the provider, and

@@ -85,7 +85,9 @@
           <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg><span>{{ busy === "image" ? "Uploading…" : "Upload Image" }}</span>
         </button>
 
-        <input v-if="allowVideoUpload" ref="videoInput" type="file" accept="video/mp4,video/webm,video/quicktime" hidden @change="pickVideo" />
+        <!-- Must match VIDEO_UPLOAD_TYPES in api/uploads.js. It offered video/quicktime, which uploadVideo
+             then refused -- the picker let a tenant choose a .mov and the upload told them off for it. -->
+        <input v-if="allowVideoUpload" ref="videoInput" type="file" accept="video/mp4,video/webm" hidden @change="pickVideo" />
         <button v-if="allowVideoUpload" type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="videoInput?.click()">
           <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg><span>{{ busy === "video" ? "Uploading…" : "Upload Video" }}</span>
         </button>

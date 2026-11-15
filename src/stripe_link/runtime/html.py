@@ -50,6 +50,9 @@ from stripe_link.domain.fonts import (
     REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
 )
 from stripe_link.domain.events import (
+    DELIVERY_AUTO,
+    delivery as event_delivery,
+    ends_at as event_ends_at,
     live_occurrence as event_live_occurrence,
     next_occurrence as event_next_occurrence,
     open_occurrences as event_open_occurrences,
@@ -996,6 +999,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-occurrence:has(input:checked){border-color:var(--sl-price-card-selected-border);box-shadow:0 0 0 1px var(--sl-price-card-selected-border)}",
     "    .sl-occurrence-seats{margin-left:auto;font-size:1.2rem;font-weight:700;color:var(--sl-price-amount)}",
     "    .sl-event-live-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
+    # The auto-webinar player. Full width of the card and never taller than the viewport, so a phone shows
+    # the video and the page's own words rather than one filling the screen.
+    "    .sl-event-player{width:100%;max-width:100%;max-height:70vh;border-radius:0.8rem;background:#000;display:block}",
     "    .sl-event-join{display:block;text-align:center;text-decoration:none}",
     "    .sl-event-closed-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-dialog{border:0;padding:0;background:none;max-width:min(52rem,calc(100vw - 3.2rem));width:100%}",
@@ -9425,6 +9431,21 @@ def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any
         (f'        <p class="sl-lead-title">{title}</p>' if title else ""),
         f'        <p class="sl-event-live-heading">{heading}</p>',
     ]
+    # AN AUTO-WEBINAR PLAYS HERE RATHER THAN SENDING THE VISITOR AWAY (plans/AUTO_WEBINAR.md P2). The
+    # recording's position is NOT baked in: it is a function of the current time, and a published page is a
+    # static artifact, so the start and end ride the element as epochs and the island seats the player from
+    # the viewer's own clock.
+    video_url = safe_href(str(scheduled_event.get("video_url") or ""))
+    if event_delivery(scheduled_event) == DELIVERY_AUTO and video_url:
+        rows.append(
+            f'        <video class="sl-event-player" data-event-player playsinline controls'
+            f' preload="metadata" controlslist="nodownload noplaybackrate"'
+            f' data-starts-at="{event_starts_at(occurrence)}"'
+            f' data-ends-at="{event_ends_at(scheduled_event, occurrence)}"'
+            f' src="{escape(video_url)}"></video>'
+        )
+        rows.extend(["      </div>", "    </section>"])
+        return "\n".join(row for row in rows if row)
     if join_url:
         rows.append(
             f'        <a class="sl-cta sl-event-join" href="{escape(join_url)}" target="_blank" '
@@ -10443,6 +10464,27 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "            if (statusEl) { statusEl.classList.add('is-error'); statusEl.textContent = 'Something went wrong. Please try again.'; }",
         "            if (submitBtn) { submitBtn.dataset.busy = 'false'; submitBtn.classList.remove('is-connecting'); }",
         "          });",
+        "        });",
+        "      }",
+        # AUTO-WEBINAR PLAYBACK. The recording is a broadcast: where it has got to is a function of the
+        # VIEWER'S clock, never of when the page was published. Seats the player on load and snaps back
+        # whenever a seek lands past the live edge -- an auto-webinar that can be scrubbed to the pitch is
+        # just a video page, and the scheduled start is the only thing making this page's urgency honest.
+        # Seeking BACKWARDS is deliberately allowed: missing a sentence should not mean missing the session.
+        "      const autoPlayer = document.querySelector('[data-event-player]');",
+        "      if (autoPlayer) {",
+        "        const startsAt = Number(autoPlayer.dataset.startsAt) || 0;",
+        "        const endsAt = Number(autoPlayer.dataset.endsAt) || 0;",
+        "        const liveEdge = () => Math.max(0, Math.min(Math.floor(Date.now() / 1000), endsAt) - startsAt);",
+        "        const seat = () => {",
+        "          const edge = liveEdge();",
+        "          if (Math.abs(autoPlayer.currentTime - edge) > 2) autoPlayer.currentTime = edge;",
+        "        };",
+        "        autoPlayer.addEventListener('loadedmetadata', seat);",
+        "        if (autoPlayer.readyState >= 1) seat();",
+        "        autoPlayer.addEventListener('seeking', () => {",
+        "          const edge = liveEdge();",
+        "          if (autoPlayer.currentTime > edge + 1) autoPlayer.currentTime = edge;",
         "        });",
         "      }",
         # Declining the post-registration offer. It hides the island and says the registration stands --
