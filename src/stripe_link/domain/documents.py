@@ -3610,6 +3610,12 @@ def validate_event(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Event join_url must start with http:// or https://.")
     if document.get("duration_minutes") is not None:
         require_positive_int(document, "duration_minutes", "Event duration_minutes")
+    # How long after the start somebody may still be let in. 0 is meaningful here and means "the whole
+    # session", so it is checked as a non-negative int rather than a positive one.
+    if document.get("late_join_minutes") is not None:
+        minutes = document.get("late_join_minutes")
+        if not isinstance(minutes, int) or isinstance(minutes, bool) or minutes < 0:
+            raise DocumentValidationError("Event late_join_minutes must be a whole number of minutes, or 0 for no limit.")
 
     rows = optional_limited_object_list(document, "occurrences", 24, "Event occurrences")
     seen: set[str] = set()

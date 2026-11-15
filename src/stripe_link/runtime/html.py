@@ -53,6 +53,7 @@ from stripe_link.domain.events import (
     DELIVERY_AUTO,
     delivery as event_delivery,
     ends_at as event_ends_at,
+    joinable_until as event_joinable_until,
     live_occurrence as event_live_occurrence,
     next_occurrence as event_next_occurrence,
     occurrences as event_occurrences,
@@ -9338,8 +9339,12 @@ def render_email_cta(
         # overwrites the window from the session it matches, so this only has to be a valid shape.
         seed = event_live_occurrence(scheduled_event, now=now_epoch) or (rows[0] if rows else {})
         event_states = {
+            # `join_until` is usually the end, and is earlier only when the tenant set a late-join
+            # cut-off. Past it the island shows ENDED even though the session is still running: the
+            # visitor cannot usefully be let in, and the honest answer is that they missed it.
             "sessions": [{"start": event_starts_at(row),
-                          "end": event_ends_at(scheduled_event, row)} for row in rows],
+                          "end": event_ends_at(scheduled_event, row),
+                          "join_until": event_joinable_until(scheduled_event, row)} for row in rows],
             "live": render_event_live(scheduled_event, seed, section, title=title),
             "ended": render_event_closed(scheduled_event, section, description=description),
         }
@@ -10542,7 +10547,10 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "        try { sessions = JSON.parse(eventCta.dataset.eventSessions || '[]'); } catch (err) { sessions = []; }",
         "        const applyEventState = () => {",
         "          const now = Math.floor(Date.now() / 1000);",
-        "          const live = sessions.find((s) => now >= s.start && now < s.end);",
+        # `join_until` defaults to the end, so a session with no cut-off behaves exactly as before. Past
+        # it the visitor gets ENDED while the session is still running -- they cannot usefully be let in,
+        # and showing them the close of a pitch they have not heard is worse than saying they missed it.
+        "          const live = sessions.find((s) => now >= s.start && now < (s.join_until || s.end));",
         "          const state = live ? 'live' : (sessions.some((s) => now < s.start) ? 'upcoming' : 'ended');",
         "          eventCta.querySelectorAll('[data-event-block]').forEach((block) => {",
         "            block.hidden = block.dataset.eventBlock !== state;",

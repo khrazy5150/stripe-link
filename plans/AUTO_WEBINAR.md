@@ -86,6 +86,12 @@ The pure logic to add is small: *where in the recording are we*. Everything arou
 
 - **Does an auto-webinar need a "starting soon" holding slate** in the last minute or two, or is the
   countdown enough? The reference implementations all show one; it may just be a state of the player.
-- **What happens to someone who arrives 80 minutes into a 90-minute session?** Letting them in two minutes
-  before the pitch is worse than telling them the truth. A join cut-off (no entry after N% elapsed) is
-  probably right, and is one comparison once the client clock exists.
+- ~~**What happens to someone who arrives 80 minutes into a 90-minute session?**~~ **ANSWERED, built.**
+  `late_join_minutes` on the event: the last moment somebody may still be let in, measured from the start.
+  **0, and absent, mean the whole session** — what every event written before the field meant, and what a
+  live webinar still wants, since a host who is talking would rather have a late arrival than an empty
+  seat. Past the cut-off the page shows ENDED while the session runs on; `session_state` still says LIVE,
+  and the two answering differently is the point.
+
+  Deliberately no clever default. Only the tenant knows where their content turns, and a number picked
+  here would be wrong for most of them — so either they set one or everyone gets in.

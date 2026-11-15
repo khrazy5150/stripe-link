@@ -8,6 +8,7 @@ be asked to seek beyond the file.
 the field existed becomes an auto-webinar. That is safe only because an auto event with no recording falls
 back to the same honest block a live event with no join link already shows.
 """
+import pathlib
 import unittest
 
 from stripe_link.domain.events import (
@@ -192,6 +193,45 @@ class TheTenantCanSetOneUpTests(unittest.TestCase):
         # It is a parameter on the image-processing stack (docs/EXTERNAL_SERVICES.md). A number here would
         # go stale the moment that stack raises it.
         self.assertNotIn("maxBytes", self.screen)
+
+class TheLateJoinCutOffTests(unittest.TestCase):
+    """Arriving two minutes before the close means seeing the ask without the argument."""
+
+    def setUp(self):
+        from stripe_link.domain.events import accepts_late_join, joinable_until
+
+        self.accepts = accepts_late_join
+        self.until = joinable_until
+
+    def test_without_a_cut_off_the_whole_session_is_joinable(self):
+        # What every event written before this field meant, and what a live webinar still wants.
+        self.assertEqual(self.until(EVENT, SITTING), START + 90 * 60)
+        self.assertTrue(self.accepts(EVENT, SITTING, now=START + 89 * 60))
+
+    def test_a_cut_off_closes_the_door_while_the_session_runs_on(self):
+        capped = {**EVENT, "late_join_minutes": 20}
+        self.assertEqual(self.until(capped, SITTING), START + 20 * 60)
+        self.assertTrue(self.accepts(capped, SITTING, now=START + 19 * 60))
+        self.assertFalse(self.accepts(capped, SITTING, now=START + 21 * 60))
+        # ...and the session is still LIVE at that moment. The two answers differ on purpose.
+        self.assertEqual(session_state(capped, SITTING, now=START + 21 * 60), "live")
+
+    def test_a_cut_off_longer_than_the_session_cannot_outlast_it(self):
+        self.assertEqual(self.until({**EVENT, "late_join_minutes": 500}, SITTING), START + 90 * 60)
+
+    def test_zero_and_nonsense_both_mean_no_limit(self):
+        for value in (0, None, "", "soon", -5):
+            with self.subTest(value=value):
+                self.assertEqual(self.until({**EVENT, "late_join_minutes": value}, SITTING),
+                                 START + 90 * 60)
+
+    def test_the_page_carries_it_so_the_island_can_apply_it(self):
+        from stripe_link.runtime import html
+
+        source = (pathlib.Path(html.__file__)).read_text(encoding="utf-8")
+        self.assertIn('"join_until": event_joinable_until', source)
+        # Falls back to the end, so a page published before this field behaves exactly as it did.
+        self.assertIn("(s.join_until || s.end)", source)
 
 
 if __name__ == "__main__":

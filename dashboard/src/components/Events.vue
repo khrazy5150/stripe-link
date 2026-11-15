@@ -61,6 +61,17 @@
         </label>
       </div>
 
+      <label class="offer-field">
+        <span>Latest someone can still join <small>(minutes after the start)</small></span>
+        <input v-model.number="editing.late_join_minutes" type="number" min="0" placeholder="0 — anyone, any time" />
+      </label>
+      <p class="field-note">
+        Leave at 0 and anyone can join at any point, part-way through. Set it if your session builds to
+        something: walking in just before the close means seeing the ask without the argument, and that is
+        a first impression you cannot repair. Only you know where your content turns, so there is no
+        default.
+      </p>
+
       <template v-if="editing.delivery !== 'live'">
         <label class="offer-field">
           <span>The recording</span>
@@ -219,7 +230,7 @@ function startNew() {
   editing.value = {
     schema_version: "1.0.0", document_type: "event", event_id: localId("ev"),
     title: "", description: "", delivery: "auto", provider: "zoom", join_url: "", video_url: "",
-    duration_minutes: 60,
+    duration_minutes: 60, late_join_minutes: 0,
     occurrences: [emptyOccurrence()],
   };
 }
@@ -232,7 +243,7 @@ function startEdit(item) {
   // `delivery` is defaulted HERE as well as on the server, and to the same value, so an event saved
   // before the field existed opens on Automated rather than on an empty select.
   editing.value = {
-    delivery: "auto", video_url: "",
+    delivery: "auto", video_url: "", late_join_minutes: 0,
     ...item,
     occurrences: (item.occurrences || []).map((row) => ({ ...row })),
   };
@@ -285,6 +296,9 @@ async function save() {
       ...editing.value,
       duration_minutes: Number(editing.value.duration_minutes) || undefined,
       delivery: editing.value.delivery === "live" ? "live" : "auto",
+      // 0 is a real value here ("anyone, any time"), so it must survive rather than become undefined the
+      // way an optional number normally would.
+      late_join_minutes: Math.max(0, Number(editing.value.late_join_minutes) || 0),
       // The OTHER mode's fields are dropped on save rather than carried along invisibly. An auto event
       // holding a stale join_url would have the page offer a room nobody is in, and the renderer prefers
       // the recording -- so the link would sit in the document being wrong and never being seen.

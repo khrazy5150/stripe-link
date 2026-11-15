@@ -91,6 +91,38 @@ def delivery(event: Any) -> str:
     return value if value in DELIVERY_MODES else DELIVERY_AUTO
 
 
+def joinable_until(event: Any, occurrence: Any) -> int:
+    """The last moment somebody may still be let INTO a running session.
+
+    `late_join_minutes` on the event, measured from the start. **0 (and absent) means the whole session**,
+    which is what every event written before this field meant and what a live webinar still wants: a host
+    who is talking would rather have a late arrival than an empty seat.
+
+    It exists for the auto-webinar, where the recording is the same every time and the pitch is at the
+    end. Walking somebody in two minutes before the close is worse than telling them they missed it --
+    they see the ask without the argument, which is the one impression that cannot be repaired. The number
+    is the TENANT's because only they know where their content turns, so there is deliberately no clever
+    default: either they set one or everyone gets in.
+    """
+    start = starts_at(occurrence)
+    if not start:
+        return 0
+    end = ends_at(event, occurrence)
+    try:
+        minutes = int((event or {}).get("late_join_minutes") or 0)
+    except (TypeError, ValueError, AttributeError):
+        minutes = 0
+    if minutes <= 0:
+        return end
+    return min(end, start + minutes * 60)
+
+
+def accepts_late_join(event: Any, occurrence: Any, *, now: int) -> bool:
+    """Whether a visitor arriving right now may still be let in. Only meaningful while LIVE; a session
+    that has not started or has ended is governed by `session_state`."""
+    return int(now) < joinable_until(event, occurrence)
+
+
 def elapsed_seconds(event: Any, occurrence: Any, *, now: int) -> int:
     """How far into the session we are, in seconds -- the position an auto-webinar's player seeks to.
 
