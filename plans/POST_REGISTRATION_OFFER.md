@@ -113,11 +113,23 @@ its charge call swapped for a checkout redirect, not a second island written fro
    discarded on save with no error. That guard exists because `price_highlight` shipped with exactly that
    bug. Builder editor added (copy only — the product comes from the pricing context). Dashboard builds
    clean; 9,812 tests pass.
-4. **P4 — the wizard.** One step in the lead-event flow: "offer something after they register?" picking a
-   product and price. Without this the feature is author-only.
-5. **P5 — attribution.** Carry `lead_id` + `event_id` + `occurrence_id` into the Checkout session metadata
-   so the resulting order is traceable to the registration that produced it, and the registrant list can
-   show who bought.
+4. **P4 — pricing it. DONE.** A price's context IS its funnel role, so the role is created by adding a
+   `post_registration` price on the Products screen — no separate wizard step was needed, and adding one
+   would have been a second place to say the same thing. Labelled "After registering", by the moment the
+   buyer meets it.
+
+   The **same denylist bug turned up a second time**: `Offers.vue` derives `landingPrices` as every price
+   *not* in `FUNNEL_CONTEXTS`, so the add-on would have rendered as a buyable landing card — the offer
+   appearing before the registration it follows. Exactly `pricing._LISTICLE_EXCLUDED_CONTEXTS`, which
+   needed telling about the same context server-side in P1. Both are asserted now.
+5. **P5 — attribution. DONE.** `lead_id` + `event_id` + `occurrence_id` ride the claim link into the
+   Checkout session's metadata, so an upgrade is distinguishable from a cold purchase.
+
+   The lead id does not exist until the registration POST returns, so the href is completed client-side
+   rather than at publish — best-effort, because an unattributed claim link that reaches checkout beats a
+   perfect one that does not. Sanitised server-side through a new `identifier_slug`, for the reason the
+   existing `src` attribution already records: these are our own ids, but they come back off a static page
+   anyone can POST in place of.
 
 ## 5. Open questions
 

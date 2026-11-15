@@ -154,6 +154,45 @@ class TheTenantCanPriceItTests(unittest.TestCase):
                     / "Services.vue").read_text(encoding="utf-8")
         self.assertNotIn("post_registration", services)
 
+class TheOrderTracesBackToTheRegistrationTests(unittest.TestCase):
+    """P5. Without this an upgrade is indistinguishable from a cold purchase: the registrant list cannot
+    say who upgraded, and the offer cannot be told whether it works."""
+
+    def test_the_ids_are_sanitised_before_they_reach_a_document(self):
+        from stripe_link.domain.page_views import identifier_slug
+
+        # OUR ids, but they arrive off a static page anyone can POST in place of. Minting them does not
+        # make them trustworthy on the way back -- the same reasoning `src` already carries.
+        self.assertEqual(identifier_slug("lead_7Fx9kG"), "lead_7Fx9kG")
+        self.assertEqual(identifier_slug("lead_7F/../x"), "lead_7Fx")
+        self.assertEqual(identifier_slug("<script>"), "script")
+        self.assertEqual(identifier_slug(None), "")
+
+    def test_case_survives_because_an_id_lookup_is_case_sensitive(self):
+        from stripe_link.domain.page_views import identifier_slug, source_slug
+
+        self.assertEqual(identifier_slug("Occ_AbC"), "Occ_AbC")
+        self.assertEqual(source_slug("Occ_AbC"), "occ_abc")
+
+    def test_it_is_length_capped_like_every_other_tenant_supplied_value(self):
+        from stripe_link.domain.page_views import MAX_SOURCE_LENGTH, identifier_slug
+
+        self.assertEqual(len(identifier_slug("a" * 500)), MAX_SOURCE_LENGTH)
+
+    def test_checkout_stamps_all_three_onto_the_session(self):
+        checkout = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                    / "checkout.py").read_text(encoding="utf-8")
+        self.assertIn('("lead_id", "event_id", "occurrence_id")', checkout)
+        self.assertIn("identifier_slug(value)", checkout)
+
+    def test_the_claim_link_is_finished_after_the_registration_not_at_publish(self):
+        # The lead id does not exist until the POST returns, so the href is completed client-side.
+        html_src = (pathlib.Path(__file__).resolve().parents[1] / "src" / "stripe_link" / "runtime"
+                    / "html.py").read_text(encoding="utf-8")
+        self.assertIn("url.searchParams.set('lead_id', body.lead_id)", html_src)
+        # Best-effort: an unattributed claim link still has to reach checkout.
+        self.assertIn("catch (err) { /* keep the link as published */ }", html_src)
+
 
 if __name__ == "__main__":
     unittest.main()

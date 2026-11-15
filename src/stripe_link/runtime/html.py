@@ -10498,6 +10498,10 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),",
         "          }).then((response) => {",
         "            if (!response.ok && response.status !== 202) throw new Error('failed');",
+        # The body is read for the lead id below. A response that is not JSON must not turn an accepted
+        # registration into the error branch, so a parse failure becomes an empty object.
+        "            return response.json().catch(() => ({}));",
+        "          }).then((body) => {",
         "            leadForm.querySelectorAll('.sl-lead-input,.sl-lead-consent,button[type=\"submit\"]').forEach((el) => el.remove());",
         "            if (statusEl) statusEl.textContent = 'Thanks! We\\'ll be in touch shortly.';",
         # The post-registration offer is revealed HERE and nowhere else: the server has accepted the
@@ -10508,6 +10512,20 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "              prOffer.hidden = false;",
         "              if (statusEl) statusEl.textContent = 'Your seat is held.';",
         "              prOffer.scrollIntoView({ behavior: 'smooth', block: 'start' });",
+        # WHICH REGISTRATION BOUGHT IT. The lead id does not exist until this response, so the claim link
+        # is finished here rather than at publish -- without it the order is indistinguishable from a cold
+        # purchase and nothing can say whether the offer works. Best-effort: a claim link that reaches
+        # checkout unattributed is far better than one that does not reach checkout.
+        "              const claim = prOffer.querySelector('[data-pr-claim]');",
+        "              if (claim) {",
+        "                try {",
+        "                  const url = new URL(claim.getAttribute('href'), window.location.href);",
+        "                  if (body && body.lead_id) url.searchParams.set('lead_id', body.lead_id);",
+        "                  if (payload.event_id) url.searchParams.set('event_id', payload.event_id);",
+        "                  if (payload.occurrence_id) url.searchParams.set('occurrence_id', payload.occurrence_id);",
+        "                  claim.setAttribute('href', url.toString());",
+        "                } catch (err) { /* keep the link as published */ }",
+        "              }",
         "            }",
         "          }).catch(() => {",
         "            if (statusEl) { statusEl.classList.add('is-error'); statusEl.textContent = 'Something went wrong. Please try again.'; }",

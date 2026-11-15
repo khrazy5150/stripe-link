@@ -20,6 +20,7 @@ logger.setLevel(logging.INFO)
 
 from stripe_link.common import error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.page_views import identifier_slug
 from stripe_link.domain.page_views import source_slug as attribution_source_slug
 from stripe_link.domain.platform_suspension import SuspendedError, assert_not_suspended
 from stripe_link.sabbath_gate import SabbathClosedError, assert_store_open, closed_response as sabbath_closed_response
@@ -445,6 +446,8 @@ def handler(
             collect_tax=collect_tax,
             coupon_code=str(params.get("coupon") or ""),
             attribution_source=str(params.get("src") or ""),
+            registration=(str(params.get("lead_id") or ""), str(params.get("event_id") or ""),
+                          str(params.get("occurrence_id") or "")),
             mode=mode,
             coupons_repo=coupons_repo,
             grants_repo=grants_repo,
@@ -1206,6 +1209,7 @@ def build_checkout_payload(
     collect_tax=False,
     coupon_code="",
     attribution_source="",
+    registration=("", "", ""),
     mode="test",
     coupons_repo=None,
     grants_repo=None,
@@ -1249,6 +1253,18 @@ def build_checkout_payload(
     source = attribution_source_slug(attribution_source)
     if source:
         payload["metadata[src]"] = source
+    # WHICH REGISTRATION BOUGHT THIS (plans/POST_REGISTRATION_OFFER.md P5). The add-on is sold in the
+    # seconds after someone registers for a free session, and without these three ids the resulting order
+    # is indistinguishable from a cold purchase -- the registrant list cannot say who upgraded, and the
+    # offer cannot be told whether it works.
+    #
+    # Sanitised for the same reason `src` is, and the reason is worth repeating: these are OUR ids, but
+    # they arrive off a static page that anyone can POST in place of, so minting them does not make them
+    # trustworthy on the way back.
+    for key, value in zip(("lead_id", "event_id", "occurrence_id"), registration):
+        cleaned = identifier_slug(value)
+        if cleaned:
+            payload[f"metadata[{key}]"] = cleaned
     # A coupon carried in from a campaign page: the visitor tapped a ticket that already named the code, so
     # applying it here means the discount is on the page they land on instead of behind a field they have to
     # find and retype (plans/COUPON_ELEMENT.md).

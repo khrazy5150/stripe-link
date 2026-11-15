@@ -149,6 +149,21 @@ def source_slug(value: Any) -> str:
     return cleaned
 
 
+def identifier_slug(value: Any) -> str:
+    """One of OUR OWN ids (a lead, an event, an occurrence) arriving back off a URL, reduced to something
+    safe to store. "" when it is unusable.
+
+    Separate from `source_slug` only in that it keeps case: these are generated ids like `lead_7Fx9kG`, and
+    lowercasing them would break a lookup against the row that issued them. The reasoning is otherwise
+    identical, and so is the threat: the page carrying the value is a static artifact that anyone can POST
+    in place of, so it is sanitised here rather than trusted because we minted it.
+
+    An allow-list, not a deny-list, and length-capped -- the value reaches a stored document.
+    """
+    text = str(value or "").strip()[:MAX_SOURCE_LENGTH]
+    return "".join(ch for ch in text if ch.isalnum() or ch in "-_")
+
+
 def source_dedupe_item(page_id: str, source: str, day: str, visitor: str, now: int) -> dict[str, Any]:
     """The row whose CONDITIONAL creation decides whether this arrival counts. Mirrors `link_dedupe_item`."""
     return {
