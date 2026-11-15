@@ -168,7 +168,16 @@ When `starts_at` has passed (or capacity is reached):
 This state is computed at render from the occurrence, like every other derived thing here — not stored, so
 it cannot go stale.
 
-## 10. v2 — recorded, not approved
+## 10. v2 — auto-webinars APPROVED 2026-11-15; live hosting still not
+
+Auto-webinars were approved on 2026-11-15 and are now [AUTO_WEBINAR.md](AUTO_WEBINAR.md), with `delivery`
+defaulting to **auto** at the author's instruction. The recommendation below — auto before live — stands
+and is what was followed. **Live hosting remains unapproved**, for the reasons in the second bullet.
+
+Building it surfaced a bug in P1: the event page decides UPCOMING/LIVE/ENDED at **publish** time, and a
+published page is a static artifact, so the live window never appears on one. See AUTO_WEBINAR.md §1.
+
+The original note follows, unedited:
 
 The author raised hosting webinars on AWS, including **auto-webinars** (pre-recorded, replayed on a
 schedule). Recorded here so v1 does not block it:

@@ -67,6 +67,47 @@ def session_state(event: Any, occurrence: Any, *, now: int) -> str:
     return LIVE if moment < ends_at(event, occurrence) else ENDED
 
 
+# How the session is DELIVERED (plans/AUTO_WEBINAR.md). `auto` plays a recording that starts on a
+# schedule; `live` hands the visitor a join link to whatever provider is hosting it. Everything else about
+# the two is identical -- the registration page, the leads, the reminders, the confirmation email -- which
+# is the whole argument for auto being a delivery mode rather than a second kind of event.
+DELIVERY_AUTO = "auto"
+DELIVERY_LIVE = "live"
+DELIVERY_MODES = (DELIVERY_AUTO, DELIVERY_LIVE)
+
+
+def delivery(event: Any) -> str:
+    """`auto` or `live`. **Absent means AUTO** (author, 2026-11-15: auto is the first kind of webinar a
+    tenant creates).
+
+    Note what that default does to events saved before this field existed: they become auto-webinars with
+    no recording. That is deliberate and safe, because `render_event_live` already refuses to render a
+    button that goes nowhere -- an auto event with no `video_url` falls back to the same honest "the host
+    has not posted the link yet" block a live event with no `join_url` shows. The alternative default,
+    `live`, would have been wrong the other way: it reads an explicit choice into events whose author never
+    made one.
+    """
+    value = str((event or {}).get("delivery") or "").strip().lower()
+    return value if value in DELIVERY_MODES else DELIVERY_AUTO
+
+
+def elapsed_seconds(event: Any, occurrence: Any, *, now: int) -> int:
+    """How far into the session we are, in seconds -- the position an auto-webinar's player seeks to.
+
+    Clamped to the session: 0 before it starts, and never past its end. A viewer arriving forty minutes
+    late joins forty minutes in, exactly as they would a live broadcast, which is the entire point of
+    scheduling a recording. The caller decides what to do with it; this function has no opinion about
+    whether the session is live (ask `session_state`).
+
+    Returns 0 for an occurrence with no start, matching `session_state`'s treatment of the same case.
+    """
+    start = starts_at(occurrence)
+    if not start:
+        return 0
+    end = ends_at(event, occurrence)
+    return max(0, min(int(now), end) - start)
+
+
 def live_occurrence(event: Any, *, now: int) -> dict[str, Any] | None:
     """The sitting happening right now, if one is. The page shows its join link above everything else."""
     for row in occurrences(event):
