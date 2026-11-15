@@ -1,7 +1,16 @@
 # Webinars
 
-Status: **proposed** (design only — no code yet). Author-approved direction from the 2026-10-14 discussion;
-the v2 sketch in §10 is explicitly *not* approved and is recorded so the v1 shape does not foreclose it.
+Status: **P1–P3 SHIPPED** (2026-10-14 → 2026-11-03; `305f253` P1a … `ed38e30` P3, `f3efd97` "P2 complete").
+EventsTable, the `lead_event` offer type, server-side future/capacity refusal, the confirmation email with
+its `.ics`, event-driven reminders, and the registrant list/export/cancel are all live. The "design only —
+no code yet" header this replaces was stale for a month; §3's *do not rebuild* table is now the smaller
+half of what exists. Still deliberately unbuilt: a registrant un-registering (§12 P3), "notify me of the
+next one" (§12 P3), and the occurrence GSI (§10a). The v2 sketch in §10 — auto-webinars and hosting — is
+still explicitly *not* approved and is recorded so the v1 shape does not foreclose it.
+
+**What happens after a registration is a separate plan.** v1 ends at the confirmation email; the visitor
+stays on the page. Selling them something at that moment is [POST_REGISTRATION_OFFER.md](POST_REGISTRATION_OFFER.md),
+which adds a `post_registration` stage rather than another page type.
 
 > **Mostly-built note.** Unlike most greenfield plans here, the majority of this already exists. Lead
 > capture, the lead page shapes, the reminder sweep and the mailer are all shipped. The genuinely new work

@@ -19,7 +19,7 @@ class PricingError(ValueError):
 
 
 # Contexts never used for a listicle slide (funnel-only or, for now, flash_sale which needs its toggle).
-_LISTICLE_EXCLUDED_CONTEXTS = {"upsell", "downsell", "order_bump", "flash_sale"}
+_LISTICLE_EXCLUDED_CONTEXTS = {"upsell", "downsell", "order_bump", "flash_sale", "post_registration"}
 # When no default is designated, prefer the regular (standard) single-unit price over an ad-hoc sale.
 _LISTICLE_CONTEXT_RANK = {"standard": 0, "sale": 1}
 

@@ -38,6 +38,7 @@ _FUNNEL_CONTEXTS = {
     "order_bump": "Order bump — ticked at checkout",
     "upsell": "Upsell — offered after paying",
     "downsell": "Downsell — offered if the upsell is declined",
+    "post_registration": "Offered right after a free registration",
 }
 
 

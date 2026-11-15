@@ -130,7 +130,8 @@
             "enum": [
               "landing",
               "checkout",
-              "post_purchase"
+              "post_purchase",
+              "post_registration"
             ]
           },
           "placement": {

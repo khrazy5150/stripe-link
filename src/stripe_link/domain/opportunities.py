@@ -13,6 +13,11 @@ from typing import Any
 STAGE_LANDING = "landing"
 STAGE_CHECKOUT = "checkout"
 STAGE_POST_PURCHASE = "post_purchase"
+# Offered the moment a FREE registration succeeds, before any payment exists
+# (plans/POST_REGISTRATION_OFFER.md). Distinct from post_purchase because that stage exists to support the
+# ONE-CLICK charge: there the card is already attached to a PaymentIntent. A registrant has handed over an
+# email address and nothing else, so this stage can only ever route into a normal Checkout session.
+STAGE_POST_REGISTRATION = "post_registration"
 
 # Legacy offer.funnel.<key> -> (stage, placement.surface, default placement.strategy).
 _FUNNEL_STAGE = {

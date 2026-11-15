@@ -70,7 +70,8 @@
         "flash_sale",
         "upsell",
         "downsell",
-        "order_bump"
+        "order_bump",
+        "post_registration"
       ]
     },
     "discount_pct": {

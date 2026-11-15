@@ -122,6 +122,38 @@ def post_purchase_plan(
     return {"strategy": strategy, "upsells": upsells}
 
 
+# The price context that makes a product the thing offered right after a free registration
+# (plans/POST_REGISTRATION_OFFER.md). A context rather than a stored flag, for the same reason every other
+# funnel role is one: deleting the price must retire the offer immediately, and adding one must not wait for
+# every offer holding that product to be re-saved.
+POST_REGISTRATION_CONTEXT = "post_registration"
+
+
+def post_registration_offer(
+    offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The ONE paid thing shown the instant a free registration succeeds, or None.
+
+    Derived exactly as every other funnel role is: a product participating in this offer that carries a
+    price in the `post_registration` context. Returns {product_id, price_id, product, price}.
+
+    **Why this can never be one-click charged.** `post_purchase_plan` feeds the one-click charge, and it
+    selects on the `upsell`/`downsell` contexts; `process_upsell` independently refuses anything outside
+    `allowed_price_contexts = ["upsell", "downsell"]`. A `post_registration` price is therefore invisible to
+    both. That is deliberate and load-bearing: at this moment the visitor has given an email address and
+    nothing else, so there is no PaymentIntent to charge again and the only correct route is a normal
+    Checkout session. Two independent allowlists keep it that way; `tests/test_post_registration_offer.py`
+    holds both, because a guarantee nothing asserts is a guarantee nobody notices breaking.
+
+    **One, not a sequence.** The upsell stage earns its sequencing from a buyer who has already paid. A
+    visitor who has only just handed over an email has spent no money and owes no attention; a second and
+    third ask here reads as a toll gate. `placement.surface` already allows `downsell`, so a later
+    second-chance needs no model change -- it is left out because nobody has asked for it.
+    """
+    items = funnel_context_items(offer, products_by_id, POST_REGISTRATION_CONTEXT)
+    return items[0] if items else None
+
+
 def funnel_reserved_slugs(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:
     """The reserved funnel slugs a sales offer's post-purchase funnel needs, in flow order (plans/
     SALES_FUNNELS.md P2b): `/upsell` when the offer has resolvable upsells, then `/downsell` when it has
