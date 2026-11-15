@@ -6076,6 +6076,10 @@ Resources:
           AttributeType: S
         - AttributeName: GSI1SK
           AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
@@ -6087,6 +6091,18 @@ Resources:
             - AttributeName: GSI1PK
               KeyType: HASH
             - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # Registrations by session (plans/WEBINAR.md §10a). SPARSE: only a lead carrying an occurrence
+        # writes GSI2PK, so an ordinary lead capture never enters this index and never pays for it. That
+        # is what makes a second index on a shared table affordable -- it holds exactly the rows the
+        # query is ever asked about.
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
               KeyType: RANGE
           Projection:
             ProjectionType: ALL

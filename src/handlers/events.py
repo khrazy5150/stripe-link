@@ -9,6 +9,7 @@ import logging
 from stripe_link.common import json_response, parse_json_body
 from stripe_link.document_route import document_route
 from stripe_link.domain.documents import validate_event
+from stripe_link.domain.leads import registrants_for_occurrence
 from stripe_link.domain.events import (
     CANCELLED,
     UPCOMING,
@@ -75,7 +76,9 @@ def _announce_cancellations(previous, saved, leads_repo, notify_fn, *, now):
     replacement = next_occurrence(saved, now=now)
 
     try:
-        registrants = _registrants_by_occurrence(leads_repo, tenant_id, saved.get("event_id"))
+        registrants = _registrants_by_occurrence(
+            leads_repo, tenant_id, saved.get("event_id"),
+            occurrence_ids=[str(row.get("occurrence_id") or "") for row in newly_cancelled])
     except RepositoryError as exc:
         logger.warning("event cancelled but registrants not listed for %s: %s", tenant_id, exc)
         return
@@ -91,20 +94,22 @@ def _announce_cancellations(previous, saved, leads_repo, notify_fn, *, now):
                 logger.warning("cancellation notice failed for %s: %s", registrant.get("email"), exc)
 
 
-def _registrants_by_occurrence(leads_repo, tenant_id, event_id):
-    """This tenant's registrations for one event, grouped by occurrence. One tenant-scoped list filtered in
-    memory -- the cost of there being no index on `occurrence_id` (plans/WEBINAR.md §10a)."""
-    wanted = str(event_id or "")
+def _registrants_by_occurrence(leads_repo, tenant_id, event_id, occurrence_ids=()):
+    """This tenant's registrations for one event, grouped by occurrence.
+
+    One query per sitting against the GSI2 occurrence index (plans/WEBINAR.md §10a), instead of listing a
+    tenant's entire lead history and filtering it in memory. An event caps at 24 sittings, and only the
+    ones being announced about are asked for.
+    """
     grouped: dict[str, list[dict]] = {}
-    for lead in leads_repo.list_for_tenant(tenant_id):
-        if str(lead.get("event_id") or "") != wanted:
-            continue
-        email = str((lead.get("fields") or {}).get("email") or "").strip()
-        if email:
-            grouped.setdefault(str(lead.get("occurrence_id") or ""), []).append(
-                {"email": email, "name": str((lead.get("fields") or {}).get("name") or ""),
-                 "page_id": str(lead.get("page_id") or ""),
-                 "stripe_mode": str(lead.get("stripe_mode") or "live")})
+    for occurrence_id in occurrence_ids:
+        for lead in registrants_for_occurrence(leads_repo, tenant_id, occurrence_id, str(event_id or "")):
+            email = str((lead.get("fields") or {}).get("email") or "").strip()
+            if email:
+                grouped.setdefault(str(occurrence_id), []).append(
+                    {"email": email, "name": str((lead.get("fields") or {}).get("name") or ""),
+                     "page_id": str(lead.get("page_id") or ""),
+                     "stripe_mode": str(lead.get("stripe_mode") or "live")})
     return grouped
 
 

@@ -213,9 +213,13 @@ class TheRegistrationEmailsNameTheirPagesBusinessTests(unittest.TestCase):
                 return [{"event_id": "ev_1", "occurrence_id": "occ_1", "page_id": "page_qui",
                          "stripe_mode": "test", "fields": {"email": "a@b.co", "name": "Casey"}}]
 
-        for grouper in (reminders._registrants_for, events._registrants_by_occurrence):
-            with self.subTest(grouper=grouper.__module__):
-                registrant = grouper(Leads(), "t1", "ev_1")["occ_1"][0]
+        # The two now differ in shape -- the reminder sweep asks about ONE sitting and gets a list, the
+        # cancellation announcer asks about several and gets them grouped -- so each is called its own way.
+        # What both must still do is carry the page through, which is what this is here for.
+        for registrant in (reminders._registrants_for(Leads(), "t1", "occ_1")[0],
+                           events._registrants_by_occurrence(
+                               Leads(), "t1", "ev_1", occurrence_ids=["occ_1"])["occ_1"][0]):
+            with self.subTest(registrant=registrant):
                 self.assertEqual(registrant["page_id"], "page_qui")
                 self.assertEqual(registrant["stripe_mode"], "test")
 
@@ -229,7 +233,7 @@ class TheRegistrationEmailsNameTheirPagesBusinessTests(unittest.TestCase):
                 return [{"event_id": "ev_1", "occurrence_id": "occ_1",
                          "fields": {"email": "a@b.co"}}]
 
-        registrant = reminders._registrants_for(Leads(), "t1", "ev_1")["occ_1"][0]
+        registrant = reminders._registrants_for(Leads(), "t1", "occ_1")[0]
         self.assertEqual(registrant["page_id"], "")
         self.assertEqual(registrant["stripe_mode"], "live")
 

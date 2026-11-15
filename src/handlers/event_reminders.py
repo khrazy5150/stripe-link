@@ -18,6 +18,7 @@ Best-effort per session: one failure never blocks the rest, and because what is 
 import logging
 import time
 
+from stripe_link.domain.leads import registrants_for_occurrence
 from stripe_link.domain.events import (
     due_reminder_leads,
     occurrences,
@@ -52,7 +53,6 @@ def handler(event, context, *, events_repo=None, leads_repo=None, send_fn=None, 
         tenant_id = str(record.get("tenant_id") or "")
         if not tenant_id:
             continue
-        registrants = None          # listed lazily: most events have nothing due
         changed = False
 
         for occurrence in occurrences(record):
@@ -62,13 +62,16 @@ def handler(event, context, *, events_repo=None, leads_repo=None, send_fn=None, 
             leads_due = due_reminder_leads(record, occurrence, now=now)
             if not leads_due:
                 continue
-            if registrants is None:
-                try:
-                    registrants = _registrants_for(leads_repo, tenant_id, record.get("event_id"))
-                except RepositoryError as exc:
-                    logger.warning("event reminders: could not list leads for %s: %s", tenant_id, exc)
-                    registrants = {}
-            audience = registrants.get(str(occurrence.get("occurrence_id") or "")) or []
+            # Asked per SITTING, against the occurrence index, and only for a sitting that actually has
+            # a notice due. The old shape listed a tenant's whole lead history once per event; this asks
+            # only about the handful of people the mail is for (plans/WEBINAR.md §10a).
+            try:
+                audience = _registrants_for(leads_repo, tenant_id,
+                                            str(occurrence.get("occurrence_id") or ""),
+                                            str(record.get("event_id") or ""))
+            except RepositoryError as exc:
+                logger.warning("event reminders: could not list leads for %s: %s", tenant_id, exc)
+                audience = []
             # Only the MOST IMMINENT notice is sent. The rest are superseded rather than queued: telling
             # someone a session starts "tomorrow" when it starts in thirty minutes is wrong, not merely
             # redundant. Recording them is what stops them firing on the next sweep.
@@ -102,29 +105,23 @@ def handler(event, context, *, events_repo=None, leads_repo=None, send_fn=None, 
     return {"events": len(scheduled), "notices": sessions, "sent": sent, "failed": failed}
 
 
-def _registrants_for(leads_repo, tenant_id: str, event_id) -> dict[str, list[dict]]:
-    """This tenant's registrations for one event, grouped by occurrence.
+def _registrants_for(leads_repo, tenant_id: str, occurrence_id: str, event_id: str = "") -> list[dict]:
+    """Everyone to remind about ONE sitting, by index rather than by filtering a tenant's history.
 
-    One tenant-scoped list, filtered in memory. That is the cost of there being no index on
-    `occurrence_id`, and it is only paid for a tenant with a session starting inside the horizon.
+    `page_id` and `stripe_mode` ride along because the reminder has to be signed by the business running
+    the session, and the registration is the only record that knows which page it came from
+    (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
     """
-    wanted = str(event_id or "")
-    grouped: dict[str, list[dict]] = {}
-    for lead in leads_repo.list_for_tenant(tenant_id):
-        if str(lead.get("event_id") or "") != wanted:
-            continue
+    audience = []
+    for lead in registrants_for_occurrence(leads_repo, tenant_id, occurrence_id, event_id):
         email = str((lead.get("fields") or {}).get("email") or "").strip()
         if not email:
             continue
-        grouped.setdefault(str(lead.get("occurrence_id") or ""), []).append(
-            # `page_id` and `stripe_mode` ride along because the reminder has to be signed by the business
-            # running the session, and the registration is the only record that knows which page it came
-            # from (plans/SITE_AS_BUSINESS_IDENTITY.md §4).
+        audience.append(
             {"email": email, "name": str((lead.get("fields") or {}).get("name") or ""),
              "page_id": str(lead.get("page_id") or ""),
-             "stripe_mode": str(lead.get("stripe_mode") or "live")}
-        )
-    return grouped
+             "stripe_mode": str(lead.get("stripe_mode") or "live")})
+    return audience
 
 
 def _send_reminder(record, occurrence, registrant, lead_minutes, tenant_id):

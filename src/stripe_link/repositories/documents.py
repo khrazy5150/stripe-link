@@ -543,6 +543,41 @@ class DynamoDocumentRepository:
             return None
         return self._strip_keys(items[0])
 
+    def list_by_index(self, partition_value: str, *, index: str, partition_attr: str,
+                      tenant_id: str = "") -> list[dict[str, Any]]:
+        """Every document under one partition of a secondary index, paged to the end.
+
+        Generic on purpose: the index name and its key attribute are the caller's, so one entity needing
+        an index does not put that entity's vocabulary into the class every entity shares.
+
+        `tenant_id` filters the result rather than narrowing the query. The index's sort key is not
+        assumed to be a tenant, and an index whose partition values are globally unique ids -- which is
+        the case this exists for -- would gain nothing from narrowing but would quietly return nothing if
+        the sort key were ever shaped differently.
+        """
+        from boto3.dynamodb.conditions import Key
+
+        value = str(partition_value or "").strip()
+        if not value:
+            return []
+        documents: list[dict[str, Any]] = []
+        last_evaluated_key = None
+        while True:
+            request: dict[str, Any] = {
+                "IndexName": index,
+                "KeyConditionExpression": Key(partition_attr).eq(value),
+            }
+            if last_evaluated_key:
+                request["ExclusiveStartKey"] = last_evaluated_key
+            response = self.table.query(**request)
+            documents.extend(self._strip_keys(item) for item in response.get("Items", []))
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+        if tenant_id:
+            documents = [doc for doc in documents if str(doc.get("tenant_id") or "") == str(tenant_id)]
+        return documents
+
     def put_if_absent(self, document: dict[str, Any]) -> bool:
         """`put`, but only if this document does not already exist. True when it was written.
 

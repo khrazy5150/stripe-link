@@ -147,6 +147,19 @@ def build_lead_submission(
         # has to answer. Empty on an ordinary lead capture.
         "event_id": str(event_id or ""),
         "occurrence_id": str(occurrence_id or ""),
+        # SPARSE INDEX KEY, written only on a registration (plans/WEBINAR.md §10a). Without it "everyone
+        # registered for Wednesday" means listing a tenant's entire lead history and filtering in memory.
+        #
+        # Sparse is what makes the index affordable: an ordinary lead capture carries no occurrence, so it
+        # never enters the index and never pays for it. Only registrations do, which is the whole set the
+        # query is ever asked about. Writing it HERE rather than in the repository keeps the generic
+        # document repository generic -- one entity's index has no business in the class every entity
+        # shares.
+        # The sort key is the lead id -- unique within the sitting, and deliberately NOT a tenant key:
+        # building one of those outside the repository is forbidden here (test_mode_scope_census), and
+        # the tenant filter belongs in the query anyway, where `list_by_index` already applies it.
+        **({"GSI2PK": f"OCCURRENCE#{occurrence_id}", "GSI2SK": str(lead_id)}
+           if str(occurrence_id or "").strip() else {}),
         "fields": fields,
         "email_normalized": normalize_email(fields.get("email")),
         "phone_normalized": normalize_phone(fields.get("phone")),
@@ -209,6 +222,40 @@ def record_attendance(lead: dict[str, Any], *, position: int, now: int) -> dict[
         },
         "updated_at": int(now),
     }
+
+
+def registrants_for_occurrence(leads_repo, tenant_id: str, occurrence_id: str,
+                               event_id: str = "") -> list[dict[str, Any]]:
+    """Everyone registered for ONE sitting, by index rather than by filtering a tenant's whole history
+    (plans/WEBINAR.md §10a).
+
+    Falls back to the in-memory filter when the repository has no index query -- a fake in a test, or a
+    deploy where the index is still backfilling. A GSI added to a live table is available immediately but
+    populates in the background, so for a short while after the deploy a query would return fewer rows
+    than exist, and returning half a registrant list is worse than being slow.
+
+    Cancelled registrations are left out: somebody who gave the seat back is not coming, and reminding
+    them is the one thing they explicitly asked not to happen.
+    """
+    rows: list[dict[str, Any]] = []
+    wanted = str(occurrence_id or "")
+    if hasattr(leads_repo, "list_by_index"):
+        try:
+            rows = leads_repo.list_by_index(
+                f"OCCURRENCE#{wanted}", index="GSI2", partition_attr="GSI2PK", tenant_id=tenant_id)
+        except Exception:  # noqa: BLE001 - an index problem must not cancel the mail it feeds
+            rows = []
+    if not rows:
+        rows = [lead for lead in leads_repo.list_for_tenant(tenant_id)
+                if str(lead.get("occurrence_id") or "") == wanted]
+    # Matched on the EVENT as well, not just the sitting. The index narrows to one occurrence id, but
+    # occurrence ids are generated per event rather than globally, so occurrence alone is a weaker match
+    # than the filter this replaced -- and a reminder sent to somebody else's registrants is the kind of
+    # mistake that is noticed by the people who receive it.
+    wanted_event = str(event_id or "")
+    return [lead for lead in rows
+            if str(lead.get("status") or "") != "archived"
+            and (not wanted_event or str(lead.get("event_id") or "") == wanted_event)]
 
 
 def lead_display_name(lead: dict[str, Any]) -> str:
