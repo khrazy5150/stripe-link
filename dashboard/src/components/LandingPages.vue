@@ -1970,6 +1970,20 @@
                       </template>
                     </template>
 
+                    <!-- WHAT is offered is not edited here. The product and its price come from the
+                         product carrying a `post_registration` price, so this editor holds copy only —
+                         the same rule every other funnel role follows. -->
+                    <template v-else-if="element.type === 'post_registration_offer'">
+                      <p class="element-hint">
+                        Shown only after someone registers. It offers whichever of this offer's products has a
+                        “Offered right after a free registration” price — set that on the product to choose it.
+                      </p>
+                      <input v-model.trim="element.headline" type="text" placeholder="Heading (optional)" />
+                      <input v-model.trim="element.subheadline" type="text" placeholder="Subheading (optional)" />
+                      <input v-model.trim="element.claim_label" type="text" placeholder="Button label (optional)" />
+                      <input v-model.trim="element.decline_label" type="text" placeholder="Decline link (optional)" />
+                    </template>
+
                     <template v-else-if="element.type === 'tip_jar'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <!-- WHERE the tip lands, chosen rather than typed. The three platforms take a handle,
@@ -7053,6 +7067,11 @@ function newElement(type) {
   // opens this editor.
   if (type === "social_links") return { ...base, heading: "", items: [] };
   if (type === "link_cards") return { ...base, heading: "", items: [{ url: "", label: "", description: "", image_url: "" }] };
+  // Copy only. The product and price are derived from the `post_registration` pricing context, so there is
+  // nothing to pick here -- and every field is optional, because the renderer carries sensible defaults.
+  if (type === "post_registration_offer") {
+    return { ...base, headline: "", subheadline: "", claim_label: "", decline_label: "" };
+  }
   // A tip jar is ONE destination, not a list: two tip jars on a page is two answers to the same question.
   // The label defaults to something a visitor understands, because a blank button reads as broken.
   if (type === "tip_jar") {
@@ -7922,6 +7941,16 @@ function elementSection(element) {
       items: items.length ? items.map((item) => ({ url: item.url.trim() })) : undefined,
     };
   }
+  if (element.type === "post_registration_offer") {
+    return {
+      id: element.id,
+      type: "post_registration_offer",
+      headline: formatHeadline(element.headline || "") || undefined,
+      subheadline: (element.subheadline || "").trim() || undefined,
+      claim_label: (element.claim_label || "").trim() || undefined,
+      decline_label: (element.decline_label || "").trim() || undefined,
+    };
+  }
   if (element.type === "tip_jar") {
     // Re-resolve on SAVE, not just at choose-time: a tip button pointing at a page whose slug or domain
     // moved is a dead end the tenant never sees, because they are not the ones tapping it.
@@ -8188,6 +8217,12 @@ function elementsFromPage(sections) {
       elements.push({ id: keepId(section), type: "product_details" });
     } else if (section.type === "related_products") {
       elements.push({ id: keepId(section), type: "related_products", heading: section.heading || "Related products" });
+    } else if (section.type === "post_registration_offer") {
+      elements.push({
+        id: keepId(section), type: "post_registration_offer",
+        headline: section.headline || "", subheadline: section.subheadline || "",
+        claim_label: section.claim_label || "", decline_label: section.decline_label || "",
+      });
     } else if (section.type === "tip_jar") {
       elements.push({
         id: keepId(section), type: "tip_jar", heading: section.heading || "",

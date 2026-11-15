@@ -658,6 +658,26 @@
       "rank": 30,
       "order_mode": "ordered"
     },
+    "post_registration_offer": {
+      "placement": "free",
+      "label": "Offer after registering",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "cta_from",
+        "cta_to",
+        "cta_text",
+        "content_heading",
+        "content_text",
+        "content_border"
+      ],
+      "slot": "after",
+      "rank": 20,
+      "order_mode": "ordered"
+    },
     "coupon": {
       "placement": "free",
       "label": "Coupon",
@@ -945,6 +965,7 @@
         "hero",
         "event_date",
         "checkout_cta",
+        "post_registration_offer",
         "legal_footer"
       ],
       "allowed_ctas": [

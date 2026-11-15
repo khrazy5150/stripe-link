@@ -61,6 +61,7 @@ from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import (LIGHT_INK as SECTION_LIGHT_INK, SECTION_TONES,
                                               readable_ink as section_readable_ink, section_theme_vars,
                                               tone_class)
+from stripe_link.domain.funnels import post_registration_offer
 from stripe_link.domain.tips import MAX_AMOUNT as TIP_MAX_AMOUNT
 from stripe_link.domain.tips import MIN_AMOUNT as TIP_MIN_AMOUNT
 from stripe_link.domain.tips import allows_custom as tip_allows_custom
@@ -1413,6 +1414,20 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-pp-add.is-added{background:#16a34a;border-color:#16a34a;cursor:default}",
     "    .sl-pp-card.is-added{opacity:0.72}",
     "    .sl-pp-dismiss{background:none;border:none;color:var(--sl-muted);cursor:pointer;font-size:1.45rem;text-decoration:underline;padding:0.8rem}",
+    # The post-registration island. `[hidden]` is spelled out because the published bundle carries no
+    # reset: without it the section paints on load, which is the one thing this element must never do.
+    "    .sl-pr-offer[hidden]{display:none}",
+    "    .sl-pr-offer{width:min(52rem,calc(100% - 3.2rem));margin:2.4rem auto;display:flex;flex-direction:column;gap:1.2rem;text-align:center}",
+    "    .sl-pr-offer-heading{margin:0;font-size:2.4rem;line-height:1.15;text-wrap:balance}",
+    "    .sl-pr-offer-sub{margin:0;color:var(--sl-muted);font-size:1.6rem}",
+    "    .sl-pr-offer-card{display:flex;flex-direction:column;gap:1rem;align-items:center;border:1px solid var(--sl-border);border-radius:1.4rem;padding:2rem;background:var(--sl-surface)}",
+    "    .sl-pr-offer-card img{border-radius:1rem;max-width:100%;height:auto}",
+    "    .sl-pr-offer-title{margin:0;font-size:1.9rem;line-height:1.2}",
+    "    .sl-pr-offer-desc{margin:0;color:var(--sl-muted);font-size:1.5rem;text-wrap:pretty}",
+    "    .sl-pr-offer-price{margin:0;font-size:2.2rem;font-weight:700}",
+    "    .sl-pr-offer-price s{color:var(--sl-muted);font-size:1.6rem;font-weight:400;margin-right:0.6rem}",
+    "    .sl-pr-claim{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}",
+    "    .sl-pr-decline{background:none;border:none;color:var(--sl-muted);cursor:pointer;font-size:1.45rem;text-decoration:underline;padding:0.8rem}",
     "    .sl-brand-hero{text-align:center;padding:2.4rem 0 0.8rem}",
     "    .sl-brand-logo{display:block;height:7.2rem;width:auto;max-width:22rem;margin:0 auto 1.2rem;object-fit:contain}",
     "    .sl-brand-logo-faux{display:flex;align-items:center;justify-content:center;height:7.2rem;width:7.2rem;border-radius:1.6rem;background:var(--sl-cta-bg,var(--sl-headline));color:var(--sl-cta-text,#fff)}",
@@ -3313,6 +3328,8 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "seller_profile": {"render": lambda c: render_seller_profile(c.section), "version": 1},
     "social_links": {"render": lambda c: render_social_links(c.section), "version": 1},
     "tip_jar": {"render": lambda c: render_tip_jar(c.section), "version": 1},
+    "post_registration_offer": {"render": lambda c: render_post_registration_offer(
+        c.section, c.page, c.offer, c.products_by_id, c.checkout_url), "version": 1},
     "link_cards": {"render": lambda c: render_link_cards(c.section), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
@@ -9072,6 +9089,74 @@ def render_post_purchase_carousel(section: dict[str, Any], page: dict[str, Any],
     ] if line)
 
 
+def render_post_registration_offer(
+    section: dict[str, Any], page: dict[str, Any], offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]], checkout_url: str | None,
+) -> str:
+    """The one paid thing offered the instant a free registration succeeds
+    (plans/POST_REGISTRATION_OFFER.md P3).
+
+    Rendered HIDDEN and revealed by the lead form's success handler, because the moment it exists for is
+    *after* the visitor has said yes once. Shown up front it would compete with the registration and
+    suppress the thing the page is actually for.
+
+    **A link to Checkout, not a one-click button.** The post-purchase island posts to /upsell/charge
+    because the buyer's card is already attached to a PaymentIntent. Here nothing has been paid, so there
+    is no card and no intent: the claim is an ordinary `build_checkout_url` href, carrying the page's Stripe
+    mode like every other Buy link. Being a real `<a href>` also means it works with no JS and reads as a
+    link to a crawler.
+
+    Empty string when the offer has no `post_registration`-context price — the same contract every other
+    capability section follows, so a webinar page with nothing to sell composes identically to one that
+    never had the section.
+    """
+    found = post_registration_offer(offer, products_by_id)
+    if not found:
+        return ""
+    product = found["product"] or {}
+    price = found["price"] or {}
+    amount = int(price.get("unit_amount") or 0)
+    currency = str(price.get("currency") or "usd")
+    # The anchor is the product's OWN stored compare-at, never a number invented for the page. A struck
+    # price the tenant cannot evidence is the part of this pattern that draws a card-network complaint.
+    compare_at = int(price.get("compare_at_unit_amount") or 0)
+    title = str(section.get("title") or product.get("name") or "")
+    desc = str(section.get("description") or price.get("description") or product.get("description") or "")
+    image = str(price.get("image_url") or (product.get("images") or [""])[0] or "").strip()
+    heading = str(section.get("headline") or "One thing before you're confirmed")
+    sub = str(section.get("subheadline") or "")
+    claim = str(section.get("claim_label") or "Add it to my registration")
+    decline = str(section.get("decline_label") or "No thanks — just my free seat")
+    href = build_checkout_url(
+        checkout_url or "",
+        page=page,
+        offer=offer,
+        product_id=str(found.get("product_id") or ""),
+        price_id=str(found.get("price_id") or ""),
+        quantity="1",
+    )
+    return "\n".join(line for line in [
+        (
+            f"    <section class=\"sl-pr-offer\" data-pr-offer hidden"
+            f" data-section-id=\"{escape(str(section.get('id', 'post-registration-offer')))}\""
+            f" data-section-type=\"post_registration_offer\">"
+        ),
+        f"      <h2 class=\"sl-pr-offer-heading\">{render_headline_markup(heading)}</h2>",
+        (f"      <p class=\"sl-pr-offer-sub\">{escape(sub)}</p>" if sub else ""),
+        "      <article class=\"sl-pr-offer-card\">",
+        (f"        {responsive_img(image, title or 'Offer', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
+        (f"        <h3 class=\"sl-pr-offer-title\">{escape(title)}</h3>" if title else ""),
+        (f"        <p class=\"sl-pr-offer-desc\">{escape(desc)}</p>" if desc else ""),
+        "        <p class=\"sl-pr-offer-price\">" + (
+            f"<s>{escape(format_money(compare_at, currency))}</s> " if compare_at > amount else ""
+        ) + f"{escape(format_money(amount, currency))}</p>",
+        f"        <a class=\"sl-cta sl-pr-claim\" href=\"{escape(href)}\" data-pr-claim>{escape(claim)}</a>",
+        "      </article>",
+        f"      <button class=\"sl-pr-decline\" type=\"button\" data-pr-decline>{escape(decline)}</button>",
+        "    </section>",
+    ] if line)
+
+
 @dataclass
 class CtaRenderContext:
     cta: dict[str, Any]
@@ -10345,10 +10430,31 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "            if (!response.ok && response.status !== 202) throw new Error('failed');",
         "            leadForm.querySelectorAll('.sl-lead-input,.sl-lead-consent,button[type=\"submit\"]').forEach((el) => el.remove());",
         "            if (statusEl) statusEl.textContent = 'Thanks! We\\'ll be in touch shortly.';",
+        # The post-registration offer is revealed HERE and nowhere else: the server has accepted the
+        # registration, so the seat genuinely exists before anything asks for money. Revealing it on submit
+        # would offer an upgrade on a seat a full or past session was about to refuse.
+        "            const prOffer = document.querySelector('[data-pr-offer]');",
+        "            if (prOffer) {",
+        "              prOffer.hidden = false;",
+        "              if (statusEl) statusEl.textContent = 'Your seat is held.';",
+        "              prOffer.scrollIntoView({ behavior: 'smooth', block: 'start' });",
+        "            }",
         "          }).catch(() => {",
         "            if (statusEl) { statusEl.classList.add('is-error'); statusEl.textContent = 'Something went wrong. Please try again.'; }",
         "            if (submitBtn) { submitBtn.dataset.busy = 'false'; submitBtn.classList.remove('is-connecting'); }",
         "          });",
+        "        });",
+        "      }",
+        # Declining the post-registration offer. It hides the island and says the registration stands --
+        # the seat was already confirmed by the POST above, so there is nothing to undo and nothing further
+        # to ask. Bound at load because the island exists in the markup from the start, merely hidden.
+        "      const prOfferEl = document.querySelector('[data-pr-offer]');",
+        "      const prDecline = prOfferEl && prOfferEl.querySelector('[data-pr-decline]');",
+        "      if (prDecline) {",
+        "        prDecline.addEventListener('click', () => {",
+        "          prOfferEl.hidden = true;",
+        "          const leadStatus = document.querySelector('[data-lead-status]');",
+        "          if (leadStatus) leadStatus.textContent = \"You're all set — check your email for the link.\";",
         "        });",
         "      }",
         # Inline booking widget: reveal on click, then drive availability -> reserve -> checkout (same
