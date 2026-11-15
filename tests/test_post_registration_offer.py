@@ -10,6 +10,7 @@ mind, which is exactly why both are asserted here: a guarantee that holds by coi
 notices breaking. The listicle test covers the opposite failure, a DENYlist that lets a new context through
 because it has never heard of it.
 """
+import pathlib
 import unittest
 
 from stripe_link.domain.funnels import (
@@ -126,6 +127,32 @@ class ItNeverLeaksOntoThePage(unittest.TestCase):
         ]}
         self.assertEqual(stage_opportunities(offer, "landing"), [])
         self.assertEqual(len(opportunities_from_offer(offer)), 1)
+
+class TheTenantCanPriceItTests(unittest.TestCase):
+    """P4. Without these the feature is author-only: nothing in the dashboard can create the price that
+    makes a product the post-registration offer."""
+
+    def setUp(self):
+        import pathlib as _p
+
+        root = _p.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+        self.card = (root / "shared" / "PricingCard.vue").read_text(encoding="utf-8")
+        self.offers = (root / "Offers.vue").read_text(encoding="utf-8")
+
+    def test_the_context_can_be_chosen_on_a_price(self):
+        self.assertIn('["post_registration", "After registering"]', self.card)
+
+    def test_it_is_a_funnel_role_not_a_landing_price(self):
+        # The SECOND denylist of this shape. landingPrices takes everything NOT in FUNNEL_CONTEXTS, so a
+        # context missing here becomes a buyable card on the landing page -- the add-on appearing before
+        # the registration it follows. The server-side twin is pricing._LISTICLE_EXCLUDED_CONTEXTS.
+        self.assertIn('"post_registration"', self.offers.split("const FUNNEL_CONTEXTS")[1].split("]")[0])
+
+    def test_services_are_not_offered_it(self):
+        # Services pass their own context list; a service sold after a registration is not a thing yet.
+        services = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+                    / "Services.vue").read_text(encoding="utf-8")
+        self.assertNotIn("post_registration", services)
 
 
 if __name__ == "__main__":

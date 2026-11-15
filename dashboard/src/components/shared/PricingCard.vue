@@ -215,7 +215,11 @@ const props = defineProps({
   allowMultiple: { type: Boolean, default: true },
   contexts: {
     type: Array,
-    default: () => [["standard", "Standard"], ["sale", "Sale"], ["flash_sale", "Flash sale"], ["upsell", "Upsell"], ["downsell", "Downsell"], ["order_bump", "Order bump"]],
+    // A price's context IS its funnel role -- nothing stores the role separately, so this list is where a
+    // product becomes an order bump, an upsell, or the thing offered the moment someone registers for a
+    // free event (plans/POST_REGISTRATION_OFFER.md). Labelled by the MOMENT the buyer meets it, because
+    // that is what a tenant is choosing between.
+    default: () => [["standard", "Standard"], ["sale", "Sale"], ["flash_sale", "Flash sale"], ["upsell", "Upsell"], ["downsell", "Downsell"], ["order_bump", "Order bump"], ["post_registration", "After registering"]],
   },
   // What a tenant may CHOOSE here. "Customer chooses" is deliberately absent (author, 2026-09-15): a tip jar
   // is what the "Receive tips" purpose produces, and offering the same outcome as a radio on a product being

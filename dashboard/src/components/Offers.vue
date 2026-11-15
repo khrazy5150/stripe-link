@@ -1104,9 +1104,15 @@ const selectedProducts = computed(() => activeProducts.value.filter((product) =>
 // The offer INFERS every product's role from its pricing contexts — the tenant assigns contexts once on the
 // Products screen and never re-decides bumps/upsells/downsells per offer (plans/OFFER_MODEL_REDESIGN.md §6).
 // A product's presence in the offer + its contexts fully determine WHERE it appears:
-//   standard/sale/flash_sale -> landing card · order_bump -> checkout bump · upsell/downsell -> post-purchase.
+//   standard/sale/flash_sale -> landing card · order_bump -> checkout bump · upsell/downsell -> post-purchase
+//   · post_registration -> offered the moment someone registers for a free event.
 // A product may fill several roles at once (e.g. standard + order_bump = a landing card that can also be bumped).
-const FUNNEL_CONTEXTS = ["order_bump", "upsell", "downsell"];
+//
+// THIS LIST IS A DENYLIST further down (landingPrices takes everything NOT in it), so a context missing
+// here becomes a buyable card on the landing page. That is how the $27 post-registration add-on would have
+// appeared as a landing price -- the offer showing up before the registration it is meant to follow. Same
+// shape as pricing._LISTICLE_EXCLUDED_CONTEXTS, which had to be told about the same context server-side.
+const FUNNEL_CONTEXTS = ["order_bump", "upsell", "downsell", "post_registration"];
 function contextPrice(product, context) {
   return (product.prices || []).find((price) => (price.context || "standard") === context) || null;
 }
