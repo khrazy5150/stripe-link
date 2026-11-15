@@ -99,11 +99,20 @@ its charge call swapped for a checkout redirect, not a second island written fro
    (`pricing._LISTICLE_EXCLUDED_CONTEXTS`). A denylist that has never heard of a new context passes it, so
    the $27 add-on would have rendered as a buyable slide on the registration page — the offer appearing
    *before* the registration it is meant to follow. Added, and tested.
-2. **P2 — composition.** A `post_registration_offer` governed section, allowed on `lead_event` and
-   `lead_capture`, excluded everywhere else. Data-only change to `composition_rules.json` plus its rule
-   tests.
-3. **P3 — the island.** Render it hidden; reveal on a successful registration response. Claim →
-   `build_checkout_url`. Decline → confirmation state. Reuse the existing island's markup and JS shape.
+2. **P2 — composition. DONE.** A `post_registration_offer` element in `composition_rules.json`, seeded into
+   `lead_event`. It is **ungoverned**, like `tip_jar` and `event_date`: `is_section_visible` returns True
+   for any ungoverned section that is present, so the tenant adds it from the builder and the renderer
+   returns `""` when the offer has nothing to sell. No new `compose_page` kwarg was needed.
+3. **P3 — the island. DONE.** `render_post_registration_offer` + `SECTION_REGISTRY` entry, styles, and the
+   reveal wired into the lead form's **success branch** — not its submit — so a session the server refuses
+   as full or past never shows an offer. Claim is an `<a href>` from `build_checkout_url`; decline hides
+   the island and confirms the seat.
+
+   `tests/test_element_registration.py` caught three real omissions: an addable element must appear in the
+   builder's `newElement`, `elementSection` **and** `elementsFromPage`, or the tenant's section is
+   discarded on save with no error. That guard exists because `price_highlight` shipped with exactly that
+   bug. Builder editor added (copy only — the product comes from the pricing context). Dashboard builds
+   clean; 9,812 tests pass.
 4. **P4 — the wizard.** One step in the lead-event flow: "offer something after they register?" picking a
    product and price. Without this the feature is author-only.
 5. **P5 — attribution.** Carry `lead_id` + `event_id` + `occurrence_id` into the Checkout session metadata
