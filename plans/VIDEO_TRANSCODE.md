@@ -63,8 +63,9 @@ before this ships, not after — see [[project_pricing_model_pivot]].
   refused by the uploader, which is why that mismatch was just fixed rather than widened.
 - **The original is private and never served.** Only MediaConvert reads it. Today's pipeline serves the
   original bytes as-is, which is exactly the fragility this removes.
-- **The ladder is 1080p / 720p / 480p**, per the diagram. 360p is worth adding only if attendance data
-  shows it is needed; every rendition is transcode cost and storage on every recording.
+- **The ladder is 1080p / 720p / 480p**, per the diagram — **but see §5 before building it.** The pricing
+  work on 2026-11-15 found 1080p is the rendition that doubles egress, and egress is the dominant cost of
+  this entire feature. For a talking head over slides a **720 / 480 / 360** ladder is the likelier answer.
 - **Playback stays a broadcast.** The seek rules already shipped (`AUTO_WEBINAR.md`) do not change: the
   island seats the player at the live edge and snaps back on a forward seek. Adaptive bitrate changes the
   *quality* a viewer gets, never their position.
@@ -84,8 +85,19 @@ before this ships, not after — see [[project_pricing_model_pivot]].
 
 ## 5. Open questions
 
-- **Who pays the egress?** See §2. This is the one that should be answered before T1, because it may
-  change the ladder, the default rendition, or whether auto-webinars are a paid-tier feature at all.
+- **Who pays the egress? ANSWERED 2026-11-15: the tenant does.** Webinars are a premium product, priced
+  graduated like WebinarJam. Three consequences for this document:
+  * **Price by ATTENDEES, not by tenant.** Egress is the cost driver, so it has to be the price lever.
+    ~1.2 GB per attendee for a 90-minute ABR session ≈ **$0.10 each**; a flat uncapped plan is an
+    unbounded liability. WebinarJam's entry is $49 for 100 attendees for exactly this reason.
+  * **The 1080p rendition is the thing to cut**, not the price. It roughly doubles per-viewer egress for
+    content that is a face and a slide deck — about 40% off the dominant cost line, which beats any
+    pricing tweak. Revisit §3's ladder.
+  * **Caching buys nothing here.** CloudFront bills transfer out to viewers on a cache hit as well as a
+    miss; the cache only saves the free S3→CloudFront leg. The real relief is the perpetual **1 TB/month
+    free tier** ≈ 830 attendee-sessions, which covers launch volume and then stops mattering.
+
+  See `project_webinar_pricing` for the worked numbers and the collision with the existing $29 Pro tier.
 - **Signed playback URLs?** A paid webinar's recording sitting on a public CloudFront path is downloadable
   by anyone who reads the manifest. CloudFront signed cookies are the usual answer and are not free to
   build.
