@@ -79,8 +79,29 @@ The pure logic to add is small: *where in the recording are we*. Everything arou
    join link, positioned at the elapsed offset and barred from seeking past it.
 3. **P3 — the tenant side.** Video upload on the Events screen, through the sibling stack's presign; a
    delivery picker that starts on Auto.
-4. **P4 — attendance.** How far each registrant actually watched. Deliberately last: it is the part that
-   needs a write path per viewer, and it is worth nothing until P1–P3 prove tenants run these at all.
+4. **P4 — attendance. DONE** (per-registrant, author 2026-11-15).
+
+   **Identity without accounts.** The confirmation mail's link carries the lead id and a per-registration
+   `attend_token`; the beacon reads the row and compares. The tip jar's "the token dereferences
+   server-side" shape, minus the token table — unlike a Stripe customer id, the only thing this has to
+   resolve to is the row it already lives on. A lead id alone would not do: they are sequential enough to
+   walk, and walking them would let anyone write attendance onto a stranger's registration.
+
+   **Position is not attendance.** An auto-webinar seats a late arrival at the live edge, so somebody
+   joining forty minutes in starts at 2400 seconds having watched nothing. `watched_seconds` accumulates
+   the time BETWEEN beacons; `furthest_position` records how deep they got. Keeping both is the point —
+   position alone says a late arrival saw the end, elapsed alone cannot say whether anyone reached the
+   pitch.
+
+   **It rides `POST /leads`, routed by payload.** The first attempt extended the `/t/view` beacon and
+   `tests/test_env_var_grants.py` refused it: that endpoint is kept deliberately trivial ("the floor
+   matters more than any single handler: it is paid 74 times") and reaching the leads table from there
+   dragged ten tables into it. The leads handler already owns the table and already has a public POST, so
+   attendance costs **no new route and no transform budget**.
+
+   Also fixed on the way past: an auto event has no `join_url` and never will, so its confirmation email
+   was promising a link that was never coming. It now sends the watch link, built from the registration's
+   own Referer and refused unless that is https.
 
 ## 5. Open questions
 

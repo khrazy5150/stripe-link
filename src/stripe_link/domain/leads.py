@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import secrets
 from typing import Any
 
 SCHEMA_VERSION = "2026-05-29"
@@ -153,7 +154,59 @@ def build_lead_submission(
         "status": "new",
         "provenance": provenance,
         "idempotency_key": str(idempotency_key or ""),
+        # WHO IS WATCHING, on a page that has no idea who anybody is. A registrant clicks the link in
+        # their confirmation mail days later; the page cannot ask them to sign in, because there are no
+        # buyer accounts here and building some to count minutes would be the tail wagging the dog.
+        #
+        # So the mail carries this with the lead id, and the beacon reads the row and compares. The same
+        # "the token dereferences server-side" shape the tip jar's manage link uses -- but with no token
+        # table, because unlike a Stripe customer id the only thing this has to resolve to is the row it
+        # already lives on. A lead id alone would not do: they are sequential enough to walk, and walking
+        # them would let anyone write attendance onto a stranger's registration.
+        "attend_token": secrets.token_urlsafe(16),
         "created_at": int(now),
+        "updated_at": int(now),
+    }
+
+
+# How many seconds of drift between two beacons still counts as the same sitting. The player beacons on a
+# shorter cycle than this, so an ordinary gap (a tab backgrounded, a flaky connection) is forgiven, while a
+# visitor who closes the page and returns an hour later does not get the hour counted.
+ATTENDANCE_GAP_SECONDS = 90
+
+
+def attendance_token(lead: dict[str, Any] | None) -> str:
+    return str((lead or {}).get("attend_token") or "")
+
+
+def record_attendance(lead: dict[str, Any], *, position: int, now: int) -> dict[str, Any]:
+    """Fold one beacon into a registrant's watch record. Returns the UPDATED lead; never mutates.
+
+    `position` is where the player is in the recording, which is not the same as how long this person has
+    been watching -- an auto-webinar seats a late arrival at the live edge, so someone joining forty
+    minutes in starts at 2400 and has watched nothing. `watched_seconds` therefore accumulates the TIME
+    BETWEEN BEACONS, not the position; `furthest_position` records how deep into the session they got.
+
+    Keeping both is the point. Position alone says a late arrival saw the end; elapsed alone cannot tell a
+    tenant whether anyone reached the pitch. Together they answer "did they stay, and how far in were
+    they when they stopped".
+    """
+    previous = lead.get("attendance") if isinstance(lead.get("attendance"), dict) else {}
+    last_seen = int(previous.get("last_seen_at") or 0)
+    watched = int(previous.get("watched_seconds") or 0)
+    # The first beacon of a sitting adds nothing: there is no interval to measure yet, and crediting one
+    # would hand every drive-by visitor a free chunk of attendance.
+    gap = int(now) - last_seen
+    if last_seen and 0 < gap <= ATTENDANCE_GAP_SECONDS:
+        watched += gap
+    return {
+        **lead,
+        "attendance": {
+            "watched_seconds": watched,
+            "furthest_position": max(int(previous.get("furthest_position") or 0), max(0, int(position))),
+            "first_seen_at": int(previous.get("first_seen_at") or now),
+            "last_seen_at": int(now),
+        },
         "updated_at": int(now),
     }
 

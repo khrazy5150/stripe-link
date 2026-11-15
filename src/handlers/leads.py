@@ -26,7 +26,10 @@ from stripe_link.domain.documents import DocumentValidationError, validate_lead_
 from stripe_link.domain.events import CANCELLED, FULL, PASSED, accepts_registration, record_registration
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.entitlement_gate import require_capability
+from stripe_link.domain.page_views import identifier_slug
 from stripe_link.domain.leads import (
+    attendance_token,
+    record_attendance,
     LeadValidationError,
     build_consent,
     build_lead_submission,
@@ -77,6 +80,15 @@ def handler(
     mode = resolve_stripe_mode(event)
     leads_repo = leads_repo or leads_repository()
     if method == "POST":
+        # ONE PUBLIC ENDPOINT, TWO SHAPES. A webinar attendance beacon is a POST from a published page by
+        # somebody who is not signed in -- the same trust properties the ingest below already has, and the
+        # same table. A route of its own would be a second copy of those decisions plus CloudFormation
+        # transform budget, which this stack has spent real time recovering before (plans/WEBINAR.md §13).
+        #
+        # Routed on the payload rather than the path for that reason. It differs from ingest in the way
+        # that matters: ingest is anonymous and this names a registrant, which is what the token is for.
+        if _is_attendance_beacon(event):
+            return record_attendance_beacon(event, leads_repo=leads_repo, now=now_fn())
         return ingest_lead(
             event,
             leads_repo=leads_repo,
@@ -104,6 +116,53 @@ def handler(
             return error_response("lead_id is required.", code="missing_lead")
         return update_lead_status(event, leads_repo, lead_id, now_fn())
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
+
+
+def _is_attendance_beacon(event) -> bool:
+    """True when this POST is a watch beacon rather than a registration. Parsed defensively: a malformed
+    body is not an attendance beacon, and `ingest_lead` below will produce the proper error for it."""
+    try:
+        payload = parse_json_body(event)
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and bool(payload.get("attend_token"))
+
+
+def record_attendance_beacon(event, *, leads_repo, now):
+    """Fold one beacon into a registrant's watch record (plans/AUTO_WEBINAR.md P4).
+
+    **Always 202, whatever happens.** An unknown registration, a wrong token and a successful write are
+    indistinguishable to the caller, so this cannot be used to discover which registrations exist or to
+    confirm a guessed token. It is also the cheapest answer for something fired every thirty seconds.
+
+    The token is compared with `secrets.compare_digest`. Timing on a string compare is a thin channel, but
+    what it guards is a stranger's registration record and constant-time costs nothing.
+    """
+    accepted = json_response({"status": "accepted"}, status_code=202)
+    try:
+        payload = parse_json_body(event)
+    except ValueError:
+        return accepted
+    tenant_id = identifier_slug(payload.get("tenant_id"))
+    lead_id = identifier_slug(payload.get("lead_id"))
+    token = str(payload.get("attend_token") or "")
+    if not tenant_id or not lead_id or not token:
+        return accepted
+    try:
+        position = max(0, int(payload.get("position") or 0))
+    except (TypeError, ValueError):
+        position = 0
+    try:
+        lead = leads_repo.get(tenant_id, lead_id)
+        if not lead:
+            return accepted
+        expected = attendance_token(lead)
+        if not expected or not secrets.compare_digest(expected, token):
+            return accepted
+        leads_repo.put(record_attendance(lead, position=position, now=int(now)))
+    except Exception as exc:  # noqa: BLE001 - a viewer must never see a failure here
+        print(f"attendance not recorded for {lead_id}: {type(exc).__name__}: {exc}")
+    return accepted
 
 
 def _request_context(event) -> dict:
@@ -212,7 +271,9 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
 
     if scheduled_event is not None:
         _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id,
-                                        page_id=str(lead.get("page_id") or ""), mode=mode)
+                                        page_id=str(lead.get("page_id") or ""), mode=mode,
+                                        lead_id=lead_id, attend_token=attendance_token(lead),
+                                        page_url=str(provenance.get("referer") or ""))
         # Best-effort, and AFTER the lead is safely stored: a failed count must not lose a registration.
         # Read-compare-write, so a burst can overbook by one (plans/WEBINAR.md §4) -- the registration is
         # the record that matters, and the count exists to close the door roughly, not exactly.
@@ -226,7 +287,7 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
 
 
 def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tenant_id, *,
-                                    page_id="", mode="live"):
+                                    page_id="", mode="live", lead_id="", attend_token="", page_url=""):
     """Confirm the seat, with the calendar file. Best-effort by design.
 
     A send that fails must never cost the registration: the lead is already stored, and a visitor who sees
@@ -248,7 +309,8 @@ def _send_registration_confirmation(scheduled_event, occurrence_id, fields, tena
         if occurrence is None:
             return
         message = registration_confirmation(
-            scheduled_event, occurrence, name=str((fields or {}).get("name") or ""))
+            scheduled_event, occurrence, name=str((fields or {}).get("name") or ""),
+            watch_url=_watch_url(scheduled_event, page_url, lead_id, attend_token))
         if not message["subject"]:
             return
         # WHO the confirmation is from. Stated rather than left to the mailer's tenant-level fallback,
@@ -351,3 +413,29 @@ def update_lead_status(event, leads_repo, lead_id, now):
         return json_response({"lead": saved})
     except RepositoryError as exc:
         return error_response(str(exc), code="invalid_lead")
+
+
+def _watch_url(scheduled_event, page_url, lead_id, attend_token):
+    """Where an AUTO-webinar is watched: the page they registered on, carrying who they are.
+
+    "" for a live event, which has a join link of its own, and "" when anything is missing -- a half-built
+    link is worse than none, because the confirmation then promises something that does not work.
+
+    The page URL comes from the REFERER the registration arrived with. That is the page the visitor was
+    actually standing on, which beats reconstructing one from a slug and a custom domain and being wrong
+    for exactly the tenants who set a domain up. It is attacker-controlled, so it is accepted only when it
+    is an https URL and is rebuilt from its parts rather than concatenated.
+    """
+    from urllib.parse import urlencode, urlsplit, urlunsplit
+
+    from stripe_link.domain.events import DELIVERY_AUTO, delivery
+
+    if delivery(scheduled_event) != DELIVERY_AUTO:
+        return ""
+    if not lead_id or not attend_token or not page_url:
+        return ""
+    parts = urlsplit(str(page_url).strip())
+    if parts.scheme != "https" or not parts.netloc:
+        return ""
+    query = urlencode({"r": lead_id, "k": attend_token})
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))

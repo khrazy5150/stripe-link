@@ -9345,7 +9345,8 @@ def render_email_cta(
             "sessions": [{"start": event_starts_at(row),
                           "end": event_ends_at(scheduled_event, row),
                           "join_until": event_joinable_until(scheduled_event, row)} for row in rows],
-            "live": render_event_live(scheduled_event, seed, section, title=title),
+            "live": render_event_live(scheduled_event, seed, section, title=title,
+                                       page=page, api_base_url=api_base_url),
             "ended": render_event_closed(scheduled_event, section, description=description),
         }
         open_rows = event_open_occurrences(scheduled_event, now=now_epoch)
@@ -9464,7 +9465,8 @@ def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
 
 
 def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any],
-                      section: dict[str, Any] | None, *, title: str) -> str:
+                      section: dict[str, Any] | None, *, title: str,
+                      page: dict[str, Any] | None = None, api_base_url: str | None = None) -> str:
     """The session is running. One job: get the visitor into it.
 
     The join link is the whole page at this moment, so the form is replaced rather than sat beside -- a
@@ -9491,11 +9493,16 @@ def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any
     # the viewer's own clock.
     video_url = safe_href(str(scheduled_event.get("video_url") or ""))
     if event_delivery(scheduled_event) == DELIVERY_AUTO and video_url:
+        # The attendance beacon posts to the SAME public endpoint registrations do, routed by payload
+        # shape rather than by a route of its own (handlers/leads.py).
+        beacon_url = f"{str(api_base_url or '').rstrip('/')}/leads" if api_base_url else ""
         rows.append(
             f'        <video class="sl-event-player" data-event-player playsinline controls'
             f' preload="metadata" controlslist="nodownload noplaybackrate"'
             f' data-starts-at="{event_starts_at(occurrence)}"'
             f' data-ends-at="{event_ends_at(scheduled_event, occurrence)}"'
+            f' data-tenant-id="{escape(str((page or {}).get("tenant_id") or ""))}"'
+            f' data-beacon-url="{escape(beacon_url)}"'
             f' src="{escape(video_url)}"></video>'
         )
         rows.extend(["      </div>", "    </section>"])
@@ -10591,6 +10598,31 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "        };",
         "        autoPlayer.addEventListener('loadedmetadata', seat);",
         "        if (autoPlayer.readyState >= 1) seat();",
+        # HOW FAR THIS REGISTRANT GOT. The ids come off the link in their confirmation mail, so a page
+        # opened cold beacons nothing and the feature costs an anonymous visitor one `if`.
+        # `keepalive` so the last beacon survives the tab closing, which is exactly the beacon that says
+        # where somebody stopped watching -- the most interesting one a tenant gets.
+        "        const watchParams = new URLSearchParams(window.location.search);",
+        "        const regId = watchParams.get('r');",
+        "        const regKey = watchParams.get('k');",
+        "        const regTenant = autoPlayer.dataset.tenantId || '';",
+        "        const beaconBase = autoPlayer.dataset.beaconUrl || '';",
+        "        if (regId && regKey && regTenant && beaconBase) {",
+        "          const beat = () => {",
+        "            if (autoPlayer.paused) return;",
+        "            try {",
+        "              fetch(beaconBase, {",
+        "                method: 'POST', keepalive: true,",
+        "                headers: { 'Content-Type': 'application/json' },",
+        "                body: JSON.stringify({ tenant_id: regTenant, lead_id: regId, attend_token: regKey,",
+        "                                       position: Math.floor(autoPlayer.currentTime || 0) }),",
+        "              });",
+        "            } catch (err) { /* never block playback */ }",
+        "          };",
+        "          setInterval(beat, 30000);",
+        "          document.addEventListener('visibilitychange', () => { if (document.hidden) beat(); });",
+        "          window.addEventListener('pagehide', beat);",
+        "        }",
         "        autoPlayer.addEventListener('seeking', () => {",
         "          const edge = liveEdge();",
         "          if (autoPlayer.currentTime > edge + 1) autoPlayer.currentTime = edge;",

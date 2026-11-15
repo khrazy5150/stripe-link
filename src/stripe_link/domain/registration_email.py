@@ -34,14 +34,23 @@ def registration_confirmation(
     *,
     name: str = "",
     brand: str = "",
+    watch_url: str = "",
 ) -> dict[str, str]:
-    """`{subject, html, text}` for one registration. Empty subject means there is nothing worth sending."""
+    """`{subject, html, text}` for one registration. Empty subject means there is nothing worth sending.
+
+    `watch_url` is where an AUTO-webinar is watched: the registration page itself, carrying the ids that
+    tell it who this is. An auto event has no `join_url` and never will, so without this the confirmation
+    promised a link that was never coming -- the one failure a confirmation email cannot afford, because
+    the registrant has no way to tell it from an oversight until the session has already run.
+    """
     title = str(event.get("title") or "").strip() or "the session"
     when = _when(event, occurrence)
     if not when:
         return {"subject": "", "html": "", "text": ""}
 
-    join_url = str(event.get("join_url") or "").strip()
+    # The watch link wins where both exist: an event that plays a recording does not also want the
+    # registrant in somebody's meeting room.
+    join_url = str(watch_url or "").strip() or str(event.get("join_url") or "").strip()
     greeting = f"Hi {name.strip()}," if str(name or "").strip() else "Hi,"
     host = str(brand or "").strip()
 
