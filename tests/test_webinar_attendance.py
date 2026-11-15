@@ -104,9 +104,9 @@ def _beacon(**body):
 
 class TheBeaconTests(unittest.TestCase):
     def setUp(self):
-        from handlers.leads import record_attendance_beacon
+        from handlers.leads import registrant_action
 
-        self.call = record_attendance_beacon
+        self.call = registrant_action
         self.lead = _lead()
         self.token = attendance_token(self.lead)
 
@@ -219,6 +219,100 @@ class TheConfirmationCarriesWhoYouAreTests(unittest.TestCase):
         message = registration_confirmation(event, sitting, watch_url="https://shop.example/w?r=a&k=b")
         self.assertIn("shop.example", message["text"])
         self.assertNotIn("zoom.example", message["text"])
+
+class _FakeEvents:
+    def __init__(self, event=None):
+        self.event = event
+        self.written = None
+
+    def get(self, tenant_id, event_id):
+        return self.event
+
+    def put(self, document):
+        self.written = document
+
+
+class GivingTheSeatBackTests(unittest.TestCase):
+    """WEBINAR.md §12's unbuilt half. It proves the SAME token attendance does, so there is one
+    verification rather than two that can drift."""
+
+    def setUp(self):
+        from handlers.leads import registrant_action
+
+        self.call = registrant_action
+        self.lead = _lead()
+        self.token = attendance_token(self.lead)
+        self.event = {"event_id": "evt_1", "tenant_id": "ten_1",
+                      "occurrences": [{"occurrence_id": "occ_1", "starts_at": NOW,
+                                       "registered_count": 4}]}
+
+    def _cancel(self, repo, events, token=None):
+        return self.call(_beacon(tenant_id="ten_1", lead_id="lead_1",
+                                 attend_token=token or self.token, action="unregister"),
+                         leads_repo=repo, events_repo=events, now=NOW)
+
+    def test_the_row_is_marked_not_deleted(self):
+        # Deleting would take the consent record and the provenance with it -- the evidence a complaint
+        # has to be answered with.
+        repo = _FakeRepo(self.lead)
+        self._cancel(repo, _FakeEvents(self.event))
+        self.assertEqual(repo.written["status"], "archived")
+        self.assertEqual(repo.written["consent"], self.lead["consent"])
+        self.assertEqual(repo.written["provenance"], self.lead["provenance"])
+        self.assertEqual(repo.written["unregistered_at"], NOW)
+
+    def test_the_seat_goes_back_on_the_session(self):
+        events = _FakeEvents(self.event)
+        self._cancel(_FakeRepo(self.lead), events)
+        self.assertEqual(events.written["occurrences"][0]["registered_count"], 3)
+
+    def test_cancelling_twice_does_not_give_back_two_seats(self):
+        already = {**self.lead, "status": "archived"}
+        events = _FakeEvents(self.event)
+        self._cancel(_FakeRepo(already), events)
+        self.assertIsNone(events.written)
+
+    def test_a_wrong_token_cancels_nothing(self):
+        repo = _FakeRepo(self.lead)
+        events = _FakeEvents(self.event)
+        self._cancel(repo, events, token=secrets.token_urlsafe(16))
+        self.assertIsNone(repo.written)
+        self.assertIsNone(events.written)
+
+    def test_the_cancellation_stands_even_if_the_seat_count_fails(self):
+        class Broken(_FakeEvents):
+            def get(self, *a):
+                raise RuntimeError("events table gone")
+
+        repo = _FakeRepo(self.lead)
+        response = self._cancel(repo, Broken())
+        self.assertEqual(response["statusCode"], 202)
+        self.assertEqual(repo.written["status"], "archived")
+
+    def test_it_is_indistinguishable_from_a_beacon_to_the_caller(self):
+        # The endpoint must not confirm that a cancellation took, any more than it confirms a token.
+        cancelled = self._cancel(_FakeRepo(self.lead), _FakeEvents(self.event))
+        beaconed = self.call(_beacon(tenant_id="ten_1", lead_id="lead_1", attend_token=self.token),
+                             leads_repo=_FakeRepo(self.lead), events_repo=None, now=NOW)
+        self.assertEqual(cancelled, beaconed)
+
+
+class TheSeatCountNeverGoesNegativeTests(unittest.TestCase):
+    def test_releasing_more_than_were_taken_floors_at_zero(self):
+        from stripe_link.domain.events import release_registration
+
+        event = {"occurrences": [{"occurrence_id": "occ_1", "registered_count": 0}]}
+        released = release_registration(event, "occ_1")
+        # A negative count would make seats_left claim more room than the session has, and reopen a
+        # session that is genuinely full. Drifting toward caution is the only safe direction.
+        self.assertEqual(released["occurrences"][0]["registered_count"], 0)
+
+    def test_it_does_not_mutate_what_it_was_given(self):
+        from stripe_link.domain.events import release_registration
+
+        event = {"occurrences": [{"occurrence_id": "occ_1", "registered_count": 2}]}
+        release_registration(event, "occ_1")
+        self.assertEqual(event["occurrences"][0]["registered_count"], 2)
 
 
 if __name__ == "__main__":

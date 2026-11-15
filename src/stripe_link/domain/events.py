@@ -267,6 +267,25 @@ def record_registration(event: dict[str, Any], occurrence_id: Any) -> dict[str, 
     return updated
 
 
+def release_registration(event: dict[str, Any], occurrence_id: Any) -> dict[str, Any]:
+    """The event with that occurrence's `registered_count` decremented by one, never below zero.
+
+    The mirror of `record_registration`, and clamped for the reason that one overbooks: the count is
+    read-compare-write, so it can drift. A seat count that has drifted high is a door closed slightly
+    early; a NEGATIVE one would make `seats_left` claim more room than the session has and reopen a
+    session that is genuinely full. Drifting toward caution is the only safe direction here.
+    """
+    updated = dict(event or {})
+    rows = []
+    wanted = str(occurrence_id or "").strip()
+    for row in occurrences(updated):
+        if str(row.get("occurrence_id") or "") == wanted:
+            row = {**row, "registered_count": max(0, registered_count(row) - 1)}
+        rows.append(row)
+    updated["occurrences"] = rows
+    return updated
+
+
 # When registrants are reminded, as minutes before the session. The day-before catches people who need to
 # move something; the hour-before catches everyone else, and is the one that actually fills a room.
 REMINDER_LEAD_MINUTES = (1440, 60)

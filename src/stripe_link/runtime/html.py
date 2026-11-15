@@ -1003,6 +1003,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-event-live-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
     # The auto-webinar player. Full width of the card and never taller than the viewport, so a phone shows
     # the video and the page's own words rather than one filling the screen.
+    # The cancel control. Quiet on purpose: it is the right thing to offer and the wrong thing to
+    # advertise, so it reads as a link under the card rather than a second button beside the first.
+    "    .sl-event-unregister{display:block;margin:1.2rem auto 0;background:none;border:0;color:var(--sl-muted);font-size:1.3rem;text-decoration:underline;cursor:pointer;padding:0.6rem}",
     "    .sl-event-player{width:100%;max-width:100%;max-height:70vh;border-radius:0.8rem;background:#000;display:block}",
     # The three event blocks. `[hidden]` is spelled out because the published bundle carries no reset, and
     # a hidden block that still paints would stack all three states on top of each other.
@@ -9345,8 +9348,7 @@ def render_email_cta(
             "sessions": [{"start": event_starts_at(row),
                           "end": event_ends_at(scheduled_event, row),
                           "join_until": event_joinable_until(scheduled_event, row)} for row in rows],
-            "live": render_event_live(scheduled_event, seed, section, title=title,
-                                       page=page, api_base_url=api_base_url),
+            "live": render_event_live(scheduled_event, seed, section, title=title),
             "ended": render_event_closed(scheduled_event, section, description=description),
         }
         open_rows = event_open_occurrences(scheduled_event, now=now_epoch)
@@ -9383,7 +9385,7 @@ def render_email_cta(
             "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
             *form_rows,
             "    </section>",
-        ] if line), event_states)
+        ] if line), event_states, page=page, api_base_url=api_base_url)
 
     _RENDER_LEAD_DIALOG["open_selector"] = "[data-lead-open]"
     # Native <dialog>, not a hand-rolled overlay: focus trapping, Escape-to-close and an inert background
@@ -9401,10 +9403,11 @@ def render_email_cta(
         "      </form>",
         *form_rows,
         "    </dialog>",
-    ] if line), event_states)
+    ] if line), event_states, page=page, api_base_url=api_base_url)
 
 
-def _wrap_event_states(form_markup: str, event_states: dict[str, Any]) -> str:
+def _wrap_event_states(form_markup: str, event_states: dict[str, Any],
+                       page: dict[str, Any] | None = None, api_base_url: str | None = None) -> str:
     """Wrap a registration form with the two states only the viewer's clock can choose between.
 
     Returns `form_markup` untouched when the page has no event, so every non-webinar lead page renders
@@ -9418,8 +9421,14 @@ def _wrap_event_states(form_markup: str, event_states: dict[str, Any]) -> str:
     if not event_states:
         return form_markup
     sessions = json.dumps(event_states.get("sessions") or [], separators=(",", ":"))
+    beacon_url = f"{str(api_base_url or '').rstrip('/')}/leads" if api_base_url else ""
+    tenant_id = str((page or {}).get("tenant_id") or "")
     return "\n".join(line for line in [
-        f'    <div class="sl-event-cta" data-event-cta data-event-sessions="{escape(sessions)}">',
+        # The registrant's identity is read off the URL by the island, but WHERE to send it lives here --
+        # on the wrapper rather than on the player, because giving a seat back has to work for a live
+        # webinar and before the session starts, neither of which has a player.
+        f'    <div class="sl-event-cta" data-event-cta data-event-sessions="{escape(sessions)}"'
+        f' data-tenant-id="{escape(tenant_id)}" data-beacon-url="{escape(beacon_url)}">',
         '      <div data-event-block="upcoming">',
         form_markup,
         "      </div>",
@@ -9465,8 +9474,7 @@ def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
 
 
 def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any],
-                      section: dict[str, Any] | None, *, title: str,
-                      page: dict[str, Any] | None = None, api_base_url: str | None = None) -> str:
+                      section: dict[str, Any] | None, *, title: str) -> str:
     """The session is running. One job: get the visitor into it.
 
     The join link is the whole page at this moment, so the form is replaced rather than sat beside -- a
@@ -9493,16 +9501,11 @@ def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any
     # the viewer's own clock.
     video_url = safe_href(str(scheduled_event.get("video_url") or ""))
     if event_delivery(scheduled_event) == DELIVERY_AUTO and video_url:
-        # The attendance beacon posts to the SAME public endpoint registrations do, routed by payload
-        # shape rather than by a route of its own (handlers/leads.py).
-        beacon_url = f"{str(api_base_url or '').rstrip('/')}/leads" if api_base_url else ""
         rows.append(
             f'        <video class="sl-event-player" data-event-player playsinline controls'
             f' preload="metadata" controlslist="nodownload noplaybackrate"'
             f' data-starts-at="{event_starts_at(occurrence)}"'
             f' data-ends-at="{event_ends_at(scheduled_event, occurrence)}"'
-            f' data-tenant-id="{escape(str((page or {}).get("tenant_id") or ""))}"'
-            f' data-beacon-url="{escape(beacon_url)}"'
             f' src="{escape(video_url)}"></video>'
         )
         rows.extend(["      </div>", "    </section>"])
@@ -10549,6 +10552,15 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         # the page was published (plans/AUTO_WEBINAR.md §1). Re-run on a timer so a visitor sitting on the
         # page as the session starts is moved into it rather than left staring at a form.
         "      const eventCta = document.querySelector('[data-event-cta]');",
+        # WHO THIS VISITOR IS, when the link in their confirmation mail says so. Read once, here, because
+        # both of the things a registrant can do -- be counted as watching, and give the seat back -- need
+        # it, and only one of them involves a player.
+        "      const regParams = new URLSearchParams(window.location.search);",
+        "      const regId = regParams.get('r');",
+        "      const regKey = regParams.get('k');",
+        "      const regTenant = eventCta ? (eventCta.dataset.tenantId || '') : '';",
+        "      const regBeacon = eventCta ? (eventCta.dataset.beaconUrl || '') : '';",
+        "      const knownRegistrant = Boolean(regId && regKey && regTenant && regBeacon);",
         "      if (eventCta) {",
         "        let sessions = [];",
         "        try { sessions = JSON.parse(eventCta.dataset.eventSessions || '[]'); } catch (err) { sessions = []; }",
@@ -10581,6 +10593,31 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "        };",
         "        applyEventState();",
         "        setInterval(applyEventState, 15000);",
+        # GIVING THE SEAT BACK. Added by script rather than baked into the page because it must never
+        # appear to a visitor who is not a registrant -- a cancel control on a registration page would be
+        # a puzzle at best. Works before, during and after a session, and for a live webinar too.
+        "        if (knownRegistrant) {",
+        "          const give = document.createElement('button');",
+        "          give.type = 'button';",
+        "          give.className = 'sl-event-unregister';",
+        "          give.textContent = \"Can't make it? Cancel my registration\";",
+        "          give.addEventListener('click', () => {",
+        "            give.disabled = true;",
+        # Said before the request returns, and never revised. The endpoint answers 202 to everything by
+        # design, so it cannot report success -- and a message that flickered to an error afterwards
+        # would be inventing information nobody has.
+        "            give.textContent = \"That's cancelled — you won't get any more reminders.\";",
+        "            try {",
+        "              fetch(regBeacon, {",
+        "                method: 'POST', keepalive: true,",
+        "                headers: { 'Content-Type': 'application/json' },",
+        "                body: JSON.stringify({ tenant_id: regTenant, lead_id: regId,",
+        "                                       attend_token: regKey, action: 'unregister' }),",
+        "              });",
+        "            } catch (err) { /* the message stands either way */ }",
+        "          });",
+        "          eventCta.appendChild(give);",
+        "        }",
         "      }",
         # AUTO-WEBINAR PLAYBACK. The recording is a broadcast: where it has got to is a function of the
         # VIEWER'S clock, never of when the page was published. Seats the player on load and snaps back
@@ -10602,16 +10639,11 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         # opened cold beacons nothing and the feature costs an anonymous visitor one `if`.
         # `keepalive` so the last beacon survives the tab closing, which is exactly the beacon that says
         # where somebody stopped watching -- the most interesting one a tenant gets.
-        "        const watchParams = new URLSearchParams(window.location.search);",
-        "        const regId = watchParams.get('r');",
-        "        const regKey = watchParams.get('k');",
-        "        const regTenant = autoPlayer.dataset.tenantId || '';",
-        "        const beaconBase = autoPlayer.dataset.beaconUrl || '';",
-        "        if (regId && regKey && regTenant && beaconBase) {",
+        "        if (knownRegistrant) {",
         "          const beat = () => {",
         "            if (autoPlayer.paused) return;",
         "            try {",
-        "              fetch(beaconBase, {",
+        "              fetch(regBeacon, {",
         "                method: 'POST', keepalive: true,",
         "                headers: { 'Content-Type': 'application/json' },",
         "                body: JSON.stringify({ tenant_id: regTenant, lead_id: regId, attend_token: regKey,",

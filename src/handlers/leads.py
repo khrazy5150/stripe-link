@@ -23,7 +23,8 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_lead_submission
-from stripe_link.domain.events import CANCELLED, FULL, PASSED, accepts_registration, record_registration
+from stripe_link.domain.events import (CANCELLED, FULL, PASSED, accepts_registration,
+                                        record_registration, release_registration)
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.domain.page_views import identifier_slug
@@ -88,7 +89,9 @@ def handler(
         # Routed on the payload rather than the path for that reason. It differs from ingest in the way
         # that matters: ingest is anonymous and this names a registrant, which is what the token is for.
         if _is_attendance_beacon(event):
-            return record_attendance_beacon(event, leads_repo=leads_repo, now=now_fn())
+            return registrant_action(
+                event, leads_repo=leads_repo,
+                events_repo=events_repo or events_repository(), now=now_fn())
         return ingest_lead(
             event,
             leads_repo=leads_repo,
@@ -128,12 +131,18 @@ def _is_attendance_beacon(event) -> bool:
     return isinstance(payload, dict) and bool(payload.get("attend_token"))
 
 
-def record_attendance_beacon(event, *, leads_repo, now):
-    """Fold one beacon into a registrant's watch record (plans/AUTO_WEBINAR.md P4).
+def registrant_action(event, *, leads_repo, events_repo=None, now):
+    """What an IDENTIFIED registrant may do without an account: send a watch beacon, or give the seat back
+    (plans/AUTO_WEBINAR.md P4, plans/WEBINAR.md §12).
+
+    Both prove the same `attend_token` on the same public POST, so the verification lives in one place
+    rather than being written twice and drifting. `action: "unregister"` is the only thing that is not a
+    beacon; everything else is one.
 
     **Always 202, whatever happens.** An unknown registration, a wrong token and a successful write are
-    indistinguishable to the caller, so this cannot be used to discover which registrations exist or to
-    confirm a guessed token. It is also the cheapest answer for something fired every thirty seconds.
+    indistinguishable to the caller, so this cannot be used to discover which registrations exist, to
+    confirm a guessed token, or to probe whether a cancellation took. It is also the cheapest answer for
+    something fired every thirty seconds.
 
     The token is compared with `secrets.compare_digest`. Timing on a string compare is a thin channel, but
     what it guards is a stranger's registration record and constant-time costs nothing.
@@ -159,9 +168,41 @@ def record_attendance_beacon(event, *, leads_repo, now):
         expected = attendance_token(lead)
         if not expected or not secrets.compare_digest(expected, token):
             return accepted
+        if str(payload.get("action") or "") == "unregister":
+            return _unregister(lead, leads_repo=leads_repo, events_repo=events_repo, now=int(now))
         leads_repo.put(record_attendance(lead, position=position, now=int(now)))
     except Exception as exc:  # noqa: BLE001 - a viewer must never see a failure here
-        print(f"attendance not recorded for {lead_id}: {type(exc).__name__}: {exc}")
+        print(f"registrant action not recorded for {lead_id}: {type(exc).__name__}: {exc}")
+    return accepted
+
+
+def _unregister(lead, *, leads_repo, events_repo, now):
+    """Give the seat back. The registrant's row is MARKED, not deleted.
+
+    Deleting would take the consent record and the provenance with it -- the evidence that this person
+    asked to be contacted, and when. That is exactly what a complaint has to be answered with, so the one
+    moment it is most tempting to erase a row is the moment it is least safe to. `archived` is a status
+    the leads screen already understands, so the tenant side needs nothing new.
+
+    Idempotent: a double tap or a retried beacon must not decrement the seat count twice and hand the
+    session a seat it does not have.
+    """
+    accepted = json_response({"status": "accepted"}, status_code=202)
+    if str(lead.get("status") or "") == "archived":
+        return accepted
+    leads_repo.put({**lead, "status": "archived", "unregistered_at": int(now), "updated_at": int(now)})
+    # Best-effort and AFTER the lead is marked, mirroring registration. A seat count that failed to
+    # decrement is a door closed slightly early; a lead still marked registered would keep sending
+    # reminders for a session the person has left, which is the worse of the two.
+    event_id = str(lead.get("event_id") or "")
+    occurrence_id = str(lead.get("occurrence_id") or "")
+    if events_repo and event_id and occurrence_id:
+        try:
+            scheduled = events_repo.get(str(lead.get("tenant_id") or ""), event_id)
+            if scheduled:
+                events_repo.put(release_registration(scheduled, occurrence_id))
+        except Exception as exc:  # noqa: BLE001 - the cancellation stands either way
+            logger.warning("seat not released for event %s: %s", event_id, exc)
     return accepted
 
 
