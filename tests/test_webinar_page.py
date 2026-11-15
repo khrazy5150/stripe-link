@@ -263,12 +263,26 @@ class TheLiveState(unittest.TestCase):
         self.assertIn("builder.cta_live_label", builder)
         self.assertIn("live_title: builder.cta_live_title", builder)
 
-    def test_the_live_check_comes_before_the_registration_check(self):
-        """A form shown while the host is already talking is the page failing at the only moment that
-        matters."""
+    def test_the_viewers_clock_chooses_the_block_not_the_publishers(self):
+        """Replaces an assertion that the live check came FIRST in the source, which guarded the old
+        design: the server picked one of the three states while rendering, and the first one checked won.
+
+        That ordering stopped meaning anything on 2026-11-15. Picking here is only ever right for the
+        instant the page is published, and a published page is a static artifact that nothing republishes
+        on a schedule -- so a page published on Monday showed the registration form right through
+        Wednesday's session and after it. The live window never appeared on a published page at all.
+
+        All three blocks are rendered now and the island picks between them, so the invariant worth
+        holding is that the markup carries all three plus the windows to choose by.
+        """
         source = open(html.__file__, encoding="utf-8").read()
-        cta = source[source.index("    if scheduled_event is not None:"):][:1400]
-        self.assertLess(cta.index("event_live_occurrence"), cta.index("event_open_occurrences"))
+        self.assertIn('data-event-block="upcoming"', source)
+        self.assertIn('data-event-block="live"', source)
+        self.assertIn('data-event-block="ended"', source)
+        self.assertIn("data-event-sessions=", source)
+        # The island, and the timer that moves a visitor who is already sitting on the page.
+        self.assertIn("const applyEventState = () =>", source)
+        self.assertIn("setInterval(applyEventState", source)
 
 
 class TheInlineCtaTakesThePageGutter(unittest.TestCase):

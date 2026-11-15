@@ -116,5 +116,43 @@ class ThePlayerReplacesTheJoinLinkTests(unittest.TestCase):
         self.assertNotIn("data-event-player", markup)
         self.assertIn("not posted the link yet", markup)
 
+
+class TheViewersClockChoosesTests(unittest.TestCase):
+    """AUTO_WEBINAR.md §1: the page used to freeze whichever state the publisher was standing in."""
+
+    def _cta(self, starts):
+        from stripe_link.runtime import html
+
+        return html._wrap_event_states("FORM", {
+            "sessions": [{"start": starts, "end": starts + 5400}],
+            "live": "LIVE-BLOCK", "ended": "ENDED-BLOCK",
+        })
+
+    def test_all_three_blocks_are_in_the_markup(self):
+        markup = self._cta(START)
+        for block in ("upcoming", "live", "ended"):
+            self.assertIn(f'data-event-block="{block}"', markup)
+        self.assertIn("FORM", markup)
+        self.assertIn("LIVE-BLOCK", markup)
+        self.assertIn("ENDED-BLOCK", markup)
+
+    def test_the_windows_ride_the_markup_for_the_island_to_choose_by(self):
+        markup = self._cta(START)
+        self.assertIn("data-event-sessions=", markup)
+        self.assertIn(str(START), markup)
+        self.assertIn(str(START + 5400), markup)
+
+    def test_the_form_is_the_default_so_a_no_js_visitor_still_gets_one(self):
+        # The server refuses a registration for a session that has started or filled, so the worst a
+        # no-JS visitor meets is a refusal -- never a silent failure.
+        markup = self._cta(START)
+        upcoming = markup.index('data-event-block="upcoming"')
+        self.assertNotIn("hidden", markup[upcoming:markup.index("FORM")])
+
+    def test_a_page_with_no_event_is_untouched(self):
+        from stripe_link.runtime import html
+
+        self.assertEqual(html._wrap_event_states("FORM", {}), "FORM")
+
 if __name__ == "__main__":
     unittest.main()

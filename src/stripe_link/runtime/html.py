@@ -55,6 +55,7 @@ from stripe_link.domain.events import (
     ends_at as event_ends_at,
     live_occurrence as event_live_occurrence,
     next_occurrence as event_next_occurrence,
+    occurrences as event_occurrences,
     open_occurrences as event_open_occurrences,
     seats_left as event_seats_left,
     starts_at as event_starts_at,
@@ -1002,6 +1003,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The auto-webinar player. Full width of the card and never taller than the viewport, so a phone shows
     # the video and the page's own words rather than one filling the screen.
     "    .sl-event-player{width:100%;max-width:100%;max-height:70vh;border-radius:0.8rem;background:#000;display:block}",
+    # The three event blocks. `[hidden]` is spelled out because the published bundle carries no reset, and
+    # a hidden block that still paints would stack all three states on top of each other.
+    "    .sl-event-cta [data-event-block][hidden],.sl-occurrence[hidden]{display:none}",
     "    .sl-event-join{display:block;text-align:center;text-decoration:none}",
     "    .sl-event-closed-heading{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-dialog{border:0;padding:0;background:none;max-width:min(52rem,calc(100vw - 3.2rem));width:100%}",
@@ -9313,22 +9317,35 @@ def render_email_cta(
     # Briefly shipped pre-ticked on 2026-09-15 and reverted the same day once the rule was checked. Left here
     # so the next person reaches for the citation instead of the checkbox (author's decision: "we must comply
     # to legal statutes").
+    event_states: dict[str, Any] = {}
     if scheduled_event is not None:
         now_epoch = int(time.time())
         # A webinar is a free event whose point is that people WATCH it, so the page's job changes at the
         # start time: collect a lead before, push them at the join URL during, say they missed it after
-        # (author, 2026-10-14). The live window is checked FIRST -- a form shown while the host is already
-        # talking is the page failing at the only moment that matters.
-        live = event_live_occurrence(scheduled_event, now=now_epoch)
-        if live is not None:
-            return render_event_live(scheduled_event, live, section, title=title)
-        # Asked at PUBLISH with the same function the endpoint uses, so a page cannot offer a session the
-        # server will refuse. A page is a cached artifact, so the server still checks -- this decides what
-        # the visitor is shown, not whether the registration is allowed.
+        # (author, 2026-10-14).
+        #
+        # ALL THREE BLOCKS ARE RENDERED, and the VIEWER'S clock chooses between them
+        # (plans/AUTO_WEBINAR.md §1). This used to pick one here and return it, which is correct only for
+        # the instant the page is published -- and a published page is a static artifact that nothing
+        # republishes on a schedule, so a page published on Monday showed the registration form right
+        # through Wednesday's session and after it. The live window never appeared on a published page at
+        # all; it looked right only in the builder, where /pages/render has a real clock.
+        #
+        # The SERVER still decides whether a registration is allowed. This decides what is shown.
+        rows = [row for row in event_occurrences(scheduled_event)
+                if str(row.get("status") or "scheduled") != "cancelled" and event_starts_at(row)]
+        # Seeded from whichever sitting is live now, or the first one as a placeholder -- the island
+        # overwrites the window from the session it matches, so this only has to be a valid shape.
+        seed = event_live_occurrence(scheduled_event, now=now_epoch) or (rows[0] if rows else {})
+        event_states = {
+            "sessions": [{"start": event_starts_at(row),
+                          "end": event_ends_at(scheduled_event, row)} for row in rows],
+            "live": render_event_live(scheduled_event, seed, section, title=title),
+            "ended": render_event_closed(scheduled_event, section, description=description),
+        }
         open_rows = event_open_occurrences(scheduled_event, now=now_epoch)
-        if not open_rows:
-            return render_event_closed(scheduled_event, section, description=description)
-        inputs = [render_occurrence_picker(open_rows)] + inputs
+        if open_rows:
+            inputs = [render_occurrence_picker(open_rows)] + inputs
 
     # SHOWN ON THE PAGE, or opened from a button. Inline is the default, so no existing page changes:
     # inline forms often convert better (the field is already in front of the visitor), modals win when
@@ -9356,11 +9373,11 @@ def render_email_cta(
         "      </form>",
     ]
     if not as_dialog:
-        return "\n".join(line for line in [
+        return _wrap_event_states("\n".join(line for line in [
             "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
             *form_rows,
             "    </section>",
-        ] if line)
+        ] if line), event_states)
 
     _RENDER_LEAD_DIALOG["open_selector"] = "[data-lead-open]"
     # Native <dialog>, not a hand-rolled overlay: focus trapping, Escape-to-close and an inert background
@@ -9368,7 +9385,7 @@ def render_email_cta(
     # The section is ONLY the button. The title and description stay inside the dialog, where they head the
     # form -- repeating them on the page under a button that opens them is the same two lines twice.
     # Whatever pitches the button is the page's own content: the hero, or the ribbon that hosts it.
-    return "\n".join(line for line in [
+    return _wrap_event_states("\n".join(line for line in [
         "    <section class=\"sl-checkout-cta sl-email-cta is-dialog\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
         f"      <button class=\"sl-cta\" type=\"button\" data-lead-open>{label}</button>",
         "    </section>",
@@ -9378,6 +9395,35 @@ def render_email_cta(
         "      </form>",
         *form_rows,
         "    </dialog>",
+    ] if line), event_states)
+
+
+def _wrap_event_states(form_markup: str, event_states: dict[str, Any]) -> str:
+    """Wrap a registration form with the two states only the viewer's clock can choose between.
+
+    Returns `form_markup` untouched when the page has no event, so every non-webinar lead page renders
+    byte-identically to before.
+
+    The server's choice is still the DEFAULT: `upcoming` is the block shown in the markup, so a visitor
+    with no JS gets the registration form, which is the honest fallback -- the server refuses a
+    registration for a session that has started or filled, so the worst case is a refusal rather than a
+    silent failure. With JS the island corrects it within a frame.
+    """
+    if not event_states:
+        return form_markup
+    sessions = json.dumps(event_states.get("sessions") or [], separators=(",", ":"))
+    return "\n".join(line for line in [
+        f'    <div class="sl-event-cta" data-event-cta data-event-sessions="{escape(sessions)}">',
+        '      <div data-event-block="upcoming">',
+        form_markup,
+        "      </div>",
+        '      <div data-event-block="live" hidden>',
+        str(event_states.get("live") or ""),
+        "      </div>",
+        '      <div data-event-block="ended" hidden>',
+        str(event_states.get("ended") or ""),
+        "      </div>",
+        "    </div>",
     ] if line)
 
 
@@ -9402,7 +9448,10 @@ def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
         # Only when it is nearly gone: "497 seats left" is not scarcity, it is arithmetic.
         remaining = f'<span class="sl-occurrence-seats">{left} left</span>' if left is not None and left <= 20 else ''
         rows.append(
-            f'          <label class="sl-occurrence"><input type="radio" name="occurrence_id" '
+            # The start rides each option so the island can retire it when that sitting begins. Without
+            # it a page published on Monday still offers Wednesday's session on Thursday.
+            f'          <label class="sl-occurrence" data-starts-at="{event_starts_at(row)}">'
+            f'<input type="radio" name="occurrence_id" '
             f'value="{occurrence_id}"{checked} /> <span>{when}</span>{remaining}</label>'
         )
     rows.append('        </fieldset>')
@@ -10465,6 +10514,40 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "            if (submitBtn) { submitBtn.dataset.busy = 'false'; submitBtn.classList.remove('is-connecting'); }",
         "          });",
         "        });",
+        "      }",
+        # WHICH OF THE THREE EVENT BLOCKS THE VISITOR SEES, decided by THEIR clock rather than by whenever
+        # the page was published (plans/AUTO_WEBINAR.md §1). Re-run on a timer so a visitor sitting on the
+        # page as the session starts is moved into it rather than left staring at a form.
+        "      const eventCta = document.querySelector('[data-event-cta]');",
+        "      if (eventCta) {",
+        "        let sessions = [];",
+        "        try { sessions = JSON.parse(eventCta.dataset.eventSessions || '[]'); } catch (err) { sessions = []; }",
+        "        const applyEventState = () => {",
+        "          const now = Math.floor(Date.now() / 1000);",
+        "          const live = sessions.find((s) => now >= s.start && now < s.end);",
+        "          const state = live ? 'live' : (sessions.some((s) => now < s.start) ? 'upcoming' : 'ended');",
+        "          eventCta.querySelectorAll('[data-event-block]').forEach((block) => {",
+        "            block.hidden = block.dataset.eventBlock !== state;",
+        "          });",
+        # A sitting that has started is no longer registerable, and the server refuses it. Taking the
+        # option away is the honest version of that refusal -- leaving it selectable invites a visitor to
+        # pick the one thing that cannot work.
+        "          eventCta.querySelectorAll('.sl-occurrence').forEach((option) => {",
+        "            const input = option.querySelector('input[name=\"occurrence_id\"]');",
+        "            const starts = Number(option.dataset.startsAt) || 0;",
+        "            const past = starts > 0 && now >= starts;",
+        "            option.hidden = past;",
+        "            if (past && input) input.checked = false;",
+        "          });",
+        "          const choices = [...eventCta.querySelectorAll('.sl-occurrence:not([hidden]) input')];",
+        "          if (choices.length && !choices.some((input) => input.checked)) choices[0].checked = true;",
+        "          if (live) {",
+        "            const player = eventCta.querySelector('[data-event-player]');",
+        "            if (player) { player.dataset.startsAt = live.start; player.dataset.endsAt = live.end; }",
+        "          }",
+        "        };",
+        "        applyEventState();",
+        "        setInterval(applyEventState, 15000);",
         "      }",
         # AUTO-WEBINAR PLAYBACK. The recording is a broadcast: where it has got to is a function of the
         # VIEWER'S clock, never of when the page was published. Seats the player on load and snaps back
