@@ -240,9 +240,21 @@ an SMS registration they have nothing to do with.
 1. **P1 — Event + registration.** EventsTable, `lead_event` offer type and composition, occurrence picker,
    server-side future/capacity checks, post-event state.
 2. **P2 — Comms.** Confirmation email with `.ics`; reminders retargeted from appointments to registrations.
-3. **P3 — Operations.** Registrant list and export, and cancellation. BUILT 2026-10-14, except
-   "notify me of the next one", which is left out deliberately: it is the smallest and most speculative of
-   the three, and nobody has asked for it.
+3. **P3 — Operations. COMPLETE 2026-11-15.** Registrant list and export, and cancellation, built
+   2026-10-14. Everything below that this section recorded as "nobody has asked" was asked for on
+   2026-11-15, and all three are now built:
+
+   * **A registrant un-registering** — link-based and account-free, proving the same `attend_token` that
+     attendance does, so there is one verification rather than two that drift. The row is marked
+     `archived`, never deleted: deleting takes the consent record and the provenance with it, which is
+     exactly what a complaint has to be answered with.
+   * **"Notify me of the next one"** — the ended page MOVES its one lead form into the ask (moved, not
+     copied: the handler binds `querySelector`, singular). Each person is told **once, ever**, and their
+     row is marked when they are, because the alternative is a subscription to every sitting the tenant
+     ever schedules.
+   * **The occurrence index** (§10a) — sparse, so an ordinary lead capture never enters it.
+
+   Nothing in this plan is deliberately unbuilt any more.
 
    The guess that the list would "fall out of the existing leads screen" was half right. That screen
    already listed registrations and exported CSV, but had no idea events existed — so two sittings of one
@@ -251,8 +263,8 @@ an SMS registration they have nothing to do with.
 
    Cancellation turned out to be two things under one word. The TENANT cancelling a sitting is built: the
    events handler diffs the save against what it replaced and emails that sitting's registrants, offering
-   the next open sitting when there is one. A REGISTRANT un-registering is not built — it needs the
-   link-based, no-accounts approach the tip jar uses, and nobody has asked.
+   the next open sitting when there is one. A REGISTRANT un-registering is now built too, on the
+   link-based, no-accounts approach the tip jar uses — see the list above.
 
 ## 13. Budget note
 
