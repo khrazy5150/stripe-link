@@ -88,32 +88,32 @@ class ThePlayerReplacesTheJoinLinkTests(unittest.TestCase):
         self.live = {**EVENT, "delivery": "live", "join_url": "https://zoom.example/j/1"}
 
     def test_an_auto_session_renders_a_player(self):
-        markup = self.render(self.auto, SITTING, None, title="")
+        markup = self.render(self.auto, SITTING, None)
         self.assertIn("data-event-player", markup)
         self.assertIn("https://cdn.example/talk.mp4", markup)
 
     def test_the_player_carries_the_window_not_a_baked_position(self):
         # The position is the VIEWER's clock minus the start. Baking a number would freeze playback at
         # whatever the publish time happened to be -- the bug this whole plan exists around.
-        markup = self.render(self.auto, SITTING, None, title="")
+        markup = self.render(self.auto, SITTING, None)
         self.assertIn(f'data-starts-at="{START}"', markup)
         self.assertIn(f'data-ends-at="{START + 90 * 60}"', markup)
         self.assertNotIn("currentTime", markup)
 
     def test_an_auto_session_does_not_also_send_them_away(self):
         both = {**self.auto, "join_url": "https://zoom.example/j/1"}
-        markup = self.render(both, SITTING, None, title="")
+        markup = self.render(both, SITTING, None)
         self.assertIn("data-event-player", markup)
         self.assertNotIn("zoom.example", markup)
 
     def test_a_live_session_still_gets_its_join_link(self):
-        markup = self.render(self.live, SITTING, None, title="")
+        markup = self.render(self.live, SITTING, None)
         self.assertIn("zoom.example", markup)
         self.assertNotIn("data-event-player", markup)
 
     def test_an_auto_session_with_no_recording_says_so_rather_than_playing_nothing(self):
         # Same contract a live event with no join_url already follows: never render a dead control.
-        markup = self.render({**EVENT, "delivery": "auto"}, SITTING, None, title="")
+        markup = self.render({**EVENT, "delivery": "auto"}, SITTING, None)
         self.assertNotIn("data-event-player", markup)
         self.assertIn("not posted the link yet", markup)
 

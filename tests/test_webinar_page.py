@@ -214,31 +214,41 @@ class TheLiveState(unittest.TestCase):
 
     def test_the_join_link_replaces_the_form(self):
         """A visitor arriving mid-session does not want to fill anything in, they want the room."""
-        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {}, title="")
+        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {})
         self.assertIn("https://zoom.us/j/1", markup)
         self.assertNotIn("<input", markup)
         self.assertIn('data-event-live="true"', markup)
 
     def test_it_opens_in_a_new_tab_without_leaking_the_opener(self):
-        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {}, title="")
+        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {})
         self.assertIn('target="_blank"', markup)
         self.assertIn('rel="noopener"', markup)
 
     def test_a_dangerous_join_url_is_refused(self):
         """A tenant types this and the page puts it in an href."""
-        markup = html.render_event_live({"join_url": "javascript:alert(1)"}, {}, {}, title="")
+        markup = html.render_event_live({"join_url": "javascript:alert(1)"}, {}, {})
         self.assertNotIn("javascript:", markup)
         self.assertIn("not posted the link yet", markup)
 
     def test_no_link_says_so_rather_than_rendering_a_dead_button(self):
-        markup = html.render_event_live({}, {}, {}, title="")
+        markup = html.render_event_live({}, {}, {})
         self.assertNotIn("sl-event-join", markup)
         self.assertIn("not posted the link yet", markup)
 
+    def test_it_does_not_head_the_room_with_an_offer_of_a_seat(self):
+        """The same lesson the closed state learned on 2026-10-15, applied one block over.
+
+        This read "Save your seat" in the card's boldest type with "We're live now" beneath it in body
+        weight -- a stale invitation heading a line that contradicts it. Once the session has started a
+        seat is not what is on offer; the room is.
+        """
+        markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {}, {})
+        self.assertNotIn("sl-lead-title", markup)
+        self.assertIn("sl-event-live-heading", markup)
+
     def test_the_tenant_can_word_it(self):
         markup = html.render_event_live({"join_url": "https://zoom.us/j/1"}, {},
-                                        {"live_title": "Doors are open", "live_label": "Enter the room"},
-                                        title="")
+                                        {"live_title": "Doors are open", "live_label": "Enter the room"})
         self.assertIn("Doors are open", markup)
         self.assertIn("Enter the room", markup)
 

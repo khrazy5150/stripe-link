@@ -9353,7 +9353,7 @@ def render_email_cta(
             "sessions": [{"start": event_starts_at(row),
                           "end": event_ends_at(scheduled_event, row),
                           "join_until": event_joinable_until(scheduled_event, row)} for row in rows],
-            "live": render_event_live(scheduled_event, seed, section, title=title),
+            "live": render_event_live(scheduled_event, seed, section),
             "ended": render_event_closed(scheduled_event, section, description=description),
         }
         open_rows = event_open_occurrences(scheduled_event, now=now_epoch)
@@ -9479,13 +9479,19 @@ def render_occurrence_picker(open_rows: list[dict[str, Any]]) -> str:
 
 
 def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any],
-                      section: dict[str, Any] | None, *, title: str) -> str:
+                      section: dict[str, Any] | None) -> str:
     """The session is running. One job: get the visitor into it.
 
     The join link is the whole page at this moment, so the form is replaced rather than sat beside -- a
     visitor who arrives mid-session does not want to fill anything in, they want the room. Someone who
     never registered is let in too: a free event exists to be watched, and turning away an attendee to
     protect a lead record has the priority backwards.
+
+    **It does not keep the form's title**, for the reason `render_event_closed` does not: this block read
+    "Save your seat" in the card's boldest type with "We're live now" beneath it in body weight. That is
+    the same shape as the 2026-10-15 closed-page bug -- a stale invitation heading a line that contradicts
+    it -- and the fix there was to drop the heading, not to reword it. A seat is not what is on offer once
+    the session has started; the room is. The tenant words this one through `live_title`.
 
     No join URL yet is the one case this cannot rescue, so it says so plainly instead of rendering a button
     that goes nowhere.
@@ -9497,7 +9503,6 @@ def render_event_live(scheduled_event: dict[str, Any], occurrence: dict[str, Any
         '    <section class="sl-checkout-cta sl-email-cta sl-event-live" data-section-type="checkout_cta"'
         ' data-cta-type="email" data-event-live="true">',
         '      <div class="sl-lead-form">',
-        (f'        <p class="sl-lead-title">{title}</p>' if title else ""),
         f'        <p class="sl-event-live-heading">{heading}</p>',
     ]
     # AN AUTO-WEBINAR PLAYS HERE RATHER THAN SENDING THE VISITOR AWAY (plans/AUTO_WEBINAR.md P2). The
