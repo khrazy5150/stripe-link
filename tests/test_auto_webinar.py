@@ -154,5 +154,45 @@ class TheViewersClockChoosesTests(unittest.TestCase):
 
         self.assertEqual(html._wrap_event_states("FORM", {}), "FORM")
 
+class TheTenantCanSetOneUpTests(unittest.TestCase):
+    """P3. Asserted against the Vue source, the way the webinar tests already check the builder: these are
+    the places a field is silently dropped if somebody adds the mode and forgets the form."""
+
+    def setUp(self):
+        import pathlib as _p
+
+        self.screen = (_p.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+                       / "Events.vue").read_text(encoding="utf-8")
+
+    def test_automated_is_offered_before_live(self):
+        # Author, 2026-11-15: auto is the first kind of webinar a tenant creates.
+        self.assertLess(self.screen.index('value="auto"'), self.screen.index('value="live"'))
+
+    def test_a_new_event_starts_on_automated(self):
+        self.assertIn('delivery: "auto"', self.screen)
+
+    def test_an_event_saved_before_the_field_opens_on_automated_too(self):
+        # startEdit spreads the stored item over a default, so the select is never empty.
+        self.assertIn('delivery: "auto", video_url: ""', self.screen)
+
+    def test_both_fields_reach_the_saved_document(self):
+        self.assertIn("delivery: editing.value.delivery === \"live\"", self.screen)
+        self.assertIn("video_url: editing.value.delivery === \"live\"", self.screen)
+
+    def test_the_other_modes_fields_are_dropped_rather_than_carried(self):
+        # An auto event holding a stale join_url would name a room nobody is in, and the renderer prefers
+        # the recording -- so it would sit in the document being wrong and never being seen.
+        self.assertIn("join_url: editing.value.delivery === \"live\"", self.screen)
+
+    def test_the_picker_offers_only_what_the_uploader_accepts(self):
+        self.assertIn('accept="video/mp4,video/webm"', self.screen)
+        self.assertNotIn("video/quicktime", self.screen)
+
+    def test_the_size_ceiling_is_not_copied_into_this_repo(self):
+        # It is a parameter on the image-processing stack (docs/EXTERNAL_SERVICES.md). A number here would
+        # go stale the moment that stack raises it.
+        self.assertNotIn("maxBytes", self.screen)
+
+
 if __name__ == "__main__":
     unittest.main()

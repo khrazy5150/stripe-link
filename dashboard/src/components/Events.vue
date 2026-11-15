@@ -45,7 +45,44 @@
         <textarea v-model.trim="editing.description" rows="2"></textarea>
       </label>
 
+      <!-- AUTO IS FIRST AND IS THE DEFAULT (author, 2026-11-15). The two modes need different fields --
+           a recording has no provider and no join link -- so the rest of this block follows the choice. -->
       <div class="offer-two-column">
+        <label class="offer-field">
+          <span>How it runs</span>
+          <select v-model="editing.delivery">
+            <option value="auto">Automated — play a recording on schedule</option>
+            <option value="live">Live — you host it somewhere else</option>
+          </select>
+        </label>
+        <label class="offer-field">
+          <span>How long <small>(minutes, optional)</small></span>
+          <input v-model.number="editing.duration_minutes" type="number" min="1" />
+        </label>
+      </div>
+
+      <template v-if="editing.delivery !== 'live'">
+        <label class="offer-field">
+          <span>The recording</span>
+          <input ref="videoInput" type="file" accept="video/mp4,video/webm" hidden @change="pickVideo" />
+          <div class="element-subrow">
+            <button class="secondary-action" type="button" :disabled="uploading" @click="videoInput?.click()">
+              {{ uploading ? uploadLabel : (editing.video_url ? "Replace recording" : "Upload a recording") }}
+            </button>
+            <button v-if="editing.video_url && !uploading" class="danger-action compact" type="button"
+                    @click="editing.video_url = ''">Remove</button>
+          </div>
+        </label>
+        <p v-if="videoError" class="keys-status-banner error">{{ videoError }}</p>
+        <video v-else-if="editing.video_url" class="event-recording-preview" :src="editing.video_url" controls preload="metadata"></video>
+        <p class="field-note">
+          MP4 plays everywhere; WebM will not play on older iPhones. The recording is not converted, so
+          whatever you upload is what every attendee has to play. It starts at the scheduled time and
+          follows the clock — someone arriving late joins part-way in, exactly as they would a live session.
+        </p>
+      </template>
+
+      <template v-else>
         <label class="offer-field">
           <span>Where it runs</span>
           <select v-model="editing.provider">
@@ -57,19 +94,14 @@
           </select>
         </label>
         <label class="offer-field">
-          <span>How long <small>(minutes, optional)</small></span>
-          <input v-model.number="editing.duration_minutes" type="number" min="1" />
+          <span>Join link <small>(optional for now)</small></span>
+          <input v-model.trim="editing.join_url" type="url" placeholder="https://zoom.us/j/…" />
         </label>
-      </div>
-
-      <label class="offer-field">
-        <span>Join link <small>(optional for now)</small></span>
-        <input v-model.trim="editing.join_url" type="url" placeholder="https://zoom.us/j/…" />
-      </label>
-      <p class="field-note">
-        Registrants will be sent this link. You can add it later — the session can be scheduled before the
-        meeting exists.
-      </p>
+        <p class="field-note">
+          Registrants will be sent this link. You can add it later — the session can be scheduled before the
+          meeting exists.
+        </p>
+      </template>
 
       <div class="composition-subhead">Sessions</div>
       <p class="field-note">
@@ -125,6 +157,7 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
+import { uploadVideo } from "../api/uploads";
 import { useEventsStore } from "../stores/events";
 import { useProfileStore } from "../stores/profile";
 import { timeZoneOptions } from "../utils/timezones";
@@ -134,6 +167,10 @@ const profileStore = useProfileStore();
 const editing = ref(null);
 const saving = ref(false);
 const saveError = ref("");
+const videoInput = ref(null);
+const videoError = ref("");
+const uploading = ref(false);
+const uploadLabel = ref("Uploading…");
 
 onMounted(() => store.ensureLoaded());
 
@@ -181,16 +218,47 @@ function startNew() {
   saveError.value = "";
   editing.value = {
     schema_version: "1.0.0", document_type: "event", event_id: localId("ev"),
-    title: "", description: "", provider: "zoom", join_url: "", duration_minutes: 60,
+    title: "", description: "", delivery: "auto", provider: "zoom", join_url: "", video_url: "",
+    duration_minutes: 60,
     occurrences: [emptyOccurrence()],
   };
 }
 
 function startEdit(item) {
   saveError.value = "";
+  videoError.value = "";
   // A deep-ish copy so Cancel really cancels: editing the stored object would leave the list showing
   // changes that were never saved.
-  editing.value = { ...item, occurrences: (item.occurrences || []).map((row) => ({ ...row })) };
+  // `delivery` is defaulted HERE as well as on the server, and to the same value, so an event saved
+  // before the field existed opens on Automated rather than on an empty select.
+  editing.value = {
+    delivery: "auto", video_url: "",
+    ...item,
+    occurrences: (item.occurrences || []).map((row) => ({ ...row })),
+  };
+}
+
+// The recording. uploadVideo owns the format gate and the size ceiling -- the ceiling is a parameter on
+// the image-processing stack, never a number copied into this repo (docs/EXTERNAL_SERVICES.md).
+async function pickVideo(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  videoError.value = "";
+  uploading.value = true;
+  uploadLabel.value = "Uploading…";
+  try {
+    editing.value.video_url = await uploadVideo(file, {
+      basePrefix: "events",
+      onProgress: ({ phase, percent }) => {
+        uploadLabel.value = phase === "processing" ? "Processing…" : `Uploading ${Math.round(percent || 0)}%`;
+      },
+    });
+  } catch (err) {
+    videoError.value = err?.message || "That video could not be uploaded.";
+  } finally {
+    uploading.value = false;
+  }
 }
 
 function addOccurrence() {
@@ -216,7 +284,13 @@ async function save() {
     const document = {
       ...editing.value,
       duration_minutes: Number(editing.value.duration_minutes) || undefined,
-      join_url: editing.value.join_url || undefined,
+      delivery: editing.value.delivery === "live" ? "live" : "auto",
+      // The OTHER mode's fields are dropped on save rather than carried along invisibly. An auto event
+      // holding a stale join_url would have the page offer a room nobody is in, and the renderer prefers
+      // the recording -- so the link would sit in the document being wrong and never being seen.
+      join_url: editing.value.delivery === "live" ? (editing.value.join_url || undefined) : undefined,
+      provider: editing.value.delivery === "live" ? (editing.value.provider || undefined) : undefined,
+      video_url: editing.value.delivery === "live" ? undefined : (editing.value.video_url || undefined),
       occurrences: editing.value.occurrences
         .filter((row) => row.starts_at)
         .map((row) => ({ ...row, capacity: Number(row.capacity) || 0,
