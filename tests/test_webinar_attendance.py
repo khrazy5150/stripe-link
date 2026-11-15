@@ -314,6 +314,90 @@ class TheSeatCountNeverGoesNegativeTests(unittest.TestCase):
         release_registration(event, "occ_1")
         self.assertEqual(event["occurrences"][0]["registered_count"], 2)
 
+class TellMeAboutTheNextOneTests(unittest.TestCase):
+    """WEBINAR.md §12's third deferral. They are NOT registered -- they asked to be told, which has to
+    read like a different thing, because the way they would discover otherwise is by turning up."""
+
+    def setUp(self):
+        import handlers.events as events
+
+        self.announce = events._announce_new_sitting
+        self.waiting = {**_lead(), "wants_next": True, "event_id": "evt_1",
+                        "occurrence_id": "", "fields": {"email": "casey@example.com", "name": "Casey"}}
+        self.sent = []
+        events._notify_new_sitting = lambda *a: self.sent.append(a)
+
+    def _repo(self, leads):
+        class Repo:
+            written = []
+
+            def list_for_tenant(self, _tenant, **_kw):
+                return leads
+
+            def put(self, document):
+                Repo.written.append(document)
+
+        Repo.written = []
+        return Repo()
+
+    def _event(self, occ_ids, starts=NOW + 86400):
+        return {"event_id": "evt_1", "tenant_id": "ten_1", "title": "The class",
+                "occurrences": [{"occurrence_id": o, "starts_at": starts} for o in occ_ids]}
+
+    def test_a_new_sitting_reaches_the_people_who_asked(self):
+        repo = self._repo([self.waiting])
+        self.announce(self._event(["occ_1"]), self._event(["occ_1", "occ_2"]), repo, now=NOW)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_resaving_the_event_announces_nothing(self):
+        # A tenant fixing a typo must not re-send.
+        repo = self._repo([self.waiting])
+        same = self._event(["occ_1"])
+        self.announce(same, same, repo, now=NOW)
+        self.assertEqual(self.sent, [])
+
+    def test_a_sitting_that_has_already_run_is_not_news(self):
+        repo = self._repo([self.waiting])
+        self.announce(self._event([]), self._event(["occ_2"], starts=NOW - 86400), repo, now=NOW)
+        self.assertEqual(self.sent, [])
+
+    def test_a_cancelled_new_sitting_is_not_announced(self):
+        repo = self._repo([self.waiting])
+        saved = self._event(["occ_2"])
+        saved["occurrences"][0]["status"] = "cancelled"
+        self.announce(self._event([]), saved, repo, now=NOW)
+        self.assertEqual(self.sent, [])
+
+    def test_each_person_is_told_once_ever(self):
+        # Otherwise "tell me about the next one" becomes a subscription to every sitting the tenant ever
+        # schedules, and the unsubscribe for that is a product nobody wants to build.
+        repo = self._repo([self.waiting])
+        self.announce(self._event([]), self._event(["occ_2"]), repo, now=NOW)
+        self.assertEqual(repo.written[0]["next_announced_at"], NOW)
+        told = [lead for lead in repo.written]
+        repo2 = self._repo(told)
+        self.sent.clear()
+        self.announce(self._event([]), self._event(["occ_3"]), repo2, now=NOW)
+        self.assertEqual(self.sent, [])
+
+    def test_an_ordinary_registrant_is_not_on_this_list(self):
+        repo = self._repo([_lead()])
+        self.announce(self._event([]), self._event(["occ_2"]), repo, now=NOW)
+        self.assertEqual(self.sent, [])
+
+    def test_somebody_who_cancelled_is_not_told_either(self):
+        repo = self._repo([{**self.waiting, "status": "archived"}])
+        self.announce(self._event([]), self._event(["occ_2"]), repo, now=NOW)
+        self.assertEqual(self.sent, [])
+
+    def test_the_mail_does_not_imply_a_seat_they_do_not_have(self):
+        from stripe_link.domain.registration_email import next_sitting_announced
+
+        message = next_sitting_announced({"title": "The class", "duration_minutes": 60},
+                                         {"starts_at": NOW, "timezone": "UTC"}, name="Casey")
+        self.assertIn("not registered yet", message["text"])
+        self.assertNotIn("You're registered", message["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

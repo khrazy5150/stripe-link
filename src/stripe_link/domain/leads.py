@@ -134,6 +134,7 @@ def build_lead_submission(
     now: int,
     event_id: str = "",
     occurrence_id: str = "",
+    wants_next: bool = False,
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -147,6 +148,9 @@ def build_lead_submission(
         # has to answer. Empty on an ordinary lead capture.
         "event_id": str(event_id or ""),
         "occurrence_id": str(occurrence_id or ""),
+        # Asked to hear about the NEXT sitting of this event. Carries an event and no occurrence, which
+        # is exactly what it means: none of the current ones suited.
+        "wants_next": bool(wants_next),
         # SPARSE INDEX KEY, written only on a registration (plans/WEBINAR.md §10a). Without it "everyone
         # registered for Wednesday" means listing a tenant's entire lead history and filtering in memory.
         #

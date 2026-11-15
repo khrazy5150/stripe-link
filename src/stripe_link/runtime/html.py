@@ -1005,6 +1005,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # the video and the page's own words rather than one filling the screen.
     # The cancel control. Quiet on purpose: it is the right thing to offer and the wrong thing to
     # advertise, so it reads as a link under the card rather than a second button beside the first.
+    "    .sl-event-next[hidden]{display:none}",
+    "    .sl-event-next{margin-top:1.6rem;display:flex;flex-direction:column;align-items:center;gap:1rem}",
+    # Deliberately NOT the lead form's title weight: the closure above it stays the loudest thing
+    # on a closed page. See the comment on the markup.
+    "    .sl-event-next-title{margin:0;font-size:1.5rem;font-weight:600;color:var(--sl-price-title)}",
     "    .sl-event-unregister{display:block;margin:1.2rem auto 0;background:none;border:0;color:var(--sl-muted);font-size:1.3rem;text-decoration:underline;cursor:pointer;padding:0.6rem}",
     "    .sl-event-player{width:100%;max-width:100%;max-height:70vh;border-radius:0.8rem;background:#000;display:block}",
     # The three event blocks. `[hidden]` is spelled out because the published bundle carries no reset, and
@@ -9548,6 +9553,17 @@ def render_event_closed(scheduled_event: dict[str, Any], section: dict[str, Any]
         f'        <p class="sl-event-closed-heading">{heading}</p>',
         f'        <p class="sl-lead-description">{note}</p>',
         '      </div>',
+        # WHERE THE FORM GOES when somebody asks to hear about the next one (plans/WEBINAR.md §12). An
+        # empty host, filled by the island MOVING the page's one lead form into it -- not a second form.
+        # The lead handler binds `querySelector('[data-lead-form]')`, singular, so a second copy would
+        # render fine and never submit anything, which is the worst of both.
+        '      <div class="sl-event-next" data-next-interest hidden>',
+        # NOT `sl-lead-title`. That class is the lead form's own heading, and putting it on this page is
+        # what the 2026-10-15 reader met: an invitation in the card's boldest type above a closure in body
+        # weight. The closure stays the loudest thing here; this is an offer made after it, in its own
+        # quieter class, and test_it_does_not_lead_with_an_invitation_it_cannot_honour holds that line.
+        '        <p class="sl-event-next-title">Tell me about the next one</p>',
+        '      </div>',
         '    </section>',
     ])
 
@@ -10507,6 +10523,14 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "            payload.event_id = leadForm.dataset.eventId;",
         "            payload.occurrence_id = occurrence.value;",
         "          }",
+        # Derived from WHERE THE FORM IS, not from a hidden field. A hidden input would be swept up by
+        # the `.sl-lead-input` loop above and land inside `fields`, which is the bag that gets normalised
+        # and stored as the person's details -- a flag has no business in there.
+        "          if (leadForm.closest('[data-next-interest]')) {",
+        "            payload.wants_next = true;",
+        "            payload.event_id = leadForm.dataset.eventId || '';",
+        "            delete payload.occurrence_id;",
+        "          }",
         "          if (statusEl) { statusEl.classList.remove('is-error'); statusEl.textContent = 'Sending...'; }",
         "          if (submitBtn) { submitBtn.dataset.busy = 'true'; submitBtn.classList.add('is-connecting'); }",
         "          fetch(leadForm.dataset.endpoint, {",
@@ -10589,6 +10613,19 @@ def render_page_interactions_script(page: dict[str, Any], body_html: str | None 
         "          if (live) {",
         "            const player = eventCta.querySelector('[data-event-player]');",
         "            if (player) { player.dataset.startsAt = live.start; player.dataset.endsAt = live.end; }",
+        "          }",
+        # ASKING ABOUT THE NEXT ONE. The form is MOVED, not copied: the lead handler bound the single
+        # instance on load, and a clone would look right and submit nothing. Moving keeps that binding and
+        # the listener attached to it.
+        "          const nextHost = eventCta.querySelector('[data-next-interest]');",
+        "          const theForm = eventCta.querySelector('[data-lead-form]');",
+        "          if (state === 'ended' && nextHost && theForm && !nextHost.contains(theForm)) {",
+        # The occurrence picker goes: there is no sitting left to pick, and offering one that has already
+        # run is how a closed page starts collecting registrations again.
+        "            const picker = theForm.querySelector('.sl-occurrence-picker');",
+        "            if (picker) picker.remove();",
+        "            nextHost.appendChild(theForm);",
+        "            nextHost.hidden = false;",
         "          }",
         "        };",
         "        applyEventState();",

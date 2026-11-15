@@ -256,7 +256,13 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
     event_id = str(payload.get("event_id") or "").strip()
     occurrence_id = str(payload.get("occurrence_id") or "").strip()
     scheduled_event = None
-    if event_id or occurrence_id:
+    # "Tell me about the next one" names an EVENT and no sitting, because the whole point is that none of
+    # them suits. It therefore skips the checks below -- every one of which asks a question about a
+    # specific occurrence, and the honest answer to all of them here is "that is not what was asked".
+    wants_next = bool(payload.get("wants_next")) and not occurrence_id
+    if wants_next:
+        event_id = str(payload.get("event_id") or "").strip()
+    elif event_id or occurrence_id:
         if not (event_id and occurrence_id):
             return error_response("event_id and occurrence_id are required together.", code="invalid_registration")
         # Resolved HERE, not at the top: an ordinary lead capture never touches the events table, and
@@ -296,6 +302,7 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
         now=now,
         event_id=event_id,
         occurrence_id=occurrence_id,
+        wants_next=wants_next,
     )
     # WHICH BOOKS THIS CAME FROM. Leads are a CRM record rather than a transaction, so the repository is
     # not mode-scoped -- but a tenant testing their own form still gets a fake person in the list beside

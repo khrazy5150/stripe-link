@@ -173,3 +173,44 @@ def registration_cancelled(
         "</div>",
     ])
     return {"subject": subject, "html": html, "text": text}
+
+
+def next_sitting_announced(
+    event: dict[str, Any],
+    occurrence: dict[str, Any],
+    *,
+    name: str = "",
+) -> dict[str, str]:
+    """`{subject, html, text}` for somebody who asked to hear about the next sitting of this event.
+
+    They are NOT registered -- they asked to be told, which is a different thing and must read like one.
+    The whole email is the date and a way to take a seat; implying a seat they do not have would be the
+    one mistake that matters here, because they would discover it by turning up.
+
+    Empty subject when the sitting has no usable date, like every other message in this module.
+    """
+    title = str(event.get("title") or "").strip() or "the session"
+    when = _when(event, occurrence)
+    if not when:
+        return {"subject": "", "html": "", "text": ""}
+
+    greeting = f"Hi {name.strip()}," if str(name or "").strip() else "Hi,"
+    subject = f"{title} is running again — {when}"
+
+    lines = [
+        greeting, "",
+        f"You asked to hear when {title} was running again.",
+        "", f"The next one is {when}.",
+        "", "You're not registered yet — take a seat on the page you signed up from.",
+    ]
+    text = "\n".join(lines)
+
+    html = "".join([
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:16px;line-height:1.5">',
+        f"<p>{escape(greeting)}</p>",
+        f"<p>You asked to hear when <strong>{escape(title)}</strong> was running again.</p>",
+        f'<p style="font-size:18px"><strong>{escape(when)}</strong></p>',
+        "<p>You're not registered yet — take a seat on the page you signed up from.</p>",
+        "</div>",
+    ])
+    return {"subject": subject, "html": html, "text": text}

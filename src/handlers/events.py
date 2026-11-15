@@ -45,9 +45,11 @@ def handler(event, context, events_repo=None, leads_repo=None, notify_fn=None, n
 
     if previous is not None and str(response.get("statusCode")) == "201":
         import time
-        _announce_cancellations(previous, parse_json_body(event),
-                                leads_repo or leads_repository(), notify_fn or _notify_cancelled,
-                                now=int((now_fn or time.time)()))
+        saved = parse_json_body(event)
+        leads = leads_repo or leads_repository()
+        moment = int((now_fn or time.time)())
+        _announce_cancellations(previous, saved, leads, notify_fn or _notify_cancelled, now=moment)
+        _announce_new_sitting(previous, saved, leads, now=moment)
     return response
 
 
@@ -132,3 +134,69 @@ def _notify_cancelled(saved, occurrence, registrant, replacement, tenant_id):
 
 
 __all__ = ["handler", "CANCELLED"]
+
+
+def _announce_new_sitting(previous, saved, leads_repo, *, now):
+    """Tell the people who asked to hear about the next one that there is a next one.
+
+    Only sittings that are genuinely NEW -- present now, absent before -- and only ones still in the
+    future. Re-saving an event to fix a typo must not re-announce, and announcing a sitting that has
+    already run is worse than saying nothing at all.
+
+    Each person is told ONCE, ever, and their row is marked when they are. The alternative is being
+    emailed about every sitting a tenant ever schedules, which is not what "tell me about the next one"
+    asked for -- and the unsubscribe for it would be a product nobody wants to build.
+
+    Best-effort and synchronous, like the cancellation announcer beside it, and for the same reason: the
+    list is small, and the failure this prevents is somebody waiting for news that never comes.
+    """
+    from stripe_link.domain.events import starts_at
+
+    before = {str(row.get("occurrence_id") or "") for row in occurrences(previous)}
+    fresh = [row for row in occurrences(saved)
+             if str(row.get("occurrence_id") or "") not in before
+             and str(row.get("status") or "scheduled") != "cancelled"
+             and starts_at(row) > now]
+    if not fresh:
+        return
+
+    tenant_id = str(saved.get("tenant_id") or "")
+    event_id = str(saved.get("event_id") or "")
+    try:
+        waiting = [lead for lead in leads_repo.list_for_tenant(tenant_id)
+                   if lead.get("wants_next")
+                   and str(lead.get("event_id") or "") == event_id
+                   and not lead.get("next_announced_at")
+                   and str(lead.get("status") or "") != "archived"]
+    except RepositoryError as exc:
+        logger.warning("new sitting not announced for %s: %s", tenant_id, exc)
+        return
+
+    # The soonest of the new sittings, because "the next one" is singular and a list of three is a
+    # schedule rather than an answer.
+    soonest = min(fresh, key=starts_at)
+    for lead in waiting:
+        email = str((lead.get("fields") or {}).get("email") or "").strip()
+        if not email:
+            continue
+        try:
+            _notify_new_sitting(saved, soonest, lead, tenant_id)
+            leads_repo.put({**lead, "next_announced_at": int(now), "updated_at": int(now)})
+        except Exception as exc:  # noqa: BLE001 - one bad address must not stop the rest
+            logger.warning("new sitting not announced to a registrant of %s: %s", event_id, exc)
+
+
+def _notify_new_sitting(saved, occurrence, lead, tenant_id):
+    from stripe_link.domain.registration_email import next_sitting_announced
+    from stripe_link.mailer import send_email
+    from stripe_link.sender_identity import sending_identity
+
+    message = next_sitting_announced(saved, occurrence,
+                                     name=str((lead.get("fields") or {}).get("name") or ""))
+    if not message["subject"]:
+        return
+    identity = sending_identity(tenant_id, page_id=str(lead.get("page_id") or ""),
+                                mode=str(lead.get("stripe_mode") or "live"))
+    send_email(to=str((lead.get("fields") or {}).get("email") or ""), subject=message["subject"],
+               html=message["html"], text=message["text"], tenant_id=tenant_id,
+               from_name=identity["business_name"], reply_to=identity["reply_to"])
