@@ -36,12 +36,23 @@ Verified 2026-08-30 after nearly building a parallel video pipeline in this stac
 
 ### Size limits live in that stack, not here
 
-`MaxUploadBytes` (photo, default 100MB) and `MaxVideoUploadBytes` (video, default 500MB) are CloudFormation
-**parameters** on `image-processing-stack`. The per-upload ceiling is baked into the presigned POST's
-`content-length-range`, so S3 enforces it, and it is returned as `maxBytes` in the presign response.
+`MaxUploadBytes` (photo, 100MB) and `MaxVideoUploadBytes` (video, **5 GiB** since 2026-11-17, was 500MB)
+are CloudFormation **parameters** on `image-processing-stack`. The per-upload ceiling is baked into the
+presigned POST's `content-length-range`, so S3 enforces it, and it is returned as `maxBytes` in the
+presign response.
 
 **Never hardcode an upload limit in this repo.** `uploadVideo` reads `maxBytes` off the presign response,
 so raising the ceiling for course video is a stack parameter update — no dashboard build, no release.
+
+**5 GiB is the architectural ceiling, not a policy dial.** Two independent S3 limits sit at exactly 5 GB
+and a bigger parameter would just mint presigns that cannot succeed: `uploadMultiple` issues a *presigned
+POST*, and one POST/PUT cannot create an object over 5 GB; then `imageProcessorApp.copyOriginal` moves it
+with a single `CopyObjectCommand`, whose server-side copy caps at 5 GB too. Above that you need multipart
+upload on the client and `UploadPartCopy` in the processor — do it as part of `plans/VIDEO_TRANSCODE.md`,
+which has to solve delivery anyway. Raising the parameter also meant raising `ImageProcessorFunction`'s
+timeout from the 60s in `Globals` to 300s: the Lambda blocks on that copy, and at 5 GiB a minute is not
+enough. Sizing: a 1080p webinar recorded at a sane 2–3 Mbps is ~1.1–1.4 GB/hour, so 5 GiB covers roughly
+three hours. A 12 GB one-hour export (~28 Mbps) is an unoptimised encode, not a limit that needs raising.
 
 **No transcode.** The original is served as-is (`PRESERVE_SOURCE_FOR`). Practical consequence: prefer
 `video/mp4`; a large `.mov` from a phone will play inconsistently and is bad for page speed. If

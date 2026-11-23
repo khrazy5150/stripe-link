@@ -13,21 +13,23 @@
 
     <section v-if="!editing" class="dashboard-card">
       <header class="dashboard-card-header"><h2>Your events</h2></header>
-      <p v-if="store.loading" class="field-note">Loading…</p>
-      <p v-else-if="!store.events.length" class="field-note">
-        No events yet. An event is a live session — a webinar, a workshop — that visitors register for on a
-        landing page.
-      </p>
-      <ul v-else class="event-list">
-        <li v-for="item in store.events" :key="item.event_id" class="event-row">
-          <div class="event-row-main">
-            <strong>{{ item.title }}</strong>
-            <span class="event-row-note">{{ occurrenceSummary(item) }}</span>
-          </div>
-          <button class="secondary-action compact" type="button" @click="startEdit(item)">Edit</button>
-          <button class="danger-action compact" type="button" @click="remove(item)">Delete</button>
-        </li>
-      </ul>
+      <div class="dashboard-card-body">
+        <p v-if="store.loading" class="field-note">Loading…</p>
+        <p v-else-if="!store.events.length" class="field-note">
+          No events yet. An event is a live session — a webinar, a workshop — that visitors register for on a
+          landing page.
+        </p>
+        <ul v-else class="event-list">
+          <li v-for="item in store.events" :key="item.event_id" class="event-row">
+            <div class="event-row-main">
+              <strong>{{ item.title }}</strong>
+              <span class="event-row-note">{{ occurrenceSummary(item) }}</span>
+            </div>
+            <button class="secondary-action compact" type="button" @click="startEdit(item)">Edit</button>
+            <button class="danger-action compact" type="button" @click="remove(item)">Delete</button>
+          </li>
+        </ul>
+      </div>
     </section>
 
     <section v-else class="dashboard-card">
@@ -35,125 +37,135 @@
         <h2>{{ editing.event_id ? "Edit event" : "New event" }}</h2>
       </header>
 
-      <label class="offer-field">
-        <span>Title <small>(what the page announces)</small></span>
-        <input v-model.trim="editing.title" type="text" placeholder="e.g. How to sell AI tools" />
-      </label>
-
-      <label class="offer-field">
-        <span>Description <small>(optional)</small></span>
-        <textarea v-model.trim="editing.description" rows="2"></textarea>
-      </label>
-
-      <!-- AUTO IS FIRST AND IS THE DEFAULT (author, 2026-11-15). The two modes need different fields --
-           a recording has no provider and no join link -- so the rest of this block follows the choice. -->
-      <div class="offer-two-column">
+      <div class="dashboard-card-body event-editor">
         <label class="offer-field">
-          <span>How it runs</span>
-          <select v-model="editing.delivery">
-            <option value="auto">Automated — play a recording on schedule</option>
-            <option value="live">Live — you host it somewhere else</option>
-          </select>
+          <span>Title <small>(what the page announces)</small></span>
+          <input v-model.trim="editing.title" type="text" placeholder="e.g. How to sell AI tools" />
         </label>
+
         <label class="offer-field">
-          <span>How long <small>(minutes, optional)</small></span>
-          <input v-model.number="editing.duration_minutes" type="number" min="1" />
+          <span>Description <small>(optional)</small></span>
+          <textarea v-model.trim="editing.description" rows="2"></textarea>
         </label>
-      </div>
 
-      <label class="offer-field">
-        <span>Latest someone can still join <small>(minutes after the start)</small></span>
-        <input v-model.number="editing.late_join_minutes" type="number" min="0" placeholder="0 — anyone, any time" />
-      </label>
-      <p class="field-note">
-        Leave at 0 and anyone can join at any point, part-way through. Set it if your session builds to
-        something: walking in just before the close means seeing the ask without the argument, and that is
-        a first impression you cannot repair. Only you know where your content turns, so there is no
-        default.
-      </p>
+        <!-- AUTO IS FIRST AND IS THE DEFAULT (author, 2026-11-15). The two modes need different fields --
+             a recording has no provider and no join link -- so the rest of this block follows the choice. -->
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>How it runs</span>
+            <select v-model="editing.delivery">
+              <option value="auto">Automated — play a recording on schedule</option>
+              <option value="live">Live — you host it somewhere else</option>
+            </select>
+          </label>
+          <label class="offer-field">
+            <span>How long <small>(minutes, optional)</small></span>
+            <input v-model.number="editing.duration_minutes" type="number" min="1" />
+          </label>
+        </div>
 
-      <template v-if="editing.delivery !== 'live'">
         <label class="offer-field">
-          <span>The recording</span>
-          <input ref="videoInput" type="file" accept="video/mp4,video/webm" hidden @change="pickVideo" />
-          <div class="element-subrow">
-            <button class="secondary-action" type="button" :disabled="uploading" @click="videoInput?.click()">
-              {{ uploading ? uploadLabel : (editing.video_url ? "Replace recording" : "Upload a recording") }}
-            </button>
-            <button v-if="editing.video_url && !uploading" class="danger-action compact" type="button"
-                    @click="editing.video_url = ''">Remove</button>
+          <span>Latest someone can still join <small>(minutes after the start)</small></span>
+          <input v-model.number="editing.late_join_minutes" type="number" min="0" placeholder="0 — anyone, any time" />
+          <small>
+            Leave at 0 and anyone can join at any point, part-way through. Set it if your session builds to
+            something: walking in just before the close means seeing the ask without the argument, and that
+            is a first impression you cannot repair. Only you know where your content turns, so there is no
+            default.
+          </small>
+        </label>
+
+        <template v-if="editing.delivery !== 'live'">
+          <label class="offer-field">
+            <span>The recording</span>
+            <input ref="videoInput" type="file" accept="video/mp4,video/webm" hidden @change="pickVideo" />
+            <div class="event-upload-row">
+              <button class="secondary-action" type="button" :disabled="uploading" @click="videoInput?.click()">
+                {{ uploading ? uploadLabel : (editing.video_url ? "Replace recording" : "Upload a recording") }}
+              </button>
+              <button v-if="editing.video_url && !uploading" class="danger-action compact" type="button"
+                      @click="editing.video_url = ''">Remove</button>
+            </div>
+            <p v-if="videoError" class="keys-status-banner error">{{ videoError }}</p>
+            <video v-else-if="editing.video_url" class="event-recording-preview" :src="editing.video_url" controls preload="metadata"></video>
+            <small>
+              MP4 plays everywhere; WebM will not play on older iPhones. The recording is not converted, so
+              whatever you upload is what every attendee has to play. It starts at the scheduled time and
+              follows the clock — someone arriving late joins part-way in, exactly as they would a live session.
+            </small>
+          </label>
+        </template>
+
+        <template v-else>
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Where it runs</span>
+              <select v-model="editing.provider">
+                <option value="zoom">Zoom</option>
+                <option value="webinarjam">WebinarJam</option>
+                <option value="meet">Google Meet</option>
+                <option value="teams">Microsoft Teams</option>
+                <option value="other">Somewhere else</option>
+              </select>
+            </label>
+            <label class="offer-field">
+              <span>Join link <small>(optional for now)</small></span>
+              <input v-model.trim="editing.join_url" type="url" placeholder="https://zoom.us/j/…" />
+            </label>
           </div>
-        </label>
-        <p v-if="videoError" class="keys-status-banner error">{{ videoError }}</p>
-        <video v-else-if="editing.video_url" class="event-recording-preview" :src="editing.video_url" controls preload="metadata"></video>
-        <p class="field-note">
-          MP4 plays everywhere; WebM will not play on older iPhones. The recording is not converted, so
-          whatever you upload is what every attendee has to play. It starts at the scheduled time and
-          follows the clock — someone arriving late joins part-way in, exactly as they would a live session.
-        </p>
-      </template>
+          <p class="field-note">
+            Registrants will be sent this link. You can add it later — the session can be scheduled before the
+            meeting exists.
+          </p>
+        </template>
 
-      <template v-else>
-        <label class="offer-field">
-          <span>Where it runs</span>
-          <select v-model="editing.provider">
-            <option value="zoom">Zoom</option>
-            <option value="webinarjam">WebinarJam</option>
-            <option value="meet">Google Meet</option>
-            <option value="teams">Microsoft Teams</option>
-            <option value="other">Somewhere else</option>
-          </select>
-        </label>
-        <label class="offer-field">
-          <span>Join link <small>(optional for now)</small></span>
-          <input v-model.trim="editing.join_url" type="url" placeholder="https://zoom.us/j/…" />
-        </label>
+        <div class="composition-subhead">Sessions</div>
         <p class="field-note">
-          Registrants will be sent this link. You can add it later — the session can be scheduled before the
-          meeting exists.
+          One row per time you run it. Two rows is how you cover two time zones.
         </p>
-      </template>
-
-      <div class="composition-subhead">Sessions</div>
-      <p class="field-note">
-        One row per time you run it. Two rows is how you cover two time zones.
-      </p>
-      <div v-for="(row, index) in editing.occurrences" :key="row.occurrence_id" class="element-subrow">
-        <div class="offer-two-column">
-          <label class="offer-field">
-            <span>Starts</span>
-            <input :value="toLocal(row.starts_at)" type="datetime-local"
-                   @input="row.starts_at = fromLocal($event.target.value)" />
-          </label>
-          <label class="offer-field">
-            <span>Time zone <small>(how it is announced)</small></span>
-            <select v-model="row.timezone">
-              <option v-for="zone in timeZoneOptions(row.timezone)" :key="zone" :value="zone">{{ zone }}</option>
-            </select>
-          </label>
+        <div v-for="(row, index) in editing.occurrences" :key="row.occurrence_id" class="event-session">
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Starts</span>
+              <input :value="toLocal(row.starts_at)" type="datetime-local"
+                     @input="row.starts_at = fromLocal($event.target.value)" />
+            </label>
+            <label class="offer-field">
+              <span>Time zone <small>(how it is announced)</small></span>
+              <select v-model="row.timezone">
+                <option v-for="zone in timeZoneOptions(row.timezone)" :key="zone" :value="zone">{{ zone }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Seats <small>(0 = no limit)</small></span>
+              <input v-model.number="row.capacity" type="number" min="0" />
+            </label>
+            <label class="offer-field">
+              <span>Status</span>
+              <select v-model="row.status">
+                <option value="scheduled">Scheduled</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+          </div>
+          <div class="event-session-footer">
+            <span class="field-note">
+              {{ row.registered_count || 0 }} registered{{ row.capacity ? ` of ${row.capacity}` : "" }}.
+              <template v-if="!row.starts_at">Pick a date, or this session is not offered.</template>
+            </span>
+            <button class="danger-action compact" type="button" @click="editing.occurrences.splice(index, 1)">
+              Remove session
+            </button>
+          </div>
         </div>
-        <div class="offer-two-column">
-          <label class="offer-field">
-            <span>Seats <small>(0 = no limit)</small></span>
-            <input v-model.number="row.capacity" type="number" min="0" />
-          </label>
-          <label class="offer-field">
-            <span>Status</span>
-            <select v-model="row.status">
-              <option value="scheduled">Scheduled</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </label>
-        </div>
-        <p class="field-note">
-          {{ row.registered_count || 0 }} registered{{ row.capacity ? ` of ${row.capacity}` : "" }}.
-          <template v-if="!row.starts_at">Pick a date, or this session is not offered.</template>
-        </p>
-        <button class="danger-action compact" type="button" @click="editing.occurrences.splice(index, 1)">
-          Remove session
+        <button class="secondary-action compact event-add-session" type="button" @click="addOccurrence">
+          + Add session
         </button>
+
+        <p v-if="saveError" class="field-error">{{ saveError }}</p>
       </div>
-      <button class="secondary-action compact" type="button" @click="addOccurrence">+ Add session</button>
 
       <footer class="builder-footer">
         <button class="secondary-action" type="button" @click="editing = null">Cancel</button>
@@ -161,7 +173,6 @@
           {{ saving ? "Saving…" : "Save Event" }}
         </button>
       </footer>
-      <p v-if="saveError" class="field-error">{{ saveError }}</p>
     </section>
   </section>
 </template>
@@ -332,3 +343,110 @@ async function remove(item) {
   }
 }
 </script>
+
+<style scoped>
+/* This screen used six class names that were never given any CSS, inside a .dashboard-card that carries no
+   padding of its own -- the body padding lives on .dashboard-card-body, which the template now uses. The
+   visible result was a form flush against the card border while its own header sat inset, and help text
+   pulled up over the input above it by the global `.field-note { margin-top: -1rem }`. */
+
+/* THE LIST */
+.event-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  padding: 1.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-row:first-child {
+  padding-top: 0;
+}
+
+.event-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.event-row-main {
+  display: grid;
+  gap: 0.3rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.event-row-note {
+  color: var(--text-muted);
+  font-size: var(--text-hint);
+  font-weight: var(--weight-normal);
+}
+
+/* THE EDITOR.
+   .dashboard-card-body is a grid, so a bare <button> child would stretch the full width of the card --
+   which is how "Remove session" read as a full-width red bar. Buttons sit at their natural width. */
+.event-editor > button,
+.event-add-session {
+  justify-self: start;
+}
+
+/* Help text belongs to the field above it, so the template puts it INSIDE the label, where it rides
+   .offer-field's own 0.5rem gap and inherits --leading-label. That is also what keeps it clear of the
+   input: the global .field-note pulls itself up by 1rem, which is only safe where the gap it eats is
+   larger than that.
+
+   The cap is a reading measure, not a layout choice: these are the longest help texts on the screen, and
+   at the full width of the card a line runs past 180 characters, which is roughly three times what the
+   eye tracks back from comfortably. */
+.event-editor .offer-field > small {
+  max-width: 78ch;
+}
+
+.event-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+/* A sitting is one object, so it reads as one card rather than as four loose fields. */
+.event-session {
+  display: grid;
+  gap: 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 10px);
+  padding: 1.6rem;
+  background: var(--bg);
+}
+
+.event-session-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+}
+
+/* Inside the session card the gap is 1.4rem and this line is a footer, not a note hanging off a field --
+   the global -1rem would lift it into the row above. */
+.event-session-footer .field-note {
+  margin-top: 0;
+}
+
+/* Matches .landing-builder-footer, the other builder with a save bar: full-bleed rule, buttons right. */
+.builder-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 1rem;
+  border-top: 1px solid var(--line);
+  padding: 1.6rem 2rem;
+}
+</style>
