@@ -666,9 +666,9 @@ def _order_entries(entries, tenant_order=(), goal: str = "", offer_type: str = "
     this rule — one over keys, one over sections — is precisely what let the builder's row list and the
     rendered page disagree, since a repeatable element keys by id and an id is never in the baseline.
 
-    lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Entries missing from `tenant_order` fall back
-    to the baseline position of their type, so a tenant who never drags anything still gets a researched
-    sequence. An entry in neither list sorts last rather than first. Ties keep their incoming position.
+    lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Only free sections use `tenant_order`.
+    Fixed sections and unranked free sections use the baseline position of their type. An entry in neither
+    list sorts last rather than first. Ties keep their incoming position.
     """
     entries = list(entries)
     order = baseline_order(goal, offer_type)
@@ -705,7 +705,7 @@ def _order_entries(entries, tenant_order=(), goal: str = "", offer_type: str = "
         index, (key, section_type) = pair
         band = element_placement(section_type)
         band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
-        if key in rank:
+        if band == "free" and key in rank:
             within = rank[key]
         else:
             within = fallback + instance_baseline.get(index, baseline.get(section_type, tail))

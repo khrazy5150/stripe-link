@@ -476,7 +476,8 @@ function orderEntries(entries, tenantOrder = [], goal = "", offerType = "") {
     instanceBaseline.set(index, nearest.length ? Math.min(...nearest) : tail);
   });
   const within = (entry, index) => {
-    if (rank.has(entry.key)) return rank.get(entry.key);
+    // The editor saves the collapsed Hero row under one key. Keep fixed sections in baseline order.
+    if (isMovable(entry.type) && rank.has(entry.key)) return rank.get(entry.key);
     if (instanceBaseline.has(index)) return fallback + instanceBaseline.get(index);
     return fallback + (baseline.has(entry.type) ? baseline.get(entry.type) : tail);
   };

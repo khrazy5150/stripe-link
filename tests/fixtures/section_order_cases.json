@@ -152,6 +152,18 @@
     "hero",
     "ab"
    ]
+  },
+  {
+   "why": "The editor saves a single Hero row under the hero key. Moving Price highlight must preserve the pinned image and headline order while honoring the new order of the draggable sections.",
+   "sections": [
+    ["brand_label", "brand"],
+    ["hero_media", "image"],
+    ["hero", "hero"],
+    ["faq", "faq"],
+    ["price_highlight", "price"]
+   ],
+   "tenant_order": ["brand_label", "hero", "price_highlight", "faq"],
+   "out": ["brand", "image", "hero", "price", "faq"]
   }
  ],
  "order_section_keys": [
