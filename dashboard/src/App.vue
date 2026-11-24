@@ -155,6 +155,18 @@
         />
         <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
         <AiProvider v-else-if="activeView === 'ai'" :key="`ai-${auth.session?.client_id || ''}`" />
+        <UnderConstruction
+          v-else-if="activeView === 'adCampaigns'"
+          feature="Ad Campaigns"
+          description="We’re building a place to manage your paid ad campaigns."
+          :logo-url="logoUrl"
+        />
+        <UnderConstruction
+          v-else-if="activeView === 'mediaPoster'"
+          feature="Media Poster"
+          description="We’re building a place to publish and schedule organic social posts."
+          :logo-url="logoUrl"
+        />
         <AiVideoGenerator v-else-if="activeView === 'aiVideo'" :key="auth.session?.client_id || ''" />
         <VideoGallery v-else-if="activeView === 'videoGallery'" :key="auth.session?.client_id || ''" />
         <Products v-else-if="activeView === 'products'" />
@@ -237,6 +249,7 @@ import AiProvider from "./components/AiProvider.vue";
 import AiVideoGenerator from "./components/AiVideoGenerator.vue";
 import VideoGallery from "./components/VideoGallery.vue";
 import ToastHost from "./components/ToastHost.vue";
+import UnderConstruction from "./components/UnderConstruction.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
 import { useBrandLogo } from "./composables/useBrandLogo";
