@@ -1269,9 +1269,42 @@ class JobsRepository:
         self.table.put_item(Item=dynamodb_safe_document(document))
         return document
 
-    def get(self, tenant_id: str, job_id: str) -> dict[str, Any] | None:
-        response = self.table.get_item(Key={"tenant_id": str(tenant_id), "job_id": str(job_id)})
+    def get(self, tenant_id: str, job_id: str, *, consistent: bool = False) -> dict[str, Any] | None:
+        options = {"ConsistentRead": True} if consistent else {}
+        response = self.table.get_item(Key={"tenant_id": str(tenant_id), "job_id": str(job_id)}, **options)
         return response.get("Item")
+
+    def page_for_tenant(self, tenant_id, *, limit, cursor="", prefix="", legacy_type=""):
+        from boto3.dynamodb.conditions import Attr, Key
+
+        key = Key("tenant_id").eq(tenant_id)
+        if prefix:
+            key &= Key("job_id").begins_with(prefix)
+        if legacy_type:
+            # The original owner keys are UUIDs. Gallery records sort outside this range.
+            key &= Key("job_id").between("0", "g")
+        options = {"KeyConditionExpression": key, "Limit": limit, "ScanIndexForward": False,
+                   "ConsistentRead": True}
+        if cursor:
+            options["ExclusiveStartKey"] = {"tenant_id": tenant_id, "job_id": cursor}
+        if legacy_type:
+            options["FilterExpression"] = Attr("document_type").eq(legacy_type) & Attr("video_created_at").not_exists()
+        response = self.table.query(**options)
+        return response.get("Items", []), (response.get("LastEvaluatedKey") or {}).get("job_id", "")
+
+    def put_if_current(self, document, *, field, expected):
+        """Write a projection without replacing a newer value from a concurrent request."""
+        from boto3.dynamodb.conditions import Attr
+        from botocore.exceptions import ClientError
+
+        condition = Attr("job_id").not_exists()
+        if expected is not None:
+            condition |= Attr(field).eq(expected)
+        try:
+            self.table.put_item(Item=dynamodb_safe_document(document), ConditionExpression=condition)
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
 
     def unfinished(self, limit: int = 200, *, document_type: str | None = None) -> list[dict[str, Any]]:
         """Jobs that have not reached a terminal state, across all tenants.

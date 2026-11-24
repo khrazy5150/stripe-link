@@ -73,6 +73,19 @@ PARAMETER_OVERRIDES=(
   "AiImageApiBase=${AI_IMAGE_API_BASE:-}"
 )
 
+# The media engine is optional and isolated by release environment. Preserve configured values if
+# its stack cannot be read during a deploy.
+if MEDIA_ENGINE_OUTPUTS="$(aws cloudformation describe-stacks --region "${REGION}" \
+  --stack-name "jb-media-engine-${ENVIRONMENT}" --output text \
+  --query "Stacks[0].Outputs[?OutputKey=='ApiUrl' || OutputKey=='FunctionArn'].[OutputKey,OutputValue]" 2>/dev/null)"; then
+  MEDIA_ENGINE_API_URL="$(awk '$1 == "ApiUrl" {print $2}' <<< "${MEDIA_ENGINE_OUTPUTS}")"
+  MEDIA_ENGINE_FUNCTION_ARN="$(awk '$1 == "FunctionArn" {print $2}' <<< "${MEDIA_ENGINE_OUTPUTS}")"
+  if [[ -n "${MEDIA_ENGINE_API_URL}" && -n "${MEDIA_ENGINE_FUNCTION_ARN}" ]]; then
+    PARAMETER_OVERRIDES+=("MediaEngineApiUrl=${MEDIA_ENGINE_API_URL}")
+    PARAMETER_OVERRIDES+=("MediaEngineFunctionArn=${MEDIA_ENGINE_FUNCTION_ARN}")
+  fi
+fi
+
 # Free-tier Site hosting domain (Zone B, always noindex): prod serves on jbay.uk, test on jbay.be — separate
 # zones so a test wildcard can never touch prod (plans/PLATFORM_HOSTNAME_SERVING.md).
 if [[ "${ENVIRONMENT}" == "prod" ]]; then

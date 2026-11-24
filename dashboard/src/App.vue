@@ -3,10 +3,10 @@
   <div
     v-else
     class="app-shell"
-    :class="{ 'sidebar-collapsed': sidebarCollapsed, 'env-live': activeEnvironment === 'live' }"
+    :class="{ 'sidebar-collapsed': sidebarCollapsed, 'mobile-menu-open': mobileMenuOpen, 'env-live': activeEnvironment === 'live' }"
     :key="auth.session?.client_id"
   >
-    <aside class="sidebar">
+    <aside id="dashboard-navigation" class="sidebar">
       <div class="brand">
         <img v-if="logoUrl" :src="logoUrl" alt="" />
         <strong><span class="wm-junior">Junior</span> <span class="wm-bay">Bay</span></strong>
@@ -53,14 +53,16 @@
       </nav>
     </aside>
 
+    <div v-if="mobileMenuOpen" class="mobile-menu-backdrop" aria-hidden="true" @click="mobileMenuOpen = false"></div>
     <main>
       <header class="topbar">
         <button
           class="menu-button"
           type="button"
-          :aria-label="sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'"
-          :aria-pressed="sidebarCollapsed"
-          @click="sidebarCollapsed = !sidebarCollapsed"
+          :aria-label="narrowScreen ? 'Toggle navigation' : (sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu')"
+          aria-controls="dashboard-navigation"
+          :aria-expanded="narrowScreen ? mobileMenuOpen : !sidebarCollapsed"
+          @click="toggleSidebar"
         >
           <span></span><span></span><span></span>
         </button>
@@ -153,6 +155,8 @@
         />
         <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
         <AiProvider v-else-if="activeView === 'ai'" :key="`ai-${auth.session?.client_id || ''}`" />
+        <AiVideoGenerator v-else-if="activeView === 'aiVideo'" :key="auth.session?.client_id || ''" />
+        <VideoGallery v-else-if="activeView === 'videoGallery'" :key="auth.session?.client_id || ''" />
         <Products v-else-if="activeView === 'products'" />
         <Coupons v-else-if="activeView === 'coupons'" />
         <Offers v-else-if="activeView === 'offers'" :key="`offers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
@@ -230,6 +234,8 @@ import Shipping from "./components/Shipping.vue";
 import Sites from "./components/Sites.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import AiProvider from "./components/AiProvider.vue";
+import AiVideoGenerator from "./components/AiVideoGenerator.vue";
+import VideoGallery from "./components/VideoGallery.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
@@ -281,7 +287,20 @@ provide("takeViewIntent", () => { const intent = viewIntent.value; viewIntent.va
 // class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).
 const activeEnvironment = ref(getStripeMode());
 const sidebarCollapsed = ref(false);
+const narrowScreenQuery = window.matchMedia("(max-width: 900px)");
+const narrowScreen = ref(narrowScreenQuery.matches);
+const mobileMenuOpen = ref(false);
 const userMenuOpen = ref(false);
+
+function updateNarrowScreen(event) {
+  narrowScreen.value = event.matches;
+  mobileMenuOpen.value = false;
+}
+
+function toggleSidebar() {
+  if (narrowScreen.value) mobileMenuOpen.value = !mobileMenuOpen.value;
+  else sidebarCollapsed.value = !sidebarCollapsed.value;
+}
 
 const COLLAPSED_GROUPS_KEY = "jb_sidebar_collapsed_groups";
 function loadCollapsedGroups() {
@@ -356,6 +375,7 @@ function coerceModeIfNoSandbox() {
 
 function activateMenuItem(item) {
   if (!item.enabled) return;
+  mobileMenuOpen.value = false;
   // A locked (unentitled) feature routes to Billing to upgrade instead of opening the gated screen.
   activeView.value = item.locked ? "billing" : item.view;
 }
@@ -501,6 +521,7 @@ function handleDocumentClick(event) {
 function handleKeydown(event) {
   if (event.key === "Escape") {
     userMenuOpen.value = false;
+    mobileMenuOpen.value = false;
   }
 }
 
@@ -508,6 +529,7 @@ function handleKeydown(event) {
 const { logoUrl } = useBrandLogo();
 
 onMounted(() => {
+  narrowScreenQuery.addEventListener("change", updateNarrowScreen);
   document.addEventListener("mousedown", handleDocumentClick);
   document.addEventListener("keydown", handleKeydown);
   loadAppConfigApiBase()
@@ -530,6 +552,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  narrowScreenQuery.removeEventListener("change", updateNarrowScreen);
   document.removeEventListener("mousedown", handleDocumentClick);
   document.removeEventListener("keydown", handleKeydown);
   if (notificationsPoll) window.clearInterval(notificationsPoll);
