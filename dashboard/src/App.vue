@@ -152,7 +152,11 @@
           :active-environment="activeEnvironment"
           @switch-environment="switchEnvironment"
         />
-        <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <StripeKeys
+          v-else-if="activeView === 'stripeKeys'"
+          :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`"
+          @switch-environment="switchEnvironment"
+        />
         <AiProvider v-else-if="activeView === 'ai'" :key="`ai-${auth.session?.client_id || ''}`" />
         <AdCampaigns
           v-else-if="activeView === 'adCampaigns'"

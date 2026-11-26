@@ -12,7 +12,7 @@
         <header class="dashboard-card-header">
           <div>
             <h2>Tenant Stripe Keys</h2>
-            <p>Save test keys to the dev table and live keys to the prod table in one request.</p>
+            <p>Save your test and live keys in one request.</p>
           </div>
           <label class="tenant-field">
             Tenant ID
@@ -104,29 +104,25 @@
       </div>
     </section>
 
-    <section v-if="!store.hasTestSandbox" class="dashboard-card sandbox-card">
+    <section v-if="offerOtherMode" class="dashboard-card sandbox-card">
       <header class="dashboard-card-header">
         <div>
-          <h2>Set up a sandbox for your funnels</h2>
-          <p>Test your checkout, upsells, and funnels with Stripe test mode — no real charges, no real cards.</p>
+          <h2>Set up Stripe for {{ otherModeLabel }} mode</h2>
+          <p v-if="otherMode === 'test'">Rehearse checkout, upsells, and funnels with Stripe test mode. No real charges, no real cards.</p>
+          <p v-else>Connect Stripe in live mode to take real payments from your customers.</p>
         </div>
       </header>
       <div class="connect-card-body">
         <p class="connect-copy">
-          A sandbox connects your Stripe account in test mode so you can rehearse a full purchase safely. Use the
-          <strong>Test / Live</strong> switch at the top of the dashboard to move between modes.
+          Each mode has its own Stripe connection. You're in {{ modeLabel }} mode now; this switches you to
+          {{ otherModeLabel }} mode and opens Stripe. Use the <strong>Test / Live</strong> switch at the top of the
+          dashboard to move between modes any time.
         </p>
         <div class="connect-actions">
-          <button
-            type="button"
-            class="primary-action"
-            :disabled="store.connectStarting"
-            @click="setUpSandbox"
-          >
-            {{ store.connectStarting ? "Opening Stripe..." : "Set up a sandbox" }}
+          <button type="button" class="primary-action" :disabled="store.connectStarting" @click="setUpOtherMode">
+            {{ store.connectStarting ? "Opening Stripe..." : `Set up ${otherModeLabel} mode` }}
           </button>
         </div>
-        <div v-if="sandboxError" class="keys-status-banner error">{{ sandboxError }}</div>
       </div>
     </section>
 
@@ -224,111 +220,6 @@
       </div>
     </section>
 
-    <div v-if="wizardOpen" class="modal-backdrop" @click.self="closeWizard">
-      <section class="modal-card stripe-onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="stripe-onboarding-title">
-        <header class="modal-card-header">
-          <div>
-            <h2 id="stripe-onboarding-title">{{ wizardTitle }}</h2>
-            <!-- The shared rail (components/shared/WizardSteps.vue). The dots said how MANY steps there
-                 were and nothing about what they held, and the counter above them said the same thing twice. -->
-            <WizardSteps :steps="WIZARD_STEPS" :current="wizardStep" label="Stripe connection progress" />
-          </div>
-          <button class="modal-close" type="button" aria-label="Close" @click="closeWizard">&times;</button>
-        </header>
-
-        <div class="onboarding-body">
-          <div v-if="wizardStep === 1" class="onboarding-step">
-            <p>
-              To accept payments from your customers, Junior Bay needs permission to connect to your Stripe account.
-            </p>
-            <button
-              type="button"
-              :class="['onboarding-option-card', { selected: wizardIntent === 'create' }]"
-              @click="wizardIntent = 'create'"
-            >
-              <strong>Create a new Stripe account</strong>
-              <span>Stripe will guide you through account creation, then return you to Junior Bay.</span>
-            </button>
-            <button
-              type="button"
-              :class="['onboarding-option-card', { selected: wizardIntent === 'existing' }]"
-              @click="wizardIntent = 'existing'"
-            >
-              <strong>Connect an existing Stripe account</strong>
-              <span>Authorize Junior Bay from the Stripe account you already use.</span>
-            </button>
-          </div>
-
-          <div v-else-if="wizardStep === 2" class="onboarding-step">
-            <p>
-              Continue to Stripe to authorize Junior Bay. No API keys need to be copied or pasted.
-            </p>
-            <div class="keys-status-banner info">
-              Stripe sends Junior Bay a secure OAuth token after approval. The token is encrypted before it is stored.
-            </div>
-            <button
-              type="button"
-              class="primary-action onboarding-link"
-              :disabled="wizardSaving || store.connectStarting"
-              @click="beginStripeOAuth"
-            >
-              {{ wizardSaving || store.connectStarting ? "Opening Stripe..." : "Continue with Stripe" }}
-            </button>
-          </div>
-
-          <div v-else-if="wizardStep === 3" class="onboarding-step">
-            <p>
-              After Stripe redirects back, Junior Bay confirms the connected account here.
-            </p>
-            <div v-if="isConnected" class="keys-status-banner success">
-              Stripe account connected{{ connectAccountId ? `: ${connectAccountId}` : "" }}.
-            </div>
-            <div v-else class="keys-status-banner warning">
-              Waiting for Stripe authorization to complete.
-            </div>
-            <button type="button" class="secondary-action" :disabled="store.connectLoading" @click="refreshConnectStatus">
-              {{ store.connectLoading ? "Refreshing..." : "Refresh Status" }}
-            </button>
-          </div>
-
-          <div v-else-if="wizardStep === 4" class="onboarding-step">
-            <p>Complete Stripe onboarding so payouts, compliance, and payment acceptance are ready.</p>
-            <div v-if="isConnected && !isRestricted" class="keys-status-banner success">
-              {{ modeLabel }} Stripe Connect account is linked{{ connectAccountId ? `: ${connectAccountId}` : "" }}.
-            </div>
-            <div v-else-if="isRestricted" class="keys-status-banner warning">
-              {{ modeLabel }} account restricted in Stripe. Action required: {{ restrictionReason }}.
-            </div>
-            <div v-else class="keys-status-banner warning">
-              Stripe Connect is not linked yet.
-            </div>
-            <div class="onboarding-actions-row">
-              <button type="button" class="primary-action" :disabled="store.connectStarting" @click="beginStripeOAuth">
-                {{ store.connectStarting ? "Starting..." : "Continue Stripe onboarding" }}
-              </button>
-              <button type="button" class="secondary-action" :disabled="store.connectLoading" @click="refreshConnectStatus">
-                {{ store.connectLoading ? "Refreshing..." : "Refresh Status" }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="wizardError" class="keys-status-banner error">{{ wizardError }}</div>
-        </div>
-
-        <footer class="onboarding-footer">
-          <button type="button" class="link-action" @click="closeWizard">Skip for now</button>
-          <div class="onboarding-footer-actions">
-            <button v-if="wizardStep > 1" type="button" class="secondary-action" :disabled="wizardSaving" @click="wizardStep -= 1">
-              Back
-            </button>
-            <button type="button" class="primary-action" :disabled="wizardSaving" @click="nextWizardStep">
-              {{ wizardNextLabel }}
-            </button>
-          </div>
-        </footer>
-      </section>
-    </div>
-
     <section v-if="store.output" class="dashboard-card output-card">
       <header class="dashboard-card-header">
         <h2>API Output</h2>
@@ -339,27 +230,29 @@
 </template>
 
 <script setup>
-import WizardSteps from "./shared/WizardSteps.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import StripeKeyPanel from "./StripeKeyPanel.vue";
 import { useStripeKeysStore } from "../stores/stripeKeys";
 import { usePaymentMethodsStore } from "../stores/paymentMethods";
-import { setStripeMode } from "../api/client";
 
+const emit = defineEmits(["switch-environment"]);
 const store = useStripeKeysStore();
 const pm = usePaymentMethodsStore();
 const openInfo = ref("");
-const sandboxError = ref("");
+// Two-way: offer whichever mode has no Stripe yet, starting from the mode the tenant is in. Switching mode
+// remounts this screen (App keys it on the mode), so the connect intro opens after the remount, as the
+// Dashboard wizard does for the same step.
+const otherMode = computed(() => (store.verifyMode === "live" ? "test" : "live"));
+const otherModeLabel = computed(() => (otherMode.value === "live" ? "Live" : "Test"));
+const offerOtherMode = computed(() => store.loaded && !store.modeConfigured(otherMode.value));
 
-// Opt-in Stripe-test sandbox (live-first onboarding). Persist test mode BEFORE the OAuth round-trip so that when
-// Stripe redirects back and the dashboard reloads, App.vue initializes in test mode with the toggle revealed
-// (modes.test is now connected). If the tenant abandons OAuth, App.vue's coercion falls back to live — no strand.
-async function setUpSandbox() {
-  sandboxError.value = "";
-  setStripeMode("test");
-  store.verifyMode = "test";
-  await store.startConnect({ path: "existing" });
-  if (store.connectError) sandboxError.value = store.connectError;
+function setUpOtherMode() {
+  const target = otherMode.value;
+  emit("switch-environment", target);
+  window.setTimeout(() => {
+    store.verifyMode = target;
+    store.startConnect({ path: "existing" });
+  }, 0);
 }
 
 function toggleInfo(method) {
@@ -370,15 +263,6 @@ const BNPL_STATUS_LABELS = { active: "Active", pending: "Pending review", inacti
 function bnplStatusLabel(status) {
   return BNPL_STATUS_LABELS[status] || status;
 }
-const wizardMaxStep = 4;
-const wizardOpen = ref(false);
-// Named steps for the shared rail. Names, not numbers: "Step 2 of 4" tells you how far
-// along you are and nothing about what is left.
-const WIZARD_STEPS = ["Permission", "Authorize", "Confirm", "Onboarding"];
-const wizardStep = ref(1);
-const wizardIntent = ref("create");
-const wizardSaving = ref(false);
-const wizardError = ref("");
 
 const feeLabels = {
   physical: "Physical Products",
@@ -415,54 +299,6 @@ const connectAccountId = computed(() => (
 const testAccountId = computed(() => (store.verifyMode === "test" ? connectAccountId.value : ""));
 const liveAccountId = computed(() => (store.verifyMode === "live" ? connectAccountId.value : ""));
 const restrictionReason = computed(() => connectDocument.value.restriction_reason || "Verification Document");
-const wizardTitle = computed(() => {
-  if (wizardStep.value === 1) return "Welcome to Junior Bay! Let's connect your Stripe account.";
-  if (wizardStep.value === 2) return "Authorize Junior Bay in Stripe";
-  if (wizardStep.value === 3) return "Confirm your Stripe connection";
-  return "Complete Stripe onboarding";
-});
-
-const wizardNextLabel = computed(() => {
-  if (wizardSaving.value || store.connectStarting) return "Opening Stripe...";
-  if (wizardStep.value === 2) return "Continue with Stripe";
-  if (wizardStep.value === wizardMaxStep) return "Done";
-  return "Next ->";
-});
-
-
-function closeWizard() {
-  wizardOpen.value = false;
-  wizardError.value = "";
-}
-
-async function beginStripeOAuth() {
-  wizardError.value = "";
-  wizardSaving.value = true;
-  try {
-    await store.startConnect({ path: wizardIntent.value });
-    if (store.connectError) wizardError.value = store.connectError;
-  } finally {
-    wizardSaving.value = false;
-  }
-}
-
-async function refreshConnectStatus() {
-  await store.load();
-  await store.loadConnectCard();
-}
-
-async function nextWizardStep() {
-  wizardError.value = "";
-  if (wizardStep.value === wizardMaxStep) {
-    closeWizard();
-    return;
-  }
-  if (wizardStep.value === 2) {
-    await beginStripeOAuth();
-    return;
-  }
-  wizardStep.value += 1;
-}
 
 async function copyTenantId() {
   if (!store.tenantId || !navigator.clipboard) return;
@@ -474,29 +310,6 @@ async function copyTenantId() {
     store.message = "Tenant ID selected. Copy it from the field.";
     store.messageTone = "info";
   }
-}
-
-async function handleConnectReturn() {
-  const params = new URLSearchParams(window.location.search);
-  const result = params.get("stripe_connect");
-  if (!result) return;
-
-  const returnedMode = params.get("mode") === "live" ? "live" : params.get("mode") === "test" ? "test" : "";
-  if (returnedMode) store.verifyMode = returnedMode;
-  await refreshConnectStatus();
-  if (result === "connected") {
-    wizardOpen.value = true;
-    wizardStep.value = 3;
-    store.message = "Stripe Connect account linked.";
-    store.messageTone = "success";
-  } else if (result === "error") {
-    wizardOpen.value = true;
-    wizardStep.value = 2;
-    wizardError.value = params.get("message") || "Stripe Connect authorization failed.";
-  }
-
-  const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ""}`;
-  window.history.replaceState({}, document.title, cleanUrl);
 }
 
 // BNPL toggles are per Stripe mode (test/live) — reload them whenever the viewed mode changes, and once connected.
@@ -511,7 +324,6 @@ onMounted(async () => {
   store.resetForCurrentTenant();
   pm.reset();
   await store.load();
-  await handleConnectReturn();
   if (isConnected.value) pm.load(store.verifyMode);
 });
 </script>

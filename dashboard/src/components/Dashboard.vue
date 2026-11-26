@@ -219,11 +219,15 @@
             </template>
             <template v-else>
               <p>
-                Do you want to configure the {{ otherEnvironmentLabel }} environment now?
+                Do you want to set up Stripe for {{ otherEnvironmentLabel }} mode too?
+                {{ otherEnvironment === "test"
+                  ? "Test mode lets you rehearse purchases with no real money."
+                  : "Live mode is where you take real payments." }}
+                Each mode has its own Stripe connection.
               </p>
               <div class="onboarding-actions-row">
                 <button type="button" class="primary-action" @click="configureOtherEnvironment">
-                  Configure {{ otherEnvironmentLabel }}
+                  Set up {{ otherEnvironmentLabel }} mode
                 </button>
                 <button type="button" class="secondary-action" @click="wizardStep = 4">
                   Not now
@@ -342,8 +346,8 @@ const setupWarning = computed(() => {
   }
   if (!isConnected.value) {
     return {
-      title: "Your Stripe account is not connected.",
-      body: " You won't be able to accept payments until setup is complete.",
+      title: `Stripe isn't connected for ${props.environmentLabel.toLowerCase()} mode.`,
+      body: " You won't be able to accept payments in this mode until setup is complete.",
     };
   }
   return null;
@@ -353,7 +357,7 @@ const wizardTitle = computed(() => {
   if (wizardStep.value === 1) return `Authorize ${props.environmentLabel} Stripe`;
   if (wizardStep.value === 2) return "Confirm your Stripe connection";
   if (wizardStep.value === 4) return "Add your store photo";
-  return otherEnvironmentConfigured.value ? "Setup complete" : `Configure ${otherEnvironmentLabel.value} environment`;
+  return otherEnvironmentConfigured.value ? "Setup complete" : `Set up ${otherEnvironmentLabel.value} mode`;
 });
 
 function openWizard() {
