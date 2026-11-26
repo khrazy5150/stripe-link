@@ -74,6 +74,21 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(json.loads(self._call("GET")["body"])["avatar_url"],
                          "https://img.example/a.jpg")
 
+    def test_saving_a_photo_preserves_the_ads_pilot_grant(self):
+        profile = self.repo.get("t1", "t1")
+        profile["beta"] = ["attention", "ads"]
+        profile["ads_pilot_expires_at"] = 1_795_000_000
+        self.repo.put(profile)
+
+        url = "https://img.example/store.jpg"
+        response = self._call("PUT", {"avatar_url": url})
+
+        self.assertEqual(response["statusCode"], 200)
+        saved = self.repo.get("t1", "t1")
+        self.assertEqual(saved["avatar_url"], url)
+        self.assertEqual(saved["beta"], ["attention", "ads"])
+        self.assertEqual(saved["ads_pilot_expires_at"], 1_795_000_000)
+
     def test_clearing_removes_the_field_rather_than_storing_an_empty_string(self):
         self._call("PUT", {"avatar_url": "https://img.example/a.jpg"})
         self._call("PUT", {"avatar_url": ""})

@@ -84,12 +84,8 @@ class DeclaringABetaDoesNotShipIt(unittest.TestCase):
         finally:
             module.BETA_CAPABILITIES, module.GENERAL_CAPABILITIES = original_beta, original_general
 
-    def test_only_attention_is_beta_only_today(self):
-        """Adding a name to BETA_CAPABILITIES is the act of making a feature beta-only, and `attention`
-        (2026-11-01) is the first: its service exists in ../sam/attention but is not deployed, and no plan
-        sells the tier. Removing it from this set is how it graduates -- which must happen in BOTH stacks,
-        because attention mirrors this rule to gate its own API."""
-        self.assertEqual(set(BETA_CAPABILITIES), {"attention"})
+    def test_attention_and_ads_are_beta_only(self):
+        self.assertEqual(set(BETA_CAPABILITIES), {"attention", "ads"})
 
     def test_a_beta_only_capability_reaches_NEITHER_a_comped_account_nor_a_live_trial(self):
         """The property the set exists for, asserted on the real member rather than a stubbed one."""

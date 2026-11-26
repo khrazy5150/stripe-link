@@ -33,6 +33,7 @@ CAPABILITIES: dict[str, dict[str, str]] = {
     # by nobody. No menu `view`: there is no dashboard screen for it yet, and the service it gates is not
     # deployed. See plans/ATTENTION_PRIMITIVE.md.
     "attention": {"label": "Attention", "view": ""},
+    "ads": {"label": "Ad Campaigns", "view": ""},
 }
 
 
@@ -58,7 +59,7 @@ FREE_TIER_CAPABILITIES: frozenset[str] = frozenset({"landing_pages", "sites", "c
 # account and every live trial the day it was named -- the one thing a beta must not do. Graduating it is
 # deleting this line, AND the matching line in ../sam/attention's `entitlement.py`, which mirrors this rule
 # across the stack boundary.
-BETA_CAPABILITIES: frozenset[str] = frozenset({"attention"})
+BETA_CAPABILITIES: frozenset[str] = frozenset({"attention", "ads"})
 
 # What "everything" means for a comped account or a live trial. **Not `CAPABILITIES`**, which is the
 # whole catalogue including anything unreleased -- declaring a beta feature would otherwise hand it to

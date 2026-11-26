@@ -1,6 +1,7 @@
 import time
 from typing import Any, Callable
 
+from stripe_link.domain.ads_subscription import ads_subscription
 from stripe_link.domain.entitlements import plan_entitlements
 from stripe_link.domain.platform_billing import (DEFAULT_AI_IMAGE_QUALITY, plan_ai_generations,
                                                   plan_ai_image_qualities, plan_ai_images,
@@ -101,6 +102,7 @@ def reconcile_platform_subscription_event(
             # (entitlements.tenant_entitlement_set), and tier_id=basic flips checkout to free-tier fees.
             updates["billing_status"] = "canceled"
             updates["entitlements"] = []
+            updates["ads_subscription"] = None
             updates["tier_id"] = "free"
             # Drop the paid allowance with the rest of the plan. Left behind, a canceled tenant would keep
             # generating on the platform's Bedrock bill indefinitely.
@@ -132,6 +134,15 @@ def reconcile_platform_subscription_event(
                 updates["billing_plan_key"] = plan_key
                 plan = platform_plan(mode, plan_key, plans_repository)
                 updates["entitlements"] = plan_entitlements(plan)
+                snapshot = ads_subscription(
+                    plan, billing_mode=mode, effective_at=event_created if type(event_created) is int else now_fn(),
+                )
+                previous = tenant.get("ads_subscription")
+                if snapshot is not None and isinstance(previous, dict) and "effective_at" in previous:
+                    # Renewal and metadata-only events preserve the effective date of unchanged terms.
+                    if {**snapshot, "effective_at": previous["effective_at"]} == previous:
+                        snapshot["effective_at"] = previous["effective_at"]
+                updates["ads_subscription"] = snapshot
                 # The plan's fee tier drives the live transaction fee (fees.build_fee_context reads
                 # tenant.tier_id). The DEFAULT is the cheapest PAID tier, not the dearest: since
                 # 2026-10-21 "pro" is the $29 rung at a flat 2%, so defaulting there would hand a $19

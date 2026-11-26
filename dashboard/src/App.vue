@@ -155,10 +155,10 @@
         />
         <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
         <AiProvider v-else-if="activeView === 'ai'" :key="`ai-${auth.session?.client_id || ''}`" />
-        <UnderConstruction
+        <AdCampaigns
           v-else-if="activeView === 'adCampaigns'"
-          feature="Ad Campaigns"
-          description="We’re building a place to manage your paid ad campaigns."
+          :key="`ads-${activeEnvironment}-${auth.session?.client_id || ''}`"
+          :mode="activeEnvironment"
           :logo-url="logoUrl"
         />
         <UnderConstruction
@@ -250,6 +250,7 @@ import AiVideoGenerator from "./components/AiVideoGenerator.vue";
 import VideoGallery from "./components/VideoGallery.vue";
 import ToastHost from "./components/ToastHost.vue";
 import UnderConstruction from "./components/UnderConstruction.vue";
+import AdCampaigns from "./components/AdCampaigns.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
 import { useBrandLogo } from "./composables/useBrandLogo";

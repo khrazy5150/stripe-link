@@ -2153,7 +2153,7 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
                 f"Tenant profile beta names unknown capabilities: {', '.join(unknown)}.")
     for field in ("billing_plan_key", "billing_price_id", "stripe_customer_id", "stripe_subscription_id"):
         optional_string(document, field, f"Tenant profile {field}")
-    for field in ("current_period_end", "trial_ends_at"):
+    for field in ("current_period_end", "trial_ends_at", "ads_pilot_expires_at"):
         value = document.get(field)
         if value is not None and (whole_number(value) is None or whole_number(value) < 0):
             raise DocumentValidationError(f"Tenant profile {field} must be a non-negative integer.")

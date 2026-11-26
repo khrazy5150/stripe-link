@@ -107,6 +107,74 @@ export function fetchCampaigns() {
   return get("/me/campaigns");
 }
 
+export function fetchAdAccounts() {
+  return get("/me/ads/accounts");
+}
+
+export function fetchAdsCampaigns() {
+  return get("/me/ads/campaigns");
+}
+
+export function fetchAdsCampaign(campaignId, jobId) {
+  return get(`/me/ads/campaigns/${encodeURIComponent(campaignId)}`, jobId ? { job_id: jobId } : {});
+}
+
+export function saveAdsDraft(body, campaignId) {
+  const path = campaignId ? `/me/ads/campaigns/${encodeURIComponent(campaignId)}/revise` : "/me/ads/campaigns";
+  return postJson(path, body);
+}
+
+export function queueAdsAction(campaignId, action, revision, requestId) {
+  return postJson(`/me/ads/campaigns/${encodeURIComponent(campaignId)}/${action}`, {
+    revision, request_id: requestId,
+  });
+}
+
+export async function fetchAdsDestinationOptions() {
+  const [pageResult, offerResult] = await Promise.all([apiRequest("/pages"), apiRequest("/offers")]);
+  const offers = new Map((offerResult.offers || []).map((offer) => [offer.offer_id, offer]));
+  return (pageResult.pages || [])
+    .filter((page) => page.status === "published" && page.short_code && offers.has(page.offer_id))
+    .map((page) => ({
+      pageId: page.page_id,
+      offerId: page.offer_id,
+      name: page.name || page.title || page.page_id,
+      offerName: offers.get(page.offer_id).name || offers.get(page.offer_id).title || page.offer_id,
+    }));
+}
+
+export async function fetchAdsPageAttribution(pageId, source) {
+  const { page } = await apiRequest(`/pages/${encodeURIComponent(pageId)}`);
+  return page?.attribution?.find((entry) => entry.source === source) || null;
+}
+
+export function fetchGoogleAdsConnections() {
+  return get("/me/ads/google/connections");
+}
+
+export function startGoogleAdsConnection() {
+  return postJson("/me/ads/google/connect", {});
+}
+
+export function finishGoogleAdsConnection(connectionId, completionProof) {
+  return postJson("/me/ads/google/finish", { connection_id: connectionId, completion_proof: completionProof });
+}
+
+export function fetchGoogleAdsCandidates(connectionId) {
+  return get(`/me/ads/google/connections/${encodeURIComponent(connectionId)}/accounts`);
+}
+
+export function selectGoogleAdsAccount(connectionId, account) {
+  return postJson(`/me/ads/google/connections/${encodeURIComponent(connectionId)}/select`, {
+    account_id: account.account_id,
+    manager_id: account.manager_id,
+  });
+}
+
+export function disconnectGoogleAds(connectionId) {
+  return postJson(`/me/ads/google/connections/${encodeURIComponent(connectionId)}/disconnect`, {});
+}
+
 export function fetchCalendar({ campaignId, from, to } = {}) {
   return get("/me/posts", {
     ...(campaignId ? { campaign_id: campaignId } : {}),
