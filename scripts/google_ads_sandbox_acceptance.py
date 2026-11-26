@@ -11,6 +11,7 @@ from hashlib import sha256
 import json
 import re
 import subprocess
+import sys
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -20,6 +21,7 @@ from google_ads_phase0 import PROMO_BUDGET_MICROS, ads_request, verify_account
 
 
 DEV_ATTENTION = "https://bjhabjf4q1.execute-api.us-west-2.amazonaws.com/dev"
+DEV_LOGIN = "https://dev.juniorbay.com/auth/login"
 ADVERTISERS = ("6271196703", "5993800994")
 MANAGER = "3009951352"
 
@@ -47,6 +49,26 @@ def tenant_claim(token):
         return tenant
     except (KeyError, ValueError, IndexError) as exc:
         raise RuntimeError("Expected a Junior Bay Cognito ID token") from exc
+
+
+def sign_in(alias):
+    email = input(f"Tenant {alias} Junior Bay dev email: ").strip()
+    password = getpass.getpass(f"Tenant {alias} Junior Bay dev password: ")
+    login = Request(
+        DEV_LOGIN,
+        data=json.dumps({"email": email, "password": password}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with build_opener(NoRedirect()).open(login, timeout=30) as reply:
+            token = json.load(reply).get("session", {}).get("id_token")
+    except HTTPError as error:
+        raise RuntimeError(f"Tenant {alias} dev sign-in failed (HTTP {error.code})") from None
+    require(isinstance(token, str) and bool(token), f"Tenant {alias} dev sign-in did not return an ID token")
+    tenant_claim(token)
+    print(f"Tenant {alias} signed in.")
+    return token
 
 
 def request(token, path, *, body=None, params=None, expected=200):
@@ -147,18 +169,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign-a", help="Default is Tenant A's latest launched and paused $5 campaign")
     parser.add_argument("--campaign-b", help="Default is Tenant B's latest launched and paused $5 campaign")
+    parser.add_argument("--sign-in", action="store_true", help="Sign in to Junior Bay dev with hidden password prompts")
+    parser.add_argument("--isolation-only", action="store_true", help="Run the tenant checks without separate Google readback")
     args = parser.parse_args()
+    if args.sign_in and not sys.stdin.isatty():
+        parser.error("--sign-in requires an interactive terminal to keep passwords hidden")
     ids = (args.campaign_a, args.campaign_b)
     if (ids[0] and ids[0] == ids[1]) or not all(
         value is None or re.fullmatch(r"ads_[0-9a-f]{32}", value) for value in ids
     ):
         parser.error("Supply two distinct Junior Bay campaign IDs")
-    tokens = tuple(getpass.getpass(f"Tenant {alias} Cognito ID token: ") for alias in ("A", "B"))
+    tokens = tuple(
+        sign_in(alias) if args.sign_in else getpass.getpass(f"Tenant {alias} Cognito ID token: ")
+        for alias in ("A", "B")
+    )
     claims = tuple(tenant_claim(token) for token in tokens)
     require(claims[0] != claims[1], "The checks require two distinct Junior Bay tenants")
     campaigns = tuple(own_campaign(tokens[i], ADVERTISERS[i], ADVERTISERS[1-i], ids[i]) for i in range(2))
     for i in range(2):
         check_isolation(tokens[i], claims[i], tokens[1-i], campaigns[i], claims[1-i])
+    if args.isolation_only:
+        print("Deployed API isolation passed. Independent Google budget readback is still pending.")
+        return
     google_token = getpass.getpass("Google Ads Sandbox OAuth access token: ")
     for i in range(2):
         google_readback(google_token, ADVERTISERS[i], campaigns[i])
