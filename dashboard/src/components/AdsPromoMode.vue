@@ -107,6 +107,7 @@
             <div><dt>Scheduled stop</dt><dd>{{ formatExperimentTime(experiment.stops_at, experiment.time_zone) }}</dd></div>
           </template>
           <div><dt>Bid</dt><dd>{{ formatUsd(settings.cpc_bid_micros) }} maximum per click</dd></div>
+          <div v-if="campaign.state !== 'draft'"><dt>If changed in Google Ads</dt><dd>{{ campaign.auto_pause_on_change ? 'Pause automatically and email you' : 'Email you' }}</dd></div>
           <div class="promo-full"><dt>Exact match keywords</dt><dd>{{ settings.keywords.join(', ') }}</dd></div>
         </dl>
         <div class="promo-preview">
@@ -116,6 +117,11 @@
           <ul><li v-for="(description, index) in settings.descriptions" :key="index">{{ description }}</li></ul>
         </div>
         <AdsBudgetSummary v-model:days="days" :adjustable="!experiment" :amount-micros="campaign.draft.budget.amount_micros" />
+        <p v-if="driftMessage(campaign)" class="promo-error" role="alert">
+          Changed in Google Ads. {{ driftMessage(campaign) }}
+          <a href="https://ads.google.com/aw/campaigns" target="_blank" rel="noopener noreferrer">Open Google Ads</a>
+          <span v-if="campaign.provider_campaign_id"> and check campaign {{ campaign.provider_campaign_id }} in advertiser {{ campaign.account_id }}.</span>
+        </p>
         <p v-if="needsStopConfirmation" class="promo-error" role="alert">
           The scheduled end has passed. Google Ads has yet to confirm the stop. Junior Bay will keep checking.
           <a v-if="campaign.provider_campaign_id" href="https://ads.google.com/aw/campaigns" target="_blank" rel="noopener noreferrer">Open Google Ads</a>
@@ -130,6 +136,10 @@
           <label class="promo-consent">
             <input v-model="confirmed" type="checkbox" :disabled="busy">
             <span>I approve revision {{ campaign.revision }}, including its ad assets, destination, {{ formatUsd(campaign.draft.budget.amount_micros) }} average daily budget, and {{ experiment.days }}-day window. This creates a paused test campaign.</span>
+          </label>
+          <label class="promo-consent">
+            <input v-model="autoPause" type="checkbox" :disabled="busy">
+            <span>Pause this campaign if its budget is raised or replaced, or it is turned back on, in Google Ads. Junior Bay checks every 15 minutes while it runs and emails you either way.</span>
           </label>
           <div class="promo-actions">
             <button class="primary-action" type="button" :disabled="busy || !confirmed" @click="command('approve')">
@@ -174,6 +184,7 @@
               <strong>{{ item.configuration.settings.headlines[0] }}</strong>
               <span>{{ campaignStatus(item) }} · {{ formatUsd(item.draft.budget.amount_micros) }} average daily budget</span>
               <span v-if="awaitsStop(item)" class="promo-error">Scheduled stop awaiting confirmation</span>
+              <span v-if="item.provider_drift" class="promo-error">Changed in Google Ads. Review needed</span>
             </div>
             <button class="secondary-action" type="button" :disabled="busy" @click="openCampaign(item.campaign_id)">
               {{ item.state === 'draft' ? 'Review draft' : 'View campaign' }}
@@ -191,7 +202,7 @@ import AdsBudgetSummary from "./AdsBudgetSummary.vue";
 import AdsExperimentSummary from "./AdsExperimentSummary.vue";
 import { fetchAdsCampaign, fetchAdsCampaigns, fetchAdsDestinationOptions, queueAdsAction, saveAdsDraft } from "../api/attention";
 import {
-  ESTIMATE_DAYS, PROMO_DEFAULT_MICROS, addCalendarDays, campaignStatus, dateInZone, formatExperimentTime,
+  ESTIMATE_DAYS, PROMO_DEFAULT_MICROS, addCalendarDays, campaignStatus, dateInZone, driftMessage, formatExperimentTime,
   formatUsd, usdToMicros,
 } from "../utils/adsPromo";
 
@@ -215,6 +226,7 @@ const attributionRefresh = ref(0);
 const loading = ref(true);
 const busy = ref(false);
 const confirmed = ref(false);
+const autoPause = ref(false);
 const error = ref("");
 const notice = ref("");
 const observedJob = ref(null);
@@ -238,7 +250,7 @@ const canCreate = computed(() => policy.value?.available && advertisers.value.le
 const canEdit = computed(() => policy.value?.available && advertisers.value.some((item) => item.account_id === campaign.value?.account_id));
 const canApprove = computed(() => canEdit.value && campaign.value.draft.budget.amount_micros <= budgetCap.value);
 const canLaunch = computed(() => campaign.value.state === "paused" && canApprove.value && windowOpen.value
-  && !campaign.value.launch_requested_at && !campaign.value.pause_pending);
+  && !campaign.value.launch_requested_at && !campaign.value.pause_pending && !campaign.value.provider_drift);
 const canPause = computed(() => campaign.value?.has_provider_campaign && !campaign.value.pause_pending
   && ["enabled", "launch_pending", "reconcile_required"].includes(campaign.value.state));
 const settings = computed(() => campaign.value?.configuration.settings);
@@ -384,10 +396,12 @@ function command(action) {
   return run(async () => {
     const { campaign_id: id, revision } = campaign.value;
     const key = `${id}:${revision}:${action}`;
-    const { job } = await queueAdsAction(id, action, revision, requestId(key));
+    const options = action === "approve" ? { auto_pause_on_change: autoPause.value } : {};
+    const { job } = await queueAdsAction(id, action, revision, requestId(key), options);
     requests.delete(key);
     observedJob.value = job;
     confirmed.value = false;
+    autoPause.value = false;
     notice.value = "Action queued. Waiting for Google Ads confirmation.";
     updateCampaign({
       ...campaign.value,

@@ -124,9 +124,9 @@ export function saveAdsDraft(body, campaignId) {
   return postJson(path, body);
 }
 
-export function queueAdsAction(campaignId, action, revision, requestId) {
+export function queueAdsAction(campaignId, action, revision, requestId, options = {}) {
   return postJson(`/me/ads/campaigns/${encodeURIComponent(campaignId)}/${action}`, {
-    revision, request_id: requestId,
+    revision, request_id: requestId, ...options,
   });
 }
 

@@ -21,6 +21,24 @@ export function spendEstimate(micros, days) {
   return micros * days;
 }
 
+// A change made in Google Ads outside Junior Bay, found by Attention's settings watch. Each message names
+// what the tenant should do, and the notice disappears once a clean read shows the change is gone.
+export function driftMessage(campaign) {
+  const drift = campaign?.provider_drift;
+  if (!drift) return "";
+  const approved = formatUsd(campaign.draft?.budget?.amount_micros);
+  const change = ({
+    budget_increased: `Its average daily budget was raised to ${formatUsd(drift.observed_budget_micros)} in Google Ads, above the ${approved} you approved.`,
+    budget_replaced: `Its budget was replaced or shared in Google Ads, so the ${approved} average daily budget you approved no longer applies.`,
+    enabled_in_google: "It was turned back on in Google Ads after Junior Bay paused it, so it can spend.",
+    provider_access_lost: "Junior Bay can no longer read or pause it in Google Ads. Ads can keep serving there.",
+  })[drift.code];
+  if (!change) return "";
+  if (drift.pause_queued) return `${change} As you chose at approval, Junior Bay requested a pause.`;
+  if (drift.code === "provider_access_lost") return `${change} Reconnect Google Ads, or pause the campaign in Google Ads.`;
+  return `${change} Review it in Google Ads, and pause the campaign if you didn't intend the change.`;
+}
+
 export function campaignStatus(campaign) {
   if (campaign.pause_pending) return "Pause queued";
   return ({
