@@ -1,6 +1,8 @@
 <template>
   <UnderConstruction v-if="mode !== 'test' || locked" feature="Ad Campaigns"
-    description="We’re building a place to manage your paid ad campaigns." :logo-url="logoUrl" />
+    :description="locked ? 'We’re building a place to manage your paid ad campaigns.'
+      : 'Live campaigns open once Google approves production access. Switch to Test to try a campaign with a Google Ads test account.'"
+    :logo-url="logoUrl" />
   <div v-else class="page ads-page">
     <header class="page-header">
       <div>

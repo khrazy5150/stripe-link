@@ -67,9 +67,8 @@
           <span></span><span></span><span></span>
         </button>
         <div class="topbar-actions">
-          <span v-if="hasTestSandbox" class="environment-pill">{{ environmentLabel }}</span>
+          <span class="environment-pill">{{ environmentLabel }}</span>
           <button
-            v-if="hasTestSandbox"
             class="topbar-icon-button environment-toggle-button"
             type="button"
             :aria-label="`Switch to ${activeEnvironment === 'test' ? 'live' : 'test'} environment`"
@@ -353,9 +352,10 @@ const menuGroups = computed(() =>
   })),
 );
 const environmentLabel = computed(() => activeEnvironment.value === "live" ? "Live" : "Test");
-// Live-first onboarding: the test/live toggle only appears once the tenant opts into a test sandbox. Until then
-// the dashboard is live-only and never strands anyone in a hidden test mode (plans/TODO.md onboarding streamline).
-const hasTestSandbox = computed(() => stripeKeys.hasTestSandbox);
+// The test/live switch is always available. Stripe is optional in each mode: a mode without Stripe keys still
+// works for everything except taking payments (Ads, pages, offers, drafts). It used to appear only after a
+// Stripe test sandbox was connected, which forced every new tenant into Live and left Ad Campaigns (test-only
+// until Google approves production access) unreachable.
 
 // Subtitle under the avatar: the Stripe account connected for the ACTIVE mode (email, else business name), so
 // "which Stripe am I wired to?" is glanceable on every screen — a tenant with several logins/accounts can't
@@ -381,12 +381,6 @@ const connectedAccountTitle = computed(() => {
   const parts = [doc.connect_business_name, doc.connect_email, doc.connect_account_id].filter(Boolean);
   return `Connected Stripe (${activeEnvironment.value}): ${parts.join(" · ")}`;
 });
-function coerceModeIfNoSandbox() {
-  if (activeEnvironment.value === "test" && !hasTestSandbox.value) {
-    switchEnvironment("live");
-  }
-}
-
 function activateMenuItem(item) {
   if (!item.enabled) return;
   mobileMenuOpen.value = false;
@@ -434,9 +428,9 @@ async function reloadActiveView() {
   // previous environment's data). Views keyed on activeEnvironment reload themselves via remount.
   const safe = (p) => Promise.resolve(p).catch(() => {});
   safe(notifications.load({ silent: true }));
-  // resetForCurrentTenant() above wiped modes.test/live; repopulate them (background) so the toggle-gating flag
-  // (hasTestSandbox) stays accurate on any view — otherwise switching mode from a non-Payments view would drop
-  // modes to empty and make the toggle disappear mid-use. On the Payments view the awaited load below covers it.
+  // resetForCurrentTenant() above wiped modes.test/live; repopulate them (background) so per-mode Stripe status
+  // (the account subtitle, setup nudges) stays accurate on any view. On the Payments view the awaited load below
+  // covers it.
   if (activeView.value !== "stripeKeys") safe(stripeKeys.load());
   if (activeView.value === "dashboard") await safe(dashboard.load());
   else if (activeView.value === "products") await safe(products.load());
@@ -549,7 +543,6 @@ onMounted(() => {
   loadAppConfigApiBase()
     .then(reloadActiveView)
     .then(() => stripeKeys.load())
-    .then(coerceModeIfNoSandbox)
     .then(maybeNudgeStripeSetup)
     .catch(() => {});
   platformBilling.load().catch(() => {});
@@ -580,12 +573,10 @@ watch(
     coupons.reset();
     products.reset();
     stripeKeys.resetForCurrentTenant();
-    // Repopulate Stripe modes for the new tenant so the toggle-gating flag (hasTestSandbox) is correct on the very
-    // first (Dashboard) view, then coerce a stale test selection to live for a tenant with no sandbox. This watch
-    // fires on login and on async auth resolution — often AFTER onMounted's load — and resetForCurrentTenant() just
-    // emptied modes, so without this reload the test/live toggle would stay hidden until the Payments screen is
-    // visited even for a tenant that has a sandbox.
-    stripeKeys.load().then(coerceModeIfNoSandbox).catch(() => {});
+    // Repopulate Stripe modes for the new tenant so per-mode Stripe status is correct on the very first
+    // (Dashboard) view. This watch fires on login and on async auth resolution — often AFTER onMounted's load —
+    // and resetForCurrentTenant() just emptied modes.
+    stripeKeys.load().catch(() => {});
     platformBilling.load().catch(() => {});  // refresh trial/plan/entitlements for the new tenant
     activeView.value = "dashboard";
     userMenuOpen.value = false;

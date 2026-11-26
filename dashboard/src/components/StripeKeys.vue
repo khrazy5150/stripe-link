@@ -113,8 +113,8 @@
       </header>
       <div class="connect-card-body">
         <p class="connect-copy">
-          A sandbox connects your Stripe account in test mode so you can rehearse a full purchase safely. Once it's
-          set up, a <strong>Test / Live</strong> toggle appears at the top of the dashboard for switching between them.
+          A sandbox connects your Stripe account in test mode so you can rehearse a full purchase safely. Use the
+          <strong>Test / Live</strong> switch at the top of the dashboard to move between modes.
         </p>
         <div class="connect-actions">
           <button
