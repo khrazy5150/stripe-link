@@ -61,12 +61,39 @@
             <p v-if="form.start_date" class="promo-full">
               Planned last day is {{ addCalendarDays(form.start_date, days - 1) }}.
               Junior Bay starts it at midnight on the start date and requests a stop at midnight after the last day.
+              Google also ends it on its own after the last day.
             </p>
+            <div class="offer-field promo-full">
+              <span id="promo-places-label">Where ads show</span>
+              <ul class="promo-chips" aria-labelledby="promo-places-label">
+                <li v-for="(place, index) in form.locations" :key="place.id" class="promo-chip">
+                  {{ place.name }}
+                  <button type="button" class="promo-chip-remove" :aria-label="`Remove ${place.name}`" @click="form.locations.splice(index, 1)">×</button>
+                </li>
+                <li v-if="!form.locations.length">Choose at least one place.</li>
+              </ul>
+              <div class="promo-place-search">
+                <input v-model.trim="placeQuery" type="search" aria-label="Search for a place" placeholder="City, county, state or country" @keydown.enter.prevent="searchPlaces">
+                <button class="secondary-action" type="button" :disabled="!placeQuery || !form.account_id || placeBusy" @click="searchPlaces">Search</button>
+              </div>
+              <ul v-if="placeResults.length" class="promo-place-results">
+                <li v-for="place in placeResults" :key="place.id">
+                  <button type="button" class="secondary-action" :disabled="form.locations.some((item) => item.id === place.id)" @click="addPlace(place)">
+                    Add {{ place.name }} · {{ place.type }}
+                  </button>
+                </li>
+              </ul>
+              <small>Ads show to people who are in, or regularly in, these places. Not to people elsewhere who only search about them.</small>
+            </div>
             <template v-if="campaign">
               <label v-for="field in creativeFields" :key="field.key" class="offer-field promo-full">
                 <span>{{ field.label }}</span>
-                <textarea v-model="form[field.key]" required rows="3" />
-                <small>Enter {{ field.min }}–{{ field.max }} lines, up to {{ field.length }} characters each.</small>
+                <textarea v-model="form[field.key]" :required="field.min > 0" rows="3" />
+                <small>{{ field.hint ? `${field.hint} ` : "" }}{{ field.min ? `Enter ${field.min}–${field.max} lines` : `Up to ${field.max} lines` }}, up to {{ field.length }} characters each.</small>
+              </label>
+              <label class="promo-consent promo-full">
+                <input v-model="form.search_partners" type="checkbox">
+                <span>Also show on Google search partner sites. Partners add reach, usually at a lower conversion rate.</span>
               </label>
               <label class="offer-field">
                 <span>Maximum cost per click bid (USD)</span>
@@ -100,7 +127,12 @@
             <dd><a :href="campaign.draft.final_url || campaign.destination.url" target="_blank" rel="noopener noreferrer">{{ campaign.draft.final_url || campaign.destination.url }}</a></dd>
           </div>
           <div><dt>Placement</dt><dd>Google Search</dd></div>
-          <div><dt>Location targeting</dt><dd>Location selection is unavailable in this test workflow</dd></div>
+          <div class="promo-full">
+            <dt>Where ads show</dt>
+            <dd v-if="settings.locations">{{ settings.locations.map((place) => place.name).join("; ") }} · people in or regularly in these places</dd>
+            <dd v-else>Every location Google serves. This campaign was created before location targeting.</dd>
+          </div>
+          <div v-if="'search_partners' in settings"><dt>Search partners</dt><dd>{{ settings.search_partners ? "On" : "Off" }}</dd></div>
           <div><dt>Tracking</dt><dd>{{ experiment ? 'Junior Bay landing page and paid order attribution' : 'Unavailable for this draft' }}</dd></div>
           <template v-if="experiment">
             <div><dt>{{ campaign.state === "draft" ? "Proposed window" : "Approved window" }}</dt><dd>{{ experiment.start_date }} through {{ experiment.last_date }} · {{ experiment.time_zone }}</dd></div>
@@ -108,7 +140,9 @@
           </template>
           <div><dt>Bid</dt><dd>{{ formatUsd(settings.cpc_bid_micros) }} maximum per click</dd></div>
           <div v-if="campaign.state !== 'draft'"><dt>If changed in Google Ads</dt><dd>{{ campaign.auto_pause_on_change ? 'Pause automatically and email you' : 'Email you' }}</dd></div>
-          <div class="promo-full"><dt>Exact match keywords</dt><dd>{{ settings.keywords.join(', ') }}</dd></div>
+          <div v-if="settings.keywords.length" class="promo-full"><dt>Exact match keywords</dt><dd>{{ settings.keywords.join(', ') }}</dd></div>
+          <div v-if="settings.phrase_keywords?.length" class="promo-full"><dt>Phrase match keywords</dt><dd>{{ settings.phrase_keywords.join(', ') }}</dd></div>
+          <div v-if="settings.negative_keywords?.length" class="promo-full"><dt>Negative keywords</dt><dd>{{ settings.negative_keywords.join(', ') }}</dd></div>
         </dl>
         <div class="promo-preview">
           <h4>Responsive search ad assets</h4>
@@ -206,10 +240,12 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AdsBudgetSummary from "./AdsBudgetSummary.vue";
 import AdsExperimentSummary from "./AdsExperimentSummary.vue";
-import { fetchAdsCampaign, fetchAdsCampaigns, fetchAdsDestinationOptions, queueAdsAction, saveAdsDraft } from "../api/attention";
+import {
+  fetchAdsCampaign, fetchAdsCampaigns, fetchAdsDestinationOptions, fetchAdsLocations, queueAdsAction, saveAdsDraft,
+} from "../api/attention";
 import {
   ESTIMATE_DAYS, PROMO_DEFAULT_MICROS, addCalendarDays, campaignStatus, dateInZone, driftMessage, formatExperimentTime,
   formatUsd, usdToMicros,
@@ -222,8 +258,11 @@ const objectives = { traffic: "Website visits", leads: "Leads", sales: "Sales" }
 const creativeFields = [
   { key: "headlines", label: "Headlines", min: 3, max: 15, length: 30 },
   { key: "descriptions", label: "Descriptions", min: 2, max: 4, length: 90 },
-  { key: "keywords", label: "Exact match keywords", min: 1, max: 100, length: 80 },
+  { key: "keywords", label: "Exact match keywords", min: 0, max: 100, length: 80, hint: "Searches for exactly this, or close variants." },
+  { key: "phrase_keywords", label: "Phrase match keywords", min: 0, max: 100, length: 80, hint: "Searches that include this phrase." },
+  { key: "negative_keywords", label: "Negative keywords", min: 0, max: 100, length: 80, hint: "Searches that include any of these never show your ad." },
 ];
+const KEYWORD_FIELDS = ["keywords", "phrase_keywords"];
 const campaigns = ref([]);
 const campaign = ref(null);
 const policy = ref(null);
@@ -239,6 +278,9 @@ const autoPause = ref(false);
 const error = ref("");
 const notice = ref("");
 const observedJob = ref(null);
+const placeQuery = ref("");
+const placeResults = ref([]);
+const placeBusy = ref(false);
 const requests = new Map();
 const pendingStates = new Set(["preparing", "launch_pending", "reconciling"]);
 let timer;
@@ -352,12 +394,56 @@ function openForm(item) {
       objective: item?.draft.objective || "traffic",
       budget: String((item?.draft.budget.amount_micros ?? Math.min(PROMO_DEFAULT_MICROS, budgetCap.value)) / 1_000_000),
       bid: item ? String(settings.value.cpc_bid_micros / 1_000_000) : "",
+      locations: item ? [...(settings.value.locations || [])] : [],
+      search_partners: Boolean(item && settings.value.search_partners),
     };
     resetStartDate();
     if (item?.draft.experiment?.start_date >= accountToday.value) form.value.start_date = item.draft.experiment.start_date;
-    for (const field of creativeFields) form.value[field.key] = item ? settings.value[field.key].join("\n") : "";
+    for (const field of creativeFields) form.value[field.key] = item ? (settings.value[field.key] || []).join("\n") : "";
+    placeResults.value = [];
+    placeQuery.value = "";
+    if (item) await proposeSitePlace(); // a new form proposes one when its page is set (watch below)
   });
 }
+
+// Proposes the chosen page's own Site location, which the tenant can remove or widen. Never overwrites a
+// choice already made, and a failed lookup leaves the picker empty rather than guessing.
+async function proposeSitePlace() {
+  const page = destinations.value.find((entry) => entry.pageId === form.value?.page_id);
+  if (!form.value || form.value.locations.length || !page?.place || !form.value.account_id) return;
+  placeQuery.value = page.place;
+  try {
+    const { locations } = await fetchAdsLocations(form.value.account_id, page.place);
+    const match = locations.find((place) => place.type === "City") || locations[0];
+    if (match && form.value && !form.value.locations.length) form.value.locations.push({ id: match.id, name: match.name });
+    placeResults.value = locations;
+  } catch {
+    placeResults.value = [];
+  }
+}
+
+async function searchPlaces() {
+  if (!placeQuery.value || !form.value?.account_id || placeBusy.value) return;
+  placeBusy.value = true;
+  try {
+    placeResults.value = (await fetchAdsLocations(form.value.account_id, placeQuery.value)).locations;
+    if (!placeResults.value.length) error.value = `Google Ads found no place called “${placeQuery.value}”.`;
+  } catch (failure) {
+    error.value = failure.message || "Google Ads could not search places just now.";
+  } finally {
+    placeBusy.value = false;
+  }
+}
+
+function addPlace(place) {
+  if (form.value.locations.length >= 10) {
+    error.value = "Choose up to 10 places.";
+    return;
+  }
+  if (!form.value.locations.some((item) => item.id === place.id)) form.value.locations.push({ id: place.id, name: place.name });
+}
+
+watch(() => form.value?.page_id, () => { if (form.value && !campaign.value) proposeSitePlace(); });
 
 function cancelForm() {
   error.value = "";
@@ -373,6 +459,7 @@ function save() {
     if (!budgetMicros.value || budgetMicros.value > budgetCap.value) {
       throw new Error(`Enter an average daily budget above $0 and up to ${formatUsd(budgetCap.value)}.`);
     }
+    if (!form.value.locations.length) throw new Error("Choose at least one place where ads show.");
     const body = {
       account_id: form.value.account_id,
       page_id: page.pageId,
@@ -380,13 +467,15 @@ function save() {
       objective: form.value.objective,
       average_daily_budget_micros: budgetMicros.value,
       experiment: { start_date: form.value.start_date, days: days.value },
+      locations: form.value.locations,
     };
     const current = campaign.value;
     if (current) {
       const bid = usdToMicros(form.value.bid);
       if (!bid || bid > budgetMicros.value) throw new Error("Enter a bid above $0 and within the average daily budget.");
       body.revision = current.revision;
-      body.search = { cpc_bid_micros: bid };
+      delete body.locations;
+      body.search = { cpc_bid_micros: bid, locations: form.value.locations, search_partners: form.value.search_partners };
       for (const { key, label, min, max, length } of creativeFields) {
         const lines = form.value[key].split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
         if (lines.length < min || lines.length > max || lines.some((line) => [...line].length > length)) {
@@ -394,6 +483,7 @@ function save() {
         }
         body.search[key] = lines;
       }
+      if (!KEYWORD_FIELDS.some((key) => body.search[key].length)) throw new Error("Enter at least one exact or phrase match keyword.");
     }
     const key = JSON.stringify(body);
     if (!current) body.request_id = requestId(key);
@@ -520,6 +610,12 @@ onBeforeUnmount(() => {
 .promo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; }
 .promo-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1.4rem; min-width: 0; padding: 0; border: 0; }
 .promo-full { grid-column: 1 / -1; }
+.promo-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: .4rem 0; padding: 0; list-style: none; }
+.promo-chip { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .6rem; border: 1px solid var(--border, #d0d5dd); border-radius: 999px; }
+.promo-chip-remove { border: 0; background: none; cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0 .1rem; }
+.promo-place-search { display: flex; gap: .6rem; }
+.promo-place-search input { flex: 1; }
+.promo-place-results { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; padding: 0; list-style: none; }
 .promo-facts dt { color: var(--muted); }
 .promo-facts dd { margin: .25rem 0 0; overflow-wrap: anywhere; }
 .promo-preview { padding: 1.6rem; border: 1px solid var(--line); border-radius: var(--radius-md); }

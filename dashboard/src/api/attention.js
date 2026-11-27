@@ -131,8 +131,15 @@ export function queueAdsAction(campaignId, action, revision, requestId, options 
 }
 
 export async function fetchAdsDestinationOptions() {
-  const [pageResult, offerResult] = await Promise.all([apiRequest("/pages"), apiRequest("/offers")]);
+  const [pageResult, offerResult, siteResult] = await Promise.all([
+    apiRequest("/pages"), apiRequest("/offers"), apiRequest("/sites").catch(() => ({ sites: [] })),
+  ]);
   const offers = new Map((offerResult.offers || []).map((offer) => [offer.offer_id, offer]));
+  // The page's own Site is the business identity, so its address is where a local campaign should show.
+  const places = new Map((siteResult.sites || []).map((site) => {
+    const address = site.organization?.address || {};
+    return [site.site_id, [address.locality, address.region].filter(Boolean).join(", ")];
+  }));
   return (pageResult.pages || [])
     .filter((page) => page.status === "published" && page.short_code && offers.has(page.offer_id))
     .map((page) => ({
@@ -140,7 +147,12 @@ export async function fetchAdsDestinationOptions() {
       offerId: page.offer_id,
       name: page.name || page.title || page.page_id,
       offerName: offers.get(page.offer_id).name || offers.get(page.offer_id).title || page.offer_id,
+      place: places.get(page.site_id) || "",
     }));
+}
+
+export function fetchAdsLocations(accountId, query) {
+  return get(`/me/ads/accounts/${encodeURIComponent(accountId)}/locations`, { q: query });
 }
 
 export async function fetchAdsPageAttribution(pageId, source) {
