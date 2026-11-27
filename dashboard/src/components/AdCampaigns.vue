@@ -37,9 +37,34 @@
               <button class="secondary-action" type="button" :disabled="busy" @click="discover(connection.connection_id)">
                 Find test advertisers
               </button>
-              <button class="secondary-action" type="button" :disabled="busy" @click="disconnect(connection.connection_id)">
+              <button class="secondary-action" type="button" :disabled="busy || Boolean(leaving)" @click="prepareDisconnect(connection.connection_id)">
                 Disconnect
               </button>
+            </div>
+            <div v-if="leaving?.connectionId === connection.connection_id" class="ads-confirm" role="alertdialog" aria-labelledby="disconnect-heading">
+              <h3 id="disconnect-heading">Disconnect this Google connection?</h3>
+              <p>
+                Junior Bay will no longer be able to read, start or pause campaigns in
+                {{ leaving.accounts.length === 1 ? 'advertiser' : 'advertisers' }} {{ leaving.accounts.join(', ') || 'on this connection' }}.
+                Disconnecting doesn't stop ads in Google. A campaign that is still running keeps spending until it is paused in Google Ads.
+              </p>
+              <template v-if="leaving.toPause.length">
+                <p>Junior Bay will pause these first, wait for Google Ads to confirm, and then disconnect:</p>
+                <ul class="ads-list">
+                  <li v-for="item in leaving.toPause" :key="item.campaign_id">{{ describe(item) }}</li>
+                </ul>
+              </template>
+              <p v-else>Your campaigns stay in Google Ads, paused.</p>
+              <p v-if="leaving.preparing.length" class="ads-warning">
+                {{ leaving.preparing.map(describe).join(', ') }} {{ leaving.preparing.length === 1 ? 'is' : 'are' }} still being created in Google Ads. Wait a minute, then try again.
+              </p>
+              <p v-if="leaving.progress" role="status">{{ leaving.progress }}</p>
+              <div class="ads-actions">
+                <button class="primary-action" type="button" :disabled="busy || leaving.preparing.length > 0" @click="confirmDisconnect">
+                  {{ leaving.toPause.length ? `Pause ${leaving.toPause.length === 1 ? 'campaign' : `${leaving.toPause.length} campaigns`} and disconnect` : 'Disconnect' }}
+                </button>
+                <button class="secondary-action" type="button" :disabled="busy" @click="leaving = null">Cancel</button>
+              </div>
             </div>
             <template v-if="candidateConnection === connection.connection_id">
               <p v-if="!candidates.length">No available test advertisers were found.</p>
@@ -74,7 +99,7 @@ import { computed, onMounted, ref } from "vue";
 import AdsPromoMode from "./AdsPromoMode.vue";
 import UnderConstruction from "./UnderConstruction.vue";
 import {
-  attentionConfigured, disconnectGoogleAds, fetchAdAccounts, fetchGoogleAdsCandidates,
+  attentionConfigured, disconnectGoogleAds, fetchAdAccounts, fetchAdsCampaign, fetchAdsCampaigns, fetchGoogleAdsCandidates, queueAdsAction,
   fetchGoogleAdsConnections, finishGoogleAdsConnection, selectGoogleAdsAccount, startGoogleAdsConnection,
 } from "../api/attention";
 
@@ -140,11 +165,69 @@ function select(connectionId, account) {
   });
 }
 
-function disconnect(connectionId) {
+const leaving = ref(null);
+const SERVING = new Set(["enabled", "launch_pending", "reconcile_required", "reconciling"]);
+const SETTLE_CHECKS = 30;
+const SETTLE_INTERVAL_MS = 3000;
+
+function describe(item) {
+  const name = item.configuration?.settings?.headlines?.[0] || "Campaign";
+  return item.provider_campaign_id ? `${name} (Google campaign ${item.provider_campaign_id})` : name;
+}
+
+function settled(item) {
+  return ["paused", "removed"].includes(item.state) && !item.pause_pending;
+}
+
+// Disconnecting removes Junior Bay's access, not the ads. Anything that can still serve, or is scheduled
+// to start, is paused first while Junior Bay can still reach Google; the server refuses otherwise.
+function prepareDisconnect(connectionId) {
   return run(async () => {
-    await disconnectGoogleAds(connectionId);
-    if (candidateConnection.value === connectionId) candidateConnection.value = "";
-    notice.value = "Google Ads access was disconnected in Junior Bay.";
+    await refresh();
+    const accountIds = accounts.value.filter((account) => account.connection_id === connectionId).map((account) => account.account_id);
+    const { campaigns } = await fetchAdsCampaigns();
+    const mine = campaigns.filter((item) => accountIds.includes(item.account_id));
+    const scheduled = (item) => item.start_scheduled && item.state === "paused" && !item.launch_requested_at;
+    leaving.value = {
+      connectionId,
+      accounts: accountIds,
+      toPause: mine.filter((item) => item.has_provider_campaign && (SERVING.has(item.state) || item.pause_pending || scheduled(item))),
+      preparing: mine.filter((item) => item.state === "preparing"),
+      progress: "",
+    };
+  });
+}
+
+function confirmDisconnect() {
+  const plan = leaving.value;
+  return run(async () => {
+    for (const item of plan.toPause) {
+      if (item.pause_pending || item.state === "reconciling") continue;
+      await queueAdsAction(item.campaign_id, "pause", item.revision, crypto.randomUUID());
+    }
+    let pending = plan.toPause;
+    for (let check = 0; pending.length && check < SETTLE_CHECKS; check += 1) {
+      plan.progress = `Waiting for Google Ads to confirm ${pending.length === 1 ? "the pause" : `${pending.length} pauses`}…`;
+      await new Promise((resolve) => setTimeout(resolve, SETTLE_INTERVAL_MS));
+      const fresh = await Promise.all(pending.map((item) => fetchAdsCampaign(item.campaign_id)));
+      pending = fresh.map((result) => result.campaign).filter((item) => !settled(item));
+    }
+    if (pending.length) {
+      plan.progress = "";
+      throw new Error(`Google Ads hasn't confirmed the pause for ${pending.map(describe).join(", ")}, so Junior Bay is still connected and keeps trying. `
+        + "Those ads can keep running until they're paused. Pause them in Google Ads (ads.google.com), or try Disconnect again in a few minutes.");
+    }
+    try {
+      await disconnectGoogleAds(plan.connectionId);
+    } catch (failure) {
+      if (failure.code === "ads_campaigns_running") throw new Error(failure.message);
+      throw failure;
+    }
+    if (candidateConnection.value === plan.connectionId) candidateConnection.value = "";
+    leaving.value = null;
+    notice.value = plan.toPause.length
+      ? `Google Ads access was disconnected. Paused first: ${plan.toPause.map(describe).join(", ")}.`
+      : "Google Ads access was disconnected. Your campaigns stay in Google Ads, paused.";
     await refresh();
   });
 }
@@ -170,4 +253,7 @@ onMounted(() => {
 .ads-page .page-header { margin-bottom: 0; }
 .ads-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
 .ads-list { display: grid; gap: .75rem; padding-inline-start: 1.25rem; }
+.ads-confirm { display: grid; gap: .75rem; margin-top: .75rem; padding: 1rem; border: 1px solid var(--border, #d0d5dd); border-radius: 8px; }
+.ads-confirm h3 { margin: 0; font-size: 1rem; }
+.ads-warning { color: var(--danger, #b91c1c); }
 </style>
