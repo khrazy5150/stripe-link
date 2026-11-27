@@ -65,6 +65,9 @@ OPERATION_ENRICH = "enrich_offer"
 # splitting it across two allowances would make them budget against themselves. `entitlement_for` branches
 # only on OPERATION_IMAGE, so naming it here routes it to the page path with no code.
 OPERATION_COPY = "generate_copy"
+# Suggested Google Search ad copy (headlines, descriptions, keywords) shares the page counter for the same
+# reason: one short structured call on the tenant's provider, part of the same piece of work as the page.
+OPERATION_ADS_COPY = "ads_copy"
 IMAGE_PREFIX = "images#"
 
 

@@ -4,7 +4,7 @@
 // offer's own semantic model, and duplicating any of that in the dashboard would be the second extraction
 // ATTENTION_PRIMITIVE.md §2 forbids. These functions do two things the components should not: they name the
 // base, and they turn the service's refusals into something a panel can render.
-import { apiRequest, getAttentionApiBase } from "./client";
+import { apiRequest, getAttentionApiBase, getStripeMode } from "./client";
 
 export const CHANNELS = [
   { key: "instagram", label: "Instagram carousel" },
@@ -207,4 +207,13 @@ export function reschedulePost(post, to) {
 
 export function fetchAdsReadiness(accountId) {
   return get(`/me/ads/accounts/${encodeURIComponent(accountId)}/readiness`);
+}
+
+// Suggested headlines, descriptions and keywords, written by stripe-link's AI tier (it holds the provider
+// and the allowance) from the offer itself. Attention validates whatever the tenant edits and saves.
+export function suggestAdsCopy({ offerId, place, objective }) {
+  return apiRequest("/ai/generate", {
+    method: "POST",
+    body: { operation: "ads_copy", offer_id: offerId, place, objective, mode: getStripeMode() },
+  });
 }

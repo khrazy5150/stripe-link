@@ -54,12 +54,13 @@ from stripe_link.domain.ai_provision import (chosen_badges, compose_sections, ne
                                              slugify)
 from stripe_link.domain import ai_generation_events as events
 from stripe_link.domain.ai_models import estimate_cost
-from stripe_link.domain.ai_quota import (OPERATION_COPY, OPERATION_ENRICH, OPERATION_IMAGE, PLATFORM_TENANT,
+from stripe_link.domain.ai_quota import (OPERATION_ADS_COPY, OPERATION_COPY, OPERATION_ENRICH, OPERATION_IMAGE,
+                                          PLATFORM_TENANT,
                                           entitlement_for, image_qualities_for, may_generate,
                                           period_key, within_platform_budget)
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
-from stripe_link.domain.semantic import analyze_offer
-from stripe_link.domain import attention_copy
+from stripe_link.domain.semantic import analyze_offer, resolve_semantic_model
+from stripe_link.domain import ads_copy, attention_copy
 from stripe_link.domain.semantic_enrich import enrich
 from stripe_link.domain import ai_images
 from stripe_link import ai_image_client
@@ -146,6 +147,13 @@ def handler(event, context, *, products_repo=None, offers_repo=None, pages_repo=
                              offers_repo=offers_repo, products_repo=products_repo,
                              config_repo=config_repo, usage_repo=usage_repo,
                              tenant_repo=tenant_repo, generator=generator)
+
+    # SUGGESTED SEARCH AD COPY, folded on like Attention copy below and for the same reasons: this function
+    # holds the provider, the BYOK config and the counter. Attention validates whatever the tenant saves.
+    if str(body.get("operation") or "").strip().lower() == OPERATION_ADS_COPY:
+        return _generate_ads_copy(body, tenant_id=tenant_id, event=event, now=now, offers_repo=offers_repo,
+                                  products_repo=products_repo, config_repo=config_repo, usage_repo=usage_repo,
+                                  tenant_repo=tenant_repo, generator=generator)
 
     # ATTENTION COPY, folded on for the third time for the reasons above, plus one: this function owns the
     # provider adapter, the BYOK configuration and the usage counter, so generating in ../sam/attention
@@ -519,6 +527,90 @@ def _generate_copy(body, *, tenant_id, event, now, config_repo, usage_repo, tena
         _release(usage_repo, tenant_id, period, now)
         return json_response({"copy": None, "generated": False, "reason": "no_copy_produced"})
     return json_response({"copy": copy, "generated": True})
+
+
+def _generate_ads_copy(body, *, tenant_id, event, now, offers_repo, products_repo, config_repo, usage_repo,
+                       tenant_repo, generator=None):
+    """Suggested headlines, descriptions and keywords for a Search campaign on one offer.
+
+    Synchronous, gated and refunded exactly like `_generate_copy`: debit first, give the slot back for
+    anything that did not produce a usable suggestion.
+    """
+    offer_id = str(body.get("offer_id") or "").strip()
+    if not offer_id:
+        return error_response("offer_id is required.", code="missing_offer")
+    mode = _mode_of(body)
+    try:
+        offers_repo = offers_repo or offers_repository(mode=mode)
+        products_repo = products_repo or products_repository(mode=mode)
+        config_repo = config_repo or ai_provider_config_repository()
+        usage_repo = usage_repo or ai_usage_repository()
+    except RepositoryError as exc:
+        return error_response(str(exc), code="repository_error")
+
+    offer = offers_repo.get(tenant_id, offer_id)
+    if not offer:
+        return error_response("That offer was not found.", status_code=404, code="not_found")
+    products = _enrich_products(offer, products_repo, tenant_id)
+    model = resolve_semantic_model(offer, products)
+    if not ads_copy.usable(model):
+        # Declined BEFORE the counter is touched: an offer with no name gives the ad nothing to be about.
+        return error_response("Give this offer a name before suggesting ad copy.", code="missing_brief")
+
+    config = (config_repo.get(tenant_id) or {}) if hasattr(config_repo, "get") else {}
+    if not config.get("provider"):
+        return error_response("Turn on AI in Settings before suggesting ad copy.", code="ai_not_configured")
+    model_name = str(config.get("model") or default_model())
+    profile = _profile(tenant_id, tenant_repo)
+
+    entitled = can_use_ai_builder(profile, provider_config=config, now=now)
+    note_capability_decision(event, capability=AI_BUILDER, tenant_id=tenant_id, granted=entitled)
+    if not entitled:
+        return error_response(
+            "AI Builder is not included on your plan. Upgrade, or connect your own AI provider key.",
+            status_code=403, code="ai_builder_not_entitled")
+    entitlement = entitlement_for(profile, provider=str(config.get("provider")), now=now,
+                                  operation=OPERATION_ADS_COPY, **_configured_allowances())
+    allowance, period = entitlement["allowance"], entitlement["period"]
+    if entitlement["source"] != "byok":
+        ok, why_not = within_platform_budget(_platform_spend(usage_repo, now), _platform_budget())
+        if not ok:
+            return error_response(why_not, status_code=429, code="platform_budget_exhausted")
+    try:
+        taken = usage_repo.consume_if_available(tenant_id, period, allowance=allowance, at=now)
+    except Exception:  # noqa: BLE001 - an unusable counter fails CLOSED, never hands out a free run
+        return error_response("Could not check your AI allowance. Try again shortly.", code="quota_unavailable")
+    if not taken["allowed"]:
+        _, why_not = may_generate(taken["used"], allowance, entitlement["source"])
+        return error_response(why_not or "You have used your AI generations.", status_code=429,
+                              code="quota_exhausted")
+
+    run = generator or generate_structured
+    try:
+        result = run(
+            prompt=ads_copy.build_prompt(
+                model, products=list(products.values()), place=str(body.get("place") or ""),
+                business=str((profile or {}).get("business_name") or ""),
+                objective=str(body.get("objective") or "traffic"),
+            ),
+            json_schema=ads_copy.request_schema(),
+            system=ads_copy.SYSTEM,
+            schema_name="ads_copy",
+            model=model_name,
+            provider=str(config.get("provider")),
+            # Ad text is published copy shown to buyers, so the §A.7 floor applies as it does to a page.
+            for_page=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - a provider failure is the tenant's slot back, not a 500
+        logger.warning("ads copy failed for %s: %s", tenant_id, exc)
+        _release(usage_repo, tenant_id, period, now)
+        return error_response("Could not suggest ad copy just now. Your generation was not used.",
+                              status_code=502, code="generation_failed")
+    suggestion = ads_copy.parse((result or {}).get("value"))
+    if not suggestion:
+        _release(usage_repo, tenant_id, period, now)
+        return json_response({"suggestion": None, "generated": False, "reason": "no_copy_produced"})
+    return json_response({"suggestion": suggestion, "generated": True})
 
 
 def _enrich_products(offer, products_repo, tenant_id):

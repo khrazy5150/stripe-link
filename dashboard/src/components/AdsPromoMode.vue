@@ -86,6 +86,12 @@
               <small>Ads show to people who are in, or regularly in, these places. Not to people elsewhere who only search about them.</small>
             </div>
             <template v-if="campaign">
+              <div class="promo-full promo-suggest">
+                <button class="secondary-action" type="button" :disabled="suggesting" @click="suggestCopy">
+                  {{ suggesting ? "Writing suggestions…" : "Suggest ad text and keywords" }}
+                </button>
+                <small>Written from your offer and the places above. It replaces the fields below, uses one AI generation, and nothing goes to Google until you save and approve.</small>
+              </div>
               <label v-for="field in creativeFields" :key="field.key" class="offer-field promo-full">
                 <span>{{ field.label }}</span>
                 <textarea v-model="form[field.key]" :required="field.min > 0" rows="3" />
@@ -255,6 +261,7 @@ import AdsBudgetSummary from "./AdsBudgetSummary.vue";
 import AdsExperimentSummary from "./AdsExperimentSummary.vue";
 import {
   fetchAdsCampaign, fetchAdsCampaigns, fetchAdsDestinationOptions, fetchAdsLocations, queueAdsAction, saveAdsDraft,
+  suggestAdsCopy,
 } from "../api/attention";
 import {
   ESTIMATE_DAYS, PROMO_DEFAULT_MICROS, addCalendarDays, campaignStatus, dateInZone, driftMessage, eligibilityText,
@@ -291,6 +298,7 @@ const observedJob = ref(null);
 const placeQuery = ref("");
 const placeResults = ref([]);
 const placeBusy = ref(false);
+const suggesting = ref(false);
 const requests = new Map();
 const pendingStates = new Set(["preparing", "launch_pending", "reconciling"]);
 let timer;
@@ -442,6 +450,30 @@ async function searchPlaces() {
     error.value = failure.message || "Google Ads could not search places just now.";
   } finally {
     placeBusy.value = false;
+  }
+}
+
+async function suggestCopy() {
+  if (suggesting.value || !campaign.value) return;
+  suggesting.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const body = await suggestAdsCopy({
+      offerId: campaign.value.destination.offer_id,
+      place: form.value.locations.map((place) => place.name).join("; "),
+      objective: form.value.objective,
+    });
+    if (!body.generated || !body.suggestion) {
+      error.value = "Nothing usable came back. Your generation was not used.";
+      return;
+    }
+    for (const field of creativeFields) form.value[field.key] = (body.suggestion[field.key] || []).join("\n");
+    notice.value = "Suggestions added. Edit anything before you save.";
+  } catch (failure) {
+    error.value = failure.message || "Could not suggest ad text just now.";
+  } finally {
+    suggesting.value = false;
   }
 }
 
@@ -624,6 +656,7 @@ onBeforeUnmount(() => {
 .promo-chip { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .6rem; border: 1px solid var(--border, #d0d5dd); border-radius: 999px; }
 .promo-chip-remove { border: 0; background: none; cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0 .1rem; }
 .promo-place-search { display: flex; gap: .6rem; }
+.promo-suggest { display: grid; gap: .4rem; justify-items: start; }
 .promo-place-search input { flex: 1; }
 .promo-place-results { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; padding: 0; list-style: none; }
 .promo-facts dt { color: var(--muted); }
