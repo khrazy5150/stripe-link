@@ -204,3 +204,7 @@ export function setPostStatus(post, status) {
 export function reschedulePost(post, to) {
   return postJson("/me/posts/schedule", { post_id: post.post_id, due_at: post.due_at, to });
 }
+
+export function fetchAdsReadiness(accountId) {
+  return get(`/me/ads/accounts/${encodeURIComponent(accountId)}/readiness`);
+}

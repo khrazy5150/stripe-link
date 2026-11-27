@@ -139,6 +139,10 @@
             <div><dt>Scheduled stop</dt><dd>{{ formatExperimentTime(experiment.stops_at, experiment.time_zone) }}</dd></div>
           </template>
           <div><dt>Bid</dt><dd>{{ formatUsd(settings.cpc_bid_micros) }} maximum per click</dd></div>
+          <template v-if="campaign.provider_review">
+            <div><dt>Google’s ad review</dt><dd>{{ reviewText(campaign.provider_review) }}</dd></div>
+            <div><dt>In Google Ads</dt><dd>{{ eligibilityText(campaign.provider_review) }}</dd></div>
+          </template>
           <div v-if="campaign.state !== 'draft'"><dt>If changed in Google Ads</dt><dd>{{ campaign.auto_pause_on_change ? 'Pause automatically and email you' : 'Email you' }}</dd></div>
           <div v-if="settings.keywords.length" class="promo-full"><dt>Exact match keywords</dt><dd>{{ settings.keywords.join(', ') }}</dd></div>
           <div v-if="settings.phrase_keywords?.length" class="promo-full"><dt>Phrase match keywords</dt><dd>{{ settings.phrase_keywords.join(', ') }}</dd></div>
@@ -151,6 +155,11 @@
           <ul><li v-for="(description, index) in settings.descriptions" :key="index">{{ description }}</li></ul>
         </div>
         <AdsBudgetSummary v-model:days="days" :adjustable="!experiment" :amount-micros="campaign.draft.budget.amount_micros" />
+        <p v-if="campaign.provider_review?.approval_status === 'DISAPPROVED'" class="promo-error" role="alert">
+          Google Ads disapproved this ad, so it won’t show. Read the policy details in Google Ads and appeal there,
+          or create a new campaign with changed ad text or a changed landing page.
+          <a href="https://ads.google.com/aw/ads" target="_blank" rel="noopener noreferrer">Open Google Ads</a>
+        </p>
         <p v-if="driftMessage(campaign)" class="promo-error" role="alert">
           Changed in Google Ads. {{ driftMessage(campaign) }}
           <a href="https://ads.google.com/aw/campaigns" target="_blank" rel="noopener noreferrer">Open Google Ads</a>
@@ -228,6 +237,7 @@
               <span v-if="awaitsStop(item)" class="promo-error">Scheduled stop awaiting confirmation</span>
               <span v-if="item.provider_drift" class="promo-error">Changed in Google Ads. Review needed</span>
               <span v-if="item.start_blocked && !item.launch_requested_at" class="promo-error">Scheduled start blocked</span>
+              <span v-if="item.provider_review?.approval_status === 'DISAPPROVED'" class="promo-error">Disapproved by Google</span>
             </div>
             <button class="secondary-action" type="button" :disabled="busy" @click="openCampaign(item.campaign_id)">
               {{ item.state === 'draft' ? 'Review draft' : 'View campaign' }}
@@ -247,8 +257,8 @@ import {
   fetchAdsCampaign, fetchAdsCampaigns, fetchAdsDestinationOptions, fetchAdsLocations, queueAdsAction, saveAdsDraft,
 } from "../api/attention";
 import {
-  ESTIMATE_DAYS, PROMO_DEFAULT_MICROS, addCalendarDays, campaignStatus, dateInZone, driftMessage, formatExperimentTime,
-  formatUsd, usdToMicros,
+  ESTIMATE_DAYS, PROMO_DEFAULT_MICROS, addCalendarDays, campaignStatus, dateInZone, driftMessage, eligibilityText,
+  formatExperimentTime, formatUsd, reviewText, usdToMicros,
 } from "../utils/adsPromo";
 
 const props = defineProps({ accounts: { type: Array, required: true } });

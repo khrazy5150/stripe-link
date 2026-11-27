@@ -163,6 +163,7 @@
           :key="`ads-${activeEnvironment}-${auth.session?.client_id || ''}`"
           :mode="activeEnvironment"
           :logo-url="logoUrl"
+          @navigate="activeView = $event"
         />
         <UnderConstruction
           v-else-if="activeView === 'mediaPoster'"

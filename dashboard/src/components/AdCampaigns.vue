@@ -14,6 +14,8 @@
       <button type="button" :class="view === 'campaigns' ? 'primary-action' : 'secondary-action'" :aria-pressed="view === 'campaigns'" @click="view = 'campaigns'">Campaigns</button>
       <button v-if="!accountsLocked" type="button" :class="view === 'accounts' ? 'primary-action' : 'secondary-action'" :aria-pressed="view === 'accounts'" @click="view = 'accounts'">Google Ads accounts</button>
     </nav>
+    <AdsReadiness v-if="!accountsLocked && loaded" v-show="view === 'campaigns'" :connections="activeConnections" :accounts="accounts"
+      @manage-accounts="view = 'accounts'" @navigate="$emit('navigate', $event)" />
     <AdsPromoMode v-show="view === 'campaigns'" :accounts="accounts" @manage-accounts="view = 'accounts'" />
     <section v-if="!accountsLocked" v-show="view === 'accounts'" class="dashboard-card" aria-labelledby="accounts-heading">
       <header class="dashboard-card-header"><h2 id="accounts-heading">Google Ads test accounts</h2></header>
@@ -97,6 +99,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import AdsPromoMode from "./AdsPromoMode.vue";
+import AdsReadiness from "./AdsReadiness.vue";
 import UnderConstruction from "./UnderConstruction.vue";
 import {
   attentionConfigured, disconnectGoogleAds, fetchAdAccounts, fetchAdsCampaign, fetchAdsCampaigns, fetchGoogleAdsCandidates, queueAdsAction,
@@ -104,6 +107,8 @@ import {
 } from "../api/attention";
 
 const props = defineProps({ mode: String, logoUrl: String });
+defineEmits(["navigate"]);
+const loaded = ref(false);
 const locked = ref(!attentionConfigured());
 const busy = ref(false);
 const view = ref("campaigns");
@@ -237,6 +242,7 @@ onMounted(() => {
   return run(async () => {
     try {
       await refresh();
+      loaded.value = true;
     } catch (failure) {
       if (failure.code === "ads_not_entitled") accountsLocked.value = true;
       else {

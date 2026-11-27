@@ -80,3 +80,29 @@ export function formatExperimentTime(seconds, timeZone) {
     timeZone, dateStyle: "medium", timeStyle: "short",
   }).format(new Date(seconds * 1000));
 }
+
+const humanize = (code) => String(code || "").replaceAll("_", " ").toLowerCase();
+
+// Google's verdict on the ad, kept apart from Junior Bay's own state (a running campaign can be disapproved).
+export function reviewText(review) {
+  if (!review) return "";
+  const topics = (review.policy_topics || []).map(humanize).join(", ");
+  switch (review.approval_status) {
+    case "APPROVED": return "Approved";
+    case "APPROVED_LIMITED": return `Approved with limits${topics ? `: ${topics}` : ""}`;
+    case "AREA_OF_INTEREST_ONLY": return "Approved for some places only";
+    case "DISAPPROVED": return `Disapproved${topics ? `: ${topics}` : ""}`;
+    default: return ["REVIEW_IN_PROGRESS", "UNDER_REVIEW"].includes(review.review_status) ? "Under review" : "Not reviewed yet";
+  }
+}
+
+const ELIGIBILITY = {
+  ELIGIBLE: "Eligible to show", PAUSED: "Paused", PENDING: "Pending", LIMITED: "Limited", LEARNING: "Learning",
+  NOT_ELIGIBLE: "Not eligible to show", ENDED: "Ended", REMOVED: "Removed", MISCONFIGURED: "Misconfigured",
+};
+
+export function eligibilityText(review) {
+  if (!review) return "";
+  const reasons = (review.primary_reasons || []).map(humanize).join(", ");
+  return `${ELIGIBILITY[review.primary_status] || humanize(review.primary_status)}${reasons ? ` (${reasons})` : ""}`;
+}
