@@ -24,10 +24,11 @@ CSS = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
 PRODUCTS = (ROOT / "dashboard" / "src" / "components" / "Products.vue").read_text(encoding="utf-8")
 PAGES = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
 DASHBOARD = (ROOT / "dashboard" / "src" / "components" / "Dashboard.vue").read_text(encoding="utf-8")
-KEYS = (ROOT / "dashboard" / "src" / "components" / "StripeKeys.vue").read_text(encoding="utf-8")
 WIZARDS = {"Products.vue": PRODUCTS, "LandingPages.vue": PAGES}
-# Every wizard in the app, including the two Stripe Connect ones, which do not use choice cards.
-ALL_WIZARDS = {**WIZARDS, "Dashboard.vue": DASHBOARD, "StripeKeys.vue": KEYS}
+# Every wizard in the app, including the Stripe Connect one on the Dashboard, which does not use choice
+# cards. The Payments screen's copy of it was removed 2026-11-26 (it was never reachable); Payments now
+# offers the other mode instead.
+ALL_WIZARDS = {**WIZARDS, "Dashboard.vue": DASHBOARD}
 
 
 def _base_check_rule():
