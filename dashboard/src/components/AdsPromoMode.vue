@@ -60,7 +60,7 @@
             </label>
             <p v-if="form.start_date" class="promo-full">
               Planned last day is {{ addCalendarDays(form.start_date, days - 1) }}.
-              Launch is manual. Junior Bay will request a stop at midnight after the last day.
+              Junior Bay starts it at midnight on the start date and requests a stop at midnight after the last day.
             </p>
             <template v-if="campaign">
               <label v-for="field in creativeFields" :key="field.key" class="offer-field promo-full">
@@ -135,7 +135,7 @@
         <template v-if="campaign.state === 'draft' && canApprove && experiment && !windowEnded && !approvalRejected">
           <label class="promo-consent">
             <input v-model="confirmed" type="checkbox" :disabled="busy">
-            <span>I approve revision {{ campaign.revision }}, including its ad assets, destination, {{ formatUsd(campaign.draft.budget.amount_micros) }} average daily budget, and {{ experiment.days }}-day window. This creates a paused test campaign.</span>
+            <span>I approve revision {{ campaign.revision }}, including its ad assets, destination, {{ formatUsd(campaign.draft.budget.amount_micros) }} average daily budget, and {{ experiment.days }}-day window. This creates a paused test campaign that Junior Bay starts {{ startPhrase }}.</span>
           </label>
           <label class="promo-consent">
             <input v-model="autoPause" type="checkbox" :disabled="busy">
@@ -154,6 +154,7 @@
             Launch test campaign
           </button>
           <button v-if="canPause" class="secondary-action" type="button" :disabled="busy" @click="command('pause')">Pause campaign</button>
+          <button v-if="canCancelStart" class="secondary-action" type="button" :disabled="busy" @click="command('pause')">Don't start automatically</button>
           <button v-if="campaign.state === 'reconcile_required' && !campaign.pause_pending" class="secondary-action" type="button" :disabled="busy" @click="command('reconcile')">
             Check Google Ads status
           </button>
@@ -161,8 +162,15 @@
         <p v-if="['draft', 'paused'].includes(campaign.state) && !canApprove">{{ availabilityMessage }}</p>
         <p v-else-if="campaign.state === 'draft' && approvalRejected">Save a new revision before approving this campaign again.</p>
         <p v-else-if="campaign.state === 'draft' && (!experiment || windowEnded)">Edit the draft to add a current experiment window.</p>
-        <p v-if="campaign.state === 'paused' && !campaign.launch_requested_at && experiment && !windowOpen && !windowEnded">
-          The approved window opens on {{ experiment.start_date }}. Return to launch the test campaign then.
+        <p v-if="campaign.start_blocked && !campaign.launch_requested_at" class="promo-error" role="alert">
+          The scheduled start did not go through. {{ campaign.start_blocked.message }}
+          Junior Bay tries again every 15 minutes until the approved window ends.
+        </p>
+        <p v-else-if="campaign.start_scheduled && !campaign.launch_requested_at">
+          Starts automatically {{ startPhrase }}.
+        </p>
+        <p v-else-if="campaign.state === 'paused' && !campaign.launch_requested_at && experiment && !windowEnded">
+          Automatic start is off. Launch the test campaign yourself during the approved window.
         </p>
         <p v-else-if="campaign.state === 'paused' && !campaign.launch_requested_at && (!experiment || windowEnded)">
           Create and approve a campaign with current experiment dates to start a run.
@@ -185,6 +193,7 @@
               <span>{{ campaignStatus(item) }} · {{ formatUsd(item.draft.budget.amount_micros) }} average daily budget</span>
               <span v-if="awaitsStop(item)" class="promo-error">Scheduled stop awaiting confirmation</span>
               <span v-if="item.provider_drift" class="promo-error">Changed in Google Ads. Review needed</span>
+              <span v-if="item.start_blocked && !item.launch_requested_at" class="promo-error">Scheduled start blocked</span>
             </div>
             <button class="secondary-action" type="button" :disabled="busy" @click="openCampaign(item.campaign_id)">
               {{ item.state === 'draft' ? 'Review draft' : 'View campaign' }}
@@ -253,6 +262,11 @@ const canLaunch = computed(() => campaign.value.state === "paused" && canApprove
   && !campaign.value.launch_requested_at && !campaign.value.pause_pending && !campaign.value.provider_drift);
 const canPause = computed(() => campaign.value?.has_provider_campaign && !campaign.value.pause_pending
   && ["enabled", "launch_pending", "reconcile_required"].includes(campaign.value.state));
+const canCancelStart = computed(() => campaign.value?.start_scheduled && campaign.value.state === "paused"
+  && campaign.value.has_provider_campaign && !campaign.value.launch_requested_at && !campaign.value.pause_pending);
+const startPhrase = computed(() => (windowOpen.value
+  ? "as soon as it is ready in Google Ads"
+  : `at ${formatExperimentTime(experiment.value.starts_at, experiment.value.time_zone)}`));
 const settings = computed(() => campaign.value?.configuration.settings);
 const failureJob = computed(() => {
   const job = observedJob.value || campaign.value?.last_job;
